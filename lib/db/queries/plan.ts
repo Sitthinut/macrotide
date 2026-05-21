@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { db } from "../client";
+import { getDb } from "../context";
 import { plans } from "../schema";
 
 export type Plan = typeof plans.$inferSelect;
@@ -7,12 +7,12 @@ export type Plan = typeof plans.$inferSelect;
 const PLAN_ID = 1; // single-row table for v1
 
 export function getPlan(): Plan | undefined {
-  return db.select().from(plans).where(eq(plans.id, PLAN_ID)).get();
+  return getDb().select().from(plans).where(eq(plans.id, PLAN_ID)).get();
 }
 
 export function upsertPlan(input: { markdown: string; selectedModelId?: string | null }): Plan {
   const now = new Date().toISOString();
-  return db
+  return getDb()
     .insert(plans)
     .values({
       id: PLAN_ID,

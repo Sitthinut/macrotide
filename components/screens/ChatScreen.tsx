@@ -152,16 +152,109 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
     }
   }, []);
 
+  const askLive = async (prompt: string, history: Message[]) => {
+    setLoading(true);
+    // Build the model conversation from prior turns + this new prompt.
+    const model = [
+      ...history
+        .filter((m) => !m.proposal) // proposals are UI-only
+        .map((m) => ({
+          role: m.role === "ai" ? "assistant" : "user",
+          content: m.text,
+        })),
+      { role: "user" as const, content: prompt },
+    ];
+
+    // Reserve the placeholder assistant message we'll stream into.
+    const placeholderTs = Date.now();
+    setMessages((m) => [...m, { role: "ai", text: "", ts: placeholderTs }]);
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: model }),
+      });
+      if (!res.ok || !res.body) {
+        throw new Error(`chat failed (${res.status})`);
+      }
+
+      // The route returns a UI message stream — each line is `data: <json>`.
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let accumulated = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const raw of lines) {
+          const line = raw.trim();
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (!payload || payload === "[DONE]") continue;
+          try {
+            const event = JSON.parse(payload);
+            // UIMessage stream emits various event types; collect text from
+            // any text-delta or text shape so we work regardless of which
+            // event variant the model emits.
+            const delta: string | undefined =
+              event.delta ?? event.text ?? event.textDelta ?? undefined;
+            if (delta && (event.type?.startsWith("text") || !event.type)) {
+              accumulated += delta;
+              setMessages((prev) =>
+                prev.map((m) => (m.ts === placeholderTs ? { ...m, text: accumulated } : m)),
+              );
+            }
+          } catch {
+            // Some events are not JSON (heartbeats, [DONE]); ignore.
+          }
+        }
+      }
+
+      // If nothing streamed, surface a friendly fallback so the message slot
+      // isn't blank.
+      if (!accumulated) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.ts === placeholderTs
+              ? { ...m, text: "(no response — check server logs or your AI provider config)" }
+              : m,
+          ),
+        );
+      }
+    } catch (err) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.ts === placeholderTs
+            ? {
+                ...m,
+                text: `Chat error: ${err instanceof Error ? err.message : "unknown"}. The dashboard still works; this just means AI hasn't been configured (or the demo turn cap was hit).`,
+              }
+            : m,
+        ),
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const ask = (prompt: string) => {
     if (!prompt.trim() || loading) return;
     const newUserMsg: Message = { role: "user", text: prompt, ts: Date.now() };
-    setMessages((m) => [...m, newUserMsg]);
+    const nextHistory = [...messages, newUserMsg];
+    setMessages(nextHistory);
     setInput("");
 
     const isPlanEdit =
       /add|update|change|set|replace|remove/i.test(prompt) &&
       /(rule|principle|risk|target|commitment|plan)/i.test(prompt);
     if (isPlanEdit) {
+      // Client-side proposal preview — purely a UI affordance for the
+      // "edit my plan" affordance until we wire AI tool calls (Phase 2.6).
       setLoading(true);
       setTimeout(() => {
         setLoading(false);
@@ -195,18 +288,7 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
       return;
     }
 
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      setMessages((m) => [
-        ...m,
-        {
-          role: "ai",
-          text: "This is a design preview — the live chat endpoint isn't wired up yet. Once `POST /api/chat` is in place it will stream the advisor's reply here, with your portfolio and plan loaded as context.",
-          ts: Date.now(),
-        },
-      ]);
-    }, 900);
+    void askLive(prompt, messages);
   };
 
   const suggestions = [

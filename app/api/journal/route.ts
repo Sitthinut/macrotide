@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { withDb } from "@/lib/api/with-db";
 import { createJournalEntry, type JournalKind, listJournalEntries } from "@/lib/db/queries/journal";
 
 const VALID_KINDS: ReadonlyArray<JournalKind> = ["note", "decision", "question", "reading"];
@@ -11,16 +12,16 @@ function parseKind(value: string | null): JournalKind | undefined {
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const limitParam = url.searchParams.get("limit");
-  const rows = listJournalEntries({
+  const filters = {
     kind: parseKind(url.searchParams.get("kind")),
     since: url.searchParams.get("since") ?? undefined,
     includeArchived: url.searchParams.get("includeArchived") === "true",
     limit: limitParam ? Number(limitParam) : undefined,
-  });
-  return NextResponse.json(rows);
+  };
+  return withDb(() => NextResponse.json(listJournalEntries(filters)));
 }
 
 export async function POST(req: Request) {
   const body = await req.json();
-  return NextResponse.json(createJournalEntry(body), { status: 201 });
+  return withDb(() => NextResponse.json(createJournalEntry(body), { status: 201 }));
 }

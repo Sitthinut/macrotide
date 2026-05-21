@@ -1,14 +1,15 @@
 import { eq } from "drizzle-orm";
-import { db } from "../client";
+import { getDb } from "../context";
 import { settings } from "../schema";
 
 export function getSetting<T = unknown>(key: string): T | undefined {
-  const row = db.select().from(settings).where(eq(settings.key, key)).get();
+  const row = getDb().select().from(settings).where(eq(settings.key, key)).get();
   return row?.value as T | undefined;
 }
 
 export function setSetting(key: string, value: unknown): void {
-  db.insert(settings)
+  getDb()
+    .insert(settings)
     .values({ key, value })
     .onConflictDoUpdate({
       target: settings.key,
@@ -18,9 +19,9 @@ export function setSetting(key: string, value: unknown): void {
 }
 
 export function listSettings(): Array<{ key: string; value: unknown }> {
-  return db.select().from(settings).all();
+  return getDb().select().from(settings).all();
 }
 
 export function deleteSetting(key: string): void {
-  db.delete(settings).where(eq(settings.key, key)).run();
+  getDb().delete(settings).where(eq(settings.key, key)).run();
 }

@@ -1,5 +1,5 @@
 import { and, desc, eq, gte, isNull, type SQL } from "drizzle-orm";
-import { db } from "../client";
+import { getDb } from "../context";
 import { journalEntries } from "../schema";
 
 export type JournalEntry = typeof journalEntries.$inferSelect;
@@ -21,7 +21,7 @@ export function listJournalEntries(filters: JournalFilters = {}): JournalEntry[]
   if (filters.since) where.push(gte(journalEntries.createdAt, filters.since));
   if (!filters.includeArchived) where.push(isNull(journalEntries.archivedAt));
 
-  const q = db
+  const q = getDb()
     .select()
     .from(journalEntries)
     .where(where.length ? and(...where) : undefined)
@@ -31,11 +31,11 @@ export function listJournalEntries(filters: JournalFilters = {}): JournalEntry[]
 }
 
 export function getJournalEntry(id: number): JournalEntry | undefined {
-  return db.select().from(journalEntries).where(eq(journalEntries.id, id)).get();
+  return getDb().select().from(journalEntries).where(eq(journalEntries.id, id)).get();
 }
 
 export function createJournalEntry(input: Omit<JournalEntryInsert, "createdAt">): JournalEntry {
-  return db
+  return getDb()
     .insert(journalEntries)
     .values({ ...input, createdAt: new Date().toISOString() })
     .returning()
@@ -46,16 +46,22 @@ export function updateJournalEntry(
   id: number,
   patch: JournalEntryUpdate,
 ): JournalEntry | undefined {
-  return db.update(journalEntries).set(patch).where(eq(journalEntries.id, id)).returning().get();
+  return getDb()
+    .update(journalEntries)
+    .set(patch)
+    .where(eq(journalEntries.id, id))
+    .returning()
+    .get();
 }
 
 export function archiveJournalEntry(id: number): void {
-  db.update(journalEntries)
+  getDb()
+    .update(journalEntries)
     .set({ archivedAt: new Date().toISOString() })
     .where(eq(journalEntries.id, id))
     .run();
 }
 
 export function deleteJournalEntry(id: number): void {
-  db.delete(journalEntries).where(eq(journalEntries.id, id)).run();
+  getDb().delete(journalEntries).where(eq(journalEntries.id, id)).run();
 }

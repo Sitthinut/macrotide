@@ -45,5 +45,10 @@ if (!globalForDb.__tidemarkDb) {
   globalForDb.__tidemarkDb = db;
 }
 
-export const sqlite = globalForDb.__tidemarkSqlite as Database.Database;
-export const db = globalForDb.__tidemarkDb as ReturnType<typeof drizzle<typeof schema>>;
+export const ownerSqlite = globalForDb.__tidemarkSqlite as Database.Database;
+export const ownerDb = globalForDb.__tidemarkDb as ReturnType<typeof drizzle<typeof schema>>;
+
+// Back-compat aliases — query files used to import these as `db`/`sqlite`.
+// Prefer `getDb()` from `./context` in new code so demo sessions are honored.
+export const db = ownerDb;
+export const sqlite = ownerSqlite;

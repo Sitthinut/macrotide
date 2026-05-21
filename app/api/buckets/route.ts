@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
+import { withDb } from "@/lib/api/with-db";
 import { createBucket, listBuckets } from "@/lib/db/queries/buckets";
 
 export async function GET() {
-  return NextResponse.json(listBuckets());
+  return withDb(() => NextResponse.json(listBuckets()));
 }
 
 export async function POST(req: Request) {
   const body = await req.json();
-  return NextResponse.json(createBucket(body), { status: 201 });
+  return withDb(() => NextResponse.json(createBucket(body), { status: 201 }));
 }

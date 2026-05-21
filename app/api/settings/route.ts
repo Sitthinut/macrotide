@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
+import { withDb } from "@/lib/api/with-db";
 import { listSettings, setSetting } from "@/lib/db/queries/settings";
 
 export async function GET() {
-  const rows = listSettings();
-  const map: Record<string, unknown> = {};
-  for (const r of rows) map[r.key] = r.value;
-  return NextResponse.json(map);
+  return withDb(() => {
+    const rows = listSettings();
+    const map: Record<string, unknown> = {};
+    for (const r of rows) map[r.key] = r.value;
+    return NextResponse.json(map);
+  });
 }
 
 export async function PUT(req: Request) {
@@ -13,8 +16,10 @@ export async function PUT(req: Request) {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return NextResponse.json({ error: "expected_object" }, { status: 400 });
   }
-  for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
-    setSetting(key, value);
-  }
-  return NextResponse.json({ ok: true });
+  return withDb(() => {
+    for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
+      setSetting(key, value);
+    }
+    return NextResponse.json({ ok: true });
+  });
 }

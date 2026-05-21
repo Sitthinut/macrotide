@@ -32,3 +32,8 @@ next-env.d.ts.bak
 /data/**/*.db
 /data/**/*.db-journal
 /data/backups/
+
+# local-only experiments — files ending in .local.ts / .local.test.ts stay
+# out of git. Useful for AI provider variants, scratch scripts, etc.
+*.local.ts
+*.local.test.ts
