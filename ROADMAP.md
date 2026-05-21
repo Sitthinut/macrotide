@@ -1,7 +1,8 @@
 # Roadmap
 
 > **Status:** Active. The working plan for turning the static-data prototype
-> into real software. Last updated 2026-05-21.
+> into real software. Last updated 2026-05-21 (Phase 2 scaffold + multi-user
+> + per-session demo landed).
 
 ---
 
@@ -9,22 +10,51 @@
 
 **Phase 1 is shipped.** As of 2026-05-21:
 
-- SQLite + Drizzle persistence layer; 10 tables, daily backups.
+- SQLite + Drizzle persistence layer; 15 tables (10 app + 5 auth), daily backups.
 - `/api/buckets`, `/api/holdings`, `/api/journal`, `/api/plan`, `/api/models`,
   `/api/quotes`, `/api/settings` all live; PortfolioScreen, JournalScreen,
   ModelPortfoliosScreen, App, AppPanels all read via SWR fetchers.
 - Bucket + holding CRUD wired to the UI (BucketSheet, HoldingSheet).
 - Add holdings sheet (CSV file upload / paste / manual) writes through to
   `/api/holdings`.
-- **Phase 3 partial:** Yahoo Finance client + cache + `/api/market/indices`;
-  MarketsScreen pulls live SET / S&P / Nasdaq / Nikkei / USD-THB with 24h
-  cache and graceful 429 fallback. News, digest, learn content, and Thai
-  mutual-fund NAVs still mocked (no public API; AIMC or scrape is a later
-  pass).
 
-What's still mocked: ANALYSIS scores (Phase 2 AI computes), chat panel
-content (Phase 2), market news (Phase 3b), benchmark + drift + contrib
-series on PortfolioScreen (need NAV history backfill).
+**Phase 2 scaffold shipped** (chat plumbing + multi-user gate + demo mode):
+
+- `/api/chat` with Vercel AI SDK + streamText, owner/demo provider routing.
+- Single AI provider abstraction (OpenRouter) — one key, every major model
+  (Anthropic / OpenAI / Google / Meta / Mistral / DeepSeek). Owner uses
+  `OPENROUTER_API_KEY`; demo uses `DEMO_OPENROUTER_API_KEY` or falls back
+  to the same key with the free-tier `openrouter/free` router so demo
+  traffic never burns paid credits.
+- Demo provider hard-capped at 10 chat turns per session, enforced server-side.
+- `ChatScreen` consumes the UI message stream and renders text-deltas live.
+- IP rate limit (20 RPM) on `/api/chat`. Security headers (X-CTO, X-Frame,
+  HSTS, Referrer-Policy, Permissions-Policy with tight `publickey-credentials`)
+  in `next.config.ts`.
+- 15 vitest tests including AsyncLocalStorage isolation + provider routing.
+
+**Phase 2.5 scaffold shipped** (multi-user mode + demo button):
+
+- better-auth + `@better-auth/passkey` with drizzle-adapter against the same
+  SQLite. Endpoints at `/api/auth/[...all]`.
+- `/onboarding` screen — passkey sign-in, account creation (registers a
+  passkey on first sign-up), or "Try the demo".
+- `AUTH_REQUIRED=1` gates the dashboard on a session cookie. Demo cookie
+  bypasses the gate.
+- **Per-session demo DBs** — each demo gets its own isolated in-memory
+  SQLite seeded with mock data. AsyncLocalStorage routes every query to the
+  right DB. Idle TTL 1h, hard cap 200 concurrent. Real users still share
+  the owner SQLite (single-tenant for now).
+
+**Phase 3 partial:** Yahoo Finance client + cache + `/api/market/indices`;
+MarketsScreen pulls live SET / S&P / Nasdaq / Nikkei / USD-THB with 24h
+cache and graceful 429 fallback. News, digest, learn content, and Thai
+mutual-fund NAVs still mocked (no public API; AIMC or scrape is a later
+pass).
+
+What's still mocked: ANALYSIS scores (need AI tool-calls — Phase 2.6),
+ANALYSIS chart series (need NAV history backfill — Phase 3b), market news
+(Phase 3b), benchmark + drift + contrib series on PortfolioScreen.
 
 The 7-screen UI is intact and responsive across mobile / tablet / desktop.
 
