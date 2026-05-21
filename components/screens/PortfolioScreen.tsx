@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { type BucketFormValues, BucketSheet } from "@/components/BucketSheet";
 import { MiniBars, MiniLine, ModelDonut, PerfChart } from "@/components/charts";
 import { FeedbackRow } from "@/components/FeedbackRow";
+import { type HoldingFormValues, HoldingSheet } from "@/components/HoldingSheet";
 import { Icon } from "@/components/Icon";
 import {
   useModelPortfoliosView,
@@ -21,6 +22,23 @@ import {
   SECTOR_BREAKDOWN,
 } from "@/lib/mock/data";
 import type { AssetClass, BenchmarkKey, Holding, Portfolio } from "@/lib/mock/types";
+
+function holdingToFormValues(h: Holding, fallbackBucketId: string): HoldingFormValues {
+  return {
+    bucketId: h.bucketId ?? fallbackBucketId,
+    ticker: h.ticker,
+    thaiName: h.thai ?? "",
+    englishName: h.name,
+    category: h.category,
+    assetClass: h.class,
+    region: h.region,
+    units: h.units,
+    avgCost: h.units > 0 ? h.cost / h.units : 0,
+    ter: h.ter,
+    source: h.source,
+    color: h.color,
+  };
+}
 
 function portfolioToFormValues(p: Portfolio): BucketFormValues {
   return {
@@ -98,6 +116,39 @@ export function PortfolioScreen({
   const [bucketSheet, setBucketSheet] = useState<
     { mode: "create" } | { mode: "edit"; bucket: Portfolio } | null
   >(null);
+  const [holdingSheet, setHoldingSheet] = useState<Holding | null>(null);
+
+  async function saveHolding(values: HoldingFormValues) {
+    const id = holdingSheet?.id;
+    if (id === undefined) return;
+    const payload = {
+      bucketId: values.bucketId,
+      ticker: values.ticker,
+      thaiName: values.thaiName || null,
+      englishName: values.englishName,
+      category: values.category || null,
+      assetClass: values.assetClass,
+      region: values.region || null,
+      units: values.units,
+      avgCost: values.avgCost,
+      ter: values.ter,
+      color: values.color,
+      source: values.source || null,
+    };
+    const res = await fetch(`/api/holdings/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`Update failed (${res.status})`);
+    invalidate(/^\/api\/holdings/);
+  }
+
+  async function deleteHolding(id: number) {
+    const res = await fetch(`/api/holdings/${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`Delete failed (${res.status})`);
+    invalidate(/^\/api\/holdings/);
+  }
 
   async function saveBucket(values: BucketFormValues) {
     const isEdit = bucketSheet?.mode === "edit";
@@ -814,9 +865,27 @@ export function PortfolioScreen({
 
       <div className="holdings-list">
         {filtered.map((h) => {
-          const pct = (h.value / view.totalValue) * 100;
+          const pct = view.totalValue > 0 ? (h.value / view.totalValue) * 100 : 0;
+          const editable = h.id !== undefined;
           return (
-            <div key={h.ticker + (h.source || "")} className="holding">
+            <div
+              key={(h.id ?? h.ticker) + (h.source || "")}
+              className="holding"
+              role={editable ? "button" : undefined}
+              tabIndex={editable ? 0 : undefined}
+              onClick={editable ? () => setHoldingSheet(h) : undefined}
+              onKeyDown={
+                editable
+                  ? (e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setHoldingSheet(h);
+                      }
+                    }
+                  : undefined
+              }
+              style={editable ? { cursor: "pointer" } : undefined}
+            >
               <div className="swatch" style={{ background: h.color }}>
                 {swatchAbbr(h.ticker)}
               </div>
@@ -894,6 +963,41 @@ export function PortfolioScreen({
         onSave={saveBucket}
         onDelete={
           bucketSheet?.mode === "edit" ? () => deleteBucket(bucketSheet.bucket.id) : undefined
+        }
+      />
+
+      <HoldingSheet
+        open={!!holdingSheet}
+        holdingId={holdingSheet?.id}
+        lockTicker
+        initial={
+          holdingSheet
+            ? holdingToFormValues(
+                holdingSheet,
+                holdingSheet.bucketId ?? activePf?.id ?? portfolios[0]?.id ?? "",
+              )
+            : {
+                bucketId: "",
+                ticker: "",
+                thaiName: "",
+                englishName: "",
+                category: "",
+                assetClass: "equity",
+                region: "",
+                units: 0,
+                avgCost: 0,
+                ter: 0,
+                source: "",
+                color: "var(--accent)",
+              }
+        }
+        bucketOptions={portfolios.map((p) => ({ id: p.id, name: p.name }))}
+        onClose={() => setHoldingSheet(null)}
+        onSave={saveHolding}
+        onDelete={
+          holdingSheet?.id !== undefined
+            ? () => deleteHolding(holdingSheet.id as number)
+            : undefined
         }
       />
     </div>

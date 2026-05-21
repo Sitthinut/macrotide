@@ -3,6 +3,10 @@
 export type AssetClass = "equity" | "bond" | "alternative" | "cash";
 
 export interface Holding {
+  /** DB primary key — present on adapted holdings from /api/holdings. */
+  id?: number;
+  /** Which bucket the holding belongs to — present on adapted holdings. */
+  bucketId?: string;
   ticker: string;
   thai?: string;
   name: string;

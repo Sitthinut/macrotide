@@ -37,6 +37,8 @@ function holdingFromDb(
   const value = h.units * nav;
   const cost = (h.avgCost ?? 0) * h.units;
   return {
+    id: h.id,
+    bucketId: h.bucketId,
     ticker: h.ticker,
     thai: h.thaiName ?? undefined,
     name: h.englishName,
