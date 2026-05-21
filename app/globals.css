@@ -138,16 +138,24 @@ html {
   background: var(--bg);
 }
 
-/* ===== App shell ===== */
+/* ===== App shell =====
+   --demo-banner-h is read by every full-viewport container (.app-frame,
+   .ra-shell, .ra-main, the rails, and the chat screen) so they subtract the
+   sticky DemoBanner's height and the page doesn't gain a phantom scroll
+   when demo mode is active. The DemoBanner component measures itself at
+   runtime and writes the actual rendered px to this variable on body. */
+:root {
+  --demo-banner-h: 0px;
+}
 .app-root {
-  min-height: 100vh;
+  min-height: calc(100vh - var(--demo-banner-h));
   display: flex;
   justify-content: center;
   background: var(--bg);
 }
 .app-frame {
   width: 100%;
-  min-height: 100vh;
+  min-height: calc(100vh - var(--demo-banner-h));
   background: var(--bg);
   position: relative;
   padding-bottom: 96px;
@@ -1040,6 +1048,14 @@ textarea.sheet-input:focus {
 }
 
 /* Chat */
+/* Mobile fullscreen chat shell. The wide-screen panel override below
+   (.ra-chat-body .screen) wins on specificity and switches height to 100%
+   so the screen fills its panel container instead of viewport-relative. */
+.chat-shell {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - 96px - var(--demo-banner-h, 0px));
+}
 .chat-stream {
   padding: 8px 16px 100px;
   display: flex;
@@ -1528,7 +1544,7 @@ textarea.sheet-input:focus {
 .ra-shell {
   display: grid;
   width: 100%;
-  min-height: 100vh;
+  min-height: calc(100vh - var(--demo-banner-h));
   background: var(--bg);
   color: var(--ink);
 }
@@ -1557,7 +1573,7 @@ textarea.sheet-input:focus {
   flex-direction: column;
   position: sticky;
   top: 0;
-  height: 100vh;
+  height: calc(100vh - var(--demo-banner-h));
   z-index: 25;
 }
 
@@ -1726,7 +1742,7 @@ textarea.sheet-input:focus {
   min-width: 0;
   background: var(--bg);
   overflow-y: auto;
-  height: 100vh;
+  height: calc(100vh - var(--demo-banner-h));
 }
 .ra-main-inner {
   max-width: 760px;
@@ -1758,7 +1774,7 @@ textarea.sheet-input:focus {
 .ra-panel {
   background: var(--paper);
   border-left: 1px solid var(--line-soft);
-  height: 100vh;
+  height: calc(100vh - var(--demo-banner-h));
   position: sticky;
   top: 0;
   display: flex;
@@ -1860,7 +1876,7 @@ textarea.sheet-input:focus {
 .ra-apps-rail {
   background: var(--paper);
   border-left: 1px solid var(--line-soft);
-  height: 100vh;
+  height: calc(100vh - var(--demo-banner-h));
   position: sticky;
   top: 0;
   display: flex;

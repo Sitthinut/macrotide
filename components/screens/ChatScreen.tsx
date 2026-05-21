@@ -22,9 +22,18 @@ interface Message {
   role: "user" | "ai";
   text: string;
   ts: number;
+  // Stable identity for streaming updates. `ts` is for display only — two
+  // messages can share a ms if they're queued in the same event-loop tick.
+  id: string;
   proposal?: PlanProposal;
   applied?: boolean;
   rejected?: boolean;
+}
+
+function makeId(): string {
+  return typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 interface MsgFeedback {
@@ -126,6 +135,7 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
             portfolio.totalValue / 1000,
           )}k across ${portfolio.holdings.length} funds).\n\nYou haven't drafted your plan yet. We can build it together — just say "help me write my plan" and I'll walk you through it.`,
           ts: Date.now(),
+          id: makeId(),
         },
       ];
     }
@@ -136,6 +146,7 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
           portfolio.totalValue / 1000,
         )}k across ${portfolio.holdings.length} funds). Ask me anything about your holdings, your target, or how index investing works.`,
         ts: Date.now(),
+        id: makeId(),
       },
     ];
   }, []);
@@ -146,11 +157,15 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
   const [msgFeedback, setMsgFeedback] = useState<Record<number, MsgFeedback>>({});
   const streamRef = useRef<HTMLDivElement>(null);
 
+  // Auto-scroll to the bottom whenever messages grow or the streaming text
+  // changes. We track the last message's text length so streamed deltas tick
+  // the effect without re-rendering it on every keystroke in the composer.
+  const lastText = messages[messages.length - 1]?.text ?? "";
   useEffect(() => {
     if (streamRef.current) {
       streamRef.current.scrollTop = streamRef.current.scrollHeight;
     }
-  }, []);
+  }, [messages.length, lastText]);
 
   const askLive = async (prompt: string, history: Message[]) => {
     setLoading(true);
@@ -166,8 +181,8 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
     ];
 
     // Reserve the placeholder assistant message we'll stream into.
-    const placeholderTs = Date.now();
-    setMessages((m) => [...m, { role: "ai", text: "", ts: placeholderTs }]);
+    const placeholderId = makeId();
+    setMessages((m) => [...m, { role: "ai", text: "", ts: Date.now(), id: placeholderId }]);
 
     try {
       const res = await fetch("/api/chat", {
@@ -206,7 +221,7 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
             if (delta && (event.type?.startsWith("text") || !event.type)) {
               accumulated += delta;
               setMessages((prev) =>
-                prev.map((m) => (m.ts === placeholderTs ? { ...m, text: accumulated } : m)),
+                prev.map((m) => (m.id === placeholderId ? { ...m, text: accumulated } : m)),
               );
             }
           } catch {
@@ -220,7 +235,7 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
       if (!accumulated) {
         setMessages((prev) =>
           prev.map((m) =>
-            m.ts === placeholderTs
+            m.id === placeholderId
               ? { ...m, text: "(no response — check server logs or your AI provider config)" }
               : m,
           ),
@@ -229,7 +244,7 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
     } catch (err) {
       setMessages((prev) =>
         prev.map((m) =>
-          m.ts === placeholderTs
+          m.id === placeholderId
             ? {
                 ...m,
                 text: `Chat error: ${err instanceof Error ? err.message : "unknown"}. The dashboard still works; this just means AI hasn't been configured (or the demo turn cap was hit).`,
@@ -244,7 +259,7 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
 
   const ask = (prompt: string) => {
     if (!prompt.trim() || loading) return;
-    const newUserMsg: Message = { role: "user", text: prompt, ts: Date.now() };
+    const newUserMsg: Message = { role: "user", text: prompt, ts: Date.now(), id: makeId() };
     const nextHistory = [...messages, newUserMsg];
     setMessages(nextHistory);
     setInput("");
@@ -281,6 +296,7 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
             role: "ai",
             text: `I'll add this to your **${sectionGuess}** section. Here's the change — confirm to apply.`,
             ts: Date.now(),
+            id: makeId(),
             proposal,
           },
         ]);
@@ -334,12 +350,10 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
 
   return (
     <div
-      className="screen"
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        minHeight: "calc(100vh - 96px)",
-      }}
+      // .chat-shell sets the screen's height as a CSS rule rather than inline
+      // so the wide-screen panel override (.ra-chat-body .screen { height: 100% })
+      // can win on specificity — inline `height` would block it.
+      className="screen chat-shell"
     >
       <div className="topbar">
         <div className="brand" style={{ flex: 1 }}>
@@ -361,10 +375,12 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
       <div
         className="chat-stream"
         ref={streamRef}
-        style={{ flex: 1, paddingBottom: 8, minHeight: 200 }}
+        // `min-height: 0` lets flex:1 shrink below content size so overflow-y
+        // actually kicks in (otherwise long messages push the composer off-screen).
+        style={{ flex: 1, paddingBottom: 8, minHeight: 0, overflowY: "auto" }}
       >
         {messages.map((m, i) => (
-          <div key={i} className={`msg ${m.role}`}>
+          <div key={m.id} className={`msg ${m.role}`}>
             {m.role === "ai" && (
               <div className="meta">
                 Advisor ·{" "}
@@ -374,7 +390,15 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
                 })}
               </div>
             )}
-            <div style={{ whiteSpace: "pre-wrap" }}>{m.text}</div>
+            {m.role === "ai" && !m.text && loading ? (
+              <div className="typing">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+            ) : (
+              <div style={{ whiteSpace: "pre-wrap" }}>{m.text}</div>
+            )}
             {m.proposal && (
               <PlanProposalCard
                 proposal={m.proposal}
@@ -410,7 +434,10 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
             )}
           </div>
         ))}
-        {loading && (
+        {/* Standalone "thinking" bubble only when there's no streaming
+            placeholder yet — i.e. proposal flow with 700ms setTimeout. The
+            stream flow renders typing dots inline inside the empty AI msg. */}
+        {loading && messages[messages.length - 1]?.role !== "ai" && (
           <div className="msg ai">
             <div className="meta">Advisor · thinking</div>
             <div className="typing">

@@ -1,9 +1,29 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export function DemoBanner() {
   const [exiting, setExiting] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Publish the banner's actual rendered height to a CSS variable so layout
+  // containers (.ra-main, .ra-shell, rails, etc.) subtract the right amount.
+  // The banner wraps to 2 lines on narrow viewports — a static 48px guess
+  // leaves an 18px gap on desktop where it's only 30px tall.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const apply = () => {
+      document.body.style.setProperty("--demo-banner-h", `${el.offsetHeight}px`);
+    };
+    apply();
+    const obs = new ResizeObserver(apply);
+    obs.observe(el);
+    return () => {
+      obs.disconnect();
+      document.body.style.removeProperty("--demo-banner-h");
+    };
+  }, []);
 
   async function exit() {
     setExiting(true);
@@ -17,6 +37,11 @@ export function DemoBanner() {
 
   return (
     <div
+      // Class is a hook for selectors; the actual height value comes from the
+      // ResizeObserver above so it matches whatever the banner actually
+      // renders at (varies by viewport — wraps to 2 lines under ~480px).
+      ref={ref}
+      className="demo-banner"
       style={{
         position: "sticky",
         top: 0,
