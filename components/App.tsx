@@ -14,6 +14,7 @@ import { SettingsScreen, type Theme } from "@/components/screens/SettingsScreen"
 import { useSelectedModelId } from "@/lib/fetchers/legacy";
 import { usePlan } from "@/lib/fetchers/portfolio";
 import { invalidate } from "@/lib/fetchers/swr";
+import { useScrollHide } from "@/lib/useScrollHide";
 import { useViewport } from "@/lib/useViewport";
 
 type Screen = "connect" | "portfolio" | "markets" | "chat" | "journal" | "models" | "settings";
@@ -45,6 +46,7 @@ export function App() {
   const viewport = useViewport();
   const isWide = viewport !== "mobile";
   const isDesktop = viewport === "desktop";
+  useScrollHide();
 
   const [theme, setTheme] = useState<Theme>(() => {
     if (typeof window === "undefined") return "system";
@@ -131,7 +133,9 @@ export function App() {
         />
       );
     }
-    if (screen === "markets") return <MarketsScreen />;
+    if (screen === "markets") {
+      return <MarketsScreen onOpenSettings={() => setScreen("settings")} />;
+    }
     if (screen === "chat") {
       return (
         <ChatScreen

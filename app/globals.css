@@ -166,15 +166,58 @@ html {
 /* Top bar */
 .topbar {
   position: sticky;
-  top: 0;
+  /* Sticks just below the demo banner when present, else flush to viewport top. */
+  top: var(--demo-banner-h, 0px);
   z-index: 30;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 14px 16px 8px;
-  background: linear-gradient(var(--bg) 80%, transparent);
-  backdrop-filter: blur(8px);
+  /* Pin the height so sub-tabs `top: 50px` lines up exactly. Content fits
+     within (14+23ish+8 = ~45–50px), but rounding varies by viewport so
+     a min-height guarantees a consistent stack offset. */
+  min-height: 50px;
+  /* Solid background so content scrolling under the sticky bar is fully
+     hidden. Previously this used a linear-gradient that faded to transparent
+     in the bottom 20%, which showed scrolling content through the bar. */
+  background: var(--bg);
+  transition: transform 220ms ease;
+  will-change: transform;
+}
+
+/* Scroll-direction-aware hide. `useScrollHide` toggles
+   [data-topbar-hidden] on <body> when scrolling down past ~60px; CSS slides
+   the topbar up and pulls sub-tabs/portfolio-switch up to fill the space.
+   Both elements use `transform` (compositor-driven, GPU-accelerated) so
+   their motion stays in lockstep — transitioning `top` on sticky elements
+   snaps instead of interpolating and creates a visible gap during hide.
+   Without JS or with prefers-reduced-motion, the attribute is never set
+   and the layout stays in its base sticky state. */
+body[data-topbar-hidden="true"] .topbar {
+  transform: translateY(-100%);
+}
+.sub-tabs,
+.portfolio-switch {
+  transition: transform 220ms ease;
+}
+body[data-topbar-hidden="true"] .sub-tabs,
+body[data-topbar-hidden="true"] .portfolio-switch {
+  /* Move up by the topbar's own height (50px mobile / 54px desktop below)
+     so the bar slides up flush with the banner bottom and stays touching
+     the rising topbar. */
+  transform: translateY(-50px);
+}
+body[data-topbar-hidden="true"] .ra-main .sub-tabs,
+body[data-topbar-hidden="true"] .ra-main .portfolio-switch {
+  transform: translateY(-54px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .topbar,
+  .sub-tabs,
+  .portfolio-switch {
+    transition: none;
+  }
 }
 .topbar > div:first-child {
   min-width: 0;
@@ -372,14 +415,21 @@ html {
 .sub-tabs {
   display: flex;
   gap: 4px;
-  padding: 6px 16px 12px;
+  /* Symmetric padding (8 top / 8 bottom) — buttons sit centered in the bar
+     with breathing room above and below. Margin-bottom adds extra space
+     between the sticky bar and the content feed below. */
+  padding: 8px 16px 8px;
+  margin-bottom: 8px;
   overflow-x: auto;
   scrollbar-width: none;
   position: sticky;
-  top: 56px;
+  /* `48px` (= topbar 50 - 2) creates a 2px overlap with the topbar's bottom
+     edge. The topbar has a higher z-index so the overlap is invisible at
+     rest. During the scroll-hide transition both elements transform by the
+     same amount, so the overlap persists — no sub-pixel seam can appear. */
+  top: calc(48px + var(--demo-banner-h, 0px));
   z-index: 20;
-  background: linear-gradient(var(--bg) 80%, transparent);
-  backdrop-filter: blur(8px);
+  background: var(--bg);
 }
 .sub-tabs::-webkit-scrollbar {
   display: none;
@@ -1369,13 +1419,23 @@ textarea.sheet-input:focus {
   stroke-width: 1;
 }
 
-/* Portfolio switcher (segmented pills at top of Portfolio) */
+/* Portfolio switcher (segmented pills at top of Portfolio).
+   Sticky to match .sub-tabs across screens — same `top` math, same
+   z-index. Without JS, this is the static-pinned base case. */
 .portfolio-switch {
   display: flex;
   gap: 4px;
-  padding: 0 16px 12px;
+  /* Match .sub-tabs symmetric padding + margin + overlap so the visual
+     rhythm is consistent across Portfolio / Markets / Journal. The 2px
+     overlap with topbar prevents any sub-pixel gap during scroll-hide. */
+  padding: 8px 16px 8px;
+  margin-bottom: 8px;
   overflow-x: auto;
   scrollbar-width: none;
+  position: sticky;
+  top: calc(48px + var(--demo-banner-h, 0px));
+  z-index: 20;
+  background: var(--bg);
 }
 .portfolio-switch::-webkit-scrollbar {
   display: none;
@@ -1743,6 +1803,20 @@ textarea.sheet-input:focus {
   background: var(--bg);
   overflow-y: auto;
   height: calc(100vh - var(--demo-banner-h));
+}
+/* Banner sits outside .ra-main, so sticky descendants don't need the
+   banner offset on their `top` (they'd double-offset otherwise).
+   sub-tabs `top: 54px` matches the desktop topbar height (50 base + 4px
+   added by `.ra-main .topbar { padding-top: 18px }` below). Without this
+   match, sub-tabs would sticky-jump 4px up when scroll engages. */
+.ra-main .topbar {
+  top: 0;
+}
+.ra-main .sub-tabs,
+.ra-main .portfolio-switch {
+  /* `52px` (= desktop topbar 54 - 2) — same 2px overlap as mobile,
+     adjusted for the taller desktop topbar (18px padding-top vs 14px). */
+  top: 52px;
 }
 .ra-main-inner {
   max-width: 760px;

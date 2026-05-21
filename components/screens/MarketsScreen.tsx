@@ -6,7 +6,11 @@ import { type MarketIndexResponse, useMarketIndices } from "@/lib/fetchers/portf
 import { LEARN_CONTENT, MARKETS } from "@/lib/mock/data";
 import type { LearnArticle, MarketIndex, Markets } from "@/lib/mock/types";
 
-export function MarketsScreen() {
+export interface MarketsScreenProps {
+  onOpenSettings: () => void;
+}
+
+export function MarketsScreen({ onOpenSettings }: MarketsScreenProps) {
   const [tab, setTab] = useState<"today" | "learn">("today");
   return (
     <div className="screen">
@@ -15,7 +19,9 @@ export function MarketsScreen() {
           <span>Markets</span>
           <span className="brand-chip">19 MAY · ICT</span>
         </div>
-        <div className="avatar">PN</div>
+        <button className="icon-btn" aria-label="Settings" onClick={onOpenSettings}>
+          <Icon name="settings" size={13} />
+        </button>
       </div>
 
       <div className="sub-tabs">
