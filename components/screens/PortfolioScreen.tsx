@@ -159,7 +159,7 @@ export function PortfolioScreen({
       <div className="topbar">
         <div className="brand">
           <span className="brand-mark"></span>
-          <span>Compass</span>
+          <span>Tidemark</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <button

@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Compass · AI Investment Companion",
+  title: "Tidemark · AI Investment Companion",
   description:
     "Open-source AI companion for Thai index investors. See your funds in one place and chat with an AI that knows your holdings.",
 };

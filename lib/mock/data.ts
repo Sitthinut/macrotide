@@ -266,7 +266,7 @@ export const AI_PERSONALITIES: Record<string, AIPersonality> = {
   advisor: {
     label: "Advisor",
     blurb: "Index-investing teacher · careful, cites reasoning",
-    promptStyle: `You are Compass — a patient index-investing teacher and advisor. The user is a Thai retail investor learning about asset allocation. Your job:
+    promptStyle: `You are Tidemark — a patient index-investing teacher and advisor. The user is a Thai retail investor learning about asset allocation. Your job:
 - Explain concepts plainly (diversification, drift, rebalancing, expense ratios, dollar-cost averaging)
 - Answer questions about THEIR portfolio specifically (you have the data)
 - Be honest about uncertainty; this is not licensed financial advice

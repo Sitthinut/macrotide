@@ -10,7 +10,7 @@
 The prototype is functionally complete:
 
 - 7 screens (Portfolio, Markets, Chat, Journal, Models, Connect, Settings)
-- Responsive shell (mobile <900 / tablet 900-1199 / desktop ≥1200)
+- Responsive shell (mobile <700 / tablet 700-1199 / desktop ≥1200)
 - Direction-C aesthetic, light/dark/system themes
 - Mobile bottom nav + wide-shell left rail + right-dock apps panel (Chat /
   Buckets / Plan / Notes)
@@ -219,11 +219,11 @@ machinery; we'll wire mutations as plain `fetch` + `mutate()` calls.
 
 ### Implementation order
 
-1. `pnpm add better-sqlite3 drizzle-orm` + `pnpm add -D drizzle-kit @types/better-sqlite3`.
+1. `npm install better-sqlite3 drizzle-orm` + `npm install -D drizzle-kit @types/better-sqlite3`.
 2. `lib/db/client.ts` + `lib/db/schema.ts` mirroring the schema above.
 3. `drizzle-kit generate` → first migration; `lib/db/client.ts` runs migrations on boot.
 4. `lib/mock/seed.ts` script that reads the current `lib/mock/data.ts` and inserts
-   into the DB. Add `pnpm seed`. Wipes + reseeds for dev sanity.
+   into the DB. Add `npm run seed`. Wipes + reseeds for dev sanity.
 5. `lib/db/queries/*.ts` — typed wrappers (`listBuckets()`, `upsertHolding()`,
    etc.).
 6. Pick one screen to migrate first — **start with `PortfolioScreen`** (the
@@ -239,7 +239,7 @@ machinery; we'll wire mutations as plain `fetch` + `mutate()` calls.
 
 ### Acceptance criteria
 
-- `pnpm dev` boots; DB file auto-created at `data/app.db`.
+- `npm run dev` boots; DB file auto-created at `data/app.db`.
 - Reload survives all user-created state: journal entries, plan edits,
   custom model portfolios, theme.
 - `lib/mock/data.ts` no longer imported by any screen (only by `seed.ts`).
@@ -337,7 +337,7 @@ CREATE TABLE plan_proposals (
 
 ### Implementation order
 
-1. `pnpm add @anthropic-ai/sdk zod`.
+1. `npm install @anthropic-ai/sdk zod`.
 2. `lib/agent/system-prompt.ts` — paste a starter prompt; iterate after first
    real call.
 3. `lib/agent/tool-schema.ts` — Zod for each tool's args.
@@ -420,7 +420,7 @@ app/
 3. `lib/market/set-index.ts` + `app/api/market/set/route.ts`.
 4. Wire `MarketsScreen` charts to fetch real series.
 5. `lib/market/fund-platform.ts` (Playwright scraper for Thai fund NAVs).
-   Run as a `pnpm refresh-navs` script first; later move to a scheduled job
+   Run as a `npm run refresh-navs` script first; later move to a scheduled job
    (Phase 5).
 6. `app/api/market/fund/[ticker]/route.ts` returns NAV + history from cache,
    triggers a scrape if cache is cold.
@@ -481,12 +481,12 @@ once you have a clear personal need.
    - Build an autocomplete on `holdings` history + a small seed of common
      tickers (kept in `lib/data/known-funds.ts`, not the DB).
    - Wire the Manual tab.
-4. **Drop `lib/mock/data.ts`** — replace `pnpm seed` with a minimal "demo"
+4. **Drop `lib/mock/data.ts`** — replace `npm run seed` with a minimal "demo"
    seed that creates one empty bucket so the UI isn't blank on first run.
 
 ### Acceptance criteria
 
-- Fresh DB (`rm data/app.db && pnpm dev`) → app boots with an empty state UI,
+- Fresh DB (`rm data/app.db && npm run dev`) → app boots with an empty state UI,
   not a crash.
 - CSV import: round-trip your actual portfolio in <60s.
 - Image OCR: 80%+ row accuracy on a clean broker screenshot (ticker + units +
@@ -512,7 +512,6 @@ once you have a clear personal need.
 | AI provider | Anthropic SDK direct | OpenRouter (provider swap), Vercel AI SDK |
 | Chat model | `claude-sonnet-4-5` | `claude-opus-4-5` (better reasoning, ~5× cost), `claude-haiku-4-5` (fast, cheap) |
 | Market data: Thai funds | Playwright scrape of fund-supermarket pages | AIMC public data feed |
-| New app name (replace "Compass") | TBD by you | Pick before Phase 2 ships — chat persona references the name |
 
 ## Explicitly out of scope (until you decide otherwise)
 
@@ -541,10 +540,10 @@ After each phase, look for:
 
 ## Next session pickup
 
-1. `cd investment-agent` and re-read this file.
+1. `cd tidemark` and re-read this file.
 2. Confirm the **Decisions you need to make** table above (Drizzle / SWR /
    Anthropic SDK / Sonnet 4.5).
-3. Start Phase 1, step 1: `pnpm add better-sqlite3 drizzle-orm` etc.
+3. Start Phase 1, step 1: `npm install better-sqlite3 drizzle-orm` etc.
 4. The smallest useful loop in Phase 1 is: **schema → migrations → seed →
    replace one screen's mock import with a real fetcher**. Pick
    `PortfolioScreen` for that one screen.

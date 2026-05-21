@@ -204,7 +204,7 @@ export function SettingsScreen({
               companion · MIT licensed
             </li>
             <li>
-              <span className="marker">↗</span>github.com/compass-invest
+              <span className="marker">↗</span>github.com/Sitthinut/tidemark
             </li>
             <li>
               <span className="marker">⚠</span>Educational tool — not licensed

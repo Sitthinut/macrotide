@@ -90,7 +90,7 @@ export function ConnectScreen({ onConnect }: ConnectScreenProps) {
                 letterSpacing: "-0.02em",
               }}
             >
-              Compass
+              Tidemark
             </span>
           </div>
           <h1

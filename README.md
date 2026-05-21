@@ -1,4 +1,4 @@
-# investment-agent
+# Tidemark
 
 > An open-source AI investment companion for Thai index investors. Personal-use
 > experiment.
@@ -35,8 +35,8 @@ for what's coming.
 ## Quick start
 
 ```bash
-git clone <repo-url> investment-agent
-cd investment-agent
+git clone <repo-url> tidemark
+cd tidemark
 npm install
 npm run dev
 ```
@@ -57,7 +57,7 @@ npm run typecheck  # tsc --noEmit
 ## Project layout
 
 ```
-investment-agent/
+tidemark/
 ├── app/              Next.js App Router (currently a single-page client app)
 ├── components/       Screens + UI primitives + chart components
 ├── lib/

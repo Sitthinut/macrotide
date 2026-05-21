@@ -860,7 +860,7 @@ function AddCustomModelSheet({
         <div className="sheet-handle"></div>
         <div className="sheet-title">Add a custom model</div>
         <div className="sheet-subtitle">
-          Bring any allocation from outside Compass. The AI parses, you confirm,
+          Bring any allocation from outside Tidemark. The AI parses, you confirm,
           and it&apos;s saved to your Journal.
         </div>
 
