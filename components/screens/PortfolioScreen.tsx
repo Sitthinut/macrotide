@@ -4,6 +4,11 @@ import { useMemo, useState } from "react";
 import { MiniBars, MiniLine, ModelDonut, PerfChart } from "@/components/charts";
 import { FeedbackRow } from "@/components/FeedbackRow";
 import { Icon } from "@/components/Icon";
+import {
+  useModelPortfoliosView,
+  usePortfolioView,
+  useSelectedModelId,
+} from "@/lib/fetchers/legacy";
 import { fmtPct } from "@/lib/format";
 import {
   ANALYSIS,
@@ -11,19 +16,9 @@ import {
   CONTRIB_SERIES,
   DRIFT_SERIES,
   GEO_BREAKDOWN,
-  MODEL_PORTFOLIOS,
-  PORTFOLIO,
-  PORTFOLIOS,
   SECTOR_BREAKDOWN,
-  USER_GOALS,
 } from "@/lib/mock/data";
-import type {
-  AggregatePortfolio,
-  AssetClass,
-  BenchmarkKey,
-  Holding,
-  Portfolio,
-} from "@/lib/mock/types";
+import type { AssetClass, BenchmarkKey, Holding, Portfolio } from "@/lib/mock/types";
 
 const SEV_COLOR: Record<string, string> = {
   good: "var(--gain)",
@@ -87,24 +82,28 @@ export function PortfolioScreen({
   const [benchmark, setBenchmark] = useState<"none" | BenchmarkKey>("none");
   const [feedback, setFeedback] = useState<Record<string, "up" | "down" | null>>({});
 
-  const activePf = useMemo(() => {
-    if (activePfId === "all") return null;
-    return PORTFOLIOS.find((p) => p.id === activePfId) || null;
-  }, [activePfId]);
+  const { portfolios, aggregate, isLoading } = usePortfolioView();
+  const { models } = useModelPortfoliosView();
+  const planSelectedModelId = useSelectedModelId();
 
-  const view: ViewPortfolio = useMemo(() => {
+  const activePf = useMemo<Portfolio | null>(() => {
+    if (activePfId === "all" || !portfolios) return null;
+    return portfolios.find((p) => p.id === activePfId) ?? null;
+  }, [activePfId, portfolios]);
+
+  const view: ViewPortfolio | null = useMemo(() => {
+    if (!aggregate) return null;
     if (!activePf) {
-      const pf: AggregatePortfolio = PORTFOLIO;
       return {
         name: "All portfolios",
         notes: null,
         type: "free",
-        holdings: pf.holdings,
-        series: pf.series,
-        totalValue: pf.totalValue,
-        initialInvestment: pf.initialInvestment,
-        perfPct: pf.perfPct,
-        asOf: pf.asOf,
+        holdings: aggregate.holdings,
+        series: aggregate.series,
+        totalValue: aggregate.totalValue,
+        initialInvestment: aggregate.initialInvestment,
+        perfPct: aggregate.perfPct,
+        asOf: aggregate.asOf,
       };
     }
     return {
@@ -118,17 +117,18 @@ export function PortfolioScreen({
       perfPct: activePf.perfPct,
       asOf: activePf.asOf,
     };
-  }, [activePf]);
-
-  const pnl = view.totalValue - view.initialInvestment;
-  const pnlPct = (pnl / view.initialInvestment) * 100;
+  }, [activePf, aggregate]);
 
   const filtered = useMemo(() => {
+    if (!view) return [] as Holding[];
     if (filter === "all") return view.holdings;
     return view.holdings.filter((h) => h.class === filter);
   }, [view, filter]);
 
   const byClass = useMemo(() => {
+    if (!view || view.totalValue <= 0) {
+      return { equity: 0, bond: 0, alternative: 0, cash: 0 };
+    }
     const groups: Record<string, number> = {};
     view.holdings.forEach((h) => {
       groups[h.class] = (groups[h.class] || 0) + h.value;
@@ -142,13 +142,30 @@ export function PortfolioScreen({
     };
   }, [view]);
 
-  const minV = Math.min(...view.series.map((s) => s.v));
-  const maxV = Math.max(...view.series.map((s) => s.v));
+  if (isLoading || !view || !portfolios) {
+    return (
+      <div className="screen">
+        <div className="topbar">
+          <div className="brand">
+            <span className="brand-mark"></span>
+            <span>Tidemark</span>
+          </div>
+        </div>
+        <div style={{ padding: 24, color: "var(--muted)" }}>Loading…</div>
+      </div>
+    );
+  }
+
+  const pnl = view.totalValue - view.initialInvestment;
+  const pnlPct = view.initialInvestment > 0 ? (pnl / view.initialInvestment) * 100 : 0;
+
+  const minV = view.series.length ? Math.min(...view.series.map((s) => s.v)) : 0;
+  const maxV = view.series.length ? Math.max(...view.series.map((s) => s.v)) : 0;
   const fmtK = (n: number) => `฿${Math.round(n / 1000).toLocaleString("en-US")}k`;
 
   const targetModel = activePf?.targetModelId
-    ? MODEL_PORTFOLIOS.find((m) => m.id === activePf.targetModelId)
-    : MODEL_PORTFOLIOS.find((m) => m.id === USER_GOALS.selectedModelId);
+    ? models?.find((m) => m.id === activePf.targetModelId)
+    : models?.find((m) => m.id === planSelectedModelId);
 
   const showAnalysis = activePfId === "all" || activePf?.targetModelId;
 
@@ -200,9 +217,9 @@ export function PortfolioScreen({
       <div className="portfolio-switch">
         <button data-active={activePfId === "all"} onClick={() => setActivePfId("all")}>
           ☰ All
-          <span className="pf-sub">{PORTFOLIOS.length} BUCKETS</span>
+          <span className="pf-sub">{portfolios.length} BUCKETS</span>
         </button>
-        {PORTFOLIOS.map((p) => (
+        {portfolios.map((p) => (
           <button key={p.id} data-active={activePfId === p.id} onClick={() => setActivePfId(p.id)}>
             <span className="pf-icon">{p.icon}</span> {p.name}
             <span className="pf-sub">{p.typeLabel.toUpperCase()}</span>
@@ -729,7 +746,7 @@ export function PortfolioScreen({
                   {targetModel.name}
                 </div>
                 <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
-                  Browse {MODEL_PORTFOLIOS.length - 1} other index strategies →
+                  Browse {Math.max(0, (models?.length ?? 0) - 1)} other index strategies →
                 </div>
               </div>
               <Icon name="arrowRight" size={14} />
