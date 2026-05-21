@@ -156,6 +156,58 @@ export function PortfolioScreen({
     );
   }
 
+  if (portfolios.length === 0) {
+    return (
+      <div className="screen">
+        <div className="topbar">
+          <div className="brand">
+            <span className="brand-mark"></span>
+            <span>Tidemark</span>
+          </div>
+          <button className="icon-btn" aria-label="Settings" onClick={onOpenSettings}>
+            <Icon name="settings" size={13} />
+          </button>
+        </div>
+        <div style={{ padding: "24px 20px" }}>
+          <div className="card" style={{ padding: "36px 22px", textAlign: "center" }}>
+            <div style={{ fontSize: 28, marginBottom: 10 }}>○</div>
+            <div
+              style={{
+                fontSize: 17,
+                fontWeight: 500,
+                letterSpacing: "-0.02em",
+                marginBottom: 8,
+              }}
+            >
+              No buckets yet
+            </div>
+            <div
+              style={{
+                fontSize: 13,
+                color: "var(--muted)",
+                lineHeight: 1.5,
+                marginBottom: 22,
+                maxWidth: 320,
+                margin: "0 auto 22px",
+              }}
+            >
+              A bucket holds a set of fund positions. Most people start with one "Core" bucket for
+              long-term holdings, plus optional buckets for tax-advantaged accounts.
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button className="btn primary" onClick={onOpenImport}>
+                <Icon name="plus" size={13} /> Add your first holdings
+              </button>
+              <button className="btn ghost" onClick={onOpenModels}>
+                Browse model portfolios
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const pnl = view.totalValue - view.initialInvestment;
   const pnlPct = view.initialInvestment > 0 ? (pnl / view.initialInvestment) * 100 : 0;
 

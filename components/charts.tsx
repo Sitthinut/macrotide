@@ -212,19 +212,22 @@ export function Donut({
     cy = size / 2;
   const r = (size - thickness) / 2;
   let start = -Math.PI / 2;
-  const arcs = data.map((d, i) => {
-    const angle = (d.value / total) * Math.PI * 2;
-    const end = start + angle;
-    const large = angle > Math.PI ? 1 : 0;
-    const x1 = cx + r * Math.cos(start);
-    const y1 = cy + r * Math.sin(start);
-    const x2 = cx + r * Math.cos(end);
-    const y2 = cy + r * Math.sin(end);
-    const path = `M${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2}`;
-    const out = { path, color: d.color, key: i };
-    start = end;
-    return out;
-  });
+  const arcs =
+    total > 0
+      ? data.map((d, i) => {
+          const angle = (d.value / total) * Math.PI * 2;
+          const end = start + angle;
+          const large = angle > Math.PI ? 1 : 0;
+          const x1 = cx + r * Math.cos(start);
+          const y1 = cy + r * Math.sin(start);
+          const x2 = cx + r * Math.cos(end);
+          const y2 = cy + r * Math.sin(end);
+          const path = `M${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2}`;
+          const out = { path, color: d.color, key: i };
+          start = end;
+          return out;
+        })
+      : [];
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
       <circle

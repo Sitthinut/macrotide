@@ -618,7 +618,37 @@ Comfortable with 20% drawdowns. Won't sell.
   );
 }
 
+function EmptyTab({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="section" style={{ marginTop: 0 }}>
+      <div
+        className="card"
+        style={{
+          padding: "28px 20px",
+          textAlign: "center",
+          color: "var(--muted)",
+        }}
+      >
+        <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 6, color: "var(--ink)" }}>
+          {title}
+        </div>
+        <div style={{ fontSize: 12.5, lineHeight: 1.5, maxWidth: 300, margin: "0 auto" }}>
+          {body}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function JournalNotes({ notes }: { notes: Note[] }) {
+  if (notes.length === 0) {
+    return (
+      <EmptyTab
+        title="No notes yet"
+        body="Insights you save from chat or analysis appear here. The advisor reads them for context in future conversations."
+      />
+    );
+  }
   return (
     <div>
       <div className="section" style={{ marginTop: 0 }}>
@@ -695,6 +725,22 @@ function JournalModels({ saved, onOpenModels }: { saved: string[]; onOpenModels:
     .map((id) => all.find((m) => m.id === id))
     .filter((m): m is ModelPortfolio => Boolean(m));
 
+  if (list.length === 0) {
+    return (
+      <div>
+        <EmptyTab
+          title="No saved models"
+          body="Pin index strategies from Models to track them here. The advisor can suggest models when you ask 'what should I hold?'"
+        />
+        <div className="section" style={{ textAlign: "center" }}>
+          <button className="btn ghost sm" onClick={onOpenModels}>
+            Browse model portfolios →
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="section">
@@ -764,6 +810,14 @@ function JournalModels({ saved, onOpenModels }: { saved: string[]; onOpenModels:
 }
 
 function JournalReading({ reading }: { reading: ReadingItem[] }) {
+  if (reading.length === 0) {
+    return (
+      <EmptyTab
+        title="No saved reading"
+        body="Save articles from Markets › Learn, or ask the advisor to summarize a link — they land here for later."
+      />
+    );
+  }
   return (
     <div>
       <div className="section" style={{ marginTop: 0 }}>
@@ -799,6 +853,14 @@ function JournalReading({ reading }: { reading: ReadingItem[] }) {
 }
 
 function JournalFeedback({ feedback }: { feedback: FeedbackItem[] }) {
+  if (feedback.length === 0) {
+    return (
+      <EmptyTab
+        title="No feedback yet"
+        body="Once you start chatting with the advisor, your 👍 / 👎 reactions land here so the advisor can avoid repeating advice you didn't like."
+      />
+    );
+  }
   const ups = feedback.filter((f) => f.rating === "up").length;
   const downs = feedback.filter((f) => f.rating === "down").length;
   return (
