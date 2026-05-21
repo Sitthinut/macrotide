@@ -12,18 +12,25 @@
     "lint": "biome check",
     "format": "biome check --write",
     "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:drop": "drizzle-kit drop",
+    "db:studio": "drizzle-kit studio",
     "prepare": "simple-git-hooks"
   },
   "dependencies": {
+    "better-sqlite3": "^12.10.0",
+    "drizzle-orm": "^0.45.2",
     "next": "15.5.18",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.15",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "24.12.4",
     "@types/react": "19.2.15",
     "@types/react-dom": "19.2.3",
+    "drizzle-kit": "^0.31.10",
     "lint-staged": "17.0.5",
     "simple-git-hooks": "2.13.1",
     "typescript": "5.9.3"
