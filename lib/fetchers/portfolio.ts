@@ -34,3 +34,19 @@ export function usePlan() {
 export function useJournalEntries() {
   return useResource<JournalEntry[]>("/api/journal");
 }
+
+export interface MarketIndexResponse {
+  ok: boolean;
+  symbol: string;
+  label: string;
+  name: string;
+  price?: number | null;
+  d1Pct?: number;
+  series?: { d: string; v: number }[];
+  asOf?: string | null;
+  error?: string;
+}
+
+export function useMarketIndices() {
+  return useResource<MarketIndexResponse[]>("/api/market/indices");
+}

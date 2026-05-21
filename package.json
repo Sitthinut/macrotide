@@ -16,6 +16,7 @@
     "db:drop": "drizzle-kit drop",
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx lib/mock/seed.ts",
+    "market:refresh": "curl -s -X POST http://localhost:3000/api/admin/refresh-market | python3 -m json.tool",
     "prepare": "simple-git-hooks"
   },
   "dependencies": {

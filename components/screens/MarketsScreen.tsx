@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Icon } from "@/components/Icon";
+import { type MarketIndexResponse, useMarketIndices } from "@/lib/fetchers/portfolio";
 import { LEARN_CONTENT, MARKETS } from "@/lib/mock/data";
-import type { LearnArticle, Markets } from "@/lib/mock/types";
+import type { LearnArticle, MarketIndex, Markets } from "@/lib/mock/types";
 
 export function MarketsScreen() {
   const [tab, setTab] = useState<"today" | "learn">("today");
@@ -26,15 +27,74 @@ export function MarketsScreen() {
         </button>
       </div>
 
-      {tab === "today" && <MarketsToday markets={MARKETS} />}
+      {tab === "today" && <MarketsToday />}
       {tab === "learn" && <MarketsLearn />}
     </div>
   );
 }
 
-function MarketsToday({ markets }: { markets: Markets }) {
+function adaptIndices(rows: MarketIndexResponse[]): { indices: MarketIndex[]; failures: number } {
+  let failures = 0;
+  const indices: MarketIndex[] = [];
+  for (const r of rows) {
+    if (!r.ok || r.price == null) {
+      failures++;
+      continue;
+    }
+    indices.push({
+      sym: r.label,
+      name: r.name,
+      val: r.price,
+      d: r.d1Pct ?? 0,
+      isYield: r.symbol === "THB=X",
+    });
+  }
+  return { indices, failures };
+}
+
+function MarketsToday() {
+  const { data: liveRows, isLoading } = useMarketIndices();
+  const live = useMemo(() => (liveRows ? adaptIndices(liveRows) : null), [liveRows]);
+
+  // Live data wins when we have it; otherwise fall back to mock so the screen
+  // still tells a coherent story while NAV is being refreshed or rate-limited.
+  const markets: Markets = useMemo(
+    () => (live && live.indices.length > 0 ? { ...MARKETS, indices: live.indices } : MARKETS),
+    [live],
+  );
+
+  const banner =
+    !isLoading && live && live.failures > 0
+      ? `${live.failures} index source${live.failures > 1 ? "s" : ""} temporarily unavailable.`
+      : null;
+
+  return <MarketsTodayInner markets={markets} banner={banner} />;
+}
+
+function MarketsTodayInner({ markets, banner }: { markets: Markets; banner: string | null }) {
   return (
     <div>
+      {banner && (
+        <div
+          className="section"
+          style={{ marginTop: 0, paddingTop: 0, paddingBottom: 0, marginBottom: 8 }}
+        >
+          <div
+            style={{
+              padding: "8px 12px",
+              background: "var(--card-soft)",
+              border: "1px solid var(--line-soft)",
+              borderRadius: 8,
+              fontSize: 11.5,
+              color: "var(--muted)",
+              fontFamily: "var(--font-mono)",
+              letterSpacing: "0.02em",
+            }}
+          >
+            ⓘ {banner}
+          </div>
+        </div>
+      )}
       <div className="section" style={{ marginTop: 0 }}>
         <div
           className="card"
