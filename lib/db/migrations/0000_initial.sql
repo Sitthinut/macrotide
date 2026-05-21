@@ -3,8 +3,11 @@ CREATE TABLE `buckets` (
 	`name` text NOT NULL,
 	`type_label` text,
 	`icon` text,
+	`color` text,
 	`brokerage` text NOT NULL,
+	`notes` text,
 	`goal_text` text,
+	`target_model_id` text,
 	`target_allocation` text,
 	`created_at` text DEFAULT (CURRENT_TIMESTAMP) NOT NULL,
 	`updated_at` text DEFAULT (CURRENT_TIMESTAMP) NOT NULL
@@ -77,11 +80,17 @@ CREATE INDEX `idx_journal_created` ON `journal_entries` (`created_at`);--> state
 CREATE TABLE `model_portfolios` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
-	`description` text,
+	`tagline` text,
+	`blurb` text,
 	`built_in` integer DEFAULT false NOT NULL,
 	`allocation` text NOT NULL,
 	`expected_return` real,
 	`expected_volatility` real,
+	`ter` real,
+	`horizon` text,
+	`risk` text,
+	`pros` text,
+	`cons` text,
 	`created_at` text NOT NULL
 );
 --> statement-breakpoint

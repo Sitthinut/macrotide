@@ -7,9 +7,17 @@ export const buckets = sqliteTable("buckets", {
   name: text("name").notNull(),
   typeLabel: text("type_label"),
   icon: text("icon"),
+  color: text("color"),
   brokerage: text("brokerage").notNull(),
+  notes: text("notes"),
   goalText: text("goal_text"),
-  targetAllocation: text("target_allocation", { mode: "json" }).$type<Record<string, number>>(),
+  targetModelId: text("target_model_id"),
+  targetAllocation: text("target_allocation", { mode: "json" }).$type<{
+    equity: number;
+    bond: number;
+    alternative: number;
+    cash: number;
+  }>(),
   createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
   updatedAt: text("updated_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
 });
@@ -94,14 +102,22 @@ export const journalEntries = sqliteTable(
 );
 
 // Model portfolios — built-ins shipped with the app + user customizations.
+export type ModelMixSlice = { label: string; pct: number; ticker?: string; color: string };
+
 export const modelPortfolios = sqliteTable("model_portfolios", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
-  description: text("description"),
+  tagline: text("tagline"),
+  blurb: text("blurb"),
   builtIn: integer("built_in", { mode: "boolean" }).notNull().default(false),
-  allocation: text("allocation", { mode: "json" }).$type<Record<string, number>>().notNull(),
+  allocation: text("allocation", { mode: "json" }).$type<ModelMixSlice[]>().notNull(),
   expectedReturn: real("expected_return"),
   expectedVolatility: real("expected_volatility"),
+  ter: real("ter"),
+  horizon: text("horizon"),
+  risk: text("risk"),
+  pros: text("pros", { mode: "json" }).$type<string[]>(),
+  cons: text("cons", { mode: "json" }).$type<string[]>(),
   createdAt: text("created_at").notNull(),
 });
 
