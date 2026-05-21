@@ -70,6 +70,26 @@ export function PerfChart({
     padBottom = 24;
   const innerH = height - padTop - padBottom;
 
+  if (!data || data.length === 0) {
+    return (
+      <div
+        style={{
+          width: "100%",
+          height,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "var(--muted)",
+          fontSize: 12,
+          fontFamily: "var(--font-mono)",
+          letterSpacing: "0.04em",
+        }}
+      >
+        NO HISTORY YET
+      </div>
+    );
+  }
+
   let benchSeries: SeriesPoint[] | null = null;
   if (benchmarkData && benchmarkData.length === data.length) {
     const portfolioStart = data[0].v;
