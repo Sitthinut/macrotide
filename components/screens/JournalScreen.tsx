@@ -7,8 +7,13 @@ import { useJournalView, useModelPortfoliosView, useSelectedModelId } from "@/li
 import { usePlan } from "@/lib/fetchers/portfolio";
 import { invalidate } from "@/lib/fetchers/swr";
 import { fmtRelativeDate } from "@/lib/format";
-import { parseBullets, parseCommitments, parsePlan, parseQuestions } from "@/lib/mock/data";
 import type { FeedbackItem, ModelPortfolio, Note, ReadingItem } from "@/lib/mock/types";
+import {
+  parseBullets,
+  parseCommitments,
+  parsePlan,
+  parseQuestions,
+} from "@/lib/portfolio/plan-parser";
 
 type Tab = "plan" | "notes" | "models" | "reading" | "feedback";
 

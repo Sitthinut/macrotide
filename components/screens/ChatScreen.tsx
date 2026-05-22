@@ -4,14 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FeedbackRow } from "@/components/FeedbackRow";
 import { Icon } from "@/components/Icon";
 import { invalidate } from "@/lib/fetchers/swr";
-import {
-  AI_PERSONALITIES,
-  MODEL_PORTFOLIOS,
-  PORTFOLIO,
-  USER_GOALS,
-  USER_PLAN,
-} from "@/lib/mock/data";
 import { applyPlanEdit } from "@/lib/portfolio/plan-edit";
+import { AI_PERSONALITIES } from "@/lib/static/personalities";
 
 const ACTIVE_THREAD_KEY = "macrotide_chat_active_thread";
 
@@ -125,35 +119,18 @@ function PlanProposalCard({
 
 export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }: ChatScreenProps) {
   void persona; // single advisor persona for MVP
-  void MODEL_PORTFOLIOS;
-  void USER_GOALS;
-  const portfolio = PORTFOLIO;
 
-  const initial = useMemo<Message[]>(() => {
-    const planText = USER_PLAN.markdown?.trim();
-    if (!planText) {
-      return [
-        {
-          role: "ai",
-          text: `Hi — I'm your index-investing advisor. I can see your portfolio (฿${Math.round(
-            portfolio.totalValue / 1000,
-          )}k across ${portfolio.holdings.length} funds).\n\nYou haven't drafted your plan yet. We can build it together — just say "help me write my plan" and I'll walk you through it.`,
-          ts: Date.now(),
-          id: makeId(),
-        },
-      ];
-    }
-    return [
+  const initial = useMemo<Message[]>(
+    () => [
       {
         role: "ai",
-        text: `Hi — I'm your advisor. I've read your plan and can see your portfolio (฿${Math.round(
-          portfolio.totalValue / 1000,
-        )}k across ${portfolio.holdings.length} funds). Ask me anything about your holdings, your target, or how index investing works.`,
+        text: "Hi — I'm your index-investing advisor. Ask me about your portfolio, your plan, or how index investing works. If you don't have a plan yet, say \"help me write my plan\" and I'll walk you through it.",
         ts: Date.now(),
         id: makeId(),
       },
-    ];
-  }, []);
+    ],
+    [],
+  );
 
   const [messages, setMessages] = useState<Message[]>(initial);
   const [input, setInput] = useState("");

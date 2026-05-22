@@ -12,6 +12,7 @@ import {
 } from "@/lib/fetchers/legacy";
 import { invalidate } from "@/lib/fetchers/swr";
 import { fmtPct } from "@/lib/format";
+import type { AssetClass, BenchmarkKey, Holding, Portfolio } from "@/lib/mock/types";
 import {
   ANALYSIS,
   BENCHMARKS,
@@ -19,8 +20,7 @@ import {
   DRIFT_SERIES,
   GEO_BREAKDOWN,
   SECTOR_BREAKDOWN,
-} from "@/lib/mock/data";
-import type { AssetClass, BenchmarkKey, Holding, Portfolio } from "@/lib/mock/types";
+} from "@/lib/static/analysis";
 
 function holdingToFormValues(h: Holding, fallbackBucketId: string): HoldingFormValues {
   return {

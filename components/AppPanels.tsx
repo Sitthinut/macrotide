@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { ChatScreen } from "@/components/screens/ChatScreen";
 import { useJournalView, usePortfolioView } from "@/lib/fetchers/legacy";
-import { ANALYSIS } from "@/lib/mock/data";
+import { ANALYSIS } from "@/lib/static/analysis";
 
 export type AppId = "chat" | "portfolios" | "plan" | "notes";
 
