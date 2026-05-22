@@ -6,7 +6,7 @@ import { authClient, signIn, useSession } from "@/lib/auth/client";
 
 type Mode = "intro" | "signup";
 
-export default function OnboardingPage() {
+export default function LoginPage() {
   const router = useRouter();
   const { data: session } = useSession();
   const [mode, setMode] = useState<Mode>("intro");
@@ -15,7 +15,7 @@ export default function OnboardingPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Already signed in? Skip the onboarding screen.
+  // Already signed in? Skip the login screen.
   useEffect(() => {
     if (session?.user) router.replace("/");
   }, [session, router]);

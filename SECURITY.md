@@ -24,7 +24,7 @@ Macrotide follows the **secure-by-default** principle, one of [Saltzer & Schroed
 
 ### We defend against
 
-- **Anonymous network visitors reading the owner's portfolio.** Passkey auth blocks the dashboard. Unauthenticated requests get bounced to `/onboarding`.
+- **Anonymous network visitors reading the owner's portfolio.** Passkey auth blocks the dashboard. Unauthenticated requests get bounced to `/login`.
 - **Cross-session leakage in demo mode.** Each demo session is its own in-memory SQLite, keyed by cookie, swept after 1h idle.
 - **Brute-force on `/api/chat`.** IP-based rate limit, 20 req/min (per-IP, in-memory).
 - **Brute-force on `/api/auth/*`.** IP-based rate limit, 10 req/min.

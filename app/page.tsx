@@ -10,13 +10,13 @@ export default async function Home() {
   const isDemo = !!store.get(DEMO_COOKIE)?.value;
 
   // Three modes:
-  //  - AUTH_REQUIRED unset: open access (single-user / dev). Render directly.
-  //  - AUTH_REQUIRED=1 + valid session cookie: render as the owner.
-  //  - AUTH_REQUIRED=1 + valid demo cookie: render as a demo session.
-  //  - AUTH_REQUIRED=1 + neither: bounce to /onboarding.
+  //  - AUTH_DISABLED=1: open access (single-user / dev). Render directly.
+  //  - auth required + valid session cookie: render as the owner.
+  //  - auth required + valid demo cookie: render as a demo session.
+  //  - auth required + neither: bounce to /login.
   if (isAuthRequired() && !isDemo) {
     const user = await getSessionUser();
-    if (!user) redirect("/onboarding");
+    if (!user) redirect("/login");
   }
 
   return (

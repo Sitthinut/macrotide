@@ -37,7 +37,7 @@
 
 - better-auth + `@better-auth/passkey` with drizzle-adapter against the same
   SQLite. Endpoints at `/api/auth/[...all]`.
-- `/onboarding` screen — passkey sign-in, account creation (registers a
+- `/login` screen — passkey sign-in, account creation (registers a
   passkey on first sign-up), or "Try the demo".
 - `AUTH_REQUIRED=1` gates the dashboard on a session cookie. Demo cookie
   bypasses the gate.

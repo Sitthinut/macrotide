@@ -32,7 +32,7 @@ export function DemoBanner() {
     } catch {
       // ignore — we still want to redirect
     }
-    window.location.href = "/onboarding";
+    window.location.href = "/login";
   }
 
   return (

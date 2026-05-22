@@ -10,7 +10,7 @@ See [SECURITY.md](SECURITY.md) for the full threat model.
 
 | Toggle | Env var | Default | Effect |
 | --- | --- | --- | --- |
-| Passkey auth | `AUTH_DISABLED=1` to opt out | required | Bounces visitors to `/onboarding` until a passkey login. |
+| Passkey auth | `AUTH_DISABLED=1` to opt out | required | Bounces visitors to `/login` until a passkey login. |
 | Demo button | (always on) | available | Anyone can spin up an isolated in-memory SQLite, capped at 10 chat turns. |
 | AI key | `OPENROUTER_API_KEY` | unset | Without it, chat returns a friendly stub message; rest of the app works. |
 
@@ -42,7 +42,7 @@ OPENROUTER_API_KEY=sk-or-...
 
 No `AUTH_DISABLED` line — auth is already required by default.
 
-On first visit the `/onboarding` screen shows three buttons:
+On first visit the `/login` screen shows three buttons:
 
 - **Sign in with passkey** — for returning users whose device has a passkey.
 - **Create account** — collects name + email + registers a passkey on this device.

@@ -134,7 +134,7 @@ sudo ufw --force enable
 ### 7. Verify the deploy
 
 ```sh
-# Open https://macrotide.yourdomain.com — should land on /onboarding
+# Open https://macrotide.yourdomain.com — should land on /login
 # Sign up + register a passkey from your phone
 # Click "Try the demo" from incognito → verify isolated session
 ```
@@ -190,7 +190,7 @@ For a zero-downtime swap behind Caddy: blue/green with two systemd instances on 
 | `503` from Caddy | systemd unit isn't running. `journalctl -u macrotide -n 50`. |
 | Passkey "origin mismatch" in browser | `PUBLIC_APP_URL` doesn't match the URL the browser is on. Fix .env.local + restart. |
 | `/api/chat` always replies with "isn't configured yet" | `OPENROUTER_API_KEY` is missing or invalid in `.env.local`. Restart the systemd unit after editing. |
-| Demo dashboard renders but data is wrong | Cookie collision across browsers. Clear `macrotide_demo` cookie, hit `/onboarding` again. |
+| Demo dashboard renders but data is wrong | Cookie collision across browsers. Clear `macrotide_demo` cookie, hit `/login` again. |
 | `/api/chat` returns 429 immediately | IP rate limit. The default is 20 RPM; see `lib/api/rate-limit.ts`. |
 | Build fails with "out of memory" | ARM64 VMs with <2 GB RAM need a swapfile. `sudo fallocate -l 2G /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile`. |
 
