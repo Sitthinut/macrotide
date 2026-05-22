@@ -26,7 +26,7 @@ export default function LoginPage() {
     try {
       const res = await fetch("/api/demo", { method: "POST" });
       if (!res.ok) throw new Error("demo start failed");
-      router.replace("/?demo=1");
+      router.replace("/");
     } catch (e) {
       setError(e instanceof Error ? e.message : "demo start failed");
       setBusy(false);
