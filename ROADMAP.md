@@ -137,7 +137,7 @@ exposes the gaps that need polish; polishing on mock data risks rework.
 | 2.6 | Cleanup & chat persistence | ✅ Shipped 2026-05-22 | Chat history persists; plan-edit Apply wired; mock-import migration done. Thread-list sidebar deferred to a polish pass |
 | 3 | Market data | 🟡 Partial | SET/global indices live; funds + news in 3b |
 | 3b | Fund NAVs + news + NAV history | 🟡 Mostly shipped | Provider + v2 endpoints + holdings.quote_source + PortfolioScreen wiring all live; RSS news still pending |
-| 4 | Portfolio import | 🟡 Partial | CSV done; OCR pending Phase 2 maturity |
+| 4 | Portfolio import | 🟡 Partial | CSV done; Image OCR shipped 2026-05-22 (free-tier OpenRouter vision via `/api/import/image`); manual-entry autocomplete pending |
 | 4b | Broker scraping / API integration | Out of scope | Revisit only if a clear personal need emerges |
 | 5 | Long-term memory + history compression | Pending | Per-user explicit-save preferences; chat compression to control OpenRouter cost. Research libraries first |
 | 5b | Scheduled jobs / digests / notifications | Pending | Depends on 3b and 6 |
@@ -929,12 +929,19 @@ once you have a clear personal need.
    - `app/api/import/csv/route.ts`: accepts `multipart/form-data`.
    - Wire the CSV tab of `AddHoldingsSheet`.
    - Sample file at `data/sample-holdings.csv`.
-2. **Image OCR**.
-   - `lib/portfolio/ocr.ts`: send image to Claude with a strict JSON schema
-     prompt → return `{ proposed_rows: [...] }`.
-   - `app/api/import/image/route.ts`.
-   - Wire the Image tab. Show proposed rows in a confirmation table; user
-     edits + saves.
+2. **Image OCR** (shipped 2026-05-22).
+   - `lib/portfolio/ocr.ts`: send image to an OpenRouter vision model via
+     Vercel AI SDK `generateObject` with a strict Zod schema → return
+     `{ rows: ProposedRow[] }`. Defaults to a `:free` model (currently
+     `google/gemma-4-31b-it:free`) so this path never burns paid credits.
+     Override with `OCR_MODEL` env var.
+   - `app/api/import/image/route.ts`: multipart/form-data POST, 5 MB cap,
+     JPG/PNG/WebP only, 10 RPM IP rate-limit, returns 503 cleanly when
+     `OPENROUTER_API_KEY` is unset.
+   - Image tab of `AddHoldingsSheet`: editable confirmation table
+     (ticker / name / units / avgCost / quoteSource) with add-row + remove-row
+     before save. Inline per-row error states; quoteSource auto-inferred from
+     ticker shape (hyphenated → `thai_mutual_fund`, otherwise `yahoo`).
 3. **Manual entry**.
    - Build an autocomplete on `holdings` history + a small seed of common
      tickers (kept in `lib/data/known-funds.ts`, not the DB).

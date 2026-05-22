@@ -164,6 +164,7 @@ different sources without a schema change.
 | `AUTH_DISABLED` | dev convenience | Set to `1` to skip the login gate on localhost. |
 | `PUBLIC_APP_URL` | production | Canonical URL; passkeys break if this changes. |
 | `SEC_API_KEY` | quote_source=thai_mutual_fund | Thai SEC Open API subscription key (Primary or Secondary — both valid). One subscription covers all 6 product groups. Header: `Ocp-Apim-Subscription-Key`. |
+| `OCR_MODEL` | optional | OpenRouter vision model used by the Image tab of the Add holdings sheet. Defaults to a `:free` tier model so this path never burns paid credits. |
 
 Keep [.env.example](./.env.example), [AUTH.md](./AUTH.md), and
 [DEPLOY.md](./DEPLOY.md) in sync when you add/rename variables.

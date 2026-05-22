@@ -19,6 +19,43 @@ interface ExtractedHolding {
   source?: string;
 }
 
+/** A row as returned by /api/import/image, after the user has had a chance
+ *  to edit it in the confirmation table. */
+interface OcrRow {
+  ticker: string;
+  englishName: string;
+  units: string;
+  avgCost: string;
+  quoteSource: QuoteSource;
+  error?: string | null;
+}
+
+interface OcrApiResponse {
+  rows: Array<{
+    ticker: string;
+    englishName?: string;
+    units: number;
+    avgCost?: number;
+    quoteSource: QuoteSource;
+  }>;
+}
+
+interface OcrErrorResponse {
+  error: string;
+  message?: string;
+}
+
+function emptyOcrRow(quoteSource: QuoteSource): OcrRow {
+  return {
+    ticker: "",
+    englishName: "",
+    units: "",
+    avgCost: "",
+    quoteSource,
+    error: null,
+  };
+}
+
 export interface AddedHolding {
   ticker: string;
   units: string;
@@ -39,7 +76,8 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
   const [pasteText, setPasteText] = useState("");
   const [imgPreview, setImgPreview] = useState<string | null>(null);
   const [imgProcessing, setImgProcessing] = useState(false);
-  const [imgExtracted, setImgExtracted] = useState<ExtractedHolding[] | null>(null);
+  const [ocrRows, setOcrRows] = useState<OcrRow[] | null>(null);
+  const [ocrError, setOcrError] = useState<string | null>(null);
   const [rows, setRows] = useState<Row[]>([
     { ticker: "", units: "", value: "" },
     { ticker: "", units: "", value: "" },
@@ -78,32 +116,158 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
       .filter((r): r is Row => r !== null);
   };
 
-  const handleImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    // Allow re-uploading the same file later.
+    e.target.value = "";
     if (!file) return;
+
+    // Render a local preview while we hit the API — same UX whether OCR
+    // takes 500ms or 8s.
     const reader = new FileReader();
-    reader.onload = (ev) => {
-      setImgPreview((ev.target?.result as string) ?? null);
-      setImgProcessing(true);
-      setTimeout(() => {
-        setImgProcessing(false);
-        setImgExtracted([
-          {
-            ticker: "K-USA-A(A)",
-            units: "8945.31",
-            value: "162804.55",
-            source: "Kasikorn statement (Apr 2026)",
-          },
-          {
-            ticker: "K-FIXED-A",
-            units: "14820.30",
-            value: "178420.27",
-            source: "Kasikorn statement (Apr 2026)",
-          },
-        ]);
-      }, 1800);
-    };
+    reader.onload = (ev) => setImgPreview((ev.target?.result as string) ?? null);
     reader.readAsDataURL(file);
+
+    setImgProcessing(true);
+    setOcrError(null);
+    setOcrRows(null);
+
+    try {
+      const fd = new FormData();
+      fd.append("image", file);
+      const res = await fetch("/api/import/image", { method: "POST", body: fd });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as OcrErrorResponse | null;
+        setOcrError(body?.message ?? `OCR failed (${res.status})`);
+        return;
+      }
+      const body = (await res.json()) as OcrApiResponse;
+      if (!body.rows || body.rows.length === 0) {
+        setOcrError(
+          "Couldn't read any holdings from that image. Try a sharper crop, or add rows manually below.",
+        );
+        setOcrRows([emptyOcrRow(quoteSource)]);
+        return;
+      }
+      setOcrRows(
+        body.rows.map((r) => ({
+          ticker: r.ticker,
+          englishName: r.englishName ?? "",
+          units: String(r.units),
+          avgCost: r.avgCost != null ? String(r.avgCost) : "",
+          quoteSource: r.quoteSource,
+          error: null,
+        })),
+      );
+    } catch (err) {
+      setOcrError(err instanceof Error ? err.message : "Failed to reach OCR endpoint.");
+    } finally {
+      setImgProcessing(false);
+    }
+  };
+
+  const updateOcrRow = (i: number, patch: Partial<OcrRow>) => {
+    setOcrRows((prev) => {
+      if (!prev) return prev;
+      const copy = [...prev];
+      copy[i] = { ...copy[i], ...patch };
+      return copy;
+    });
+  };
+  const removeOcrRow = (i: number) =>
+    setOcrRows((prev) => (prev ? prev.filter((_, idx) => idx !== i) : prev));
+  const addOcrRow = () => setOcrRows((prev) => [...(prev ?? []), emptyOcrRow(quoteSource)]);
+
+  const resetOcrState = () => {
+    setImgPreview(null);
+    setOcrRows(null);
+    setOcrError(null);
+    setImgProcessing(false);
+  };
+
+  const saveOcrRows = async () => {
+    if (!bucketId) {
+      setOcrError("Pick a portfolio first");
+      return;
+    }
+    if (!ocrRows || ocrRows.length === 0) {
+      setOcrError("Nothing to save — add at least one row.");
+      return;
+    }
+
+    // Validate before we hit the network so per-row errors render inline.
+    let hasError = false;
+    const validated = ocrRows.map((r) => {
+      const ticker = r.ticker.trim().toUpperCase();
+      const units = Number.parseFloat(r.units);
+      if (!ticker) {
+        hasError = true;
+        return { ...r, error: "Ticker required" };
+      }
+      if (!Number.isFinite(units) || units <= 0) {
+        hasError = true;
+        return { ...r, error: "Units must be a positive number" };
+      }
+      return { ...r, ticker, error: null as string | null };
+    });
+    setOcrRows(validated);
+    if (hasError) return;
+
+    setOcrError(null);
+    try {
+      let saved = 0;
+      const next = [...validated];
+      for (let i = 0; i < next.length; i++) {
+        const r = next[i];
+        const units = Number.parseFloat(r.units);
+        const avgCost = r.avgCost ? Number.parseFloat(r.avgCost) : 0;
+        const ticker = r.ticker;
+        const englishName = r.englishName.trim() || ticker;
+        const res = await fetch("/api/holdings", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            bucketId,
+            ticker,
+            englishName,
+            assetClass: "equity",
+            units,
+            avgCost: Number.isFinite(avgCost) ? avgCost : 0,
+            ter: 0,
+            color: "var(--accent)",
+            source: source || "Image OCR",
+            quoteSource: r.quoteSource,
+          }),
+        });
+        if (!res.ok) {
+          next[i] = { ...r, error: `Save failed (${res.status})` };
+          setOcrRows(next);
+          hasError = true;
+          break;
+        }
+        saved += 1;
+      }
+      if (!hasError) {
+        invalidate(/^\/api\/holdings/);
+        onAdd(
+          validated.map((r) => ({
+            ticker: r.ticker,
+            units: r.units,
+            value: r.avgCost
+              ? String(Number.parseFloat(r.units) * Number.parseFloat(r.avgCost))
+              : "",
+            source: source || "Image OCR",
+            addedAt: Date.now(),
+          })),
+        );
+        resetOcrState();
+        onClose();
+      } else if (saved > 0) {
+        setOcrError(`Saved ${saved} of ${validated.length}. Fix the row above and retry.`);
+      }
+    } catch (err) {
+      setOcrError(err instanceof Error ? err.message : "Failed to save holdings");
+    }
   };
 
   const submit = async () => {
@@ -111,9 +275,20 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
       setSubmitError("Pick a portfolio first");
       return;
     }
+    // Image tab uses its own validation / multi-row save logic, but we toggle
+    // the shared `submitting` flag so the bottom CTA disables consistently.
+    if (method === "image") {
+      setSubmitError(null);
+      setSubmitting(true);
+      try {
+        await saveOcrRows();
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
     let toAdd: ExtractedHolding[] = [];
     if (method === "paste") toAdd = parsePaste();
-    if (method === "image" && imgExtracted) toAdd = imgExtracted;
     if (method === "manual") toAdd = rows.filter((r) => r.ticker && (r.units || r.value));
 
     if (toAdd.length === 0) {
@@ -162,8 +337,7 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
         { ticker: "", units: "", value: "" },
         { ticker: "", units: "", value: "" },
       ]);
-      setImgPreview(null);
-      setImgExtracted(null);
+      resetOcrState();
       onClose();
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Failed to add holdings");
@@ -201,7 +375,7 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
     method === "paste"
       ? parsePaste().length
       : method === "image"
-        ? (imgExtracted?.length ?? 0)
+        ? (ocrRows?.filter((r) => r.ticker.trim() && r.units.trim()).length ?? 0)
         : rows.filter((r) => r.ticker && (r.units || r.value)).length;
 
   return (
@@ -345,9 +519,7 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
           <button
             data-active={method === "image"}
             onClick={() => setMethod("image")}
-            disabled
-            title="Image OCR requires an AI key — coming in Phase 4b"
-            style={{ opacity: 0.5, cursor: "not-allowed" }}
+            title="Upload a broker screenshot — we'll extract the rows with AI"
           >
             📷 Image
           </button>
@@ -436,8 +608,9 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
                 lineHeight: 1.5,
               }}
             >
-              ⓘ <strong style={{ fontWeight: 500 }}>Privacy:</strong> the image is processed
-              on-device. We never upload or store screenshots.
+              ⓘ <strong style={{ fontWeight: 500 }}>How it works:</strong> the screenshot is sent to
+              a free-tier OpenRouter vision model just long enough to extract the rows. Not stored.
+              You review every row before anything is saved.
             </div>
           </>
         )}
@@ -490,7 +663,23 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
               )}
             </div>
 
-            {imgExtracted && (
+            {ocrError && (
+              <div
+                style={{
+                  marginBottom: 8,
+                  padding: "8px 10px",
+                  background: "var(--loss-soft, rgba(220,38,38,0.08))",
+                  borderRadius: 8,
+                  color: "var(--loss)",
+                  fontSize: 12,
+                  lineHeight: 1.4,
+                }}
+              >
+                {ocrError}
+              </div>
+            )}
+
+            {ocrRows && (
               <div
                 style={{
                   background: "var(--card-soft)",
@@ -508,38 +697,175 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
                     marginBottom: 8,
                   }}
                 >
-                  ● AI EXTRACTED · {imgExtracted.length} HOLDINGS
+                  ● REVIEW & EDIT · {ocrRows.length} {ocrRows.length === 1 ? "ROW" : "ROWS"}
                 </div>
-                {imgExtracted.map((h, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "70px 1fr auto",
-                      gap: 8,
-                      fontSize: 12,
-                      padding: "4px 0",
-                    }}
-                  >
-                    <span className="num" style={{ fontWeight: 500 }}>
-                      {h.ticker}
-                    </span>
-                    <span style={{ color: "var(--muted)" }}>{h.units} units</span>
-                    <span className="num">
-                      ฿{Math.round(Number(h.value)).toLocaleString("en-US")}
-                    </span>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr 0.8fr 0.8fr 1fr 24px",
+                    gap: 6,
+                    fontSize: 10,
+                    fontFamily: "var(--font-mono)",
+                    color: "var(--muted)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.04em",
+                    paddingBottom: 4,
+                  }}
+                >
+                  <span style={{ padding: "0 4px" }}>Ticker</span>
+                  <span style={{ padding: "0 4px" }}>Name</span>
+                  <span style={{ padding: "0 4px" }}>Units</span>
+                  <span style={{ padding: "0 4px" }}>Avg cost</span>
+                  <span style={{ padding: "0 4px" }}>Type</span>
+                  <span></span>
+                </div>
+
+                {ocrRows.map((r, i) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: ocrRows is an editable
+                  // local table; row identity is positional, no stable id available.
+                  <div key={i} style={{ marginBottom: 6 }}>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr 0.8fr 0.8fr 1fr 24px",
+                        gap: 6,
+                        alignItems: "center",
+                      }}
+                    >
+                      <input
+                        placeholder="K-FIXED-A"
+                        value={r.ticker}
+                        onChange={(e) => updateOcrRow(i, { ticker: e.target.value })}
+                        style={{
+                          padding: "6px 8px",
+                          background: "var(--bg)",
+                          border: "1px solid var(--line-soft)",
+                          borderRadius: 6,
+                          fontSize: 12,
+                          fontFamily: "var(--font-mono)",
+                          color: "var(--ink)",
+                          minWidth: 0,
+                        }}
+                      />
+                      <input
+                        placeholder="(optional)"
+                        value={r.englishName}
+                        onChange={(e) => updateOcrRow(i, { englishName: e.target.value })}
+                        style={{
+                          padding: "6px 8px",
+                          background: "var(--bg)",
+                          border: "1px solid var(--line-soft)",
+                          borderRadius: 6,
+                          fontSize: 12,
+                          color: "var(--ink)",
+                          minWidth: 0,
+                        }}
+                      />
+                      <input
+                        placeholder="0.00"
+                        inputMode="decimal"
+                        value={r.units}
+                        onChange={(e) => updateOcrRow(i, { units: e.target.value })}
+                        style={{
+                          padding: "6px 8px",
+                          background: "var(--bg)",
+                          border: "1px solid var(--line-soft)",
+                          borderRadius: 6,
+                          fontSize: 12,
+                          color: "var(--ink)",
+                          minWidth: 0,
+                          textAlign: "right",
+                        }}
+                      />
+                      <input
+                        placeholder="—"
+                        inputMode="decimal"
+                        value={r.avgCost}
+                        onChange={(e) => updateOcrRow(i, { avgCost: e.target.value })}
+                        style={{
+                          padding: "6px 8px",
+                          background: "var(--bg)",
+                          border: "1px solid var(--line-soft)",
+                          borderRadius: 6,
+                          fontSize: 12,
+                          color: "var(--ink)",
+                          minWidth: 0,
+                          textAlign: "right",
+                        }}
+                      />
+                      <select
+                        value={r.quoteSource}
+                        onChange={(e) =>
+                          updateOcrRow(i, { quoteSource: e.target.value as QuoteSource })
+                        }
+                        style={{
+                          padding: "6px 4px",
+                          background: "var(--bg)",
+                          border: "1px solid var(--line-soft)",
+                          borderRadius: 6,
+                          fontSize: 11,
+                          color: "var(--ink)",
+                          minWidth: 0,
+                        }}
+                      >
+                        {QUOTE_SOURCES.map((s) => (
+                          <option key={s} value={s}>
+                            {QUOTE_SOURCE_LABELS[s]}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => removeOcrRow(i)}
+                        aria-label="Remove row"
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          cursor: "pointer",
+                          color: "var(--muted)",
+                          padding: 4,
+                        }}
+                      >
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                        >
+                          <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" />
+                        </svg>
+                      </button>
+                    </div>
+                    {r.error && (
+                      <div
+                        style={{
+                          marginTop: 2,
+                          fontSize: 11,
+                          color: "var(--loss)",
+                          paddingLeft: 4,
+                        }}
+                      >
+                        {r.error}
+                      </div>
+                    )}
                   </div>
                 ))}
+
+                <button
+                  type="button"
+                  className="btn ghost sm"
+                  style={{ marginTop: 4 }}
+                  onClick={addOcrRow}
+                >
+                  <Icon name="plus" size={12} /> Add row
+                </button>
               </div>
             )}
 
-            <button
-              className="btn ghost sm full"
-              onClick={() => {
-                setImgPreview(null);
-                setImgExtracted(null);
-              }}
-            >
+            <button className="btn ghost sm full" onClick={resetOcrState}>
               Use a different image
             </button>
           </div>
