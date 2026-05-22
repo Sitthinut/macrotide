@@ -136,7 +136,7 @@ exposes the gaps that need polish; polishing on mock data risks rework.
 | 2.5 | Passkey + demo | ✅ Shipped 2026-05-21 | Single-owner auth + per-session in-memory demo DB |
 | 2.6 | Cleanup & chat persistence | ✅ Shipped 2026-05-22 | Chat history persists; plan-edit Apply wired; mock-import migration done. Thread-list sidebar deferred to a polish pass |
 | 3 | Market data | 🟡 Partial | SET/global indices live; funds + news in 3b |
-| 3b | Fund NAVs + news + NAV history | Pending | Thai SEC Open API (official, free with subscription key); RSS for news; provider plug-in shape |
+| 3b | Fund NAVs + news + NAV history | 🟡 Mostly shipped | Provider + v2 SEC Open API endpoints live; PortfolioScreen wiring + RSS news still pending |
 | 4 | Portfolio import | 🟡 Partial | CSV done; OCR pending Phase 2 maturity |
 | 4b | Broker scraping / API integration | Out of scope | Revisit only if a clear personal need emerges |
 | 5 | Long-term memory + history compression | Pending | Per-user explicit-save preferences; chat compression to control OpenRouter cost. Research libraries first |
@@ -754,16 +754,25 @@ The **Securities and Exchange Commission of Thailand** publishes daily
 fund disclosure data via an official, government-run API. This is the
 authoritative source — better than scraping any private fund supermarket.
 
-- **Current portal:** [api-portal.sec.or.th](https://api-portal.sec.or.th/)
-  (discontinuing 30 June 2026).
-- **New portal:** [secopendata.sec.or.th/sec-open-apis](https://secopendata.sec.or.th/sec-open-apis)
-  (launched 12 January 2026). The codebase should target the new portal.
-- **Pricing:** free for public disclosure data. Subscription key required
-  (Azure APIM header `Ocp-Apim-Subscription-Key`).
-- **Rate limit:** 3,000 calls per 300 seconds (≈10 req/sec average).
-  Comfortable for our cache-heavy access pattern.
-- **Relevant products:** "Fund Daily Info" (NAV by date), "Fund Factsheet"
-  (fund metadata, policy, fees).
+- **Portal:** [secopendata.sec.or.th/sec-open-apis](https://secopendata.sec.or.th/sec-open-apis)
+  (launched 2026-01-12; legacy [api-portal.sec.or.th](https://api-portal.sec.or.th/)
+  retires 2026-06-30 — we're already on the new portal's v2 paths).
+- **Pricing:** free for public disclosure data. One subscription gives
+  Primary + Secondary keys (rotation pair) covering all 6 product groups
+  (`/bond`, `/fund`, `/digital-asset`, `/LicenseCheck`, `/onereport`,
+  `/pvd`). Header: `Ocp-Apim-Subscription-Key`.
+- **Rate limit:** 5,000 calls per 300 seconds. Min ≥16 ms between requests.
+  HTTP **421** (not 429) signals over-limit; respect `Retry-After`.
+- **Refresh windows:** 09:30 + 17:30 Bangkok time.
+- **Endpoints used (v2):**
+  - `GET /v2/fund/general-info/amcs` — list of asset management companies.
+  - `GET /v2/fund/general-info/profiles?company_info={unique_id}` — funds
+    for one AMC (resolves abbr → proj_id).
+  - `GET /v2/fund/daily-info/nav?proj_id={id}&start_nav_date=…&end_nav_date=…`
+    — daily NAV time series. Single call returns the whole range,
+    paginated via cursor. Major win vs the legacy per-date model.
+- **Response envelope (all v2):** `{ message, page_size, next_cursor, items: [...] }`.
+  Empty `next_cursor` = last page. Default/max `page_size` = 100.
 
 > No private-company data sources are referenced in code or docs. Reason:
 > avoid TOS/legal exposure and brand-implication for an experimental
@@ -803,23 +812,20 @@ source later. New providers should claim asset-class names (`crypto:`,
 and `[{ date, close }]`. Existing `fund_quotes` / `nav_history` schema is
 already provider-agnostic; no migration needed.
 
-### Implementation order
+### Status
 
-1. **Refactor `lib/market/` to provider shape** — pure code move; existing
-   tests stay green; no behavior change.
-2. **`lib/market/providers/sec-thailand.ts`** — `fetchQuote` and
-   `fetchSeries` against Thai SEC Open API. Strict Zod parsing of the
-   response. Env: `SEC_API_KEY`.
-3. **`app/api/quotes/route.ts`** — accept `?symbol=` (multi-symbol via
-   repeats), dispatch through the registry + cache.
-4. **Fixtures + tests** — record a synthetic response shape (no real fund
-   codes); test cache hit / cache miss / API error fallback paths.
-5. **Wire into Portfolio holdings** — when a holding has a `ticker` like
-   `thfund:XYZ`, the API enriches with a real NAV. UI shows real
-   value-vs-cost and ROI %. Missing NAVs render as "—" with no chart
-   line break.
-6. **News (RSS) — optional** — `lib/market/news.ts` aggregates Bangkok Post
-   and SET news RSS. May ship as Phase 3c instead.
+- ✅ **Refactor `lib/market/` to provider shape** — shipped.
+- ✅ **`lib/market/providers/sec-thailand.ts`** — v2 endpoints, cursor
+  pagination, 421 handling. 8 vitest cases (100% synthetic data).
+- ✅ **`app/api/quotes/route.ts`** — `?refresh=1` dispatches through the
+  registry and populates `fund_quotes` + `nav_history`.
+- ✅ **`useRefreshedQuotes()` fetcher hook.**
+- ✅ **`npm run smoke:sec -- thfund:<code>`** for live verification.
+- ⏳ **Wire into Portfolio holdings** — pending. Add holdings with a
+  `thfund:` ticker (manually or via the AddHoldingsSheet); the API
+  enriches automatically. UI work needed to render "—" for missing NAVs.
+- ⏳ **News (RSS) — optional** — `lib/market/news.ts` aggregates Bangkok
+  Post and SET news RSS. May ship as Phase 3c instead.
 
 ### Env vars added
 
@@ -844,9 +850,6 @@ SEC_API_KEY=...   # Thai SEC Open API subscription key (Ocp-Apim-Subscription-Ke
 
 ### Risk
 
-- **Portal migration mid-implementation**: existing portal discontinues
-  30 June 2026. Target the new `secopendata.sec.or.th` portal from day
-  one. If endpoint shapes differ, parse defensively.
 - **Holiday gaps**: SET observes Thai public holidays; NAV history has
   natural gaps. Charts must render gracefully.
 - **Subscription key lifecycle**: keys can be rotated. Surface a clear
