@@ -23,6 +23,8 @@ export interface Holding {
   ter: number;
   color: string;
   source: string;
+  /** Data-routing key. Present on adapted holdings from /api/holdings. */
+  quoteSource?: string;
 }
 
 export interface PerfPct {

@@ -23,8 +23,12 @@ export function useQuotes() {
   return useResource<FundQuote[]>("/api/quotes");
 }
 
-export interface RefreshedQuote {
-  symbol: string;
+export interface QuoteRef {
+  source: string;
+  ticker: string;
+}
+
+export interface RefreshedQuote extends QuoteRef {
   ok: boolean;
   price?: number;
   previousClose?: number;
@@ -34,13 +38,14 @@ export interface RefreshedQuote {
 
 /**
  * Live-refresh quotes through the provider registry (Yahoo / Thai SEC / …).
- * Returned shape reflects post-fetch state. Cache hits are served from the
- * DB; misses trigger a network call. Pass `null` to skip.
+ * Cache hits return from the DB; misses trigger a network call. Pass `null`
+ * to skip. Each ref must carry both `source` (the quote_source value, e.g.
+ * "yahoo" or "thai_mutual_fund") and `ticker` (the bare user-visible code).
  */
-export function useRefreshedQuotes(tickers: string[] | null) {
+export function useRefreshedQuotes(refs: QuoteRef[] | null) {
   const key =
-    tickers && tickers.length
-      ? `/api/quotes?refresh=1&tickers=${encodeURIComponent(tickers.join(","))}`
+    refs && refs.length
+      ? `/api/quotes?refresh=1&refs=${encodeURIComponent(refs.map((r) => `${r.source}:${r.ticker}`).join(","))}`
       : null;
   return useResource<RefreshedQuote[]>(key);
 }

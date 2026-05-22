@@ -2,6 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { Icon } from "@/components/Icon";
+import {
+  DEFAULT_QUOTE_SOURCE,
+  QUOTE_SOURCE_LABELS,
+  QUOTE_SOURCES,
+  type QuoteSource,
+} from "@/lib/market/sources";
 import type { AssetClass } from "@/lib/mock/types";
 
 export interface HoldingFormValues {
@@ -16,6 +22,8 @@ export interface HoldingFormValues {
   avgCost: number;
   ter: number;
   source: string;
+  /** Which provider serves this holding's NAV/price. */
+  quoteSource: QuoteSource;
   color: string;
 }
 
@@ -123,13 +131,28 @@ export function HoldingSheet({
         </div>
 
         <div className="sheet-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <FormRow label="Type" hint="Determines where we fetch this holding's price">
+            <select
+              className="sheet-input"
+              value={values.quoteSource}
+              onChange={(e) => update({ quoteSource: e.target.value as QuoteSource })}
+              disabled={lockTicker}
+            >
+              {QUOTE_SOURCES.map((s) => (
+                <option key={s} value={s}>
+                  {QUOTE_SOURCE_LABELS[s]}
+                </option>
+              ))}
+            </select>
+          </FormRow>
+
           <FormRow label="Ticker">
             <input
               className="sheet-input"
               value={values.ticker}
               onChange={(e) => update({ ticker: e.target.value.toUpperCase() })}
               disabled={lockTicker}
-              placeholder="SCBS&P500"
+              placeholder={values.quoteSource === "thai_mutual_fund" ? "K-FIXED-A" : "AAPL"}
               style={{ textTransform: "uppercase" }}
             />
           </FormRow>

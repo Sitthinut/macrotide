@@ -12,6 +12,7 @@ import {
 } from "@/lib/fetchers/legacy";
 import { invalidate } from "@/lib/fetchers/swr";
 import { fmtPct } from "@/lib/format";
+import { DEFAULT_QUOTE_SOURCE, isQuoteSource } from "@/lib/market/sources";
 import type { AssetClass, BenchmarkKey, Holding, Portfolio } from "@/lib/mock/types";
 import {
   ANALYSIS,
@@ -35,6 +36,7 @@ function holdingToFormValues(h: Holding, fallbackBucketId: string): HoldingFormV
     avgCost: h.units > 0 ? h.cost / h.units : 0,
     ter: h.ter,
     source: h.source,
+    quoteSource: isQuoteSource(h.quoteSource) ? h.quoteSource : DEFAULT_QUOTE_SOURCE,
     color: h.color,
   };
 }
@@ -143,6 +145,7 @@ export function PortfolioScreen({
       ter: values.ter,
       color: values.color,
       source: values.source || null,
+      quoteSource: values.quoteSource,
     };
     const res = await fetch(`/api/holdings/${id}`, {
       method: "PATCH",
@@ -925,6 +928,7 @@ export function PortfolioScreen({
                 avgCost: 0,
                 ter: 0,
                 source: "",
+                quoteSource: DEFAULT_QUOTE_SOURCE,
                 color: "var(--accent)",
               }
         }

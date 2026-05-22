@@ -24,7 +24,19 @@ const DEFAULT_ASSET_CLASS: AssetClass = "equity";
 const DEFAULT_RISK: RiskBand = "balanced";
 
 function quotesByTicker(quotes: FundQuote[]): Map<string, FundQuote> {
-  return new Map(quotes.map((q) => [q.ticker, q]));
+  // fund_quotes.ticker is the combined cache key "source:ticker" — see
+  // lib/market/cache.ts. We also index by the bare ticker so older callers
+  // that pass plain symbols still get a hit on the unique entry.
+  const m = new Map<string, FundQuote>();
+  for (const q of quotes) {
+    m.set(q.ticker, q);
+    const idx = q.ticker.indexOf(":");
+    if (idx > 0) {
+      const bare = q.ticker.slice(idx + 1);
+      if (!m.has(bare)) m.set(bare, q);
+    }
+  }
+  return m;
 }
 
 function holdingFromDb(
@@ -32,7 +44,10 @@ function holdingFromDb(
   quotes: Map<string, FundQuote>,
   fallbackSource: string,
 ): Holding {
-  const q = quotes.get(h.ticker);
+  // Prefer the source-namespaced lookup. Falls back to the bare ticker for
+  // backward compatibility with cache entries written before quoteSource
+  // existed.
+  const q = quotes.get(`${h.quoteSource}:${h.ticker}`) ?? quotes.get(h.ticker);
   const nav = q?.nav ?? h.avgCost ?? 0;
   const value = h.units * nav;
   const cost = (h.avgCost ?? 0) * h.units;
@@ -55,6 +70,7 @@ function holdingFromDb(
     ter: h.ter ?? 0,
     color: h.color ?? "var(--accent)",
     source: h.source ?? fallbackSource,
+    quoteSource: h.quoteSource,
   };
 }
 

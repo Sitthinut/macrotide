@@ -140,6 +140,10 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
             ter: 0,
             color: "var(--accent)",
             source: row.source || source,
+            // Bulk imports default to Thai mutual fund — most likely shape
+            // for the audience. User can edit individual holdings to switch
+            // type (Stock / ETF / Index) via HoldingSheet.
+            quoteSource: "thai_mutual_fund",
           }),
         });
         if (!res.ok) throw new Error(`Add ${ticker} failed (${res.status})`);
