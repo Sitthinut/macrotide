@@ -1616,8 +1616,11 @@ textarea.sheet-input {
   border-left: 1px solid var(--line);
 }
 .portfolio-switch button[data-active="true"] .pf-sub {
-  color: rgba(255, 255, 255, 0.55);
-  border-left-color: rgba(255, 255, 255, 0.15);
+  /* Active-button text is var(--bg) — flip to dimmed currentColor so this
+     stays readable in both themes (was hardcoded white → white-on-white
+     in dark mode). */
+  color: color-mix(in srgb, currentColor 55%, transparent);
+  border-left-color: color-mix(in srgb, currentColor 25%, transparent);
 }
 
 /* Notes card for portfolio (free-form) */
