@@ -12,14 +12,14 @@ interface Bucket {
 }
 
 const globalForRl = globalThis as unknown as {
-  __tidemarkRateBuckets?: Map<string, Bucket>;
+  __macrotideRateBuckets?: Map<string, Bucket>;
 };
 
 function buckets(): Map<string, Bucket> {
-  if (!globalForRl.__tidemarkRateBuckets) {
-    globalForRl.__tidemarkRateBuckets = new Map();
+  if (!globalForRl.__macrotideRateBuckets) {
+    globalForRl.__macrotideRateBuckets = new Map();
   }
-  return globalForRl.__tidemarkRateBuckets;
+  return globalForRl.__macrotideRateBuckets;
 }
 
 export interface RateLimitConfig {

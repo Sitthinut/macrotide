@@ -12,7 +12,7 @@ export default function GlobalError({
   useEffect(() => {
     // Surface in the browser console so dev sees the stack; production
     // hosts should wire a real error reporter here.
-    console.error("[tidemark] unhandled error", error);
+    console.error("[macrotide] unhandled error", error);
   }, [error]);
 
   return (

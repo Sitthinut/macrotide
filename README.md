@@ -1,4 +1,4 @@
-# Tidemark
+# Macrotide
 
 > An open-source AI investment companion for Thai index investors. Personal-use
 > experiment.
@@ -37,8 +37,8 @@ for what's coming.
 ## Quick start
 
 ```bash
-git clone <repo-url> tidemark
-cd tidemark
+git clone <repo-url> macrotide
+cd macrotide
 npm install
 npm run dev
 ```
@@ -60,7 +60,7 @@ npm run typecheck  # tsc --noEmit
 ## Project layout
 
 ```
-tidemark/
+macrotide/
 ├── app/              Next.js App Router (currently a single-page client app)
 ├── components/       Screens + UI primitives + chart components
 ├── lib/

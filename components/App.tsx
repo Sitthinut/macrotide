@@ -58,7 +58,7 @@ const APPS_RAIL: { id: AppId; icon: string; label: string }[] = [
   { id: "notes", icon: "book", label: "Notes" },
 ];
 
-const THEME_STORAGE_KEY = "tidemark-theme";
+const THEME_STORAGE_KEY = "macrotide-theme";
 
 export function App() {
   const viewport = useViewport();

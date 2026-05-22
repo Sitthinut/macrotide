@@ -5,7 +5,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { ownerDb } from "@/lib/db/client";
 
 function rpName(): string {
-  return process.env.AUTH_RP_NAME ?? "Tidemark";
+  return process.env.AUTH_RP_NAME ?? "Macrotide";
 }
 
 function rpId(): string | undefined {
@@ -31,7 +31,7 @@ function origins(): string[] {
 export const auth = betterAuth({
   appName: rpName(),
   database: drizzleAdapter(ownerDb, { provider: "sqlite" }),
-  secret: process.env.AUTH_SECRET ?? "tidemark-dev-secret-change-me",
+  secret: process.env.AUTH_SECRET ?? "macrotide-dev-secret-change-me",
   trustedOrigins: origins(),
   // Email/password is disabled by default — passkey is the primary path.
   // Email magic-link is a planned addition once we wire a transactional

@@ -87,7 +87,7 @@ export function ConnectScreen({ onConnect }: ConnectScreenProps) {
                 letterSpacing: "-0.02em",
               }}
             >
-              Tidemark
+              Macrotide
             </span>
           </div>
           <h1

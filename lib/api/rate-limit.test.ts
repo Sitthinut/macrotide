@@ -3,10 +3,10 @@ import { rateLimit } from "./rate-limit";
 
 const TEST_CFG = { scope: "test", limit: 3, windowMs: 1000 };
 
-const globalForRl = globalThis as unknown as { __tidemarkRateBuckets?: Map<string, unknown> };
+const globalForRl = globalThis as unknown as { __macrotideRateBuckets?: Map<string, unknown> };
 
 afterEach(() => {
-  globalForRl.__tidemarkRateBuckets?.clear();
+  globalForRl.__macrotideRateBuckets?.clear();
 });
 
 describe("rateLimit", () => {

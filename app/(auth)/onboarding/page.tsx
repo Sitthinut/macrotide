@@ -80,7 +80,7 @@ export default function OnboardingPage() {
   return (
     <div style={shell}>
       <div style={card}>
-        <div style={mark}>Tidemark</div>
+        <div style={mark}>Macrotide</div>
         <div style={tagline}>
           {mode === "intro" ? (
             <>An AI companion for index investors. Track your funds, plan, and chat.</>

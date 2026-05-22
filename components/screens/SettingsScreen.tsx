@@ -187,7 +187,7 @@ export function SettingsScreen({ theme, onThemeChange, onBack }: SettingsScreenP
               <span className="marker">v0.1</span>Open-source AI investment companion · MIT licensed
             </li>
             <li>
-              <span className="marker">↗</span>github.com/Sitthinut/tidemark
+              <span className="marker">↗</span>github.com/Sitthinut/macrotide
             </li>
             <li>
               <span className="marker">⚠</span>Educational tool — not licensed financial advice

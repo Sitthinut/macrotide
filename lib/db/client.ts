@@ -13,8 +13,8 @@ const MIGRATIONS_DIR = resolve("lib/db/migrations");
 // Next.js hot-reload reimports server modules — pin the connection on globalThis
 // so we don't leak SQLite file handles across reloads in dev.
 const globalForDb = globalThis as unknown as {
-  __tidemarkSqlite?: Database.Database;
-  __tidemarkDb?: ReturnType<typeof drizzle<typeof schema>>;
+  __macrotideSqlite?: Database.Database;
+  __macrotideDb?: ReturnType<typeof drizzle<typeof schema>>;
 };
 
 function init() {
@@ -33,20 +33,20 @@ function init() {
   }
 
   backupIfStale(sqlite).catch((err) => {
-    console.error("[tidemark] backup failed:", err);
+    console.error("[macrotide] backup failed:", err);
   });
 
   return { sqlite, db };
 }
 
-if (!globalForDb.__tidemarkDb) {
+if (!globalForDb.__macrotideDb) {
   const { sqlite, db } = init();
-  globalForDb.__tidemarkSqlite = sqlite;
-  globalForDb.__tidemarkDb = db;
+  globalForDb.__macrotideSqlite = sqlite;
+  globalForDb.__macrotideDb = db;
 }
 
-export const ownerSqlite = globalForDb.__tidemarkSqlite as Database.Database;
-export const ownerDb = globalForDb.__tidemarkDb as ReturnType<typeof drizzle<typeof schema>>;
+export const ownerSqlite = globalForDb.__macrotideSqlite as Database.Database;
+export const ownerDb = globalForDb.__macrotideDb as ReturnType<typeof drizzle<typeof schema>>;
 
 // Back-compat aliases — query files used to import these as `db`/`sqlite`.
 // Prefer `getDb()` from `./context` in new code so demo sessions are honored.

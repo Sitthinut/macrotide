@@ -4,10 +4,10 @@ import { ownerDb, ownerSqlite } from "@/lib/db/client";
 import { type DbContext, runWithDbContext } from "@/lib/db/context";
 import { getOrCreateDemoSession } from "@/lib/db/demo";
 
-export const DEMO_COOKIE = "tidemark_demo";
+export const DEMO_COOKIE = "macrotide_demo";
 
 /**
- * Resolve a per-request DB context. If the request carries a `tidemark_demo`
+ * Resolve a per-request DB context. If the request carries a `macrotide_demo`
  * cookie, we route reads/writes to that session's in-memory SQLite. Otherwise
  * the owner singleton is used.
  *

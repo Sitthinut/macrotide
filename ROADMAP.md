@@ -579,7 +579,7 @@ app/
 
 1. `npm install better-auth @better-auth/passkey @better-auth/magic-link resend`.
 2. `lib/auth/server.ts` — `betterAuth({...})` with Drizzle adapter, passkey
-   plugin (`rpName: "Tidemark"`, `rpID: PUBLIC_APP_URL host`), magic-link
+   plugin (`rpName: "Macrotide"`, `rpID: PUBLIC_APP_URL host`), magic-link
    plugin (Resend sender).
 3. `npx @better-auth/cli generate` → emits `lib/db/schema/auth.ts`. Commit it.
 4. `drizzle-kit generate` → migration for auth tables + `user_id` columns +
@@ -781,31 +781,31 @@ Targets a single Linux VM (any cloud VPS or home server). Requires Phase 2.5.
   Caddyfile. No certbot, no Nginx config tedium.
 - **systemd** to keep the Node process alive across reboots. PM2 is fine too
   if you prefer a friendlier UX.
-- **SQLite file** at `/opt/tidemark/data/app.db`. Daily backups via the
+- **SQLite file** at `/opt/macrotide/data/app.db`. Daily backups via the
   existing `lib/db/backup.ts`; mirror to an off-VM object store (e.g.
   Cloudflare R2 — 10 GB free, no egress) via `rclone` cron.
 
 **Caddyfile (the whole thing):**
 
 ```caddyfile
-tidemark.example.com {
+macrotide.example.com {
     reverse_proxy localhost:3000
 }
 ```
 
-**systemd unit (sketch, `/etc/systemd/system/tidemark.service`):**
+**systemd unit (sketch, `/etc/systemd/system/macrotide.service`):**
 
 ```ini
 [Unit]
-Description=Tidemark
+Description=Macrotide
 After=network.target
 
 [Service]
-WorkingDirectory=/opt/tidemark
-EnvironmentFile=/opt/tidemark/.env
+WorkingDirectory=/opt/macrotide
+EnvironmentFile=/opt/macrotide/.env
 ExecStart=/usr/bin/node node_modules/.bin/next start -p 3000
 Restart=always
-User=tidemark
+User=macrotide
 
 [Install]
 WantedBy=multi-user.target
@@ -820,10 +820,10 @@ WantedBy=multi-user.target
    iptables rules already in place.
 3. Point your DNS A record at the VM.
 4. Install Node, Caddy, clone the repo, `npm ci`, `npm run build`.
-5. Create `/opt/tidemark/.env` with `AUTH_ENABLED=true`,
+5. Create `/opt/macrotide/.env` with `AUTH_ENABLED=true`,
    `AUTH_ALLOWED_EMAILS`, `AUTH_SECRET`, `PUBLIC_APP_URL`,
    `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `DAILY_TOKEN_BUDGET_PER_USER`.
-6. `systemctl enable --now tidemark`, `systemctl reload caddy`.
+6. `systemctl enable --now macrotide`, `systemctl reload caddy`.
 7. Visit the URL — sign in via magic link, register a passkey, done.
 
 **Optional hardening:**
@@ -890,7 +890,7 @@ After each phase, look for:
 
 ## Next session pickup
 
-1. `cd tidemark` and re-read this file.
+1. `cd macrotide` and re-read this file.
 2. Confirm the **Decisions you need to make** table above (Drizzle / SWR /
    Anthropic SDK / Sonnet 4.5).
 3. Start Phase 1, step 1: `npm install better-sqlite3 drizzle-orm` etc.

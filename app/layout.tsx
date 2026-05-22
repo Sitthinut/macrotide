@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Tidemark · AI Investment Companion",
+  title: "Macrotide · AI Investment Companion",
   description:
     "Open-source AI companion for Thai index investors. See your funds in one place and chat with an AI that knows your holdings.",
 };
@@ -16,7 +16,7 @@ export const viewport: Viewport = {
 // Runs before React hydrates so the saved theme is applied on first paint.
 // No-flash pattern used by next-themes; mutating <html> outside React avoids
 // hydration mismatches.
-const themeBootstrap = `(function(){try{var t=localStorage.getItem('tidemark-theme');if(t!=='light'&&t!=='dark'&&t!=='system')t='system';document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','system');}})();`;
+const themeBootstrap = `(function(){try{var t=localStorage.getItem('macrotide-theme');if(t!=='light'&&t!=='dark'&&t!=='system')t='system';document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','system');}})();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

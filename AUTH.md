@@ -1,6 +1,6 @@
 # Authentication & AI providers
 
-Tidemark ships with three independent toggles you mix and match to suit your deployment:
+Macrotide ships with three independent toggles you mix and match to suit your deployment:
 
 | Toggle | Env var | What it does |
 |---|---|---|
@@ -29,7 +29,7 @@ cp .env.example .env.local
 # In .env.local:
 AUTH_REQUIRED=1
 AUTH_SECRET=$(openssl rand -base64 32)
-PUBLIC_APP_URL=https://tidemark.example.com
+PUBLIC_APP_URL=https://macrotide.example.com
 OPENROUTER_API_KEY=sk-or-...
 ```
 

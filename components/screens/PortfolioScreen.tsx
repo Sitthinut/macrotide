@@ -225,7 +225,7 @@ export function PortfolioScreen({
         <div className="topbar">
           <div className="brand" style={{ flex: 1 }}>
             <span className="brand-mark"></span>
-            <span>Tidemark</span>
+            <span>Macrotide</span>
           </div>
         </div>
         <div style={{ padding: 24, color: "var(--muted)" }}>Loading…</div>
@@ -239,7 +239,7 @@ export function PortfolioScreen({
         <div className="topbar">
           <div className="brand" style={{ flex: 1 }}>
             <span className="brand-mark"></span>
-            <span>Tidemark</span>
+            <span>Macrotide</span>
           </div>
           <button className="icon-btn" aria-label="Settings" onClick={onOpenSettings}>
             <Icon name="settings" size={13} />
@@ -306,7 +306,7 @@ export function PortfolioScreen({
       <div className="topbar">
         <div className="brand" style={{ flex: 1 }}>
           <span className="brand-mark"></span>
-          <span>Tidemark</span>
+          <span>Macrotide</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <button

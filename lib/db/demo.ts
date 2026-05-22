@@ -19,15 +19,15 @@ type DemoSession = {
 };
 
 const globalForDemo = globalThis as unknown as {
-  __tidemarkDemoSessions?: Map<string, DemoSession>;
-  __tidemarkDemoSweeperStarted?: boolean;
+  __macrotideDemoSessions?: Map<string, DemoSession>;
+  __macrotideDemoSweeperStarted?: boolean;
 };
 
 function sessions(): Map<string, DemoSession> {
-  if (!globalForDemo.__tidemarkDemoSessions) {
-    globalForDemo.__tidemarkDemoSessions = new Map();
+  if (!globalForDemo.__macrotideDemoSessions) {
+    globalForDemo.__macrotideDemoSessions = new Map();
   }
-  return globalForDemo.__tidemarkDemoSessions;
+  return globalForDemo.__macrotideDemoSessions;
 }
 
 // Run drizzle-style migrations against an in-memory DB by replaying SQL files
@@ -53,8 +53,8 @@ function migrationSql(): string {
 }
 
 function startSweeper(): void {
-  if (globalForDemo.__tidemarkDemoSweeperStarted) return;
-  globalForDemo.__tidemarkDemoSweeperStarted = true;
+  if (globalForDemo.__macrotideDemoSweeperStarted) return;
+  globalForDemo.__macrotideDemoSweeperStarted = true;
   setInterval(() => {
     const now = Date.now();
     const map = sessions();

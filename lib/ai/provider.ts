@@ -47,8 +47,8 @@ function openrouter(apiKey: string, models: string[]): LanguageModel {
     baseURL: "https://openrouter.ai/api/v1",
     apiKey,
     headers: {
-      "HTTP-Referer": process.env.PUBLIC_APP_URL ?? "https://tidemark.local",
-      "X-Title": "Tidemark",
+      "HTTP-Referer": process.env.PUBLIC_APP_URL ?? "https://macrotide.local",
+      "X-Title": "Macrotide",
     },
     // OpenRouter accepts a `models: [primary, ...fallbacks]` body field; tries
     // each in order if the previous one fails. Only inject when there's an
