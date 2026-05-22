@@ -932,9 +932,9 @@ once you have a clear personal need.
 2. **Image OCR** (shipped 2026-05-22).
    - `lib/portfolio/ocr.ts`: send image to an OpenRouter vision model via
      Vercel AI SDK `generateObject` with a strict Zod schema → return
-     `{ rows: ProposedRow[] }`. Defaults to a `:free` model (currently
-     `google/gemma-4-31b-it:free`) so this path never burns paid credits.
-     Override with `OCR_MODEL` env var.
+     `{ rows: ProposedRow[] }`. Defaults to `openrouter/free` — OpenRouter's
+     free-models router, which picks a free vision-capable backend per call
+     so this path never burns paid credits. Override with `OCR_MODEL`.
    - `app/api/import/image/route.ts`: multipart/form-data POST, 5 MB cap,
      JPG/PNG/WebP only, 10 RPM IP rate-limit, returns 503 cleanly when
      `OPENROUTER_API_KEY` is unset.

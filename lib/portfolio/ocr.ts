@@ -35,11 +35,11 @@ export interface OcrResult {
   rows: ProposedRow[];
 }
 
-// Default model chosen from the current OpenRouter free + image-modality list.
-// google/gemma-4-31b-it:free is a Google-trained instruction-tuned 31B model
-// with image input, available at zero token cost. Override via `OCR_MODEL`
-// if a stronger free option becomes available.
-const DEFAULT_OCR_MODEL = "google/gemma-4-31b-it:free";
+// OpenRouter's free-models router. Picks a free vision-capable backend per
+// call, so this path never burns paid credits and survives any single
+// model's deprecation. Mirrors the chat path's default. Override via
+// `OCR_MODEL` to pin a specific model if quality varies.
+const DEFAULT_OCR_MODEL = "openrouter/free";
 
 const SYSTEM_PROMPT = `You extract Thai mutual fund and stock holdings from a broker / fund-house screenshot.
 
