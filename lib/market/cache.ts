@@ -2,7 +2,8 @@ import "server-only";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { fundQuotes, navHistory } from "@/lib/db/schema";
-import { getSeries, type YahooInterval, type YahooRange } from "./yahoo";
+import type { SeriesInterval, SeriesRange } from "./providers/types";
+import { resolveProvider } from "./registry";
 
 const QUOTE_TTL_MS = 5 * 60_000; // 5 min for live quote
 const HISTORY_TTL_MS = 24 * 60 * 60_000; // 24 h for daily series
@@ -28,13 +29,13 @@ export interface CachedSeries {
 
 /**
  * Return cached daily series for `symbol` if it's <24h old, otherwise refetch
- * from Yahoo and upsert into nav_history + fund_quotes. The cached version is
- * always preferred to keep Yahoo load minimal.
+ * from the appropriate provider and upsert into nav_history + fund_quotes.
+ * The cached version is always preferred to keep upstream load minimal.
  */
 export async function getCachedSeries(
   symbol: string,
-  range: YahooRange = "6mo",
-  interval: YahooInterval = "1d",
+  range: SeriesRange = "6mo",
+  interval: SeriesInterval = "1d",
 ): Promise<CachedSeries> {
   const cachedQuote = db.select().from(fundQuotes).where(eq(fundQuotes.ticker, symbol)).get();
 
@@ -57,8 +58,8 @@ export async function getCachedSeries(
     };
   }
 
-  // Refresh from Yahoo.
-  const fresh = await getSeries(symbol, range, interval);
+  const provider = resolveProvider(symbol);
+  const fresh = await provider.fetchSeries(symbol, range, interval);
   if (fresh.series.length === 0) {
     return { symbol, series: [], quote: null };
   }
@@ -113,7 +114,7 @@ export async function getCachedSeries(
   };
 }
 
-function rangeStart(range: YahooRange): string {
+function rangeStart(range: SeriesRange): string {
   const now = new Date();
   const days =
     range === "1mo"
@@ -157,12 +158,11 @@ function computeReturnPct(series: { close: number; t: number }[], days: number):
  */
 export async function refreshSymbols(
   symbols: string[],
-  range: YahooRange = "6mo",
+  range: SeriesRange = "6mo",
 ): Promise<{ symbol: string; ok: boolean; error?: string }[]> {
   const results: { symbol: string; ok: boolean; error?: string }[] = [];
   for (const s of symbols) {
     try {
-      // Force a refresh by deleting the quote row so isFresh fails.
       db.delete(fundQuotes).where(eq(fundQuotes.ticker, s)).run();
       await getCachedSeries(s, range);
       results.push({ symbol: s, ok: true });
