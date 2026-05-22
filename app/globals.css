@@ -1645,44 +1645,42 @@ textarea.sheet-input {
   flex-shrink: 0;
 }
 
-/* Chart-card carousel (Portfolio extra charts).
-   Responsive card width: peek-style on mobile (~1 card visible), 2 cards mid,
-   3 cards wide. Cards visually scroll past the row's left/right edges — the
-   responsive width + the natural "peek" of the next card both signal that
-   the strip is horizontally scrollable. */
+/* Chart cards grid (Portfolio extra charts).
+   1 col mobile / 2 col tablet+desktop — clean 2×2 for the 4 cards, no
+   awkward dangling card on a 3-col layout. No horizontal scroll. */
 .chart-row {
-  display: flex;
-  gap: 8px;
-  padding: 0 16px 4px;
-  scroll-padding-left: 16px;
-  scroll-padding-right: 16px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  scroll-snap-type: x proximity;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  padding: 0 16px;
 }
-.chart-row::-webkit-scrollbar {
-  display: none;
+@media (min-width: 600px) {
+  .chart-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 .chart-row .chart-card {
-  /* Responsive width: 1.2 cards on narrow (peek next), 2 cards mid, 3 cards wide. */
-  flex: 0 0 calc(85% - 8px);
-  scroll-snap-align: start;
   background: var(--paper);
   border: 1px solid var(--line-soft);
   border-radius: 14px;
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
+  /* Allow content (charts with explicit widths) to shrink with the column. */
+  min-width: 0;
+  /* Uniform card height across the whole grid (not just within a row). The
+     SVG-fill rule below lets chart-based cards grow their viz into the
+     extra space; list-based cards get a touch of bottom whitespace. */
+  min-height: 240px;
 }
-@media (min-width: 640px) {
-  .chart-row .chart-card {
-    flex: 0 0 calc(50% - 12px);
-  }
-}
-@media (min-width: 960px) {
-  .chart-row .chart-card {
-    flex: 0 0 calc(33.333% - 14px);
-  }
+/* Push the last visual element to the bottom and let it stretch into any
+   extra height the grid gave the card. Charts (MiniLine / MiniBars) use
+   preserveAspectRatio="none" so they fill the assigned height nicely. */
+.chart-row .chart-card > svg:last-child {
+  flex: 1;
+  height: auto;
+  min-height: 48px;
+  margin-top: 4px;
 }
 .chart-row .chart-card .h {
   font-size: 10px;

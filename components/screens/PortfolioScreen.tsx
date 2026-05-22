@@ -466,7 +466,6 @@ export function PortfolioScreen({
         <div style={{ marginBottom: 14 }}>
           <div className="section-header" style={{ padding: "0 20px" }}>
             <h3>Charts</h3>
-            <span className="link">Swipe →</span>
           </div>
           <div className="chart-row">
             <div className="chart-card">
