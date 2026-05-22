@@ -40,7 +40,15 @@ export const holdings = sqliteTable(
     avgCost: real("avg_cost"),
     ter: real("ter"),
     color: text("color"),
+    /** Brokerage / import provenance — free-text, displayed in UI. */
     source: text("source"),
+    /**
+     * Data-routing key. Tells the market registry which provider to call when
+     * fetching NAV / price (see lib/market/sources.ts). One of:
+     *   - "yahoo"             — stocks, ETFs, indices, FX via Yahoo
+     *   - "thai_mutual_fund"  — Thai mutual fund NAVs via the SEC Open API
+     */
+    quoteSource: text("quote_source").notNull().default("yahoo"),
     acquiredOn: text("acquired_on"),
     createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
     updatedAt: text("updated_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),

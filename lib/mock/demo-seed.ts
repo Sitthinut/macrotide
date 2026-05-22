@@ -93,6 +93,8 @@ export function seedDemoData(db: Db): void {
           ter: h.ter,
           color: h.color,
           source: h.source,
+          // All demo seed holdings are Thai mutual funds.
+          quoteSource: "thai_mutual_fund",
           acquiredOn: null,
           createdAt: now,
           updatedAt: now,

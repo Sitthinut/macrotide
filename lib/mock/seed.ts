@@ -124,6 +124,10 @@ async function main() {
           ter: h.ter,
           color: h.color,
           source: h.source,
+          // All mock holdings are Thai mutual funds — route through the SEC
+          // Open API by default. Real-world adds via HoldingSheet will pick
+          // the right source explicitly via the type selector.
+          quoteSource: "thai_mutual_fund",
           acquiredOn: null,
           createdAt: now,
           updatedAt: now,
