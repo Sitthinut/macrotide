@@ -6,6 +6,71 @@
 > chat summarization + recall/FTS. Memory design in
 > [docs/features/memory.md](./docs/features/memory.md)).
 
+---
+
+## 🌙 Autonomous build run — live status (started 2026-05-23 night)
+
+> **This section is the durable source of truth for the overnight autonomous
+> build.** The lead agent updates it as work lands, so if the session dies
+> before the user returns, this table shows exactly what's done, what's on a
+> branch, and what needs the user's hands.
+>
+> **Merge policy:** green waves are merged into `main` **locally and never
+> pushed** (pushing is the user's call). Each wave is a foundation for the next,
+> so merging is structural. Branches are `team/<slug>`.
+>
+> **Verification ceiling without the user:** typecheck + lint + build + unit/
+> integration tests. Anything needing a real passkey / OAuth / browser is
+> marked 🧪 and is NOT claimed as done.
+
+**Status legend:** ⬜ not started · 🔨 in progress · ✅ merged to `main` (local,
+unpushed) · 🧪 code-complete + tests green, needs user browser/WebAuthn
+verification · ⏸️ needs a user decision before it can proceed.
+
+### Wave 0 — immediate, no dependencies
+| # | Task | Branch | Status | Notes |
+|---|------|--------|--------|-------|
+| 1 | Passkey signup fix (enable `emailAndPassword` bootstrap) | `team/passkey-fix` | ⬜ | Unblocks login; 🧪 final WebAuthn click is the user's |
+| 2 | Session close-cycle integration tests | `team/session-tests` | ⬜ | close→idle→reactivate→re-close watermark |
+| 3 | `closeStaleSessions` runnable CLI (`tsx` + `npm run`) | `team/close-stale-cli` | ⬜ | No scheduler pick (parked) |
+
+### Wave 1 — FOUNDATION (solo, merges before Wave 2)
+| # | Task | Branch | Status | Notes |
+|---|------|--------|--------|-------|
+| 4 | 6a Data layer — migration `0007` (user_id + `usage` + `account_tier`), `OWNER_EMAIL` backfill, per-user query filter, `userId` in AsyncLocalStorage, `requireUser()` | `team/6a-dataplane` | ⬜ | 🧪 user applies migration to real DB + sets `OWNER_EMAIL` |
+
+### Wave 2 — Phase 6 fan-out (after 6a merges)
+| # | Task | Branch | Status | Notes |
+|---|------|--------|--------|-------|
+| 5 | 6b Identity — better-auth google/github (env-gated), `/login` buttons, post-OAuth passkey prompt | `team/6b-identity` | ⬜ | 🧪 register OAuth apps + 4 env vars + browser verify |
+| 6 | 6d Quotas + tier gating — model-chain by tier, daily cap, usage logging, limit UI | `team/6d-quotas` | ⬜ | Works on ROADMAP env defaults |
+| 7 | 6c Sign-up gate — Turnstile (dev-bypass when unset), wire `AUTH_RATE_LIMIT`, `tier=free` default, first-user bucket seed, `/legal/*` + checkbox | `team/6c-signup` | ⬜ | 🧪 Turnstile keys; review legal copy |
+| 8 | 6e Account page — `/account`: passkeys (revoke), linked providers, usage, sign-out-everywhere | `team/6e-account` | ⬜ | 🧪 browser verify |
+
+### Wave 3 — Advisor actions + UX (after 6a; reviews can start anytime)
+| # | Task | Branch | Status | Notes |
+|---|------|--------|--------|-------|
+| 9 | Phase 2 tool-call execution — tools mutate state via `requireUser` + per-user queries | `team/tool-calls` | ⬜ | 🧪 browser verify |
+| 10 | Plan-edit proposal cards — accept/reject UI wired to apply path | `team/plan-edit-cards` | ⬜ | Depends on #9 |
+| 11 | ANALYSIS scores — replace `/api/analysis` placeholder with real computed scores | `team/analysis-scores` | ⬜ | Depends on #9 |
+| 12 | Charts review + redesign — audit real-vs-mock (`DRIFT_SERIES`), build meaningful charts (hand-drawn SVG) | `team/charts` | ⬜ | User asked me to implement what's good |
+| 13 | Plan & Health review + redesign — audit `PortfolioScreen`/`AppPanels`/`api/plan`, ship worthwhile signals | `team/plan-health` | ⬜ | User asked me to implement what's good |
+
+### ⏳ Needs the user (collected — do these when you're back)
+- Apply migration `0007` to the real `data/app.db` (after backup) + set `OWNER_EMAIL`.
+- Register Google + GitHub OAuth apps → set `GOOGLE_CLIENT_ID/SECRET`, `GITHUB_CLIENT_ID/SECRET`.
+- Get Cloudflare Turnstile keys → `TURNSTILE_SITE_KEY/SECRET_KEY`.
+- Browser/WebAuthn verification of: passkey signup (#1), OAuth sign-in (#5), account page passkey revoke (#8), tool-call actions (#9).
+- Review legal copy in `/legal/terms` + `/legal/privacy` (#7).
+- Decide scheduler/cron for the digest sweep (Phase 5b — out of this run).
+
+### ▶️ How to resume if my session died
+1. `git branch --list 'team/*'` — each completed task is a committed branch.
+2. Check this table's Status column for what merged vs. what's still on a branch.
+3. Merged work is on local `main` (unpushed). Unmerged `team/*` branches are reviewable diffs.
+
+---
+
 ## How to read this doc
 
 - **Source of truth for feature status.** Every shipped feature should be
