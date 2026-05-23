@@ -301,6 +301,11 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
       const decoder = new TextDecoder();
       let buffer = "";
       let accumulated = "";
+      // Tool confirmations collected from the stream. A model can run a tool
+      // (e.g. save_preference) and end its turn without emitting any prose —
+      // some cheaper models do this routinely. We surface the tool's own
+      // message so the turn is never blank when work actually happened.
+      const toolMessages: string[] = [];
 
       while (true) {
         const { value, done } = await reader.read();
@@ -326,22 +331,37 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
                 prev.map((m) => (m.id === placeholderId ? { ...m, text: accumulated } : m)),
               );
             }
+            // Tool result, regardless of the exact event variant: our memory
+            // tools return `{ message: string }`. Pull it from common shapes.
+            const toolOut: unknown = event.output ?? event.result ?? undefined;
+            if (toolOut && typeof toolOut === "object" && "message" in toolOut) {
+              const msg = (toolOut as { message?: unknown }).message;
+              if (typeof msg === "string" && msg.trim()) toolMessages.push(msg.trim());
+            }
           } catch {
             // Some events are not JSON (heartbeats, [DONE]); ignore.
           }
         }
       }
 
-      // If nothing streamed, surface a friendly fallback so the message slot
-      // isn't blank.
+      // Fail-safe: if the model emitted no prose, fall back to the tool
+      // confirmation(s); if there were none either, show a calm note rather
+      // than a scary "check server logs" message. The dashboard is unaffected
+      // regardless of what the LLM did.
       if (!accumulated) {
+        const fallback = toolMessages.length
+          ? toolMessages.join("\n\n")
+          : "I didn't have anything to add there. Your dashboard and notes are unaffected — try rephrasing if you expected a reply.";
         setMessages((prev) =>
-          prev.map((m) =>
-            m.id === placeholderId
-              ? { ...m, text: "(no response — check server logs or your AI provider config)" }
-              : m,
-          ),
+          prev.map((m) => (m.id === placeholderId ? { ...m, text: fallback } : m)),
         );
+        // A tool ran even though no prose came back — refresh memory views and
+        // still attempt the auto-title so the thread doesn't stay "Untitled".
+        if (toolMessages.length) {
+          void invalidate("/api/memory/preferences");
+          const tid = returnedThread ?? threadId;
+          if (tid) void maybeAutoTitle(tid);
+        }
       } else {
         // First turn pair just completed on a thread we haven't titled yet —
         // ask the server to auto-title it. Idempotent server-side; the ref

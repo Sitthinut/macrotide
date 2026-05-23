@@ -76,8 +76,8 @@ export function SettingsScreen({ theme, onThemeChange, onBack }: SettingsScreenP
   })).filter((g) => g.rows.length > 0);
 
   const handleForget = async (row: PreferenceRow) => {
-    const ok = window.confirm(`Forget this note?\n\n"${row.content}"`);
-    if (!ok) return;
+    // No confirm: forget is reversible. The row moves to "Recently forgotten"
+    // (30-day window) with a restore button — that's the undo.
     const res = await fetch(`${MEMORY_KEY}/${row.id}`, { method: "DELETE" });
     if (!res.ok) {
       window.alert(`Failed to forget note (${res.status})`);
