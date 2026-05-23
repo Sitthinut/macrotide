@@ -20,6 +20,11 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   outputFileTracingRoot: path.join(__dirname),
+  // Dev-only escape hatch: trust one extra origin when the dev server is reached
+  // through a reverse proxy or remote host (Codespaces, a LAN IP, a tunnel, etc.)
+  // instead of plain localhost. Set DEV_ALLOWED_ORIGIN in .env.local. No effect on
+  // prod builds. See .env.example.
+  allowedDevOrigins: process.env.DEV_ALLOWED_ORIGIN ? [process.env.DEV_ALLOWED_ORIGIN] : [],
   async headers() {
     return [
       {

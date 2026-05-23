@@ -238,6 +238,7 @@ owner chain. Tier is stored in `account_tier`; promote via SQL
 | Var | Default | Read by | Notes |
 | --- | --- | --- | --- |
 | `CODEX_AUTH_FILE` | OS-default Codex auth path | [lib/ai/codex.local.ts](./lib/ai/codex.local.ts) | Path to a Codex CLI auth JSON file, used by the local-codex integration during development. Test-only outside of dev. |
+| `DEV_ALLOWED_ORIGIN` | unset (localhost only) | [next.config.ts](./next.config.ts) | One extra origin added to Next's `allowedDevOrigins` so the dev server trusts a non-localhost host (reverse proxy, Codespaces, LAN IP, tunnel). Hostname only, no scheme. No effect on prod builds. |
 
 ### Framework
 
