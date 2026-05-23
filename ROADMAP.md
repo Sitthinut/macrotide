@@ -43,7 +43,7 @@ verification · ⏸️ needs a user decision before it can proceed.
 | # | Task | Branch | Status | Notes |
 |---|------|--------|--------|-------|
 | 5 | 6b Identity — better-auth google/github (env-gated), `/login` buttons, post-OAuth passkey prompt | `team/6b-6c-auth` | 🔨 | combined w/ 6c (shared login page). 🧪 register OAuth apps + 4 env vars + browser verify |
-| 6 | 6d Quotas + tier gating — model-chain by tier, daily cap, usage logging, limit UI | `team/6d-quotas` | 🔨 | Works on ROADMAP env defaults |
+| 6 | 6d Quotas + tier gating — model-chain by tier, daily cap, usage logging, limit UI | merged→`main` | ✅ | ✅ merged (9ed504f). Free tier pinned to `openrouter/free` in code (can't resolve paid). 26 new tests. Active once a real user logs in; owner path unchanged. 🧪 browser-verify limit banner needs an auth'd user |
 | 7 | 6c Sign-up gate — Turnstile (dev-bypass when unset), wire `AUTH_RATE_LIMIT`, `tier=free` default, first-user bucket seed, `/legal/*` + checkbox | `team/6b-6c-auth` | 🔨 | combined w/ 6b. 🧪 Turnstile keys; review legal copy |
 | 8 | 6e Account page — `/account`: passkeys (revoke), linked providers, usage, sign-out-everywhere | `team/6e-account` | 🔨 | 🧪 browser verify |
 
