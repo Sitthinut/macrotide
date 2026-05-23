@@ -10,6 +10,13 @@
 
 ## 🌙 Autonomous build run — live status (started 2026-05-23 night)
 
+> ✅ **RUN COMPLETE — all 13 tasks merged to local `main` (unpushed).** Final
+> state: typecheck clean, **251 tests passing**, production build compiles (25
+> routes), lint 0 errors. Nothing pushed — review the log (`git log --oneline`)
+> and the **⏳ Needs the user** checklist below, then push when you're happy.
+> Tasks marked 🧪 are code-complete but need your browser/WebAuthn/live-LLM to
+> verify (I can't drive a passkey or a real model from here).
+>
 > **This section is the durable source of truth for the overnight autonomous
 > build.** The lead agent updates it as work lands, so if the session dies
 > before the user returns, this table shows exactly what's done, what's on a
@@ -52,7 +59,7 @@ verification · ⏸️ needs a user decision before it can proceed.
 |---|------|--------|--------|-------|
 | 9 | Phase 2 tool-call execution — read_portfolio/plan/journal, write_journal, propose_plan_edit; per-user scoped | merged→`main` | 🧪 | ✅ merged (7c86630). Tools in all 3 chat paths, `stepCountIs(5)`, 6d gating intact. 🧪 needs a live LLM + OPENROUTER key to verify tool-call streaming end-to-end |
 | 10 | Plan-edit proposal cards — accept wired to new `POST /api/plan/edit` (`applyPlanEdit`+upsert, per-user) | merged→`main` | 🧪 | ✅ merged (7c86630). Reused `PlanProposalCard`; removed old fake-proposal regex. 🧪 browser-verify propose→card→Apply→plan updated |
-| 11 | ANALYSIS composite score — transparent 0-100 from `health.ts` (drift/TER/concentration/cash), +breakdown | `team/analysis-scores` | 🔨 | Decoupled from #9 — deterministic off `health.ts`, no LLM. Running in parallel |
+| 11 | ANALYSIS composite score — transparent 0-100 from `health.ts` (drift 30/fees 25/concentration 25/cash 20), +per-component breakdown | merged→`main` | ✅ | ✅ merged (224b1c0). `lib/portfolio/score.ts`, 21 tests, deterministic (no LLM). ⚠️ known caveat: the HHI concentration component penalizes *intentional* uneven weighting (e.g. a 60/40 mix scores below equal-weight) — detail text explains it; tweak weights/rule if you disagree |
 | 12 | Charts — **recharts** interactive charts w/ hover+tooltips (`InteractiveCharts.tsx`, `'use client'`) | merged→`main` | ✅ | ✅ merged (8b00b79). 🧪 eyeball the new charts in-browser |
 | 13 | Plan & Health redesign — real signals in `lib/portfolio/health.ts` (drift, blended TER, concentration, cash drag, rebalance hint w/ good/watch/action tone) | merged→`main` | ✅ | ✅ merged (8b00b79). 21 health tests. ⚠️ **REMOVED visible mock cards** (sector roll-up, contributions, fabricated insights) as "mock theater" — no real data source; reinstatable as labeled placeholders if you want them. Also dropped mock series DRIFT_SERIES/CONTRIB_SERIES/GEO/SECTOR. 🧪 eyeball PortfolioScreen charts + Plan&Health panel (hover/tooltips, dark mode, empty/no-target states) |
 
@@ -281,7 +288,7 @@ exposes the gaps that need polish; polishing on mock data risks rework.
 | # | Phase | Status | Notes |
 | - | --- | --- | --- |
 | 1 | Persistence | ✅ Shipped 2026-05-21 | SQLite + Drizzle |
-| 2 | AI chat | 🟡 Partial | Scaffold + streaming + history persistence live; tool calls + plan-edit cards pending Phase 6 |
+| 2 | AI chat | 🟢 Tool-calls shipped 2026-05-23 | streaming + history + **advisor tool-calls** (read_portfolio/plan/journal, write_journal, propose_plan_edit) + **plan-edit proposal cards** (→ `POST /api/plan/edit`) + **ANALYSIS composite score**. 🧪 live-LLM browser verify (see autonomous-run §) |
 | 2.5 | Passkey + demo | ✅ Shipped 2026-05-21 | Single-owner auth + per-session in-memory demo DB |
 | 2.6 | Cleanup & chat persistence | ✅ Shipped 2026-05-22 | Chat history persists; plan-edit Apply wired; mock-import migration done. Thread-list sidebar deferred to a polish pass |
 | 3 | Market data | 🟡 Partial | SET/global indices live; funds + news in 3b |
@@ -290,7 +297,7 @@ exposes the gaps that need polish; polishing on mock data risks rework.
 | 4b | Broker scraping / API integration | Out of scope | Revisit only if a clear personal need emerges |
 | 5 | Long-term memory + chat archival | ✅ 5a+5b shipped 2026-05-23 | **5a** — bitemporal `user_preferences` + 4-tool surface + always-on injection + Settings → Memory + chat sidebar (auto-title, 30-day trash, in-panel list) + empty-turn fail-safe. **5b** — session lifecycle (active/idle/archived); **real-time session-close extraction** (incremental, watermark `extracted_through_id` migration `0006`, running-summary context; `closeStaleSessions` backstop) writing `source='extracted'` + confidence floor; chat summarization at ~80% context (migration-free `role='summary'`, banner); `recall_preferences` tool + sidebar FTS. **5c+** (vector recall / offline consolidation) future. Guide: [docs/features/memory.md](./docs/features/memory.md); prior-art: [docs/research/memory-systems.md](./docs/research/memory-systems.md) |
 | 5b | Scheduled jobs / digests / notifications | Pending | Depends on 3b and 6 |
-| 6 | Multi-user (Google + GitHub SSO + passkey, public-discoverable) | Pending | Data-layer migration to per-user, OAuth, Turnstile, quotas, account page |
+| 6 | Multi-user (Google + GitHub SSO + passkey, public-discoverable) | 🟡 Code shipped 2026-05-23, needs setup | **6a–6e code merged** (autonomous run): per-user data layer (migration `0007`, `ownedBy` scoping, `requireUser`), OAuth env-gated, Turnstile signup gate, quotas/tier gating, account page. 🧪 user must: apply `0007` + `OWNER_EMAIL` backfill, set `AUTH_SECRET`, register OAuth apps, get Turnstile keys, browser-verify. See autonomous-run § |
 
 ## Phase 1 — Persistence
 
