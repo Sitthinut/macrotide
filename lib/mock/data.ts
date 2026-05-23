@@ -19,7 +19,7 @@ import type {
   UserGoals,
   UserJournal,
   UserPlan,
-} from "./types";
+} from "@/lib/static/types";
 
 // ===== PORTFOLIOS: user has multiple, each with own holdings + constraints =====
 export const PORTFOLIOS: Portfolio[] = [

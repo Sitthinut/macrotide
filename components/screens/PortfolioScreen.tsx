@@ -14,7 +14,6 @@ import type { SeriesRange } from "@/lib/fetchers/portfolio";
 import { invalidate } from "@/lib/fetchers/swr";
 import { fmtPct } from "@/lib/format";
 import { DEFAULT_QUOTE_SOURCE, isQuoteSource } from "@/lib/market/sources";
-import type { AssetClass, BenchmarkKey, Holding, Portfolio } from "@/lib/mock/types";
 import {
   ANALYSIS,
   BENCHMARKS,
@@ -23,6 +22,7 @@ import {
   GEO_BREAKDOWN,
   SECTOR_BREAKDOWN,
 } from "@/lib/static/analysis";
+import type { AssetClass, BenchmarkKey, Holding, Portfolio } from "@/lib/static/types";
 
 function holdingToFormValues(h: Holding, fallbackBucketId: string): HoldingFormValues {
   return {

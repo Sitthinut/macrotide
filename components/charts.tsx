@@ -1,7 +1,7 @@
 // Chart primitives — all hand-drawn SVG, no chart library needed
 
 import { useId } from "react";
-import type { MixSlice, SeriesPoint } from "@/lib/mock/types";
+import type { MixSlice, SeriesPoint } from "@/lib/static/types";
 
 // ===== Sparkline =====
 export function Sparkline({

@@ -104,7 +104,7 @@ that takes a write.
 | Pure helpers (plan-edit, plan-parser) | [lib/portfolio/](./lib/portfolio/) | Unit-testable; no DB / network. |
 | User state (buckets, holdings, plan, journal, chat) | [lib/db/queries/](./lib/db/queries/) via `withDb` | Owner vs demo routed automatically. |
 | Mock seeds | [lib/mock/seed.ts](./lib/mock/seed.ts), [lib/mock/demo-seed.ts](./lib/mock/demo-seed.ts) | NEVER imported by components. |
-| Shared types | [lib/mock/types.ts](./lib/mock/types.ts) | Misnamed (cosmetic debt) — types, not mock. |
+| Shared types | [lib/static/types.ts](./lib/static/types.ts) | Domain types shared across components and adapters. |
 
 **Components MUST NOT import from `@/lib/mock/data`.** Verify with
 `grep -rn 'from "@/lib/mock/data"' components/` — should return zero hits.

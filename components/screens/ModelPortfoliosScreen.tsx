@@ -5,8 +5,8 @@ import { ModelDonut } from "@/components/charts";
 import { Icon } from "@/components/Icon";
 import { useModelPortfoliosView } from "@/lib/fetchers/legacy";
 import { invalidate } from "@/lib/fetchers/swr";
-import type { ModelPortfolio } from "@/lib/mock/types";
 import { modelPortfolioToInsert } from "@/lib/portfolio/adapter";
+import type { ModelPortfolio } from "@/lib/static/types";
 
 export interface ModelPortfoliosScreenProps {
   selectedId: string;

@@ -8,7 +8,7 @@ import {
   QUOTE_SOURCES,
   type QuoteSource,
 } from "@/lib/market/sources";
-import type { AssetClass } from "@/lib/mock/types";
+import type { AssetClass } from "@/lib/static/types";
 
 export interface HoldingFormValues {
   bucketId: string;

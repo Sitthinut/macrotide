@@ -1,4 +1,4 @@
-import type { LearnContent } from "@/lib/mock/types";
+import type { LearnContent } from "@/lib/static/types";
 
 // Editorial reading list shown on MarketsScreen. Placeholder content until
 // a real CMS or markdown library lands (Phase 3b or later).

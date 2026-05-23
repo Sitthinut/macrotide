@@ -735,10 +735,6 @@ chat topbar.
   AppPanels. Wiring an API route is wasted work until the numbers come
   from AI tool calls — when they do, the route shape lands at the same
   time. Until then the static-import path is the minimum thing.
-- **Types still in `lib/mock/types.ts`.** Components import shared types
-  (`Holding`, `Portfolio`, `LearnArticle`, etc.) from `@/lib/mock/types`.
-  These aren't mock — just misnamed. A future rename moves them to
-  `lib/static/types.ts` or `lib/types.ts`. Cosmetic, not blocking.
 
 ### Risk (retained for posterity)
 

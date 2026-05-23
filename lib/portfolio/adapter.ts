@@ -1,4 +1,4 @@
-// Shapes DB rows into the legacy `lib/mock/types` view that the existing
+// Shapes DB rows into the legacy `lib/static/types` view that the existing
 // screens render against. Lets us swap the data source without rewriting UI.
 
 import type { Bucket } from "@/lib/db/queries/buckets";
@@ -19,7 +19,7 @@ import type {
   RiskBand,
   SeriesPoint,
   UserJournal,
-} from "@/lib/mock/types";
+} from "@/lib/static/types";
 
 const DEFAULT_ASSET_CLASS: AssetClass = "equity";
 const DEFAULT_RISK: RiskBand = "balanced";

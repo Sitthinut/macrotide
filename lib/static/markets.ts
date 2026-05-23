@@ -1,4 +1,4 @@
-import type { Markets } from "@/lib/mock/types";
+import type { Markets } from "@/lib/static/types";
 
 // Editorial market chrome (indices snapshot, news cards, daily digest).
 // Live SET / global indices come from /api/market/indices; the news + digest

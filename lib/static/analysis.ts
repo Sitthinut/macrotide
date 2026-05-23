@@ -1,4 +1,4 @@
-import type { Analysis, BenchmarkKey, Breakdown, SeriesPoint } from "@/lib/mock/types";
+import type { Analysis, BenchmarkKey, Breakdown, SeriesPoint } from "@/lib/static/types";
 
 // Placeholder analytics surface. Real numbers land in Phase 6 when AI tool
 // calls (read_portfolio + computed concentration/drift/weighted TER) replace

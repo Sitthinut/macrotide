@@ -1,6 +1,6 @@
 "use client";
 
-// Adapter-shaped fetchers — return the legacy `lib/mock/types` view so
+// Adapter-shaped fetchers — return the legacy `lib/static/types` view so
 // existing screens can drop their mock imports without rewriting layout.
 
 import { useEffect, useMemo, useRef } from "react";

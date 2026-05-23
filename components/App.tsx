@@ -21,7 +21,7 @@ import { SettingsScreen, type Theme } from "@/components/screens/SettingsScreen"
 import { usePortfolioView, useSelectedModelId } from "@/lib/fetchers/legacy";
 import { usePlan } from "@/lib/fetchers/portfolio";
 import { invalidate } from "@/lib/fetchers/swr";
-import type { Portfolio } from "@/lib/mock/types";
+import type { Portfolio } from "@/lib/static/types";
 import { useScrollHide } from "@/lib/useScrollHide";
 import { useViewport } from "@/lib/useViewport";
 

@@ -3,9 +3,9 @@
 import { useMemo, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { type MarketIndexResponse, useMarketIndices } from "@/lib/fetchers/portfolio";
-import type { LearnArticle, MarketIndex, Markets } from "@/lib/mock/types";
 import { LEARN_CONTENT } from "@/lib/static/learn";
 import { MARKETS } from "@/lib/static/markets";
+import type { LearnArticle, MarketIndex, Markets } from "@/lib/static/types";
 
 export interface MarketsScreenProps {
   onOpenSettings: () => void;

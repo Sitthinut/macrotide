@@ -1,4 +1,4 @@
-import type { AIPersonality } from "@/lib/mock/types";
+import type { AIPersonality } from "@/lib/static/types";
 
 // Editorial AI personas. Read by ChatScreen for the topbar label and (eventually)
 // a persona picker. Not user state — does not belong in lib/mock/data.ts.
