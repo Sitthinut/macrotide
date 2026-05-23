@@ -977,9 +977,11 @@ day-trader headline noise.
 | Of Dollars and Data | `https://ofdollarsanddata.com/feed/` | Nick Maggiulli's long-form data-driven investing posts. |
 | A Wealth of Common Sense | `https://awealthofcommonsense.com/feed/` | Ben Carlson's index-investing commentary. |
 | Bangkok Post Business | `https://www.bangkokpost.com/rss/data/business.xml` | Thai macro lens (rates, baht, fiscal). |
+| Federal Reserve · Monetary Policy | `https://www.federalreserve.gov/feeds/press_monetary.xml` | FOMC statements, minutes, projections — authoritative rate-decision signal for rebalancing context. Low-volume (~15 items/year) by design. |
 
 Sources audited and considered but **dropped:**
 
+*v1 audit (philosophy / long-form round):*
 - **Bogleheads forum** — high volume; "Re:" replies are thread-context
   noise without summaries.
 - **MarketWatch top stories** — headline-driven mainstream finance; not
@@ -988,8 +990,34 @@ Sources audited and considered but **dropped:**
   bodies to non-browser UAs (anti-bot tarpit); the surviving feedburner
   feed last updated October 2011. No working editorial RSS.
 
+*v2 audit (market-context round):*
+- **MarketWatch marketpulse / realtimeheadlines** — both technically parse
+  but newest items date from mid-2025 (~10-11 months stale); the feeds
+  appear abandoned.
+- **Bloomberg markets** — feed works but content is dominated by
+  company / CEO interviews rather than market-commentary.
+- **Yahoo Finance `news/rssindex`** — high-volume, mixed clickbait with
+  occasional market recaps; signal-to-noise too low.
+- **Yahoo Finance `rss/2.0/headline`** — per-symbol only (requires
+  `?s=SYMBOL`); not a market-wide feed.
+- **CNBC markets** — daily trader / options noise (Nvidia options flow,
+  software-stock mini-bull-markets) — exactly the headline style the
+  app explicitly wants to avoid.
+- **Reuters markets / business** — `reuters.com/markets/rss` is
+  auth-gated (401) and `feeds.reuters.com` no longer resolves.
+- **Federal Reserve press (all)** — `press_all.xml` works but mixes
+  monetary-policy items with administrative / enforcement releases.
+  Chose the narrower `press_monetary.xml` to keep signal tight.
+- **Bank of Thailand** — no public RSS as of 2026-05-22. The new BOT
+  site (URL pattern `/en/news-and-media/news/mpc/...`) does not expose
+  feed-discovery links, robots.txt, or any `.xml` / `.rss` paths via
+  the english sitemap. Bangkok Post Business remains the Thai-side
+  window — they routinely cover MPC decisions.
+
 When adding a new feed, audit it first against the bar above: HTTP 200,
-parseable RSS/Atom, ≥10 recent items, editorial-not-headline.
+parseable RSS/Atom, ≥10 recent items (≥1 item within ~4 months is fine
+for naturally-low-volume sources like central-bank press releases),
+editorial-not-headline.
 
 ### Dependencies
 

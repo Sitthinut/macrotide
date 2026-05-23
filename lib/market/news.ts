@@ -36,7 +36,12 @@ export interface NewsAggregateResult {
 }
 
 // Source list. Editorial picks confirmed by user via lead 2026-05-23.
-// Bogleheads + MarketWatch + Morningstar were considered and dropped.
+// v1 (philosophy): ODAD, AWoCS, Bangkok Post Business.
+// v2 added Fed Monetary Policy for rate-decision / market-context coverage.
+// Considered and dropped across both rounds: Bogleheads, Morningstar,
+// MarketWatch (top + marketpulse + realtime), Bloomberg markets, Reuters,
+// Yahoo Finance, CNBC, Bank of Thailand (no public RSS). See ROADMAP
+// Phase 3c for rationale.
 export const NEWS_FEEDS: readonly NewsFeedDef[] = [
   {
     id: "ofdollarsanddata",
@@ -52,6 +57,11 @@ export const NEWS_FEEDS: readonly NewsFeedDef[] = [
     id: "bangkokpost-business",
     name: "Bangkok Post Business",
     url: "https://www.bangkokpost.com/rss/data/business.xml",
+  },
+  {
+    id: "fed-monetary",
+    name: "Federal Reserve · Monetary Policy",
+    url: "https://www.federalreserve.gov/feeds/press_monetary.xml",
   },
 ] as const;
 

@@ -100,6 +100,35 @@ describe("parseFeed (RSS 2.0)", () => {
   it("returns [] on a document with no recognized envelope", () => {
     expect(parseFeed("<html><body>hi</body></html>", FEED_A)).toEqual([]);
   });
+
+  it("handles CDATA-wrapped pubDate (Federal Reserve feed shape)", () => {
+    // The Fed's press_monetary.xml wraps pubDate values in CDATA. Confirm
+    // textValue() unwraps both <title> CDATA and <pubDate> CDATA the same way.
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0">
+  <channel>
+    <title>FRB: Press Release - Monetary Policy</title>
+    <item>
+      <title><![CDATA[Federal Reserve issues FOMC statement]]></title>
+      <link><![CDATA[https://www.federalreserve.gov/newsevents/pressreleases/monetary20260429a.htm]]></link>
+      <guid><![CDATA[https://www.federalreserve.gov/newsevents/pressreleases/monetary20260429a.htm]]></guid>
+      <pubDate><![CDATA[Wed, 29 Apr 2026 18:00:00 GMT]]></pubDate>
+    </item>
+  </channel>
+</rss>`;
+    const items = parseFeed(xml, {
+      id: "fed-monetary",
+      name: "Federal Reserve · Monetary Policy",
+      url: "https://www.federalreserve.gov/feeds/press_monetary.xml",
+    });
+    expect(items.length).toBe(1);
+    expect(items[0].title).toBe("Federal Reserve issues FOMC statement");
+    expect(items[0].url).toBe(
+      "https://www.federalreserve.gov/newsevents/pressreleases/monetary20260429a.htm",
+    );
+    expect(items[0].publishedAt).toBe("2026-04-29T18:00:00.000Z");
+    expect(items[0].source).toBe("Federal Reserve · Monetary Policy");
+  });
 });
 
 describe("parseFeed (Atom 1.0)", () => {
