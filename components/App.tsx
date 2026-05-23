@@ -11,6 +11,7 @@ import {
 } from "@/components/AppPanels";
 import { Icon } from "@/components/Icon";
 import { type PortfolioFormValues, PortfolioSheet } from "@/components/PortfolioSheet";
+import { AccountScreen } from "@/components/screens/AccountScreen";
 import { ChatScreen } from "@/components/screens/ChatScreen";
 import { ConnectScreen } from "@/components/screens/ConnectScreen";
 import { JournalScreen } from "@/components/screens/JournalScreen";
@@ -35,7 +36,15 @@ function portfolioToFormValues(p: Portfolio): PortfolioFormValues {
   };
 }
 
-type Screen = "connect" | "portfolio" | "markets" | "chat" | "journal" | "models" | "settings";
+type Screen =
+  | "connect"
+  | "portfolio"
+  | "markets"
+  | "chat"
+  | "journal"
+  | "models"
+  | "settings"
+  | "account";
 
 const MOBILE_NAV: { id: Screen; icon: string; label: string }[] = [
   { id: "portfolio", icon: "home", label: "Portfolio" },
@@ -272,6 +281,9 @@ export function App() {
         />
       );
     }
+    if (screen === "account") {
+      return <AccountScreen onBack={() => setScreen("portfolio")} />;
+    }
     return null;
   };
 
@@ -301,7 +313,8 @@ export function App() {
 
   // ===== MOBILE SHELL (unchanged behaviour from original) =====
   if (!isWide) {
-    const hideNav = screen === "connect" || screen === "settings" || screen === "models";
+    const hideNav =
+      screen === "connect" || screen === "settings" || screen === "models" || screen === "account";
     return (
       <>
         <div className="app-root">
@@ -397,7 +410,12 @@ export function App() {
                 >
                   <Icon name="insight" size={14} /> Templates
                 </button>
-                <button onClick={() => setAccountMenuOpen(false)}>
+                <button
+                  onClick={() => {
+                    setAccountMenuOpen(false);
+                    setScreen("account");
+                  }}
+                >
                   <Icon name="user" size={14} /> Account
                 </button>
                 <hr />
