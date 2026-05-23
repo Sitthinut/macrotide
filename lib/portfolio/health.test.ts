@@ -1,0 +1,241 @@
+import { describe, expect, it } from "vitest";
+import type { Holding, MixSlice } from "@/lib/static/types";
+import {
+  allocationByClass,
+  allocationByRegion,
+  blendedTer,
+  cashWeight,
+  computeDrift,
+  computeHealth,
+  concentration,
+  rebalanceHint,
+  summarizeHealth,
+  trackingGap,
+} from "./health";
+
+function holding(partial: Partial<Holding> & { ticker: string; value: number }): Holding {
+  return {
+    ticker: partial.ticker,
+    name: partial.name ?? partial.ticker,
+    category: partial.category ?? "Fund",
+    class: partial.class ?? "equity",
+    region: partial.region ?? "United States",
+    value: partial.value,
+    cost: partial.cost ?? partial.value,
+    units: partial.units ?? 1,
+    nav: partial.nav ?? 1,
+    d1: partial.d1 ?? 0,
+    ytd: partial.ytd ?? 0,
+    y1: partial.y1 ?? 0,
+    ter: partial.ter ?? 0,
+    color: partial.color ?? "var(--accent)",
+    source: partial.source ?? "",
+  };
+}
+
+const holdings: Holding[] = [
+  holding({ ticker: "SCBS&P500", value: 600, class: "equity", region: "United States", ter: 0.4 }),
+  holding({ ticker: "K-WORLDX", value: 200, class: "equity", region: "Global", ter: 0.45 }),
+  holding({ ticker: "K-FIXED-A", value: 150, class: "bond", region: "Thailand", ter: 0.2 }),
+  holding({ ticker: "KFCASH-A", value: 50, class: "cash", region: "Thailand", ter: 0.1 }),
+];
+const TOTAL = 1000;
+
+const targetMix: MixSlice[] = [
+  { label: "US Equity", pct: 50, ticker: "SCBS&P500", color: "var(--accent)" },
+  { label: "Global Equity", pct: 30, ticker: "K-WORLDX", color: "#7C7CFF" },
+  { label: "Thai Bonds", pct: 20, ticker: "K-FIXED-A", color: "#F4A434" },
+];
+
+describe("allocationByClass", () => {
+  it("groups by asset class and computes percentages, dropping empties", () => {
+    const slices = allocationByClass(holdings, TOTAL);
+    const map = Object.fromEntries(slices.map((s) => [s.key, s.pct]));
+    expect(map.equity).toBeCloseTo(80);
+    expect(map.bond).toBeCloseTo(15);
+    expect(map.cash).toBeCloseTo(5);
+    expect(map.alternative).toBeUndefined();
+  });
+
+  it("returns no slices for an empty/zero portfolio", () => {
+    expect(allocationByClass([], 0)).toEqual([]);
+  });
+});
+
+describe("allocationByRegion", () => {
+  it("groups by region, sorted by value desc", () => {
+    const slices = allocationByRegion(holdings, TOTAL);
+    expect(slices[0].label).toBe("United States");
+    expect(slices[0].pct).toBeCloseTo(60);
+    expect(slices.find((s) => s.label === "Thailand")?.pct).toBeCloseTo(20);
+  });
+});
+
+describe("computeDrift", () => {
+  it("computes per-ticker drift vs target", () => {
+    const drift = computeDrift(holdings, TOTAL, targetMix);
+    const byTicker = Object.fromEntries(drift.map((d) => [d.ticker, d]));
+    expect(byTicker["SCBS&P500"].drift).toBeCloseTo(10); // 60 - 50
+    expect(byTicker["K-WORLDX"].drift).toBeCloseTo(-10); // 20 - 30
+    expect(byTicker["K-FIXED-A"].drift).toBeCloseTo(-5); // 15 - 20
+  });
+
+  it("surfaces holdings with no target (e.g. cash) as full overweight", () => {
+    const drift = computeDrift(holdings, TOTAL, targetMix);
+    const cash = drift.find((d) => d.ticker === "KFCASH-A");
+    expect(cash?.target).toBe(0);
+    expect(cash?.drift).toBeCloseTo(5);
+  });
+
+  it("sums target slices that share a ticker", () => {
+    const splitMix: MixSlice[] = [
+      { label: "Long Bonds", pct: 40, ticker: "K-FIXED-A", color: "#F4A434" },
+      { label: "Mid Bonds", pct: 15, ticker: "K-FIXED-A", color: "#FFC97A" },
+    ];
+    const drift = computeDrift(
+      [holding({ ticker: "K-FIXED-A", value: 1000, class: "bond" })],
+      1000,
+      splitMix,
+    );
+    expect(drift[0].target).toBeCloseTo(55);
+    expect(drift[0].drift).toBeCloseTo(45);
+  });
+
+  it("sorts by absolute drift magnitude", () => {
+    const drift = computeDrift(holdings, TOTAL, targetMix);
+    const mags = drift.map((d) => Math.abs(d.drift));
+    expect(mags).toEqual([...mags].sort((a, b) => b - a));
+  });
+});
+
+describe("trackingGap", () => {
+  it("equals the sum of overweights (= half the absolute deviation)", () => {
+    const drift = computeDrift(holdings, TOTAL, targetMix);
+    // overweights: SCBS&P500 +10, KFCASH-A +5 => 15
+    expect(trackingGap(drift)).toBeCloseTo(15);
+  });
+
+  it("is zero when perfectly on target", () => {
+    const onTarget: Holding[] = [
+      holding({ ticker: "SCBS&P500", value: 500 }),
+      holding({ ticker: "K-WORLDX", value: 300 }),
+      holding({ ticker: "K-FIXED-A", value: 200, class: "bond" }),
+    ];
+    expect(trackingGap(computeDrift(onTarget, 1000, targetMix))).toBeCloseTo(0);
+  });
+});
+
+describe("blendedTer", () => {
+  it("value-weights the expense ratios", () => {
+    // (600*0.4 + 200*0.45 + 150*0.2 + 50*0.1)/1000 = 365/1000 = 0.365
+    expect(blendedTer(holdings, TOTAL)).toBeCloseTo(0.365);
+  });
+  it("returns 0 for empty portfolio", () => {
+    expect(blendedTer([], 0)).toBe(0);
+  });
+});
+
+describe("concentration", () => {
+  it("reports largest holding, top-3 and HHI", () => {
+    const c = concentration(holdings, TOTAL);
+    expect(c.top?.ticker).toBe("SCBS&P500");
+    expect(c.top?.pct).toBeCloseTo(60);
+    expect(c.top3Pct).toBeCloseTo(95); // 60 + 20 + 15
+    expect(c.holdingCount).toBe(4);
+    // HHI = 0.6^2 + 0.2^2 + 0.15^2 + 0.05^2 = 0.425
+    expect(c.hhi).toBeCloseTo(0.425);
+  });
+  it("handles empty portfolio", () => {
+    const c = concentration([], 0);
+    expect(c.top).toBeNull();
+    expect(c.hhi).toBe(0);
+  });
+});
+
+describe("cashWeight", () => {
+  it("sums the cash-class sleeves", () => {
+    expect(cashWeight(holdings, TOTAL)).toBeCloseTo(5);
+  });
+});
+
+describe("computeHealth", () => {
+  it("rolls every signal up in one pass", () => {
+    const h = computeHealth(holdings, TOTAL, targetMix, 0.35);
+    expect(h.trackingGapPp).toBeCloseTo(15);
+    expect(h.blendedTer).toBeCloseTo(0.365);
+    expect(h.targetTer).toBe(0.35);
+    expect(h.cashPct).toBeCloseTo(5);
+    expect(h.byClass.length).toBe(3);
+    expect(h.concentration.top?.ticker).toBe("SCBS&P500");
+  });
+
+  it("omits drift when no target mix is provided", () => {
+    const h = computeHealth(holdings, TOTAL, null);
+    expect(h.drift).toEqual([]);
+    expect(h.trackingGapPp).toBe(0);
+  });
+});
+
+describe("rebalanceHint", () => {
+  it("returns the most over- and under-weight sleeves", () => {
+    const drift = computeDrift(holdings, TOTAL, targetMix);
+    const hint = rebalanceHint(drift);
+    expect(hint.trim?.ticker).toBe("SCBS&P500"); // +10
+    expect(hint.add?.ticker).toBe("K-WORLDX"); // -10
+  });
+
+  it("ignores drift within tolerance", () => {
+    const onTarget = [
+      holding({ ticker: "SCBS&P500", value: 500 }),
+      holding({ ticker: "K-WORLDX", value: 300 }),
+      holding({ ticker: "K-FIXED-A", value: 200, class: "bond" }),
+    ];
+    const hint = rebalanceHint(computeDrift(onTarget, 1000, targetMix));
+    expect(hint.trim).toBeNull();
+    expect(hint.add).toBeNull();
+  });
+});
+
+describe("summarizeHealth", () => {
+  it("flags large drift first, with rebalance moves in the body", () => {
+    const h = computeHealth(holdings, TOTAL, targetMix);
+    const s = summarizeHealth(h, "Balanced");
+    expect(s.tone).toBe("watch");
+    expect(s.title).toContain("off your Balanced target");
+    expect(s.body).toContain("SCBS&P500");
+  });
+
+  it("flags concentration when a single fund dominates and drift is small", () => {
+    const concentrated = [
+      holding({ ticker: "SCBS&P500", value: 800, ter: 0.4 }),
+      holding({ ticker: "K-WORLDX", value: 200, ter: 0.4 }),
+    ];
+    // mix matching weights so drift is ~0, isolating the concentration branch
+    const mix: MixSlice[] = [
+      { label: "US", pct: 80, ticker: "SCBS&P500", color: "var(--accent)" },
+      { label: "Global", pct: 20, ticker: "K-WORLDX", color: "#7C7CFF" },
+    ];
+    const s = summarizeHealth(computeHealth(concentrated, 1000, mix), "Custom");
+    expect(s.tone).toBe("action");
+    expect(s.title).toContain("SCBS&P500");
+  });
+
+  it("praises a low blended fee when nothing else is wrong", () => {
+    // Diversified + on-target + no cash, so drift/concentration/cash all pass.
+    const cheap = [
+      holding({ ticker: "SCBS&P500", value: 250, ter: 0.4 }),
+      holding({ ticker: "K-WORLDX", value: 250, ter: 0.4 }),
+      holding({ ticker: "K-FIXED-A", value: 250, class: "bond", ter: 0.4 }),
+      holding({ ticker: "K-USA-A", value: 250, ter: 0.4 }),
+    ];
+    const mix: MixSlice[] = [
+      { label: "US", pct: 25, ticker: "SCBS&P500", color: "var(--accent)" },
+      { label: "Global", pct: 25, ticker: "K-WORLDX", color: "#7C7CFF" },
+      { label: "Bonds", pct: 25, ticker: "K-FIXED-A", color: "#F4A434" },
+      { label: "US Value", pct: 25, ticker: "K-USA-A", color: "#5BA7B5" },
+    ];
+    const s = summarizeHealth(computeHealth(cheap, 1000, mix), "Custom");
+    expect(s.tone).toBe("good");
+    expect(s.title).toContain("0.40%");
+  });
+});

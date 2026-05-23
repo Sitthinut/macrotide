@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { MiniBars, MiniLine, ModelDonut, PerfChart } from "@/components/charts";
+import { ModelDonut } from "@/components/charts";
 import { FeedbackRow } from "@/components/FeedbackRow";
 import { type HoldingFormValues, HoldingSheet } from "@/components/HoldingSheet";
 import { Icon } from "@/components/Icon";
+import { AllocationDonut, DriftBars, NavChart } from "@/components/InteractiveCharts";
 import {
   useModelPortfoliosView,
   usePortfolioView,
@@ -14,14 +15,8 @@ import type { SeriesRange } from "@/lib/fetchers/portfolio";
 import { invalidate } from "@/lib/fetchers/swr";
 import { fmtPct } from "@/lib/format";
 import { DEFAULT_QUOTE_SOURCE, isQuoteSource } from "@/lib/market/sources";
-import {
-  ANALYSIS,
-  BENCHMARKS,
-  CONTRIB_SERIES,
-  DRIFT_SERIES,
-  GEO_BREAKDOWN,
-  SECTOR_BREAKDOWN,
-} from "@/lib/static/analysis";
+import { computeHealth, rebalanceHint, summarizeHealth } from "@/lib/portfolio/health";
+import { BENCHMARKS } from "@/lib/static/analysis";
 import type { AssetClass, BenchmarkKey, Holding, Portfolio } from "@/lib/static/types";
 
 function holdingToFormValues(h: Holding, fallbackBucketId: string): HoldingFormValues {
@@ -41,19 +36,6 @@ function holdingToFormValues(h: Holding, fallbackBucketId: string): HoldingFormV
     color: h.color,
   };
 }
-
-const SEV_COLOR: Record<string, string> = {
-  good: "var(--gain)",
-  low: "var(--muted)",
-  medium: "var(--amber)",
-  high: "var(--loss)",
-};
-const SEV_LABEL: Record<string, string> = {
-  good: "Strength",
-  low: "Note",
-  medium: "Watch",
-  high: "Action",
-};
 
 const SWATCH_ABBR: Record<string, string> = {
   "SCBS&P500": "S&P",
@@ -238,6 +220,29 @@ export function PortfolioScreen({
     };
   }, [view]);
 
+  // Target model for plan/health drift — resolve before the early returns so
+  // the health memo below can depend on it (hooks must run unconditionally).
+  const targetModel = useMemo(() => {
+    if (!models) return null;
+    if (activePf?.targetModelId) return models.find((m) => m.id === activePf.targetModelId) ?? null;
+    return models.find((m) => m.id === planSelectedModelId) ?? null;
+  }, [models, activePf, planSelectedModelId]);
+
+  // Real, computed health signals — drift vs target, blended fee, concentration,
+  // cash drag. No mock fixtures. (Subjective 0–100 scores stay out — task #11.)
+  const health = useMemo(
+    () =>
+      view
+        ? computeHealth(
+            view.holdings,
+            view.totalValue,
+            targetModel?.mix ?? null,
+            targetModel?.ter ?? null,
+          )
+        : null,
+    [view, targetModel],
+  );
+
   if (isLoading || !view || !portfolios) {
     return (
       <div className="screen">
@@ -314,11 +319,20 @@ export function PortfolioScreen({
   const maxV = view.series.length ? Math.max(...view.series.map((s) => s.v)) : 0;
   const fmtK = (n: number) => `฿${Math.round(n / 1000).toLocaleString("en-US")}k`;
 
-  const targetModel = activePf?.targetModelId
-    ? models?.find((m) => m.id === activePf.targetModelId)
-    : models?.find((m) => m.id === planSelectedModelId);
-
   const showAnalysis = activePfId === "all" || activePf?.targetModelId;
+
+  // `health` is derived from `view`, which is guaranteed non-null past the
+  // early returns above — this guard just narrows the type for TS.
+  if (!health) return null;
+
+  const hasHoldings = view.holdings.length > 0;
+  const headline = summarizeHealth(health, targetModel?.name ?? null);
+  const { trim, add } = rebalanceHint(health.drift);
+  const HEADLINE_TONE: Record<string, string> = {
+    good: "var(--gain)",
+    watch: "var(--amber)",
+    action: "var(--loss)",
+  };
 
   return (
     <div className="screen">
@@ -438,7 +452,7 @@ export function PortfolioScreen({
             {fmtK(minV)} → {fmtK(maxV)}
           </span>
         </div>
-        <PerfChart
+        <NavChart
           data={view.series}
           benchmarkData={benchmark !== "none" ? BENCHMARKS[benchmark] : null}
           benchmarkLabel={
@@ -486,41 +500,81 @@ export function PortfolioScreen({
         </div>
       </div>
 
-      {activePfId === "all" && (
+      {hasHoldings && (
         <div style={{ marginBottom: 14 }}>
           <div className="section-header" style={{ padding: "0 20px" }}>
             <h3>Charts</h3>
           </div>
           <div className="chart-row">
             <div className="chart-card">
-              <div className="h">DRIFT FROM TARGET · 6M</div>
-              <div className="v" style={{ color: "var(--amber)" }}>
-                +6.2pp
+              <div className="h">ALLOCATION · BY ASSET CLASS</div>
+              <AllocationDonut data={health.byClass} height={150} />
+              <div className="stack-sm" style={{ fontSize: 11, marginTop: 4 }}>
+                {health.byClass.map((s) => (
+                  <div key={s.key} className="row between" style={{ gap: 6, padding: "2px 0" }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span
+                        style={{ width: 7, height: 7, borderRadius: "50%", background: s.color }}
+                      ></span>
+                      <span>{s.label}</span>
+                    </span>
+                    <span className="num" style={{ color: "var(--muted)" }}>
+                      {s.pct.toFixed(1)}%
+                    </span>
+                  </div>
+                ))}
               </div>
-              <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
-                Trending up — time to consider a rebalance
-              </div>
-              <MiniLine data={DRIFT_SERIES} accent="var(--amber)" height={48} />
             </div>
 
             <div className="chart-card">
-              <div className="h">GEOGRAPHY</div>
+              <div className="h">
+                DRIFT FROM TARGET{targetModel ? ` · ${targetModel.name}` : ""}
+              </div>
+              {targetModel ? (
+                <>
+                  <div
+                    className="v"
+                    style={{
+                      color: health.trackingGapPp >= 5 ? "var(--amber)" : "var(--gain)",
+                    }}
+                  >
+                    {health.trackingGapPp.toFixed(1)}pp
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
+                    {health.trackingGapPp >= 5
+                      ? "Off target — consider a rebalance"
+                      : "Closely tracking your target"}
+                  </div>
+                  <DriftBars data={health.drift} height={150} />
+                </>
+              ) : (
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "var(--muted)",
+                    lineHeight: 1.5,
+                    padding: "16px 0",
+                  }}
+                >
+                  Pick a target model to track how far each holding has drifted from its intended
+                  weight.
+                </div>
+              )}
+            </div>
+
+            <div className="chart-card">
+              <div className="h">GEOGRAPHY · BY FUND DOMICILE</div>
               <div className="stacked-bar">
-                {GEO_BREAKDOWN.map((g) => (
-                  <span key={g.label} style={{ width: `${g.pct}%`, background: g.color }}></span>
+                {health.byRegion.map((g) => (
+                  <span key={g.key} style={{ width: `${g.pct}%`, background: g.color }}></span>
                 ))}
               </div>
               <div className="stack-sm" style={{ fontSize: 11 }}>
-                {GEO_BREAKDOWN.map((g) => (
-                  <div key={g.label} className="row between" style={{ gap: 6, padding: "2px 0" }}>
+                {health.byRegion.slice(0, 6).map((g) => (
+                  <div key={g.key} className="row between" style={{ gap: 6, padding: "2px 0" }}>
                     <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <span
-                        style={{
-                          width: 7,
-                          height: 7,
-                          borderRadius: "50%",
-                          background: g.color,
-                        }}
+                        style={{ width: 7, height: 7, borderRadius: "50%", background: g.color }}
                       ></span>
                       <span>{g.label}</span>
                     </span>
@@ -533,46 +587,38 @@ export function PortfolioScreen({
             </div>
 
             <div className="chart-card">
-              <div className="h">SECTOR · ROLL-UP</div>
-              <div className="stacked-bar">
-                {SECTOR_BREAKDOWN.map((g) => (
-                  <span key={g.label} style={{ width: `${g.pct}%`, background: g.color }}></span>
-                ))}
+              <div className="h">CONCENTRATION</div>
+              <div className="v">
+                {health.concentration.top ? `${health.concentration.top.pct.toFixed(0)}%` : "—"}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 10 }}>
+                {health.concentration.top
+                  ? `Largest holding · ${health.concentration.top.ticker}`
+                  : "No holdings"}
               </div>
               <div className="stack-sm" style={{ fontSize: 11 }}>
-                {SECTOR_BREAKDOWN.slice(0, 5).map((g) => (
-                  <div key={g.label} className="row between" style={{ gap: 6, padding: "2px 0" }}>
-                    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span
-                        style={{
-                          width: 7,
-                          height: 7,
-                          borderRadius: "50%",
-                          background: g.color,
-                        }}
-                      ></span>
-                      <span>{g.label}</span>
-                    </span>
-                    <span className="num" style={{ color: "var(--muted)" }}>
-                      {g.pct.toFixed(1)}%
-                    </span>
-                  </div>
-                ))}
-                <div style={{ fontSize: 10, color: "var(--muted)", paddingTop: 4 }}>
-                  + 3 more sectors
+                <div className="row between" style={{ padding: "2px 0" }}>
+                  <span>Top 3 holdings</span>
+                  <span className="num" style={{ color: "var(--muted)" }}>
+                    {health.concentration.top3Pct.toFixed(0)}%
+                  </span>
+                </div>
+                <div className="row between" style={{ padding: "2px 0" }}>
+                  <span>Funds held</span>
+                  <span className="num" style={{ color: "var(--muted)" }}>
+                    {health.concentration.holdingCount}
+                  </span>
+                </div>
+                <div className="row between" style={{ padding: "2px 0" }}>
+                  <span>Cash drag</span>
+                  <span
+                    className="num"
+                    style={{ color: health.cashPct >= 10 ? "var(--amber)" : "var(--muted)" }}
+                  >
+                    {health.cashPct.toFixed(1)}%
+                  </span>
                 </div>
               </div>
-            </div>
-
-            <div className="chart-card">
-              <div className="h">CONTRIBUTIONS · 6M</div>
-              <div className="v">
-                ฿{Math.round(CONTRIB_SERIES.reduce((s, c) => s + c.v, 0) / 1000)}k
-              </div>
-              <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
-                Total added · {CONTRIB_SERIES.filter((c) => c.v > 0).length} deposits
-              </div>
-              <MiniBars data={CONTRIB_SERIES} accent="var(--accent)" height={48} />
             </div>
           </div>
         </div>
@@ -587,32 +633,43 @@ export function PortfolioScreen({
             </span>
           </div>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(4, 1fr)",
-              gap: 6,
-            }}
-          >
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
             {(
               [
-                { key: "diversification", lbl: "DIVERSIFY", color: "var(--accent)" },
-                { key: "fees", lbl: "FEES", color: "var(--gain)" },
-                { key: "alignment", lbl: "ON-TARGET", color: "var(--amber)" },
-                { key: "risk", lbl: "RISK FIT", color: "var(--info)" },
-              ] as {
-                key: keyof typeof ANALYSIS.scores;
-                lbl: string;
-                color: string;
-              }[]
+                {
+                  lbl: "OFF TARGET",
+                  val: `${health.trackingGapPp.toFixed(1)}`,
+                  unit: "pp",
+                  color: health.trackingGapPp >= 5 ? "var(--amber)" : "var(--gain)",
+                },
+                {
+                  lbl: "BLENDED FEE",
+                  val: health.blendedTer.toFixed(2),
+                  unit: "%",
+                  color: health.blendedTer <= 0.75 ? "var(--gain)" : "var(--amber)",
+                },
+                {
+                  lbl: "TOP HOLDING",
+                  val: health.concentration.top ? health.concentration.top.pct.toFixed(0) : "0",
+                  unit: "%",
+                  color: (health.concentration.top?.pct ?? 0) >= 35 ? "var(--loss)" : "var(--info)",
+                },
+                {
+                  lbl: "CASH",
+                  val: health.cashPct.toFixed(0),
+                  unit: "%",
+                  color: health.cashPct >= 10 ? "var(--amber)" : "var(--accent)",
+                },
+              ] as { lbl: string; val: string; unit: string; color: string }[]
             ).map((s) => (
               <div
-                key={s.key}
+                key={s.lbl}
                 className="card-soft"
                 style={{ padding: "8px 8px", textAlign: "center" }}
               >
                 <div className="num" style={{ fontSize: 18, fontWeight: 500, color: s.color }}>
-                  {ANALYSIS.scores[s.key]}
+                  {s.val}
+                  <span style={{ fontSize: 10, marginLeft: 1 }}>{s.unit}</span>
                 </div>
                 <div
                   style={{
@@ -634,7 +691,7 @@ export function PortfolioScreen({
               style={{
                 fontSize: 10,
                 fontFamily: "var(--font-mono)",
-                color: "var(--accent-ink)",
+                color: HEADLINE_TONE[headline.tone],
                 letterSpacing: "0.04em",
                 marginBottom: 4,
               }}
@@ -642,14 +699,9 @@ export function PortfolioScreen({
               ● TOP THING TO KNOW
             </div>
             <div
-              style={{
-                fontSize: 14,
-                fontWeight: 500,
-                marginBottom: 6,
-                letterSpacing: "-0.01em",
-              }}
+              style={{ fontSize: 14, fontWeight: 500, marginBottom: 6, letterSpacing: "-0.01em" }}
             >
-              {ANALYSIS.insights[0].title}
+              {headline.title}
             </div>
             <div
               style={{
@@ -659,17 +711,13 @@ export function PortfolioScreen({
                 marginBottom: 10,
               }}
             >
-              {ANALYSIS.insights[0].body}
+              {headline.body}
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               <button
                 className="btn sm primary"
                 onClick={() => {
-                  window.dispatchEvent(
-                    new CustomEvent("ai-prompt", {
-                      detail: `Help me understand: ${ANALYSIS.insights[0].title}`,
-                    }),
-                  );
+                  window.dispatchEvent(new CustomEvent("ai-prompt", { detail: headline.prompt }));
                 }}
               >
                 <Icon name="chat" size={12} /> Discuss
@@ -677,126 +725,72 @@ export function PortfolioScreen({
             </div>
           </div>
 
-          <div style={{ marginTop: 8 }}>
-            {ANALYSIS.insights.slice(1).map((ins, i, arr) => (
+          {(trim || add) && (
+            <div
+              className="card"
+              style={{
+                marginTop: 12,
+                background: "var(--accent-soft)",
+                borderColor: "transparent",
+              }}
+            >
               <div
-                key={i}
-                onClick={() =>
-                  window.dispatchEvent(
-                    new CustomEvent("ai-prompt", { detail: `Explain: ${ins.title}` }),
-                  )
-                }
                 style={{
-                  padding: "10px 12px",
-                  borderBottom: i < arr.length - 1 ? "1px solid var(--line-soft)" : "none",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
+                  fontSize: 10,
+                  fontFamily: "var(--font-mono)",
+                  color: "var(--accent-ink)",
+                  letterSpacing: "0.04em",
+                  marginBottom: 6,
                 }}
               >
-                <span
-                  style={{
-                    width: 7,
-                    height: 7,
-                    borderRadius: 50,
-                    background: SEV_COLOR[ins.severity],
-                    flexShrink: 0,
-                  }}
-                ></span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: 12.5,
-                      fontWeight: 500,
-                      letterSpacing: "-0.01em",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {ins.title}
+                ● SUGGESTED REBALANCE
+              </div>
+              <div style={{ marginBottom: 10 }}>
+                {trim && (
+                  <div className="row between" style={{ padding: "3px 0", fontSize: 12.5 }}>
+                    <span style={{ color: "var(--accent-ink)" }}>
+                      Trim <strong>{trim.ticker}</strong>
+                    </span>
+                    <span className="num" style={{ color: "var(--accent-ink)" }}>
+                      {trim.current.toFixed(0)}% → {trim.target.toFixed(0)}%
+                    </span>
                   </div>
-                </div>
-                <span
-                  className="tag"
-                  style={{
-                    background: "transparent",
-                    borderColor: SEV_COLOR[ins.severity],
-                    color: SEV_COLOR[ins.severity],
-                    fontSize: 9,
+                )}
+                {add && (
+                  <div className="row between" style={{ padding: "3px 0", fontSize: 12.5 }}>
+                    <span style={{ color: "var(--accent-ink)" }}>
+                      Add to <strong>{add.ticker}</strong>
+                    </span>
+                    <span className="num" style={{ color: "var(--accent-ink)" }}>
+                      {add.current.toFixed(0)}% → {add.target.toFixed(0)}%
+                    </span>
+                  </div>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  className="btn sm primary"
+                  style={{ flex: 1 }}
+                  onClick={() => {
+                    window.dispatchEvent(
+                      new CustomEvent("ai-prompt", {
+                        detail: `My portfolio has drifted ${health.trackingGapPp.toFixed(1)}pp from my ${targetModel.name} target. Give me a step-by-step rebalance plan with specific amounts.`,
+                      }),
+                    );
                   }}
                 >
-                  {SEV_LABEL[ins.severity]}
-                </span>
+                  Plan the rebalance <Icon name="arrowRight" size={12} />
+                </button>
               </div>
-            ))}
-          </div>
 
-          <div
-            className="card"
-            style={{
-              marginTop: 12,
-              background: "var(--accent-soft)",
-              borderColor: "transparent",
-            }}
-          >
-            <div
-              style={{
-                fontSize: 10,
-                fontFamily: "var(--font-mono)",
-                color: "var(--accent-ink)",
-                letterSpacing: "0.04em",
-                marginBottom: 6,
-              }}
-            >
-              ● SUGGESTED ACTION
+              <FeedbackRow
+                topic="rebalance"
+                label="HELPFUL?"
+                value={feedback.rebalance ?? null}
+                onChange={(rating) => setFeedback({ ...feedback, rebalance: rating })}
+              />
             </div>
-            <div
-              style={{
-                fontSize: 14,
-                fontWeight: 500,
-                marginBottom: 6,
-                color: "var(--accent-ink)",
-                letterSpacing: "-0.01em",
-              }}
-            >
-              Rebalance toward {targetModel.name}
-            </div>
-            <div
-              style={{
-                fontSize: 12.5,
-                color: "var(--accent-ink)",
-                lineHeight: 1.45,
-                opacity: 0.85,
-                marginBottom: 10,
-              }}
-            >
-              5 small moves to bring you back on target.
-            </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button
-                className="btn sm primary"
-                style={{ flex: 1 }}
-                onClick={() => {
-                  window.dispatchEvent(
-                    new CustomEvent("ai-prompt", {
-                      detail: `Show me the rebalance plan for ${targetModel.name} and explain each move.`,
-                    }),
-                  );
-                }}
-              >
-                Read more <Icon name="arrowRight" size={12} />
-              </button>
-            </div>
-
-            <FeedbackRow
-              topic="rebalance"
-              label="HELPFUL?"
-              value={feedback.rebalance ?? null}
-              onChange={(rating) => setFeedback({ ...feedback, rebalance: rating })}
-            />
-          </div>
+          )}
         </div>
       )}
 

@@ -1,4 +1,6 @@
-// Chart primitives — all hand-drawn SVG, no chart library needed
+// Small hand-drawn SVG chart primitives (sparklines, mini line/bars, model
+// donuts). These are intentionally NOT interactive — for full charts with
+// hover + tooltips see components/InteractiveCharts.tsx (recharts).
 
 import { useId } from "react";
 import type { MixSlice, SeriesPoint } from "@/lib/static/types";

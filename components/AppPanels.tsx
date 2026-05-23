@@ -4,8 +4,13 @@ import { useEffect, useState } from "react";
 import { ChatThreadList } from "@/components/ChatThreadList";
 import { Icon } from "@/components/Icon";
 import { ChatScreen } from "@/components/screens/ChatScreen";
-import { useJournalView, usePortfolioView } from "@/lib/fetchers/legacy";
-import { ANALYSIS } from "@/lib/static/analysis";
+import {
+  useJournalView,
+  useModelPortfoliosView,
+  usePortfolioView,
+  useSelectedModelId,
+} from "@/lib/fetchers/legacy";
+import { computeHealth, summarizeHealth } from "@/lib/portfolio/health";
 
 export type AppId = "chat" | "portfolios" | "plan" | "notes";
 
@@ -207,82 +212,123 @@ export function PortfoliosPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
-const SEV_TAG: Record<string, string> = {
-  good: "Strength",
-  low: "Note",
-  medium: "Watch",
-  high: "Action",
+const TONE_COLOR: Record<string, string> = {
+  good: "var(--gain)",
+  watch: "var(--amber)",
+  action: "var(--loss)",
 };
 
 export function PlanPanel({ onClose }: { onClose: () => void }) {
-  const score = Math.round(
-    (ANALYSIS.scores.diversification + ANALYSIS.scores.alignment + ANALYSIS.scores.fees) / 3,
-  );
-  const dashLen = (150.8 * score) / 100;
+  // Real, computed health over the combined book vs the selected target model.
+  const { aggregate } = usePortfolioView();
+  const { models } = useModelPortfoliosView();
+  const selectedModelId = useSelectedModelId();
+  const targetModel = models?.find((m) => m.id === selectedModelId) ?? null;
+
+  const health = aggregate
+    ? computeHealth(
+        aggregate.holdings,
+        aggregate.totalValue,
+        targetModel?.mix ?? null,
+        targetModel?.ter ?? null,
+      )
+    : null;
+
+  if (!health) {
+    return (
+      <>
+        <PanelHeader title="Plan & Health" onClose={onClose} />
+        <div
+          className="ra-panel-body"
+          style={{ padding: 16, color: "var(--muted)", fontSize: 12.5 }}
+        >
+          Loading…
+        </div>
+      </>
+    );
+  }
+
+  const headline = summarizeHealth(health, targetModel?.name ?? null);
+  const metrics: { label: string; value: string }[] = [
+    ...(targetModel
+      ? [{ label: "Off target", value: `${health.trackingGapPp.toFixed(1)}pp` }]
+      : []),
+    { label: "Blended fee", value: `${health.blendedTer.toFixed(2)}%` },
+    {
+      label: "Top holding",
+      value: health.concentration.top ? `${health.concentration.top.pct.toFixed(0)}%` : "—",
+    },
+    { label: "Cash", value: `${health.cashPct.toFixed(0)}%` },
+  ];
+
   return (
     <>
       <PanelHeader title="Plan & Health" onClose={onClose} />
       <div className="ra-panel-body" style={{ padding: "12px 14px" }}>
-        <div className="score-card" style={{ marginBottom: 12 }}>
-          <div className="score-circle">
-            <svg width="56" height="56" viewBox="0 0 56 56">
-              <circle
-                cx="28"
-                cy="28"
-                r="24"
-                fill="none"
-                stroke="var(--line-soft)"
-                strokeWidth="4"
-              />
-              <circle
-                cx="28"
-                cy="28"
-                r="24"
-                fill="none"
-                stroke="var(--accent)"
-                strokeWidth="4"
-                strokeDasharray={`${dashLen} 999`}
-                strokeLinecap="round"
-              />
-            </svg>
-            <div className="val">{score}</div>
+        <div
+          className="card-soft"
+          style={{ padding: "10px 12px", marginBottom: 12, borderRadius: 12 }}
+        >
+          <div
+            style={{
+              fontSize: 9.5,
+              fontFamily: "var(--font-mono)",
+              letterSpacing: "0.06em",
+              color: TONE_COLOR[headline.tone],
+              marginBottom: 4,
+            }}
+          >
+            ● TOP THING TO KNOW
           </div>
-          <div style={{ flex: 1 }}>
-            <div
-              style={{
-                fontSize: 13.5,
-                fontWeight: 500,
-                letterSpacing: "-0.01em",
-              }}
-            >
-              On track
-            </div>
-            <div style={{ fontSize: 12, color: "var(--muted)" }}>
-              {ANALYSIS.insights.length} items
-            </div>
+          <div
+            style={{ fontSize: 13, fontWeight: 500, letterSpacing: "-0.01em", lineHeight: 1.35 }}
+          >
+            {headline.title}
           </div>
+          <button
+            type="button"
+            className="btn ghost sm"
+            style={{ marginTop: 8, gap: 4 }}
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent("ai-prompt", { detail: headline.prompt }))
+            }
+          >
+            <Icon name="chat" size={12} /> Discuss
+          </button>
         </div>
+
         <div
           style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 9.5,
-            color: "var(--muted)",
-            letterSpacing: "0.06em",
-            margin: "4px 0 6px",
+            display: "grid",
+            gridTemplateColumns: `repeat(${metrics.length}, 1fr)`,
+            gap: 6,
           }}
         >
-          SUGGESTED ACTIONS
-        </div>
-        <ul className="bullet-list">
-          {ANALYSIS.insights.slice(0, 4).map((it, i) => (
-            <li key={i}>
-              <span className="marker">{String(i + 1).padStart(2, "0")}</span>
-              <span>
-                <strong>{SEV_TAG[it.severity] || "Note"}:</strong> {it.title}
-              </span>
-            </li>
+          {metrics.map((m) => (
+            <div key={m.label} style={{ textAlign: "center" }}>
+              <div className="num" style={{ fontSize: 15, fontWeight: 500 }}>
+                {m.value}
+              </div>
+              <div
+                style={{
+                  fontSize: 8.5,
+                  fontFamily: "var(--font-mono)",
+                  color: "var(--muted)",
+                  letterSpacing: "0.04em",
+                  marginTop: 2,
+                }}
+              >
+                {m.label.toUpperCase()}
+              </div>
+            </div>
           ))}
-        </ul>
+        </div>
+
+        {!targetModel && (
+          <div style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.5, marginTop: 12 }}>
+            Pick a target model to unlock drift tracking and rebalance suggestions.
+          </div>
+        )}
       </div>
     </>
   );
