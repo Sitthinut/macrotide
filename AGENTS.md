@@ -155,19 +155,57 @@ different sources without a schema change.
 
 ## Environment variables
 
-| Var | Required | Notes |
-| --- | --- | --- |
-| `OPENROUTER_API_KEY` | for real chat | Stub responses without it. |
-| `AI_MODELS` | optional | Comma-separated fallback chain. Default `openrouter/auto`. |
-| `DEMO_OPENROUTER_API_KEY` | optional | Demo traffic uses this if set, else falls back to free-tier router. |
-| `AUTH_SECRET` | production | Required when `NODE_ENV=production`. |
-| `AUTH_DISABLED` | dev convenience | Set to `1` to skip the login gate on localhost. |
-| `PUBLIC_APP_URL` | production | Canonical URL; passkeys break if this changes. |
-| `SEC_API_KEY` | quote_source=thai_mutual_fund | Thai SEC Open API subscription key (Primary or Secondary — both valid). One subscription covers all 6 product groups. Header: `Ocp-Apim-Subscription-Key`. |
-| `OCR_MODEL` | optional | OpenRouter vision model used by the Image tab of the Add holdings sheet. Defaults to a `:free` tier model so this path never burns paid credits. |
+**Canonical reference** for every `process.env.*` the app reads. Operator
+setup hints live in [.env.example](./.env.example) (a thin template); the
+authoritative behavior, defaults, and code locations are below. Keep this
+table in sync when adding/renaming vars and also update
+[.env.example](./.env.example), [AUTH.md](./AUTH.md), and
+[DEPLOY.md](./DEPLOY.md) where they reference specifics.
 
-Keep [.env.example](./.env.example), [AUTH.md](./AUTH.md), and
-[DEPLOY.md](./DEPLOY.md) in sync when you add/rename variables.
+### AI / model selection
+
+| Var | Default | Read by | Notes |
+| --- | --- | --- | --- |
+| `OPENROUTER_API_KEY` | — (required for live AI) | [lib/ai/provider.ts](./lib/ai/provider.ts), [lib/portfolio/ocr.ts](./lib/portfolio/ocr.ts) | Chat returns a stub response without it; OCR returns 503. |
+| `AI_MODELS` | `openrouter/free,openrouter/auto` | [lib/ai/provider.ts](./lib/ai/provider.ts) | Comma-separated owner-chat fallback chain. First model is primary. |
+| `DEMO_OPENROUTER_API_KEY` | falls back to `OPENROUTER_API_KEY` | [lib/ai/provider.ts](./lib/ai/provider.ts) | Separate key for demo traffic so demo can't burn owner quota. |
+| `DEMO_AI_MODELS` | `openrouter/free` | [lib/ai/provider.ts](./lib/ai/provider.ts) | Demo-chat model chain. Free-only by default. |
+| `OCR_MODEL` | `baidu/qianfan-ocr-fast:free` | [lib/portfolio/ocr.ts](./lib/portfolio/ocr.ts) | Image OCR primary. Free tier; 27.2M tokens/week quota. Operator-verified no-train (re-verify before public deploy). |
+| `OCR_FALLBACK_MODEL` | `baidu/qianfan-ocr-fast` (only when `OCR_MODEL` is unset) | [lib/portfolio/ocr.ts](./lib/portfolio/ocr.ts) | Auto-retry on quota / rate-limit. Pinning `OCR_MODEL` disables the default fallback unless this is set explicitly. |
+
+### Auth (better-auth)
+
+| Var | Default | Read by | Notes |
+| --- | --- | --- | --- |
+| `AUTH_SECRET` | dev fallback (`macrotide-dev-secret-change-me`) | [lib/auth/index.ts](./lib/auth/index.ts) | REQUIRED in production (boot throws if `NODE_ENV=production` and unset). |
+| `AUTH_DISABLED` | unset | [middleware](./middleware.ts), [app/(auth)/login/](./app/(auth)/login/) | Set to `1` to skip the login gate on trusted local dev only. |
+| `AUTH_RP_NAME` | `Macrotide` | [lib/auth/index.ts](./lib/auth/index.ts) | Passkey relying-party display name. |
+| `AUTH_RP_ID` | inferred from `PUBLIC_APP_URL` | [lib/auth/index.ts](./lib/auth/index.ts) | Override only if you understand WebAuthn `rpID` rules. |
+| `PUBLIC_APP_URL` | `http://localhost:3000` (implicit) | [lib/auth/index.ts](./lib/auth/index.ts), [lib/portfolio/ocr.ts](./lib/portfolio/ocr.ts) | Canonical URL. Used for OpenRouter `HTTP-Referer` and WebAuthn origin. Changing this in prod breaks existing passkeys. |
+
+### Database
+
+| Var | Default | Read by | Notes |
+| --- | --- | --- | --- |
+| `DB_PATH` | `data/app.db` | [lib/db/client.ts](./lib/db/client.ts), [lib/mock/seed.ts](./lib/mock/seed.ts) | SQLite file path (relative paths resolved from CWD). Parent dir auto-created. |
+
+### External data sources
+
+| Var | Default | Read by | Notes |
+| --- | --- | --- | --- |
+| `SEC_API_KEY` | — (Thai funds render as "—" without it) | [lib/market/providers/sec-thailand.ts](./lib/market/providers/sec-thailand.ts) | Thai SEC Open API subscription key (Primary or Secondary — both valid). Header: `Ocp-Apim-Subscription-Key`. Covers all 6 product groups under one subscription. |
+
+### Dev-only
+
+| Var | Default | Read by | Notes |
+| --- | --- | --- | --- |
+| `CODEX_AUTH_FILE` | OS-default Codex auth path | [lib/ai/codex.local.ts](./lib/ai/codex.local.ts) | Path to a Codex CLI auth JSON file, used by the local-codex integration during development. Test-only outside of dev. |
+
+### Framework
+
+| Var | Default | Read by | Notes |
+| --- | --- | --- | --- |
+| `NODE_ENV` | `development` (set by Next.js / build tooling) | [lib/auth/index.ts](./lib/auth/index.ts) | Gates the `AUTH_SECRET` requirement and cookie `secure` flag. |
 
 ## Build, lint, test
 
