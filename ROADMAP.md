@@ -31,7 +31,7 @@ verification · ⏸️ needs a user decision before it can proceed.
 | # | Task | Branch | Status | Notes |
 |---|------|--------|--------|-------|
 | 1 | Passkey signup fix (enable `emailAndPassword` bootstrap) | merged→`main` | 🧪 | ✅ merged (414d37a); typecheck/build green. 🧪 you do the final WebAuthn signup click to confirm |
-| 2 | Session close-cycle integration tests | `team/session-tests` | 🔨 | close→idle→reactivate→re-close watermark |
+| 2 | Session close-cycle integration tests | merged→`main` | ✅ | ✅ merged (d125352); 5/5 tests green on main. Done, no user action |
 | 3 | `closeStaleSessions` runnable CLI (`tsx` + `npm run`) | `team/close-stale-cli` | 🔨 | No scheduler pick (parked) |
 
 ### Wave 1 — FOUNDATION (solo, merges before Wave 2)
