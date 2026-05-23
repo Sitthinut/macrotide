@@ -1,11 +1,11 @@
 import { convertToModelMessages, type ModelMessage, streamText, type UIMessage } from "ai";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { resolveDemoProvider, resolveOwnerProvider } from "@/lib/ai/provider";
+import { resolveDemoProvider, resolveOwnerProvider, resolveTierProvider } from "@/lib/ai/provider";
 import { compressContext, estimateTokens } from "@/lib/ai/summarize";
 import { CHAT_RATE_LIMIT, clientIp, rateLimit } from "@/lib/api/rate-limit";
 import { DEMO_COOKIE, withDb } from "@/lib/api/with-db";
-import { runWithDbContext } from "@/lib/db/context";
+import { getUserId, runWithDbContext } from "@/lib/db/context";
 import { DEMO_CHAT_TURN_CAP, getDemoSession, incrementChatTurn } from "@/lib/db/demo";
 import {
   appendMessage,
@@ -14,6 +14,7 @@ import {
   reactivateThread,
   upsertSummary,
 } from "@/lib/db/queries/chat";
+import { dailyTokenBudget, getTier, isOverDailyCap, recordUsage } from "@/lib/db/queries/usage";
 import { buildMemoryBlock } from "@/lib/memory/inject";
 import { createMemoryTools } from "@/lib/memory/tools";
 
@@ -166,11 +167,13 @@ export async function POST(req: Request) {
       reactivateThread(threadId);
     }
 
-    // Pre-Phase-6: single owner. userId is null everywhere; demo sessions
-    // share the same null-namespace as the owner inside their isolated
-    // per-session in-memory DB (so they get their own preference set without
-    // us threading session ids through the memory layer).
-    const userId = null;
+    // Phase 6: the authenticated user id (or `null` in single-owner / pre-auth
+    // mode, plumbed by withDb → AsyncLocalStorage). Demo sessions stay `null`:
+    // they share the owner's null-namespace inside their isolated per-session
+    // in-memory DB (their own preference set without threading session ids
+    // through the memory layer), and they're metered by the demo turn cap, not
+    // the per-user token budget.
+    const userId = demoId ? null : getUserId();
     const system = composeSystemPrompt(userId);
     const modelMessages = await toModelMessagesAsync(body.messages);
 
@@ -224,16 +227,72 @@ export async function POST(req: Request) {
       return response;
     }
 
-    // Owner path — full chat, no cap.
+    const finalThreadId = threadId;
+
+    // ── Authenticated multi-user path (Phase 6 — 6d) ───────────────────────
+    // A real user means tier gating + a daily token cap. Single-owner /
+    // pre-auth mode (userId === null) falls through to the legacy owner path
+    // below, which is uncapped and uses the owner model chain — identical to
+    // pre-Phase-6 behavior.
+    if (userId !== null) {
+      const tier = getTier(userId);
+
+      // Hard gate BEFORE forwarding to OpenRouter: a user already at/over the
+      // cap never starts a (possibly paid) request. The cap resets at UTC
+      // midnight as the usage date key rolls over.
+      if (isOverDailyCap(userId, tier)) {
+        const budget = dailyTokenBudget(tier);
+        const limit = stubResponse(
+          `You've reached today's usage limit (${budget.toLocaleString()} tokens). ` +
+            `It resets at midnight UTC. Your dashboard and saved notes still work — ` +
+            `come back tomorrow to keep chatting.`,
+          finalThreadId,
+        );
+        limit.headers.set("x-daily-limit", "reached");
+        return limit;
+      }
+
+      const provider = resolveTierProvider(tier);
+      if (!provider.ready || !provider.model) {
+        return stubResponse(
+          `AI chat isn't configured yet (${provider.label}). Set OPENROUTER_API_KEY in .env.local — see AUTH.md.`,
+          finalThreadId,
+        );
+      }
+
+      const memoryTools = createMemoryTools({ userId });
+      const result = streamText({
+        model: provider.model,
+        system,
+        messages: compression.messages,
+        tools: memoryTools,
+        maxOutputTokens: tier === "trusted" ? 2048 : 1024,
+        onFinish: ({ text, totalUsage }) => {
+          runWithDbContext(ctx, () => {
+            if (text) {
+              appendMessage({ threadId: finalThreadId, role: "assistant", content: text });
+            }
+            // Log tokens regardless of whether prose came back — a tool-only
+            // turn still consumes budget. `totalUsage` aggregates across steps.
+            recordUsage(userId, totalUsage?.inputTokens ?? 0, totalUsage?.outputTokens ?? 0);
+          });
+        },
+      });
+      const response = result.toUIMessageStreamResponse();
+      response.headers.set("x-thread-id", finalThreadId);
+      setContextHeader(response);
+      return response;
+    }
+
+    // Owner path — full chat, no cap (single-owner / pre-auth mode).
     const provider = resolveOwnerProvider();
     if (!provider.ready || !provider.model) {
       return stubResponse(
         `AI chat isn't configured yet (${provider.label}). Set OPENROUTER_API_KEY in .env.local — see AUTH.md.`,
-        threadId,
+        finalThreadId,
       );
     }
 
-    const finalThreadId = threadId;
     const memoryTools = createMemoryTools({ userId });
     const result = streamText({
       model: provider.model,

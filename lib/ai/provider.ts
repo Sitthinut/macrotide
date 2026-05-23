@@ -103,6 +103,37 @@ export function resolveOwnerProvider(): ResolvedProvider {
   return { model: openrouter(key, models), ready: true, label: chainLabel("OpenRouter", models) };
 }
 
+// The free tier is pinned to OpenRouter's free meta-router — DELIBERATELY not
+// derived from `AI_MODELS`. This is the most cost/security-critical invariant
+// in 6d: a free-tier user can never resolve to a paid model regardless of how
+// the operator configures the owner chain (see ROADMAP § Risk · Per-tier model
+// gating). It's a constant, not an env var, so a config slip can't widen it.
+const FREE_TIER_MODELS = ["openrouter/free"];
+
+/**
+ * Resolve the chat provider for a tier (Phase 6 — 6d):
+ *   - 'trusted' → the owner model chain (`AI_MODELS`, default
+ *                 `openrouter/free → openrouter/auto`); identical to the owner
+ *                 path.
+ *   - 'free'    → `openrouter/free` ONLY. Zero owner cost; ignores `AI_MODELS`.
+ *
+ * Both read the shared `OPENROUTER_API_KEY`; per-user keys are out of scope —
+ * tier gating + the daily cap are what bound free-tier spend.
+ */
+export function resolveTierProvider(tier: "free" | "trusted"): ResolvedProvider {
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key) return { model: null, ready: false, label: "OpenRouter (no key)" };
+  if (tier === "trusted") {
+    const models = parseModels(process.env.AI_MODELS) ?? OWNER_DEFAULT;
+    return { model: openrouter(key, models), ready: true, label: chainLabel("Trusted", models) };
+  }
+  return {
+    model: openrouter(key, FREE_TIER_MODELS),
+    ready: true,
+    label: chainLabel("Free", FREE_TIER_MODELS),
+  };
+}
+
 export function resolveDemoProvider(): ResolvedProvider {
   const key = process.env.DEMO_OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY;
   if (!key) return { model: null, ready: false, label: "Demo (no key configured)" };

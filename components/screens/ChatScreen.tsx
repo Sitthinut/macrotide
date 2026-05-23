@@ -147,6 +147,10 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
   // model's input view; we surface a banner suggesting a fresh chat rather
   // than condensing silently. See docs/features/memory.md § mid-chat.
   const [contextNotice, setContextNotice] = useState(false);
+  // Set when the server rejects a turn because the user hit their daily token
+  // budget (header `x-daily-limit`, Phase 6 — 6d). Resets at UTC midnight
+  // server-side; the banner just nudges the user to come back.
+  const [limitNotice, setLimitNotice] = useState(false);
   const streamRef = useRef<HTMLDivElement>(null);
   // Tracks which thread ids we've already tried to title in this session, so
   // a slow title-endpoint response doesn't get re-fired while the user keeps
@@ -372,6 +376,10 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
       }
       const ctxHeader = res.headers.get("x-context-summarized");
       if (ctxHeader === "1" || ctxHeader === "over") setContextNotice(true);
+      // Daily token budget hit — the server streams a plain-text explanation
+      // (rendered as the assistant turn) and flags it here so we also show a
+      // dismissible banner above the composer.
+      if (res.headers.get("x-daily-limit") === "reached") setLimitNotice(true);
       const returnedThread = res.headers.get("x-thread-id");
       if (returnedThread && returnedThread !== threadId) {
         setThreadId(returnedThread);
@@ -778,6 +786,40 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
             type="button"
             className="btn ghost sm"
             onClick={() => setContextNotice(false)}
+            aria-label="Dismiss"
+            style={{ flexShrink: 0, padding: "4px 8px" }}
+          >
+            <Icon name="close" size={12} />
+          </button>
+        </div>
+      )}
+
+      {limitNotice && (
+        <div
+          role="status"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            margin: "0 8px 6px",
+            padding: "8px 10px",
+            fontSize: 12,
+            lineHeight: 1.4,
+            color: "var(--ink-soft)",
+            background: "var(--card-soft)",
+            border: "1px solid var(--line)",
+            borderRadius: 8,
+          }}
+        >
+          <Icon name="sparkle" size={12} />
+          <span style={{ flex: 1 }}>
+            You've reached today's chat usage limit. It resets at midnight UTC — your dashboard and
+            saved notes are unaffected.
+          </span>
+          <button
+            type="button"
+            className="btn ghost sm"
+            onClick={() => setLimitNotice(false)}
             aria-label="Dismiss"
             style={{ flexShrink: 0, padding: "4px 8px" }}
           >

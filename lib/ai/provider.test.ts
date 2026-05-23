@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveDemoProvider, resolveOwnerProvider } from "./provider";
+import { resolveDemoProvider, resolveOwnerProvider, resolveTierProvider } from "./provider";
 
 const ENV_KEYS = [
   "OPENROUTER_API_KEY",
@@ -50,6 +50,46 @@ describe("resolveOwnerProvider", () => {
     process.env.AI_MODELS = "openrouter/auto";
     const p = resolveOwnerProvider();
     expect(p.label).toBe("OpenRouter · openrouter/auto");
+  });
+});
+
+describe("resolveTierProvider (Phase 6 — 6d tier gating)", () => {
+  it("returns not-ready when key is missing", () => {
+    delete process.env.OPENROUTER_API_KEY;
+    expect(resolveTierProvider("free").ready).toBe(false);
+    expect(resolveTierProvider("trusted").ready).toBe(false);
+  });
+
+  it("trusted tier uses the owner AI_MODELS chain", () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    process.env.AI_MODELS = "openrouter/auto,anthropic/claude-sonnet-4.5";
+    const p = resolveTierProvider("trusted");
+    expect(p.label).toBe("Trusted · openrouter/auto → anthropic/claude-sonnet-4.5");
+  });
+
+  it("trusted tier defaults to free → auto when AI_MODELS unset", () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    delete process.env.AI_MODELS;
+    expect(resolveTierProvider("trusted").label).toBe(
+      "Trusted · openrouter/free → openrouter/auto",
+    );
+  });
+
+  it("free tier resolves to openrouter/free only", () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    delete process.env.AI_MODELS;
+    expect(resolveTierProvider("free").label).toBe("Free · openrouter/free");
+  });
+
+  it("INVARIANT: free tier NEVER resolves to a paid model, regardless of AI_MODELS", () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    // Operator misconfigures AI_MODELS with a pricey model — free tier must
+    // ignore it entirely. A regression here burns the owner's budget.
+    process.env.AI_MODELS = "anthropic/claude-opus-4.1,openai/gpt-5";
+    const p = resolveTierProvider("free");
+    expect(p.label).toBe("Free · openrouter/free");
+    expect(p.label).not.toContain("anthropic");
+    expect(p.label).not.toContain("openai");
   });
 });
 

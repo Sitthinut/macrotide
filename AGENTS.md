@@ -190,6 +190,24 @@ table in sync when adding/renaming vars and also update
 | --- | --- | --- | --- |
 | `DB_PATH` | `data/app.db` | [lib/db/client.ts](./lib/db/client.ts), [lib/mock/seed.ts](./lib/mock/seed.ts) | SQLite file path (relative paths resolved from CWD). Parent dir auto-created. |
 
+### Quotas + tier gating (Phase 6 — 6d)
+
+Per-user metering only applies to **authenticated** requests. Single-owner /
+`AUTH_DISABLED` mode (`getUserId()` === null) is never metered, and demo
+sessions are bounded by the demo turn cap, not these budgets.
+
+| Var | Default | Read by | Notes |
+| --- | --- | --- | --- |
+| `DAILY_TOKEN_BUDGET_FREE` | `20000` | [lib/db/queries/usage.ts](./lib/db/queries/usage.ts) | Daily input+output token cap per `tier='free'` user. Checked before forwarding to OpenRouter; resets at UTC midnight. Malformed/≤0 → default. |
+| `DAILY_TOKEN_BUDGET_TRUSTED` | `200000` | [lib/db/queries/usage.ts](./lib/db/queries/usage.ts) | Same, for `tier='trusted'` users. |
+
+The free-tier **model chain** is pinned to `openrouter/free` in code
+([lib/ai/provider.ts](./lib/ai/provider.ts) `resolveTierProvider`) and is
+deliberately NOT derived from `AI_MODELS` — a free user can never resolve to a
+paid model regardless of operator config. `tier='trusted'` uses the `AI_MODELS`
+owner chain. Tier is stored in `account_tier`; promote via SQL
+(`UPDATE account_tier SET tier='trusted' WHERE user_id=?`).
+
 ### External data sources
 
 | Var | Default | Read by | Notes |
