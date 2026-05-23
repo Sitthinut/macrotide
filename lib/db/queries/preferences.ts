@@ -1,7 +1,7 @@
 // Long-term memory queries. Bitemporal: updates add a new row and
 // supersede; nothing is mutated in place. `valid_until IS NULL` is the
 // active set. See docs/features/memory.md for the full design.
-import { and, desc, eq, gt, isNull, like, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, like, or, sql } from "drizzle-orm";
 import { getDb } from "../context";
 import { userPreferences } from "../schema";
 
@@ -36,6 +36,27 @@ export function listActive(userId: string | null, category?: PreferenceCategory)
     .where(and(...conds))
     .orderBy(userPreferences.category, userPreferences.id)
     .all();
+}
+
+/**
+ * Cold-recall complement to the always-on injection: find ACTIVE preferences
+ * relevant to a free-text query. Tokenizes the query on Unicode letters/numbers
+ * and returns active rows whose content matches ANY token (case-insensitive
+ * substring — same matching style as resolveActive's substring path, but OR'd
+ * across tokens so recall is generous). Ordered by (category, id) like
+ * listActive; empty/blank queries return []. Optionally capped by `limit`.
+ */
+export function recall(userId: string | null, query: string, limit = 20): Preference[] {
+  const tokens = query.toLowerCase().match(/[\p{L}\p{N}]+/gu);
+  if (!tokens || tokens.length === 0) return [];
+  const tokenMatches = tokens.map((t) => like(userPreferences.content, `%${t}%`));
+  const rows = getDb()
+    .select()
+    .from(userPreferences)
+    .where(and(activeFilter(userId), or(...tokenMatches)))
+    .orderBy(userPreferences.category, userPreferences.id)
+    .all();
+  return rows.slice(0, limit);
 }
 
 export function listRecentlyForgotten(userId: string | null, days = 30): Preference[] {

@@ -1413,7 +1413,15 @@ enough archived-session data to need any of it.
    saved-count) for a future toast/digest surface.
 8. **5b chat summarization** — summarize-and-replace older turns when a
    session crosses ~80% context (banner-suggested, not silent).
-9. **5b recall + search** — `recall_preferences` tool + sidebar FTS.
+9. **5b recall + search** — ✅ **shipped 2026-05-23** — `recall_preferences`
+   tool (5th memory tool; keyword match over ACTIVE rows, the cold-recall
+   complement to always-on injection) in `lib/memory/tools.ts` backed by
+   `recall()` in `lib/db/queries/preferences.ts`. Sidebar full-text search:
+   external-content FTS5 table `chat_messages_fts` + 3 sync triggers
+   (insert/update/delete) via migration `0005_chat_fts`, a `searchThreads()`
+   query (`lib/db/queries/search.ts`; bm25-ranked message snippets + title
+   LIKE, soft-deleted threads excluded), a `GET /api/chat/search` route, and
+   a debounced search input in `ChatThreadList`.
 
 ### Acceptance criteria
 

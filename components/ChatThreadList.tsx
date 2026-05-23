@@ -18,6 +18,12 @@ interface BucketedThread {
   threads: ThreadRow[];
 }
 
+interface ThreadSearchHit {
+  thread: ThreadRow;
+  snippet: string | null;
+  matchedOn: "message" | "title" | "both";
+}
+
 function bucketize(threads: ThreadRow[]): BucketedThread[] {
   const now = Date.now();
   const dayMs = 24 * 60 * 60_000;
@@ -83,6 +89,20 @@ export function ChatThreadList({
   // path stays one request.
   const { data, isLoading, error } = useResource<ThreadRow[]>(open ? "/api/chat/threads" : null);
   const [showDeleted, setShowDeleted] = useState(false);
+
+  // Sidebar full-text search. The raw input updates immediately for
+  // responsiveness; `debouncedQuery` trails by 200ms so we don't fire a
+  // request per keystroke. A blank query falls back to the bucketed list.
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedQuery(searchQuery.trim()), 200);
+    return () => clearTimeout(id);
+  }, [searchQuery]);
+  const searchActive = debouncedQuery.length > 0;
+  const { data: searchData, isLoading: searchLoading } = useResource<ThreadSearchHit[]>(
+    open && searchActive ? `/api/chat/search?q=${encodeURIComponent(debouncedQuery)}` : null,
+  );
   const { data: deletedData, isLoading: deletedLoading } = useResource<ThreadRow[]>(
     open && showDeleted ? "/api/chat/threads?include=deleted" : null,
   );
@@ -118,6 +138,8 @@ export function ChatThreadList({
       setMenuOpenId(null);
       setRenamingId(null);
       setShowDeleted(false);
+      setSearchQuery("");
+      setDebouncedQuery("");
     }
   }, [open]);
 
@@ -193,7 +215,72 @@ export function ChatThreadList({
     await invalidate(/^\/api\/chat\/threads/);
   };
 
-  const listBody = (
+  const searchResults = (
+    <>
+      {searchLoading && (
+        <div style={{ padding: "16px", fontSize: 13, color: "var(--muted)" }}>Searching…</div>
+      )}
+      {!searchLoading && searchData && searchData.length === 0 && (
+        <div style={{ padding: "16px", fontSize: 13, color: "var(--muted)" }}>
+          No chats match “{debouncedQuery}”.
+        </div>
+      )}
+      {searchData?.map((hit) => {
+        const t = hit.thread;
+        const isActive = t.id === activeThreadId;
+        const title = titleFor(t);
+        return (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => {
+              onSelect(t.id);
+              onClose();
+            }}
+            style={{
+              display: "block",
+              width: "100%",
+              textAlign: "left",
+              background: isActive ? "var(--accent-soft)" : "transparent",
+              border: 0,
+              cursor: "pointer",
+              padding: "8px 16px",
+            }}
+            title={title}
+          >
+            <div
+              style={{
+                fontSize: 13.5,
+                fontWeight: isActive ? 600 : 400,
+                color: isActive ? "var(--accent-ink)" : "var(--ink)",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {title}
+            </div>
+            {hit.snippet && (
+              <div
+                style={{
+                  fontSize: 11.5,
+                  color: "var(--muted)",
+                  marginTop: 2,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {hit.snippet}
+              </div>
+            )}
+          </button>
+        );
+      })}
+    </>
+  );
+
+  const normalList = (
     <>
       {isLoading && (
         <div style={{ padding: "16px", fontSize: 13, color: "var(--muted)" }}>Loading…</div>
@@ -487,6 +574,32 @@ export function ChatThreadList({
           </div>
         )}
       </div>
+    </>
+  );
+
+  const listBody = (
+    <>
+      <div style={{ padding: "8px 12px 4px" }}>
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search chats…"
+          aria-label="Search chats"
+          style={{
+            width: "100%",
+            boxSizing: "border-box",
+            background: "var(--card-soft, var(--bg))",
+            border: "1px solid var(--line)",
+            borderRadius: 6,
+            color: "var(--ink)",
+            fontSize: 13,
+            padding: "6px 10px",
+            outline: "none",
+          }}
+        />
+      </div>
+      {searchActive ? searchResults : normalList}
     </>
   );
 

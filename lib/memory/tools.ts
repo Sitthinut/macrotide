@@ -16,6 +16,7 @@ import {
   listActive,
   PREFERENCE_CATEGORIES,
   type Preference,
+  recall,
   save,
   update,
 } from "../db/queries/preferences";
@@ -234,11 +235,50 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
     },
   });
 
+  const recall_preferences = tool({
+    description:
+      "Recall saved preferences relevant to a topic. This is the cold-recall " +
+      "complement to the always-on memory block: the active preferences are " +
+      "already injected at the top of the conversation, so use this only when " +
+      "you need to look something up that may not be top-of-mind — e.g. the " +
+      "user asks 'what did I tell you about my taxes?' or you want to check " +
+      "for a relevant constraint before answering. Matches active preferences " +
+      "by keyword (any word in the query). Returns the matching rows; if " +
+      "nothing matches, say so plainly rather than guessing.",
+    inputSchema: z.object({
+      query: z
+        .string()
+        .min(1)
+        .describe(
+          "Free-text topic or keywords to search saved preferences for " +
+            "(e.g. 'retirement age', 'tax', 'how should you respond').",
+        ),
+    }),
+    execute: async ({ query }) => {
+      const rows = recall(userId, query);
+      return {
+        ok: true as const,
+        count: rows.length,
+        rows: rows.map((r) => ({
+          id: r.id,
+          category: r.category,
+          content: r.content,
+        })),
+        message:
+          rows.length === 0
+            ? `No saved preferences match "${query}".`
+            : `${rows.length} saved preference${rows.length === 1 ? "" : "s"} match "${query}":\n` +
+              formatCandidates(rows),
+      };
+    },
+  });
+
   return {
     save_preference,
     update_preference,
     forget_preference,
     list_preferences,
+    recall_preferences,
   };
 }
 

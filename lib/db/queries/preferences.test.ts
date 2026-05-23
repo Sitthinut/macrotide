@@ -5,7 +5,15 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { runWithDbContext } from "../context";
 import * as schema from "../schema";
-import { forget, listActive, listRecentlyForgotten, restore, save, update } from "./preferences";
+import {
+  forget,
+  listActive,
+  listRecentlyForgotten,
+  recall,
+  restore,
+  save,
+  update,
+} from "./preferences";
 
 function freshDb() {
   const sqlite = new Database(":memory:");
@@ -121,6 +129,67 @@ describe("preferences queries", () => {
       const result = restore(r.id);
       expect(result).toBeUndefined();
       expect(listActive(null)).toHaveLength(1);
+    });
+  });
+});
+
+describe("recall", () => {
+  it("returns active rows matching any query token (case-insensitive)", () => {
+    withFresh(() => {
+      save({
+        userId: null,
+        category: "finance_context",
+        content: "tax: files jointly in Thailand",
+        source: "user_tool",
+      });
+      save({
+        userId: null,
+        category: "profile",
+        content: "retirement age: 55",
+        source: "user_tool",
+      });
+      save({ userId: null, category: "fact", content: "owns a dog", source: "user_tool" });
+
+      const taxHits = recall(null, "TAX situation");
+      expect(taxHits.map((r) => r.content)).toEqual(["tax: files jointly in Thailand"]);
+
+      // Multiple tokens are OR'd, so an unrelated extra word still recalls.
+      const orHits = recall(null, "retirement crypto");
+      expect(orHits.map((r) => r.content)).toEqual(["retirement age: 55"]);
+    });
+  });
+
+  it("excludes forgotten (inactive) rows", () => {
+    withFresh(() => {
+      const r = save({
+        userId: null,
+        category: "fact",
+        content: "wants quarterly rebalancing",
+        source: "user_tool",
+      });
+      expect(recall(null, "rebalancing")).toHaveLength(1);
+      forget(null, String(r.id));
+      expect(recall(null, "rebalancing")).toHaveLength(0);
+    });
+  });
+
+  it("returns [] for blank / punctuation-only queries and on no match", () => {
+    withFresh(() => {
+      save({ userId: null, category: "fact", content: "likes index funds", source: "user_tool" });
+      expect(recall(null, "   ")).toEqual([]);
+      expect(recall(null, "!!!")).toEqual([]);
+      expect(recall(null, "bitcoin")).toEqual([]);
+    });
+  });
+
+  it("orders by (category, id) and respects the limit", () => {
+    withFresh(() => {
+      save({ userId: null, category: "profile", content: "alpha keyword", source: "user_tool" });
+      save({ userId: null, category: "fact", content: "beta keyword", source: "user_tool" });
+      const all = recall(null, "keyword");
+      // fact sorts before profile alphabetically.
+      expect(all.map((r) => r.category)).toEqual(["fact", "profile"]);
+      expect(recall(null, "keyword", 1)).toHaveLength(1);
     });
   });
 });
