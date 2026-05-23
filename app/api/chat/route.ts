@@ -7,6 +7,8 @@ import { DEMO_COOKIE, withDb } from "@/lib/api/with-db";
 import { runWithDbContext } from "@/lib/db/context";
 import { DEMO_CHAT_TURN_CAP, getDemoSession, incrementChatTurn } from "@/lib/db/demo";
 import { appendMessage, createThread, getThread } from "@/lib/db/queries/chat";
+import { buildMemoryBlock } from "@/lib/memory/inject";
+import { createMemoryTools } from "@/lib/memory/tools";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -65,6 +67,17 @@ Your job is to help the user understand their portfolio, sanity-check their plan
 questions about index investing, ETFs, and Thai mutual funds (RMF, SSF, ThaiESG).
 Default to short, conservative, evidence-based answers. Never give personalized buy/sell advice.
 If the user asks for one, decline and remind them to consult a licensed advisor.`;
+
+// Compose the system prompt with the user's active-preference block prepended.
+// The block is computed once per request (frozen-for-the-session discipline;
+// see docs/features/memory.md § Why "frozen for the session") so the prefix
+// cache hits across turns of the same session. Writes from memory tools
+// during this request land in the DB but do not retroactively change this
+// snapshot — they take effect on the next chat.
+function composeSystemPrompt(userId: string | null): string {
+  const memory = buildMemoryBlock(userId);
+  return memory ? `${memory}\n\n${SYSTEM_PROMPT}` : SYSTEM_PROMPT;
+}
 
 function stubResponse(message: string, threadId?: string): Response {
   const headers: Record<string, string> = {
@@ -153,10 +166,17 @@ export async function POST(req: Request) {
       }
       incrementChatTurn(demoId);
       const finalThreadId = threadId;
+      // Pre-Phase-6: single owner. userId is null everywhere; demo sessions
+      // share the same null-namespace as the owner inside their isolated
+      // per-session in-memory DB (so they get their own preference set
+      // without us threading session ids through the memory layer).
+      const userId = null;
+      const memoryTools = createMemoryTools({ userId });
       const result = streamText({
         model: provider.model,
-        system: SYSTEM_PROMPT,
+        system: composeSystemPrompt(userId),
         messages: await toModelMessagesAsync(body.messages),
+        tools: memoryTools,
         maxOutputTokens: 1024,
         onFinish: ({ text }) => {
           if (!text) return;
@@ -180,10 +200,16 @@ export async function POST(req: Request) {
     }
 
     const finalThreadId = threadId;
+    // Pre-Phase-6: single owner — userId is null. Phase 6 will resolve the
+    // authenticated user here and thread it through to both the injected
+    // memory block and the tool execution layer.
+    const userId = null;
+    const memoryTools = createMemoryTools({ userId });
     const result = streamText({
       model: provider.model,
-      system: SYSTEM_PROMPT,
+      system: composeSystemPrompt(userId),
       messages: await toModelMessagesAsync(body.messages),
+      tools: memoryTools,
       maxOutputTokens: 2048,
       onFinish: ({ text }) => {
         if (!text) return;
