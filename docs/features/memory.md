@@ -63,7 +63,7 @@ fresh with that memory loaded.
 | `active` | The chat you're in. | → `idle` when the session closes (below). |
 | `idle` | Closed, recent. Full history kept. | → `active` when you reopen it and send a message. |
 | `archived` | Older idle chat, grouped separately in the sidebar. | → `active` on resume. |
-| (trashed) | Deleted. Soft-delete with a 30-day restore window, then hard-removed. Orthogonal to the states above. | restore within 30 days. |
+| `trashed` | Deleted — a separate axis from the states above (set via `deletedAt`, not `status`): soft-delete with a 30-day restore window, then hard-removed. | restore within 30 days. |
 
 ### What "closing a session" means
 
@@ -86,11 +86,18 @@ re-does old work.
 
 ### Long chats stay affordable
 
-If a chat grows past ~80% of the model's context budget, the Advisor summarizes
-the older turns and sends that summary in their place — the model's *input view*
+If a chat grows past ~80% of the context budget, the Advisor summarizes the
+older turns and sends that summary in their place — the model's *input view*
 shrinks, but **no message is ever deleted** from the chat. A banner tells you
 this happened. This keeps a 50-turn chat from costing dramatically more than a
 short one.
+
+The "budget" is a fixed conservative constant (`DEFAULT_CONTEXT_BUDGET_TOKENS`,
+32k, in `lib/ai/summarize.ts`) — a safe floor across the varied free-tier
+OpenRouter models, *not* read from the live model's actual window. Token use is
+estimated with a chars/4 heuristic (no tokenizer dependency). Both the budget
+and the 0.8 threshold are overridable per call via `compressContext()`; the chat
+route uses the defaults.
 
 ### Sidebar
 
