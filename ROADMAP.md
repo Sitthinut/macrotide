@@ -1009,23 +1009,53 @@ once you have a clear personal need.
 
 ### Follow-up: advisor-assist OCR (depends on Phase 6 tool calls)
 
-The cheap-now OCR (partial rows + confirmation table) handles the easy case
-where the user can read missing fields off the screenshot themselves. The
-harder case: user uploads a screenshot, OCR pulls 7 tickers, 3 are missing
-units — and the user doesn't remember the exact unit counts either. Today
-that user is stuck.
+**Where we are today (post-2026-05-23 redesign):** `/api/import/image` returns
+`{ text: string }` — pure transcription, no structuring. The UI displays the
+transcription in a monospace block with a Copy button and a prompt:
+*"Use the Manual tab to enter rows, or paste this into chat and ask the
+advisor to structure it for you."* The **human bridges** OCR and the
+advisor: they copy the text and either fill the Manual form themselves or
+paste it into chat where the advisor reads it as plain text (no tools — the
+advisor can talk about it but can't write holdings yet).
 
-The advisor-assist version turns this into a conversation:
+This works for users who can recognize their tickers in the transcription
+and know their unit counts. It fails when (a) the OCR is dirty (typos in
+ticker symbols, line breaks in the wrong places) and (b) the user can't
+manually reconcile what they see.
 
-1. On upload, `/api/import/image` still returns `{ rows: ProposedRow[] }`.
-2. If any row is incomplete, the UI offers "Walk through these with the
-   advisor" instead of (or alongside) the manual confirmation table.
-3. Clicking opens a chat thread pre-loaded with structured proposal cards —
-   one per holding — like the existing `propose_plan_edit` flow.
-4. The advisor asks targeted questions ("I see K-WORLDX but couldn't read
-   units — do you have a confirmation slip or recent statement?") and uses
-   a new `propose_holding` tool to fill in fields based on the conversation.
-5. User accepts/rejects each card; accepted cards POST to `/api/holdings`.
+**Advisor-assist turns the human bridge into an automated one. The raw
+transcription is intermediate state — the user never sees it.** The Image
+tab becomes a one-step upload that hands off to the advisor:
+
+1. On upload, `/api/import/image` returns the transcription as today.
+2. The Image tab does NOT render the raw text. Instead it auto-starts (or
+   resumes) a chat thread with the transcription pre-loaded as a system
+   message ("I just OCR'd this screenshot for the user — turn it into
+   holdings rows. The user has NOT seen the raw OCR; show them only
+   structured proposals.").
+3. Advisor reasons over the text. Calls a new `propose_holding` tool for
+   each row it can confidently identify; asks clarifying questions in chat
+   for the rest ("I see what looks like `K-FIXED-A` but the units are
+   smudged — any guess?").
+4. Each `propose_holding` call renders as a card in the chat — structurally
+   identical to the existing `propose_plan_edit` cards. Each card shows
+   the proposed ticker / units / avgCost / quoteSource cleanly (no OCR
+   typos, no stray line breaks).
+5. User accepts/rejects each card. Accepted cards POST to `/api/holdings`.
+
+Why hide the transcription: raw OCR is noisy (typos, weird whitespace,
+mis-read currency symbols). Showing it to the user trades clarity for
+transparency they don't need. If the advisor proposes the wrong ticker,
+the user catches it on the card (they recognize their own holdings); if
+they want to debug deeper, a "show what the OCR read" expand on the chat
+turn is the escape hatch — but it's collapsed by default.
+
+Why this split-labor architecture is right: vision models that can OCR
+cheaply can't reliably do structured output (we proved this in the v1→v3
+redesign). Reasoning models that can do structured output don't do OCR
+cheaply. Splitting the labor — cheap vision for transcription, smarter
+reasoning model for structuring + conversation — gets quality and cost
+both right, AND keeps the transcription out of the user's face.
 
 Shape mirrors Phase 2's plan-edit pattern. Schema addition:
 
@@ -1034,16 +1064,21 @@ CREATE TABLE holding_proposals (
   id           TEXT PRIMARY KEY,
   thread_id    TEXT NOT NULL REFERENCES chat_threads(id),
   bucket_id    TEXT REFERENCES buckets(id),
-  draft        TEXT NOT NULL,           -- JSON ProposedRow
-  rationale    TEXT,
+  draft        TEXT NOT NULL,           -- JSON: { ticker, englishName?, units?, avgCost?, quoteSource }
+  rationale    TEXT,                    -- advisor's reasoning, shown on the card
+  source_text  TEXT,                    -- the OCR transcription excerpt this draft came from (audit trail)
   status       TEXT NOT NULL,           -- "pending" | "accepted" | "rejected"
   created_at   TEXT NOT NULL,
   resolved_at  TEXT
 );
 ```
 
-**Depends on:** Phase 6 tool-call surface being solid (chat tools that mutate
-state, structured proposal cards). Don't start this before Phase 6's
+(The exported `ProposedRow` type in `lib/portfolio/ocr.ts` is the contract
+for `draft` — we kept it around after the v3 redesign specifically so this
+follow-up can reuse the same shape.)
+
+**Depends on:** Phase 6 tool-call surface being solid (chat tools that
+mutate state, structured proposal cards). Don't start this before Phase 6's
 `propose_plan_edit` lands — it's the same pattern and should reuse the same
 infrastructure.
 
