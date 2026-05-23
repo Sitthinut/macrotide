@@ -5,7 +5,6 @@ import { ChatThreadList } from "@/components/ChatThreadList";
 import { FeedbackRow } from "@/components/FeedbackRow";
 import { Icon } from "@/components/Icon";
 import { invalidate } from "@/lib/fetchers/swr";
-import { applyPlanEdit } from "@/lib/portfolio/plan-edit";
 import { AI_PERSONALITIES } from "@/lib/static/personalities";
 
 const ACTIVE_THREAD_KEY = "macrotide_chat_active_thread";
@@ -352,12 +351,13 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
     dirtyRef.current = true;
     // Build the model conversation from prior turns + this new prompt.
     const model = [
-      ...history
-        .filter((m) => !m.proposal) // proposals are UI-only
-        .map((m) => ({
-          role: m.role === "ai" ? "assistant" : "user",
-          content: m.text,
-        })),
+      // Send each turn's text. The `proposal` field is UI-only metadata and is
+      // never forwarded (we only pass role + text), but the assistant prose that
+      // accompanied a proposal IS part of the conversation, so keep these turns.
+      ...history.map((m) => ({
+        role: m.role === "ai" ? "assistant" : "user",
+        content: m.text,
+      })),
       { role: "user" as const, content: prompt },
     ];
 
@@ -433,6 +433,24 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
               const msg = (toolOut as { message?: unknown }).message;
               if (typeof msg === "string" && msg.trim()) toolMessages.push(msg.trim());
             }
+            // propose_plan_edit emits a `proposal` in its tool output (the
+            // PlanProposal shape the card expects). Attach it to the streaming
+            // assistant message so PlanProposalCard renders with Accept/Not now.
+            if (toolOut && typeof toolOut === "object" && "proposal" in toolOut) {
+              const p = (toolOut as { proposal?: unknown }).proposal;
+              if (p && typeof p === "object" && "section" in p && "add" in p) {
+                const raw = p as Partial<PlanProposal>;
+                const proposal: PlanProposal = {
+                  section: String(raw.section ?? "Plan"),
+                  rationale: String(raw.rationale ?? ""),
+                  add: raw.add ?? null,
+                  rm: raw.rm ?? null,
+                };
+                setMessages((prev) =>
+                  prev.map((m) => (m.id === placeholderId ? { ...m, proposal } : m)),
+                );
+              }
+            }
           } catch {
             // Some events are not JSON (heartbeats, [DONE]); ignore.
           }
@@ -493,46 +511,9 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
     setMessages(nextHistory);
     setInput("");
 
-    const isPlanEdit =
-      /add|update|change|set|replace|remove/i.test(prompt) &&
-      /(rule|principle|risk|target|commitment|plan)/i.test(prompt);
-    if (isPlanEdit) {
-      // Client-side proposal preview — purely a UI affordance for the
-      // "edit my plan" affordance until we wire AI tool calls (Phase 2.6).
-      setLoading(true);
-      setTimeout(() => {
-        setLoading(false);
-        const m = prompt.match(
-          /(?:add|update|change|set|replace|remove)\s+(?:a|the)?\s*(?:rule|line|principle|note|item)?\s*[:"']?(.+?)["']?$/i,
-        );
-        const newLine = m?.[1] ? m[1].trim() : (prompt.split("about").pop()?.trim() ?? prompt);
-        const sectionGuess = /risk/i.test(prompt)
-          ? "Risk"
-          : /commit|rule/i.test(prompt)
-            ? "Commitments"
-            : /target|alloc/i.test(prompt)
-              ? "Target"
-              : "Principles";
-        const proposal: PlanProposal = {
-          section: sectionGuess,
-          rationale: `Adding to your ${sectionGuess} section to reflect: "${newLine}". This will be saved to your plan and the advisor will reference it in future conversations.`,
-          add: `- ${newLine}`,
-          rm: null,
-        };
-        setMessages((m) => [
-          ...m,
-          {
-            role: "ai",
-            text: `I'll add this to your **${sectionGuess}** section. Here's the change — confirm to apply.`,
-            ts: Date.now(),
-            id: makeId(),
-            proposal,
-          },
-        ]);
-      }, 700);
-      return;
-    }
-
+    // Plan edits now flow through the advisor's propose_plan_edit tool: the
+    // model emits a proposal in the chat stream, which askLive picks up and
+    // renders as a PlanProposalCard. No client-side heuristic / fake preview.
     void askLive(prompt, messages);
   };
 
@@ -569,26 +550,18 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
     // Optimistic: mark applied immediately, roll back on failure.
     setMessages((prev) => prev.map((x, i) => (i === idx ? { ...x, applied: true } : x)));
     try {
-      const planRes = await fetch("/api/plan");
-      if (!planRes.ok) throw new Error(`plan fetch ${planRes.status}`);
-      const current = (await planRes.json()) as {
-        markdown?: string;
-        selectedModelId?: string | null;
-      };
-      const nextMarkdown = applyPlanEdit(current.markdown ?? "", {
-        section: proposal.section,
-        add: proposal.add,
-        rm: proposal.rm,
-      });
-      const putRes = await fetch("/api/plan", {
-        method: "PUT",
+      // Single server round trip — the route reads the current plan, applies
+      // the additive edit (applyPlanEdit), and upserts it, all per-user scoped.
+      const res = await fetch("/api/plan/edit", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          markdown: nextMarkdown,
-          selectedModelId: current.selectedModelId ?? null,
+          section: proposal.section,
+          add: proposal.add,
+          rm: proposal.rm,
         }),
       });
-      if (!putRes.ok) throw new Error(`plan put ${putRes.status}`);
+      if (!res.ok) throw new Error(`plan edit ${res.status}`);
       invalidate("/api/plan");
     } catch (err) {
       // Roll back the optimistic apply and surface the error inline.

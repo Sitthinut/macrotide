@@ -1,6 +1,13 @@
-import { convertToModelMessages, type ModelMessage, streamText, type UIMessage } from "ai";
+import {
+  convertToModelMessages,
+  type ModelMessage,
+  stepCountIs,
+  streamText,
+  type UIMessage,
+} from "ai";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { createAdvisorTools } from "@/lib/advisor/tools";
 import { resolveDemoProvider, resolveOwnerProvider, resolveTierProvider } from "@/lib/ai/provider";
 import { compressContext, estimateTokens } from "@/lib/ai/summarize";
 import { CHAT_RATE_LIMIT, clientIp, rateLimit } from "@/lib/api/rate-limit";
@@ -74,7 +81,16 @@ const SYSTEM_PROMPT = `You are Macrotide, an AI companion for index investors fo
 Your job is to help the user understand their portfolio, sanity-check their plan, and answer
 questions about index investing, ETFs, and Thai mutual funds (RMF, SSF, ThaiESG).
 Default to short, conservative, evidence-based answers. Never give personalized buy/sell advice.
-If the user asks for one, decline and remind them to consult a licensed advisor.`;
+If the user asks for one, decline and remind them to consult a licensed advisor.
+
+You have tools to read the user's real data — use them instead of guessing:
+- read_portfolio for their actual holdings, allocation, drift, fees, and concentration;
+- read_plan for their written investing plan;
+- read_journal to recall past notes, decisions, and questions.
+Use write_journal to log a decision or note when the user asks.
+When the user wants to add a rule/principle/risk note/target to their plan, call
+propose_plan_edit — it shows them a card to confirm; it does NOT change the plan itself.
+Always read before you reference numbers or propose plan changes, and never invent figures.`;
 
 // Compose the system prompt with the user's active-preference block prepended.
 // The block is computed once per request (frozen-for-the-session discipline;
@@ -207,12 +223,17 @@ export async function POST(req: Request) {
       }
       incrementChatTurn(demoId);
       const finalThreadId = threadId;
-      const memoryTools = createMemoryTools({ userId });
+      const tools = { ...createMemoryTools({ userId }), ...createAdvisorTools({ userId }) };
       const result = streamText({
         model: provider.model,
         system,
         messages: compression.messages,
-        tools: memoryTools,
+        tools,
+        // Multi-step so the model can call a read tool (read_portfolio /
+        // read_plan / read_journal) and then answer using the result, or
+        // explain a proposal after propose_plan_edit. Token usage aggregates
+        // across steps in onFinish, so 6d's per-user budget is unaffected.
+        stopWhen: stepCountIs(5),
         maxOutputTokens: 1024,
         onFinish: ({ text }) => {
           if (!text) return;
@@ -260,12 +281,13 @@ export async function POST(req: Request) {
         );
       }
 
-      const memoryTools = createMemoryTools({ userId });
+      const tools = { ...createMemoryTools({ userId }), ...createAdvisorTools({ userId }) };
       const result = streamText({
         model: provider.model,
         system,
         messages: compression.messages,
-        tools: memoryTools,
+        tools,
+        stopWhen: stepCountIs(5),
         maxOutputTokens: tier === "trusted" ? 2048 : 1024,
         onFinish: ({ text, totalUsage }) => {
           runWithDbContext(ctx, () => {
@@ -293,12 +315,13 @@ export async function POST(req: Request) {
       );
     }
 
-    const memoryTools = createMemoryTools({ userId });
+    const tools = { ...createMemoryTools({ userId }), ...createAdvisorTools({ userId }) };
     const result = streamText({
       model: provider.model,
       system,
       messages: compression.messages,
-      tools: memoryTools,
+      tools,
+      stopWhen: stepCountIs(5),
       maxOutputTokens: 2048,
       onFinish: ({ text }) => {
         if (!text) return;
