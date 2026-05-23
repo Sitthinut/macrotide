@@ -1826,7 +1826,6 @@ that was edited.
      prompt (writes `source='extracted'` rows) + chat-history
      summarization + `recall_preferences` tool + sidebar FTS. Needs a job
      runner (also unblocks the parked "scheduled jobs" phase).
-   - **Phase 4 manual-entry autocomplete** — half-day, closes Phase 4.
    - **Phase 6 (multi-user)** — multi-day, one-way door. Only start when
      committed to sharing with family/friends.
 4. **Don't pick yet:**
