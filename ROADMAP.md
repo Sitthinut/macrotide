@@ -45,7 +45,7 @@ verification · ⏸️ needs a user decision before it can proceed.
 | 5 | 6b Identity — better-auth google/github (env-gated), `/login` buttons, post-OAuth passkey prompt | merged→`main` | 🧪 | ✅ merged (914c783). Env-gated: boots passkey-only with nothing set. 🧪 register OAuth apps (callbacks `<PUBLIC_APP_URL>/api/auth/callback/{google,github}`) + set 4 client vars + browser verify |
 | 6 | 6d Quotas + tier gating — model-chain by tier, daily cap, usage logging, limit UI | merged→`main` | ✅ | ✅ merged (9ed504f). Free tier pinned to `openrouter/free` in code (can't resolve paid). 26 new tests. Active once a real user logs in; owner path unchanged. 🧪 browser-verify limit banner needs an auth'd user |
 | 7 | 6c Sign-up gate — Turnstile (dev-bypass when unset), wire `AUTH_RATE_LIMIT`, `tier=free` default, first-user bucket seed, `/legal/*` + checkbox | merged→`main` | 🧪 | ✅ merged (914c783). Turnstile bypassed when `TURNSTILE_SECRET_KEY` unset. 11 auth tests. 🧪 get Turnstile keys; **review `/legal/terms` + `/legal/privacy` boilerplate** before public launch |
-| 8 | 6e Account page — `/account`: passkeys (revoke), linked providers, usage, sign-out-everywhere | `team/6e-account` | 🔨 | 🧪 browser verify |
+| 8 | 6e Account page — passkeys (revoke), linked providers, usage, sign-out-everywhere | merged→`main` | 🧪 | ✅ merged (6f0828d). Built as an `AccountScreen` (matches the app's screens-in-`App.tsx` pattern, not an app-router route); wired the dead "Account" menu button. 🧪 browser-verify passkey revoke + sign-out-everywhere |
 
 ### Wave 3 — Advisor actions + UX (after 6a; reviews can start anytime)
 | # | Task | Branch | Status | Notes |
