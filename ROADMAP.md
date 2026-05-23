@@ -30,14 +30,14 @@ verification · ⏸️ needs a user decision before it can proceed.
 ### Wave 0 — immediate, no dependencies
 | # | Task | Branch | Status | Notes |
 |---|------|--------|--------|-------|
-| 1 | Passkey signup fix (enable `emailAndPassword` bootstrap) | `team/passkey-fix` | ⬜ | Unblocks login; 🧪 final WebAuthn click is the user's |
-| 2 | Session close-cycle integration tests | `team/session-tests` | ⬜ | close→idle→reactivate→re-close watermark |
-| 3 | `closeStaleSessions` runnable CLI (`tsx` + `npm run`) | `team/close-stale-cli` | ⬜ | No scheduler pick (parked) |
+| 1 | Passkey signup fix (enable `emailAndPassword` bootstrap) | `team/passkey-fix` | 🔨 | Unblocks login; 🧪 final WebAuthn click is the user's |
+| 2 | Session close-cycle integration tests | `team/session-tests` | 🔨 | close→idle→reactivate→re-close watermark |
+| 3 | `closeStaleSessions` runnable CLI (`tsx` + `npm run`) | `team/close-stale-cli` | 🔨 | No scheduler pick (parked) |
 
 ### Wave 1 — FOUNDATION (solo, merges before Wave 2)
 | # | Task | Branch | Status | Notes |
 |---|------|--------|--------|-------|
-| 4 | 6a Data layer — migration `0007` (user_id + `usage` + `account_tier`), `OWNER_EMAIL` backfill, per-user query filter, `userId` in AsyncLocalStorage, `requireUser()` | `team/6a-dataplane` | ⬜ | 🧪 user applies migration to real DB + sets `OWNER_EMAIL` |
+| 4 | 6a Data layer — migration `0007` (user_id + `usage` + `account_tier`), `OWNER_EMAIL` backfill, per-user query filter, `userId` in AsyncLocalStorage, `requireUser()` | `team/6a-dataplane` | 🔨 | 🧪 user applies migration to real DB + sets `OWNER_EMAIL` |
 
 ### Wave 2 — Phase 6 fan-out (after 6a merges)
 | # | Task | Branch | Status | Notes |
