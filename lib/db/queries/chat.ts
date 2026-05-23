@@ -4,7 +4,16 @@ import { chatMessages, chatThreads } from "../schema";
 
 export type ChatThread = typeof chatThreads.$inferSelect;
 export type ChatMessage = typeof chatMessages.$inferSelect;
-export type ChatRole = "user" | "assistant" | "tool";
+export type ChatRole = "user" | "assistant" | "tool" | "summary";
+
+/**
+ * Role marker for the context-compression summary row (Phase 5b #3). Stored in
+ * the free-TEXT `chat_messages.role` column (no migration). These rows are an
+ * internal model-input artifact: excluded from display ({@link listMessages}'s
+ * `includeInternal` filter) and from FTS search. Keep in sync with
+ * `SUMMARY_ROLE` in lib/ai/summarize.ts.
+ */
+export const SUMMARY_ROLE = "summary";
 /**
  * Session lifecycle states (Phase 5b). Deletion is intentionally NOT a status —
  * it lives on `deletedAt` (30-day trash) so a thread can be e.g. archived AND
@@ -189,13 +198,58 @@ export function findIdleThreads(olderThanDays: number): ChatThread[] {
     .all();
 }
 
-export function listMessages(threadId: string): ChatMessage[] {
-  return getDb()
+/**
+ * List a thread's messages oldest-first. By default the internal
+ * context-summary rows ({@link SUMMARY_ROLE}) are excluded — they are a
+ * model-input artifact, not part of the visible conversation. Pass
+ * `includeInternal: true` to get them too (e.g. for audit).
+ */
+export function listMessages(
+  threadId: string,
+  opts: { includeInternal?: boolean } = {},
+): ChatMessage[] {
+  const rows = getDb()
     .select()
     .from(chatMessages)
     .where(eq(chatMessages.threadId, threadId))
     .orderBy(asc(chatMessages.createdAt), asc(chatMessages.id))
     .all();
+  if (opts.includeInternal) return rows;
+  return rows.filter((m) => m.role !== SUMMARY_ROLE);
+}
+
+/**
+ * Store (or refresh) the context-compression summary for a thread (Phase 5b
+ * #3). Migration-free: writes a {@link SUMMARY_ROLE} row into `chat_messages`.
+ * Exactly one summary row is kept per thread — a prior one is replaced. This
+ * NEVER touches user/assistant rows, so the persisted conversation is intact;
+ * summarization only ever compresses the model's *input view*.
+ */
+export function upsertSummary(threadId: string, content: string): ChatMessage {
+  const db = getDb();
+  db.delete(chatMessages)
+    .where(and(eq(chatMessages.threadId, threadId), eq(chatMessages.role, SUMMARY_ROLE)))
+    .run();
+  return db
+    .insert(chatMessages)
+    .values({
+      threadId,
+      role: SUMMARY_ROLE,
+      content,
+      createdAt: new Date().toISOString(),
+    })
+    .returning()
+    .get();
+}
+
+/** Latest stored context-compression summary for a thread, if any. */
+export function getLatestSummary(threadId: string): ChatMessage | undefined {
+  return getDb()
+    .select()
+    .from(chatMessages)
+    .where(and(eq(chatMessages.threadId, threadId), eq(chatMessages.role, SUMMARY_ROLE)))
+    .orderBy(desc(chatMessages.id))
+    .get();
 }
 
 export function appendMessage(input: {

@@ -142,6 +142,11 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
   const [threadId, setThreadId] = useState<string | null>(null);
   const [msgFeedback, setMsgFeedback] = useState<Record<number, MsgFeedback>>({});
   const [showThreads, setShowThreads] = useState(false);
+  // Set when the server signals it crossed ~80% of the model context budget
+  // (header `x-context-summarized`). Earlier turns are summarized in the
+  // model's input view; we surface a banner suggesting a fresh chat rather
+  // than condensing silently. See docs/features/memory.md § mid-chat.
+  const [contextNotice, setContextNotice] = useState(false);
   const streamRef = useRef<HTMLDivElement>(null);
   // Tracks which thread ids we've already tried to title in this session, so
   // a slow title-endpoint response doesn't get re-fired while the user keeps
@@ -172,6 +177,7 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
               })),
         );
         setMsgFeedback({});
+        setContextNotice(false);
         return true;
       } catch {
         return false;
@@ -207,6 +213,7 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
     setThreadId(null);
     setMessages(initial);
     setMsgFeedback({});
+    setContextNotice(false);
   }, [initial]);
 
   // Keyboard shortcut: ⌘/Ctrl+K opens a new chat. We swallow the event so the
@@ -319,6 +326,8 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
       if (!res.ok || !res.body) {
         throw new Error(`chat failed (${res.status})`);
       }
+      const ctxHeader = res.headers.get("x-context-summarized");
+      if (ctxHeader === "1" || ctxHeader === "over") setContextNotice(true);
       const returnedThread = res.headers.get("x-thread-id");
       if (returnedThread && returnedThread !== threadId) {
         setThreadId(returnedThread);
@@ -689,6 +698,49 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
           </div>
         )}
       </div>
+
+      {contextNotice && (
+        <div
+          role="status"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            margin: "0 8px 6px",
+            padding: "8px 10px",
+            fontSize: 12,
+            lineHeight: 1.4,
+            color: "var(--ink-soft)",
+            background: "var(--card-soft)",
+            border: "1px solid var(--line)",
+            borderRadius: 8,
+          }}
+        >
+          <Icon name="sparkle" size={12} />
+          <span style={{ flex: 1 }}>
+            This chat is getting long — earlier turns are summarized to keep replies fast. Start a
+            new chat for a clean slate.
+          </span>
+          <button
+            type="button"
+            className="btn ghost sm"
+            onClick={newChat}
+            disabled={loading}
+            style={{ flexShrink: 0 }}
+          >
+            New chat
+          </button>
+          <button
+            type="button"
+            className="btn ghost sm"
+            onClick={() => setContextNotice(false)}
+            aria-label="Dismiss"
+            style={{ flexShrink: 0, padding: "4px 8px" }}
+          >
+            <Icon name="close" size={12} />
+          </button>
+        </div>
+      )}
 
       <div className="suggested-chips">
         {suggestions.map((s) => (

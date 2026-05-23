@@ -1411,8 +1411,26 @@ enough archived-session data to need any of it.
    from the injected block via `INJECT_CONFIDENCE_THRESHOLD`; near-noise
    (`< 0.3`) dropped. The job returns per-session `notices` (summary +
    saved-count) for a future toast/digest surface.
-8. **5b chat summarization** — summarize-and-replace older turns when a
-   session crosses ~80% context (banner-suggested, not silent).
+8. **5b chat summarization** — ✅ **shipped 2026-05-23** —
+   `lib/ai/summarize.ts`: `compressContext()` estimates input tokens with a
+   documented chars/4 heuristic (no tokenizer dep), and once the assembled
+   model input crosses ~80% of the context budget
+   (`DEFAULT_CONTEXT_BUDGET_TOKENS`, `SUMMARIZE_THRESHOLD`) folds the older
+   turns into one cheap-model summary (`resolveExtractorProvider` —
+   `EXTRACT_MODEL` → `TITLE_MODEL` → `openrouter/free`) and keeps the last
+   `RECENT_MESSAGES_KEPT` turns verbatim. The compression applies to the
+   **model input view only** — wired into `app/api/chat/route.ts` (both owner
+   and demo paths). Best-effort: a summarizer failure leaves the input
+   uncompressed (never drops turns). Migration-free persistence — one
+   `role='summary'` row per thread via `upsertSummary()` (free-TEXT role;
+   excluded from display in `listMessages` + from FTS search); the persisted
+   conversation is never deleted. Banner-suggested, not silent: the route sets
+   an `x-context-summarized` header and `ChatScreen` shows a dismissible
+   "earlier turns are summarized — start a new chat" banner. Tests
+   (`lib/ai/summarize.test.ts`, `lib/db/queries/chat.summary.test.ts`, model
+   mocked) cover the threshold trigger, recent-tail preservation, the
+   <2× input-token-cost property, and that the DB row count is unchanged while
+   the input view compresses.
 9. **5b recall + search** — ✅ **shipped 2026-05-23** — `recall_preferences`
    tool (5th memory tool; keyword match over ACTIVE rows, the cold-recall
    complement to always-on injection) in `lib/memory/tools.ts` backed by

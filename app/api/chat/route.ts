@@ -2,11 +2,12 @@ import { convertToModelMessages, type ModelMessage, streamText, type UIMessage }
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { resolveDemoProvider, resolveOwnerProvider } from "@/lib/ai/provider";
+import { compressContext, estimateTokens } from "@/lib/ai/summarize";
 import { CHAT_RATE_LIMIT, clientIp, rateLimit } from "@/lib/api/rate-limit";
 import { DEMO_COOKIE, withDb } from "@/lib/api/with-db";
 import { runWithDbContext } from "@/lib/db/context";
 import { DEMO_CHAT_TURN_CAP, getDemoSession, incrementChatTurn } from "@/lib/db/demo";
-import { appendMessage, createThread, getThread } from "@/lib/db/queries/chat";
+import { appendMessage, createThread, getThread, upsertSummary } from "@/lib/db/queries/chat";
 import { buildMemoryBlock } from "@/lib/memory/inject";
 import { createMemoryTools } from "@/lib/memory/tools";
 
@@ -156,6 +157,34 @@ export async function POST(req: Request) {
       appendMessage({ threadId, role: "user", content: lastUserText });
     }
 
+    // Pre-Phase-6: single owner. userId is null everywhere; demo sessions
+    // share the same null-namespace as the owner inside their isolated
+    // per-session in-memory DB (so they get their own preference set without
+    // us threading session ids through the memory layer).
+    const userId = null;
+    const system = composeSystemPrompt(userId);
+    const modelMessages = await toModelMessagesAsync(body.messages);
+
+    // Context-budget compression (Phase 5b #3). When the assembled input crosses
+    // ~80% of the model's context budget, fold older turns into a summary and
+    // send that in their place — the model INPUT VIEW shrinks, the persisted
+    // history is untouched. Best-effort: a summarizer failure leaves the input
+    // uncompressed. We surface a banner via the `x-context-summarized` header
+    // (suggest/notify, not silent). See lib/ai/summarize.ts.
+    const compression = await compressContext(modelMessages, {
+      systemTokens: estimateTokens(system),
+    });
+    if (compression.compressed && compression.summary) {
+      // Migration-free persistence: one SUMMARY_ROLE row per thread, excluded
+      // from display + search. Never deletes user/assistant rows.
+      upsertSummary(threadId, compression.summary);
+    }
+    const setContextHeader = (res: Response): void => {
+      if (compression.thresholdCrossed) {
+        res.headers.set("x-context-summarized", compression.compressed ? "1" : "over");
+      }
+    };
+
     if (demoId) {
       const provider = resolveDemoProvider();
       if (!provider.ready || !provider.model) {
@@ -166,16 +195,11 @@ export async function POST(req: Request) {
       }
       incrementChatTurn(demoId);
       const finalThreadId = threadId;
-      // Pre-Phase-6: single owner. userId is null everywhere; demo sessions
-      // share the same null-namespace as the owner inside their isolated
-      // per-session in-memory DB (so they get their own preference set
-      // without us threading session ids through the memory layer).
-      const userId = null;
       const memoryTools = createMemoryTools({ userId });
       const result = streamText({
         model: provider.model,
-        system: composeSystemPrompt(userId),
-        messages: await toModelMessagesAsync(body.messages),
+        system,
+        messages: compression.messages,
         tools: memoryTools,
         maxOutputTokens: 1024,
         onFinish: ({ text }) => {
@@ -187,6 +211,7 @@ export async function POST(req: Request) {
       });
       const response = result.toUIMessageStreamResponse();
       response.headers.set("x-thread-id", finalThreadId);
+      setContextHeader(response);
       return response;
     }
 
@@ -200,15 +225,11 @@ export async function POST(req: Request) {
     }
 
     const finalThreadId = threadId;
-    // Pre-Phase-6: single owner — userId is null. Phase 6 will resolve the
-    // authenticated user here and thread it through to both the injected
-    // memory block and the tool execution layer.
-    const userId = null;
     const memoryTools = createMemoryTools({ userId });
     const result = streamText({
       model: provider.model,
-      system: composeSystemPrompt(userId),
-      messages: await toModelMessagesAsync(body.messages),
+      system,
+      messages: compression.messages,
       tools: memoryTools,
       maxOutputTokens: 2048,
       onFinish: ({ text }) => {
@@ -220,6 +241,7 @@ export async function POST(req: Request) {
     });
     const response = result.toUIMessageStreamResponse();
     response.headers.set("x-thread-id", finalThreadId);
+    setContextHeader(response);
     return response;
   });
 }

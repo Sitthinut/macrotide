@@ -85,7 +85,7 @@ export function searchThreads(query: string, opts: SearchThreadsOptions = {}): T
        FROM chat_messages_fts
        JOIN chat_messages m ON m.id = chat_messages_fts.rowid
        JOIN chat_threads t ON t.id = m.thread_id
-       WHERE chat_messages_fts MATCH ? ${deletedClause}
+       WHERE chat_messages_fts MATCH ? AND m.role != 'summary' ${deletedClause}
        ORDER BY bm25(chat_messages_fts)`,
     )
     .all(match) as Array<ThreadRowRaw & { snippet: string | null }>;
