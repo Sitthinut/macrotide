@@ -19,41 +19,13 @@ interface ExtractedHolding {
   source?: string;
 }
 
-/** A row as returned by /api/import/image, after the user has had a chance
- *  to edit it in the confirmation table. */
-interface OcrRow {
-  ticker: string;
-  englishName: string;
-  units: string;
-  avgCost: string;
-  quoteSource: QuoteSource;
-  error?: string | null;
-}
-
 interface OcrApiResponse {
-  rows: Array<{
-    ticker: string;
-    englishName?: string;
-    units?: number;
-    avgCost?: number;
-    quoteSource: QuoteSource;
-  }>;
+  text: string;
 }
 
 interface OcrErrorResponse {
   error: string;
   message?: string;
-}
-
-function emptyOcrRow(quoteSource: QuoteSource): OcrRow {
-  return {
-    ticker: "",
-    englishName: "",
-    units: "",
-    avgCost: "",
-    quoteSource,
-    error: null,
-  };
 }
 
 export interface AddedHolding {
@@ -76,9 +48,9 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
   const [pasteText, setPasteText] = useState("");
   const [imgPreview, setImgPreview] = useState<string | null>(null);
   const [imgProcessing, setImgProcessing] = useState(false);
-  const [ocrRows, setOcrRows] = useState<OcrRow[] | null>(null);
+  const [ocrText, setOcrText] = useState<string>("");
   const [ocrError, setOcrError] = useState<string | null>(null);
-  const [ocrInfo, setOcrInfo] = useState<string | null>(null);
+  const [ocrCopied, setOcrCopied] = useState(false);
   const [rows, setRows] = useState<Row[]>([
     { ticker: "", units: "", value: "" },
     { ticker: "", units: "", value: "" },
@@ -131,8 +103,8 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
 
     setImgProcessing(true);
     setOcrError(null);
-    setOcrInfo(null);
-    setOcrRows(null);
+    setOcrText("");
+    setOcrCopied(false);
 
     try {
       const fd = new FormData();
@@ -144,27 +116,11 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
         return;
       }
       const body = (await res.json()) as OcrApiResponse;
-      if (!body.rows || body.rows.length === 0) {
+      const text = (body.text ?? "").trim();
+      setOcrText(text);
+      if (!text) {
         setOcrError(
-          "Couldn't read any holdings from that image. Try a sharper crop, or add rows manually below.",
-        );
-        setOcrRows([emptyOcrRow(quoteSource)]);
-        return;
-      }
-      setOcrRows(
-        body.rows.map((r) => ({
-          ticker: r.ticker,
-          englishName: r.englishName ?? "",
-          units: r.units != null ? String(r.units) : "",
-          avgCost: r.avgCost != null ? String(r.avgCost) : "",
-          quoteSource: r.quoteSource,
-          error: null,
-        })),
-      );
-      const missingUnits = body.rows.filter((r) => r.units == null).length;
-      if (missingUnits > 0) {
-        setOcrInfo(
-          `Pulled ${body.rows.length} rows · ${missingUnits} need units filled in before saving.`,
+          "Couldn't read this image. Try a sharper crop, or use the Manual tab to enter rows.",
         );
       }
     } catch (err) {
@@ -174,109 +130,23 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
     }
   };
 
-  const updateOcrRow = (i: number, patch: Partial<OcrRow>) => {
-    setOcrRows((prev) => {
-      if (!prev) return prev;
-      const copy = [...prev];
-      copy[i] = { ...copy[i], ...patch };
-      return copy;
-    });
+  const copyOcrText = async () => {
+    if (!ocrText) return;
+    try {
+      await navigator.clipboard.writeText(ocrText);
+      setOcrCopied(true);
+      setTimeout(() => setOcrCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable — user can select+copy manually */
+    }
   };
-  const removeOcrRow = (i: number) =>
-    setOcrRows((prev) => (prev ? prev.filter((_, idx) => idx !== i) : prev));
-  const addOcrRow = () => setOcrRows((prev) => [...(prev ?? []), emptyOcrRow(quoteSource)]);
 
   const resetOcrState = () => {
     setImgPreview(null);
-    setOcrRows(null);
+    setOcrText("");
     setOcrError(null);
-    setOcrInfo(null);
+    setOcrCopied(false);
     setImgProcessing(false);
-  };
-
-  const saveOcrRows = async () => {
-    if (!bucketId) {
-      setOcrError("Pick a portfolio first");
-      return;
-    }
-    if (!ocrRows || ocrRows.length === 0) {
-      setOcrError("Nothing to save — add at least one row.");
-      return;
-    }
-
-    // Validate before we hit the network so per-row errors render inline.
-    let hasError = false;
-    const validated = ocrRows.map((r) => {
-      const ticker = r.ticker.trim().toUpperCase();
-      const units = Number.parseFloat(r.units);
-      if (!ticker) {
-        hasError = true;
-        return { ...r, error: "Ticker required" };
-      }
-      if (!Number.isFinite(units) || units <= 0) {
-        hasError = true;
-        return { ...r, error: "Units must be a positive number" };
-      }
-      return { ...r, ticker, error: null as string | null };
-    });
-    setOcrRows(validated);
-    if (hasError) return;
-
-    setOcrError(null);
-    try {
-      let saved = 0;
-      const next = [...validated];
-      for (let i = 0; i < next.length; i++) {
-        const r = next[i];
-        const units = Number.parseFloat(r.units);
-        const avgCost = r.avgCost ? Number.parseFloat(r.avgCost) : 0;
-        const ticker = r.ticker;
-        const englishName = r.englishName.trim() || ticker;
-        const res = await fetch("/api/holdings", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            bucketId,
-            ticker,
-            englishName,
-            assetClass: "equity",
-            units,
-            avgCost: Number.isFinite(avgCost) ? avgCost : 0,
-            ter: 0,
-            color: "var(--accent)",
-            source: source || "Image OCR",
-            quoteSource: r.quoteSource,
-          }),
-        });
-        if (!res.ok) {
-          next[i] = { ...r, error: `Save failed (${res.status})` };
-          setOcrRows(next);
-          hasError = true;
-          break;
-        }
-        saved += 1;
-      }
-      if (!hasError) {
-        invalidate(/^\/api\/holdings/);
-        onAdd(
-          validated.map((r) => ({
-            ticker: r.ticker,
-            units: r.units,
-            value: r.avgCost
-              ? String(Number.parseFloat(r.units) * Number.parseFloat(r.avgCost))
-              : "",
-            source: source || "Image OCR",
-            addedAt: Date.now(),
-          })),
-        );
-        resetOcrState();
-        onClose();
-      } else if (saved > 0) {
-        setOcrError(`Saved ${saved} of ${validated.length}. Fix the row above and retry.`);
-      }
-    } catch (err) {
-      setOcrError(err instanceof Error ? err.message : "Failed to save holdings");
-    }
   };
 
   const submit = async () => {
@@ -284,16 +154,11 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
       setSubmitError("Pick a portfolio first");
       return;
     }
-    // Image tab uses its own validation / multi-row save logic, but we toggle
-    // the shared `submitting` flag so the bottom CTA disables consistently.
+    // Image tab is pure transcription — there's no "save" action here.
+    // The user reads the transcription, copies it into Manual / chat, and
+    // closes the sheet. Disable the bottom CTA when they're on this tab.
     if (method === "image") {
-      setSubmitError(null);
-      setSubmitting(true);
-      try {
-        await saveOcrRows();
-      } finally {
-        setSubmitting(false);
-      }
+      setSubmitError("Image tab is transcription-only. Switch to Manual or Paste to save rows.");
       return;
     }
     let toAdd: ExtractedHolding[] = [];
@@ -384,7 +249,7 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
     method === "paste"
       ? parsePaste().length
       : method === "image"
-        ? (ocrRows?.filter((r) => r.ticker.trim() && r.units.trim()).length ?? 0)
+        ? 0 // Image tab is transcription-only — no rows queued for save.
         : rows.filter((r) => r.ticker && (r.units || r.value)).length;
 
   return (
@@ -688,23 +553,7 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
               </div>
             )}
 
-            {ocrInfo && !ocrError && (
-              <div
-                style={{
-                  marginBottom: 8,
-                  padding: "8px 10px",
-                  background: "var(--card-soft)",
-                  borderRadius: 8,
-                  color: "var(--muted)",
-                  fontSize: 12,
-                  lineHeight: 1.4,
-                }}
-              >
-                {ocrInfo}
-              </div>
-            )}
-
-            {ocrRows && (
+            {ocrText && (
               <div
                 style={{
                   background: "var(--card-soft)",
@@ -715,178 +564,60 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
               >
                 <div
                   style={{
-                    fontSize: 10,
-                    fontFamily: "var(--font-mono)",
-                    color: "var(--accent-ink)",
-                    letterSpacing: "0.04em",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
                     marginBottom: 8,
                   }}
                 >
-                  ● REVIEW & EDIT · {ocrRows.length} {ocrRows.length === 1 ? "ROW" : "ROWS"}
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontFamily: "var(--font-mono)",
+                      color: "var(--accent-ink)",
+                      letterSpacing: "0.04em",
+                    }}
+                  >
+                    ● TRANSCRIPTION
+                  </div>
+                  <button
+                    type="button"
+                    className="btn ghost sm"
+                    onClick={copyOcrText}
+                    style={{ fontSize: 11, padding: "4px 8px" }}
+                  >
+                    {ocrCopied ? "Copied!" : "Copy"}
+                  </button>
                 </div>
-
-                <div
+                <pre
                   style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr 0.8fr 0.8fr 1fr 24px",
-                    gap: 6,
-                    fontSize: 10,
+                    margin: 0,
+                    padding: "8px 10px",
+                    background: "var(--bg)",
+                    border: "1px solid var(--line-soft)",
+                    borderRadius: 6,
                     fontFamily: "var(--font-mono)",
-                    color: "var(--muted)",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.04em",
-                    paddingBottom: 4,
+                    fontSize: 11,
+                    lineHeight: 1.5,
+                    color: "var(--ink)",
+                    whiteSpace: "pre-wrap",
+                    maxHeight: 280,
+                    overflowY: "auto",
                   }}
                 >
-                  <span style={{ padding: "0 4px" }}>Ticker</span>
-                  <span style={{ padding: "0 4px" }}>Name</span>
-                  <span style={{ padding: "0 4px" }}>Units</span>
-                  <span style={{ padding: "0 4px" }}>Avg cost</span>
-                  <span style={{ padding: "0 4px" }}>Type</span>
-                  <span></span>
-                </div>
-
-                {ocrRows.map((r, i) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: ocrRows is an editable
-                  // local table; row identity is positional, no stable id available.
-                  <div key={i} style={{ marginBottom: 6 }}>
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr 1fr 0.8fr 0.8fr 1fr 24px",
-                        gap: 6,
-                        alignItems: "center",
-                      }}
-                    >
-                      <input
-                        placeholder="K-FIXED-A"
-                        value={r.ticker}
-                        onChange={(e) => updateOcrRow(i, { ticker: e.target.value })}
-                        style={{
-                          padding: "6px 8px",
-                          background: "var(--bg)",
-                          border: "1px solid var(--line-soft)",
-                          borderRadius: 6,
-                          fontSize: 12,
-                          fontFamily: "var(--font-mono)",
-                          color: "var(--ink)",
-                          minWidth: 0,
-                        }}
-                      />
-                      <input
-                        placeholder="(optional)"
-                        value={r.englishName}
-                        onChange={(e) => updateOcrRow(i, { englishName: e.target.value })}
-                        style={{
-                          padding: "6px 8px",
-                          background: "var(--bg)",
-                          border: "1px solid var(--line-soft)",
-                          borderRadius: 6,
-                          fontSize: 12,
-                          color: "var(--ink)",
-                          minWidth: 0,
-                        }}
-                      />
-                      <input
-                        placeholder="0.00"
-                        inputMode="decimal"
-                        value={r.units}
-                        onChange={(e) => updateOcrRow(i, { units: e.target.value })}
-                        style={{
-                          padding: "6px 8px",
-                          background: "var(--bg)",
-                          border: "1px solid var(--line-soft)",
-                          borderRadius: 6,
-                          fontSize: 12,
-                          color: "var(--ink)",
-                          minWidth: 0,
-                          textAlign: "right",
-                        }}
-                      />
-                      <input
-                        placeholder="—"
-                        inputMode="decimal"
-                        value={r.avgCost}
-                        onChange={(e) => updateOcrRow(i, { avgCost: e.target.value })}
-                        style={{
-                          padding: "6px 8px",
-                          background: "var(--bg)",
-                          border: "1px solid var(--line-soft)",
-                          borderRadius: 6,
-                          fontSize: 12,
-                          color: "var(--ink)",
-                          minWidth: 0,
-                          textAlign: "right",
-                        }}
-                      />
-                      <select
-                        value={r.quoteSource}
-                        onChange={(e) =>
-                          updateOcrRow(i, { quoteSource: e.target.value as QuoteSource })
-                        }
-                        style={{
-                          padding: "6px 4px",
-                          background: "var(--bg)",
-                          border: "1px solid var(--line-soft)",
-                          borderRadius: 6,
-                          fontSize: 11,
-                          color: "var(--ink)",
-                          minWidth: 0,
-                        }}
-                      >
-                        {QUOTE_SOURCES.map((s) => (
-                          <option key={s} value={s}>
-                            {QUOTE_SOURCE_LABELS[s]}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={() => removeOcrRow(i)}
-                        aria-label="Remove row"
-                        style={{
-                          background: "transparent",
-                          border: "none",
-                          cursor: "pointer",
-                          color: "var(--muted)",
-                          padding: 4,
-                        }}
-                      >
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                        >
-                          <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" />
-                        </svg>
-                      </button>
-                    </div>
-                    {r.error && (
-                      <div
-                        style={{
-                          marginTop: 2,
-                          fontSize: 11,
-                          color: "var(--loss)",
-                          paddingLeft: 4,
-                        }}
-                      >
-                        {r.error}
-                      </div>
-                    )}
-                  </div>
-                ))}
-
-                <button
-                  type="button"
-                  className="btn ghost sm"
-                  style={{ marginTop: 4 }}
-                  onClick={addOcrRow}
+                  {ocrText}
+                </pre>
+                <div
+                  style={{
+                    marginTop: 8,
+                    fontSize: 11,
+                    color: "var(--muted)",
+                    lineHeight: 1.4,
+                  }}
                 >
-                  <Icon name="plus" size={12} /> Add row
-                </button>
+                  This is what the model read. Use the <strong>Manual</strong> tab to enter rows, or
+                  paste this into chat and ask the advisor to structure it for you.
+                </div>
               </div>
             )}
 

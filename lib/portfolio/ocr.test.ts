@@ -3,16 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Mock the AI SDK so the test never reaches OpenRouter. The mock is a
 // hoisted-safe factory; per-test behavior is configured via `mockImpl`.
 const mockImpl = {
-  // Default impl returns a clean empty object. Each test overrides via
-  // `mockImpl.value = ...` or `mockImpl.throw = ...`.
-  value: { rows: [] as unknown[] } as { rows: unknown[] },
+  // Default impl returns an empty transcription. Each test overrides via
+  // `mockImpl.text = ...` or `mockImpl.throw = ...`.
+  text: "",
   throw: null as Error | null,
 };
 
 vi.mock("ai", () => ({
-  generateObject: vi.fn(async () => {
+  generateText: vi.fn(async () => {
     if (mockImpl.throw) throw mockImpl.throw;
-    return { object: mockImpl.value };
+    return { text: mockImpl.text };
   }),
 }));
 
@@ -33,7 +33,7 @@ const FAKE_KEY = "sk-or-test";
 
 beforeEach(() => {
   process.env.OPENROUTER_API_KEY = FAKE_KEY;
-  mockImpl.value = { rows: [] };
+  mockImpl.text = "";
   mockImpl.throw = null;
 });
 
@@ -73,69 +73,24 @@ describe("isAllowedMimeType", () => {
 describe("extractHoldingsFromImage", () => {
   const fakeImage = { data: Buffer.from([0xff, 0xd8, 0xff]), mimeType: "image/jpeg" };
 
-  it("maps a clean model response into ProposedRow shape", async () => {
-    mockImpl.value = {
-      rows: [
-        {
-          ticker: "k-fixed-a",
-          englishName: "K Fixed Income",
-          units: 14820.3,
-          avgCost: 12.04,
-        },
-        { ticker: "AAPL", units: 10, avgCost: 195.5 },
-      ],
-    };
+  it("returns the model's transcription verbatim (trimmed)", async () => {
+    mockImpl.text = "  K-WORLDX  12,485.6213 units  ฿261,857\n  K-FIXED-A  15,820 units\n  ";
     const result = await extractHoldingsFromImage(fakeImage);
-    expect(result.rows).toEqual([
-      {
-        ticker: "K-FIXED-A",
-        englishName: "K Fixed Income",
-        units: 14820.3,
-        avgCost: 12.04,
-        quoteSource: "thai_mutual_fund",
-      },
-      {
-        ticker: "AAPL",
-        units: 10,
-        avgCost: 195.5,
-        quoteSource: "yahoo",
-      },
-    ]);
+    expect(result.text).toBe("K-WORLDX  12,485.6213 units  ฿261,857\n  K-FIXED-A  15,820 units");
   });
 
-  it("keeps rows even when units is missing or non-positive (user fills in later)", async () => {
-    mockImpl.value = {
-      rows: [
-        { ticker: "K-FIXED-A" }, // no units at all
-        { ticker: "K-USA-A", units: 0 }, // non-positive → treat as missing
-        { ticker: "K-WORLDX", units: -3 }, // non-positive → treat as missing
-        { ticker: "AAPL", units: 5 }, // valid
-      ],
-    };
+  it("returns empty text when the model produces nothing readable", async () => {
+    mockImpl.text = "";
     const result = await extractHoldingsFromImage(fakeImage);
-    expect(result.rows).toHaveLength(4);
-    expect(result.rows[0].units).toBeUndefined();
-    expect(result.rows[1].units).toBeUndefined();
-    expect(result.rows[2].units).toBeUndefined();
-    expect(result.rows[3].units).toBe(5);
+    expect(result).toEqual({ text: "" });
   });
 
-  it("omits avgCost when model returns nothing or non-positive", async () => {
-    mockImpl.value = {
-      rows: [
-        { ticker: "AAPL", units: 5 }, // no avgCost
-        { ticker: "MSFT", units: 5, avgCost: 0 }, // zero — drop
-      ],
-    };
-    const result = await extractHoldingsFromImage(fakeImage);
-    expect(result.rows[0].avgCost).toBeUndefined();
-    expect(result.rows[1].avgCost).toBeUndefined();
-  });
-
-  it("returns { rows: [] } cleanly on schema/parse failures (model ran but output was unusable)", async () => {
+  it("returns empty text on schema/parse failures (model ran but output was unusable)", async () => {
+    // AI_NoObjectGeneratedError-style errors and other "model failed" reasons
+    // are explicitly classified as NOT provider errors → empty result, no throw.
     mockImpl.throw = new Error("NoObjectGeneratedError: model returned freeform text");
     const result = await extractHoldingsFromImage(fakeImage);
-    expect(result).toEqual({ rows: [] });
+    expect(result).toEqual({ text: "" });
   });
 
   it("throws OcrProviderUnavailableError on AI SDK transport errors with the provider's message", async () => {
@@ -152,10 +107,23 @@ describe("extractHoldingsFromImage", () => {
     await expect(extractHoldingsFromImage(fakeImage)).rejects.toThrow(/guardrail/);
   });
 
-  it("returns { rows: [] } when the model returns an empty array", async () => {
-    mockImpl.value = { rows: [] };
-    const result = await extractHoldingsFromImage(fakeImage);
-    expect(result).toEqual({ rows: [] });
+  it("prefers the OpenRouter metadata.raw message when wrapped in AI_RetryError → AI_APICallError", async () => {
+    const transportErr = Object.assign(new Error("Failed after 3 attempts"), {
+      name: "AI_RetryError",
+      lastError: Object.assign(new Error("Provider returned error"), {
+        name: "AI_APICallError",
+        responseBody: JSON.stringify({
+          error: {
+            message: "Provider returned error",
+            metadata: {
+              raw: "google/gemma-4-31b-it:free is temporarily rate-limited upstream.",
+            },
+          },
+        }),
+      }),
+    });
+    mockImpl.throw = transportErr;
+    await expect(extractHoldingsFromImage(fakeImage)).rejects.toThrow(/rate-limited upstream/);
   });
 
   it("throws when OPENROUTER_API_KEY is missing (caller decides 503 vs stub)", async () => {

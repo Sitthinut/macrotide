@@ -5,7 +5,6 @@ import {
   extractHoldingsFromImage,
   isAllowedMimeType,
   OcrProviderUnavailableError,
-  type ProposedRow,
 } from "@/lib/portfolio/ocr";
 
 export const runtime = "nodejs";
@@ -83,14 +82,16 @@ export async function POST(req: Request) {
 
   const buffer = Buffer.from(await file.arrayBuffer());
 
-  // We wrap in withDb for consistency with other route handlers, even though
-  // this endpoint does NOT write to the DB — the confirmation pass happens
-  // client-side, and the final save round-trips through /api/holdings.
+  // Pure transcription endpoint: returns { text } only. Turning text into
+  // structured holdings rows is deferred to the user (paste into Manual tab)
+  // or to the future advisor-assist flow (Phase 6 — see ROADMAP).
+  //
+  // Wrapped in withDb for consistency with sibling routes even though this
+  // endpoint does NOT touch the DB.
   return withDb(async () => {
     try {
-      const { rows } = await extractHoldingsFromImage({ data: buffer, mimeType });
-      const payload: { rows: ProposedRow[] } = { rows };
-      return NextResponse.json(payload, { status: 200 });
+      const { text } = await extractHoldingsFromImage({ data: buffer, mimeType });
+      return NextResponse.json({ text }, { status: 200 });
     } catch (err) {
       if (err instanceof OcrProviderUnavailableError) {
         return NextResponse.json(

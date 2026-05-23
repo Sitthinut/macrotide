@@ -1,23 +1,56 @@
 import "server-only";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { generateObject } from "ai";
-import { z } from "zod";
+import { generateText } from "ai";
 import type { QuoteSource } from "@/lib/market/sources";
 
 /**
  * Image OCR for the "Add holdings" flow. The user uploads a broker-app
- * screenshot; we ask an OpenRouter vision model to extract holdings rows
- * in a strict JSON shape, then surface those rows in a confirmation table
- * (the user reviews and edits before any DB write happens).
+ * screenshot; we ask an OpenRouter vision model to transcribe what it sees
+ * into plain text and return that string for downstream use — currently the
+ * UI surfaces the transcription to the user, and in the future the advisor
+ * agent will turn it into structured holdings rows via chat tool calls
+ * ([[advisor-assist OCR — Phase 6 follow-up]] in ROADMAP).
  *
- * Defaults to a **free-tier** OpenRouter vision model — the operator
- * explicitly does not want this path to burn paid credits.
+ * **Why pure transcription instead of structured JSON.** Earlier iterations
+ * asked the model to return a Zod-validated `{ rows: ProposedRow[] }`. Free
+ * and OCR-specialized vision models routinely failed at the structured-output
+ * contract:
+ *   - `qianfan-ocr-fast` doesn't support OpenRouter's structured-output flag.
+ *   - Smaller Gemma / Llama free models return "Invalid JSON response".
+ *   - Even capable models silently returned empty rows when their schema-
+ *     following confidence was low (no signal back to the user about WHY).
+ * Pure-text transcription compiles to a single `generateText` call that works
+ * across every image-capable model. The reasoning that used to happen inside
+ * the OCR call (which line is a ticker? which number is units vs. total
+ * value?) is deferred to either the user (read the transcription, fill rows
+ * manually) or a future advisor flow.
  *
- * Override the model with `OCR_MODEL=<provider/model:free>` when a better
- * free vision option lands. See https://openrouter.ai/models for the
- * current free + multimodal list.
+ * Defaults to `openrouter/free`. Override with `OCR_MODEL` — see
+ * `.env.example` for verified-working alternatives and the production
+ * no-train guidance.
  */
 
+export interface OcrInput {
+  data: Buffer;
+  mimeType: string;
+}
+
+export interface OcrResult {
+  /**
+   * Plain-text transcription of everything the model read from the image, in
+   * reading order. Empty string when the model produced nothing usable —
+   * the route still returns 200 in that case; the UI shows a "couldn't read"
+   * empty state.
+   */
+  text: string;
+}
+
+/**
+ * Shape of a holding row proposed to the user, kept here as the contract for
+ * the future advisor-assist flow that will turn `text` into rows via chat
+ * tool calls. Not produced by the OCR endpoint today — the route returns
+ * `text` only.
+ */
 export interface ProposedRow {
   ticker: string;
   englishName?: string;
@@ -26,64 +59,20 @@ export interface ProposedRow {
   quoteSource: QuoteSource;
 }
 
-export interface OcrInput {
-  data: Buffer;
-  mimeType: string;
-}
+// Default to `baidu/qianfan-ocr-fast` — verified-working purpose-built OCR
+// model on OpenRouter. ~$0.004 per call, no-train (suitable for production).
+// Chose this over `openrouter/free` because OpenRouter's free vision pool
+// repeatedly fast-fails with "No endpoints found that support image input"
+// and the few free vision models that DO route (Gemma 4) hit upstream rate
+// limits. A few mills per call is the right tradeoff for "actually works".
+//
+// To stay strictly free at the cost of reliability, set `OCR_MODEL=openrouter/free`
+// (requires OpenRouter privacy setting to allow training-enabled providers).
+const DEFAULT_OCR_MODEL = "baidu/qianfan-ocr-fast";
 
-export interface OcrResult {
-  rows: ProposedRow[];
-}
+const SYSTEM_PROMPT = `You are an OCR transcription engine. Read the image and return EVERY line of visible text, in reading order. Preserve numbers, currency symbols, percent signs, and column structure exactly as they appear. Use newlines between rows of a table. Do not summarize, interpret, or add commentary — just transcribe.
 
-// OpenRouter's free-models router. Picks a free vision-capable backend per
-// call, so this path never burns paid credits and survives any single
-// model's deprecation. Mirrors the chat path's default. Override via
-// `OCR_MODEL` to pin a specific model if quality varies.
-const DEFAULT_OCR_MODEL = "openrouter/free";
-
-const SYSTEM_PROMPT = `You extract Thai mutual fund and stock holdings from a broker / fund-house screenshot.
-
-Goal: surface every holding you can identify, even if some fields are missing.
-The user will review and complete the rows in a confirmation table, so partial
-data is useful — don't drop a row just because one field is unreadable.
-
-Rules:
-- Ticker is the only required field. If you can't read the ticker, omit the row.
-- Never invent a ticker. Copy it exactly as printed.
-- englishName, units, avgCost are all optional — leave any field undefined when
-  it's not clearly visible. Never guess.
-- units is the share / unit count (positive number). avgCost is the average
-  cost PER UNIT — not the total market value. If only a total/market value is
-  shown, leave avgCost undefined.
-- If the image is not a portfolio / holdings list at all, return { "rows": [] }.`;
-
-const RowSchema = z.object({
-  ticker: z
-    .string()
-    .min(1)
-    .max(40)
-    .describe("Ticker exactly as printed on the screen (e.g. K-FIXED-A, AAPL)."),
-  englishName: z
-    .string()
-    .min(1)
-    .max(200)
-    .optional()
-    .describe("Fund's official English name if clearly visible. Omit if unsure."),
-  units: z
-    .number()
-    .positive()
-    .optional()
-    .describe("Unit / share count, positive number. Omit if not clearly visible."),
-  avgCost: z
-    .number()
-    .positive()
-    .optional()
-    .describe("Average cost PER UNIT (not total value). Omit if not shown."),
-});
-
-const SchemaShape = z.object({
-  rows: z.array(RowSchema),
-});
+If the image contains no readable text at all, return an empty string.`;
 
 const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
 type AllowedMimeType = (typeof ALLOWED_MIME_TYPES)[number];
@@ -94,7 +83,9 @@ export function isAllowedMimeType(mimeType: string): mimeType is AllowedMimeType
 
 // Thai mutual fund share-class shape: at least one hyphen group of A-Z/0-9
 // (e.g. K-FIXED-A, HIDIV-D, SCBS&P500-A). Single-token tickers like AAPL or
-// dotted symbols like PTT.BK fall through to "yahoo".
+// dotted symbols like PTT.BK fall through to "yahoo". Kept here as the
+// canonical heuristic for the future advisor-assist flow that turns
+// transcribed text into structured holding rows.
 const THAI_FUND_RE = /^[A-Z0-9&]+(?:-[A-Z0-9&]+)+$/;
 
 export function inferQuoteSource(ticker: string): QuoteSource {
@@ -115,15 +106,14 @@ function openrouterVisionModel(apiKey: string, modelId: string) {
 }
 
 /**
- * Extract holdings rows from a broker screenshot.
+ * Transcribe a broker screenshot to plain text.
  *
- * Returns `{ rows: [] }` (not an error) when the model can't read the image,
- * returns invalid data, or is uncertain — the route handler treats an empty
- * result as a successful "nothing recognized" so the UI can show a friendly
- * empty state.
+ * Returns `{ text: "" }` (not an error) when the model can't read the image —
+ * the route handler treats an empty string as a successful "nothing recognized"
+ * so the UI can show a friendly empty state.
  *
- * Throws only on missing API key or transport-level failures; callers should
- * check for OPENROUTER_API_KEY before calling.
+ * Throws `OcrProviderUnavailableError` on transport / auth / guardrail errors
+ * so the route can surface a 502 with the provider's actual message.
  */
 export async function extractHoldingsFromImage(input: OcrInput): Promise<OcrResult> {
   const apiKey = process.env.OPENROUTER_API_KEY;
@@ -135,11 +125,10 @@ export async function extractHoldingsFromImage(input: OcrInput): Promise<OcrResu
   const model = openrouterVisionModel(apiKey, modelId);
 
   try {
-    const result = await generateObject({
+    const result = await generateText({
       model,
-      schema: SchemaShape,
       temperature: 0,
-      maxOutputTokens: 1024,
+      maxOutputTokens: 4096,
       system: SYSTEM_PROMPT,
       messages: [
         {
@@ -147,7 +136,7 @@ export async function extractHoldingsFromImage(input: OcrInput): Promise<OcrResu
           content: [
             {
               type: "text",
-              text: "Extract holdings rows from this screenshot. Follow the rules in the system prompt — if you are unsure, return an empty rows array.",
+              text: "Transcribe every line of text visible in this image, in reading order. Output the transcription only — no commentary.",
             },
             {
               type: "image",
@@ -159,12 +148,12 @@ export async function extractHoldingsFromImage(input: OcrInput): Promise<OcrResu
       ],
     });
 
-    return normalizeRows(result.object.rows);
+    return { text: (result.text ?? "").trim() };
   } catch (err) {
     if (isProviderError(err)) {
       throw new OcrProviderUnavailableError(extractProviderMessage(err));
     }
-    return { rows: [] };
+    return { text: "" };
   }
 }
 
@@ -180,10 +169,6 @@ function isProviderError(err: unknown): boolean {
   const name = (err as { name?: string }).name ?? "";
   if (!name.startsWith("AI_")) return false;
   if (name === "AI_NoObjectGeneratedError") return false;
-  // AI_RetryError wraps the real cause — if the wrapped reason is a model
-  // output / JSON parse failure (not a transport or auth issue), treat it
-  // as a "model failed to comply" and return empty rows so the UI shows
-  // a friendly "couldn't read" prompt rather than a scary 502.
   const msg = (err as { message?: string }).message ?? "";
   if (/invalid json|schema validation|no object generated|parse/i.test(msg)) {
     return false;
@@ -224,33 +209,9 @@ function extractProviderMessage(err: unknown): string {
       }
     }
   }
-  // Last resort: any message from the chain.
   for (const node of candidates) {
     const m = (node as { message?: string }).message;
     if (m) return m;
   }
   return "Vision model provider is unavailable. Try again later.";
-}
-
-function normalizeRows(rows: Array<z.infer<typeof RowSchema>>): OcrResult {
-  const out: ProposedRow[] = [];
-  for (const raw of rows) {
-    const ticker = raw.ticker.trim().toUpperCase();
-    if (!ticker) continue;
-    const row: ProposedRow = {
-      ticker,
-      quoteSource: inferQuoteSource(ticker),
-    };
-    if (typeof raw.units === "number" && Number.isFinite(raw.units) && raw.units > 0) {
-      row.units = raw.units;
-    }
-    if (raw.englishName && raw.englishName.trim()) {
-      row.englishName = raw.englishName.trim();
-    }
-    if (typeof raw.avgCost === "number" && Number.isFinite(raw.avgCost) && raw.avgCost > 0) {
-      row.avgCost = raw.avgCost;
-    }
-    out.push(row);
-  }
-  return { rows: out };
 }

@@ -929,29 +929,33 @@ once you have a clear personal need.
    - `app/api/import/csv/route.ts`: accepts `multipart/form-data`.
    - Wire the CSV tab of `AddHoldingsSheet`.
    - Sample file at `data/sample-holdings.csv`.
-2. **Image OCR** (shipped 2026-05-22, partial-row pass 2026-05-23).
-   - `lib/portfolio/ocr.ts`: send image to an OpenRouter vision model via
-     Vercel AI SDK `generateObject` with a Zod schema → return
-     `{ rows: ProposedRow[] }`. Defaults to `openrouter/free` — OpenRouter's
-     free-models router, which picks a free vision-capable backend per call
-     so this path never burns paid credits. Override with `OCR_MODEL`.
-   - **Partial rows on purpose:** ticker is the only required field. `units`,
-     `avgCost`, `englishName` are all optional — the model surfaces every
-     holding it can identify, and the user completes missing fields in the
-     confirmation table. Avoids the failure mode where a screenshot that
-     hides units (e.g. a value-only portfolio overview) returns zero rows.
+2. **Image OCR** (shipped 2026-05-22, redesigned to pure transcription 2026-05-23).
+   - `lib/portfolio/ocr.ts`: `generateText` (not `generateObject`) call to
+     an OpenRouter vision model → returns `{ text: string }` only — the
+     raw transcription the model read from the image. Defaults to
+     `baidu/qianfan-ocr-fast` (~$0.004 per call, no-train, verified
+     working at ~8s for a dense screenshot); override with `OCR_MODEL`.
+   - **Why pure transcription, not structured rows.** Iteration history:
+     v1 used `generateObject` with a strict Zod schema (`rows: ProposedRow[]`)
+     and required units → returned zero rows on screenshots that hid units.
+     v2 relaxed the schema (units optional) → still returned empty on dense
+     screenshots because cheap vision models can't both OCR and structure
+     reliably. v3 (current) gives each model one job: vision models transcribe;
+     reasoning happens elsewhere (user → Manual tab today; advisor → Phase 6
+     tool calls later). Bonus: works with OCR-specialized models like
+     `baidu/qianfan-ocr-fast` that don't support OpenRouter's structured-output
+     mode at all.
    - `app/api/import/image/route.ts`: multipart/form-data POST, 5 MB cap,
-     JPG/PNG/WebP only, 10 RPM IP rate-limit, returns 503 cleanly when
-     `OPENROUTER_API_KEY` is unset. Returns 502 with the provider's message
-     when the OpenRouter request fails (e.g. data-policy guardrail blocks
-     all available endpoints) — the UI surfaces this so the operator can
-     act on it.
-   - Image tab of `AddHoldingsSheet`: editable confirmation table
-     (ticker / name / units / avgCost / quoteSource) with add-row + remove-row
-     before save. Info banner surfaces "N rows pulled · M need units filled
-     in". Save still requires units per row (a holding without quantity is
-     unsavable); quoteSource auto-inferred from ticker shape
-     (hyphenated → `thai_mutual_fund`, otherwise `yahoo`).
+     JPG/PNG/WebP only, 10 RPM IP rate-limit. Returns 503 when
+     `OPENROUTER_API_KEY` is unset. Returns 502 with the provider's
+     `error.metadata.raw` message when the OpenRouter request fails (rate
+     limit, guardrail policy, no available endpoint) — the UI surfaces this
+     so the operator can act.
+   - Image tab of `AddHoldingsSheet`: shows the transcription in a
+     monospace block with a Copy button. Helper text directs the user to
+     either the Manual tab (to enter rows from the transcription) or chat
+     ("paste this and ask the advisor to structure it for you"). The Image
+     tab no longer has a save action — `previewCount` for that tab is 0.
    - **Production caveat — free-tier OCR vs. training-data policy.** The
      `openrouter/free` default works only when the OpenRouter account has
      enabled "Free endpoints that may train on request data" under
