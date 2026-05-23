@@ -1,8 +1,8 @@
 # Roadmap
 
 > **Status:** Active. The working plan for turning the static-data prototype
-> into real software. Last updated 2026-05-23 (Phase 5 designed end-to-end;
-> docs conventions added; detailed memory design moved to
+> into real software. Last updated 2026-05-23 (Phase 5a shipped — long-term
+> memory foundation + chat sidebar; Phase 5b pending. Memory design in
 > [docs/features/memory.md](./docs/features/memory.md)).
 
 ## How to read this doc
@@ -221,7 +221,7 @@ exposes the gaps that need polish; polishing on mock data risks rework.
 | 3b | Fund NAVs + news + NAV history | 🟡 Mostly shipped | Provider + v2 endpoints + holdings.quote_source + PortfolioScreen wiring all live; demo NAV history pre-seeded 2026-05-23 (chart fills instantly); RSS news still pending |
 | 4 | Portfolio import | 🟡 Partial | CSV done; Image OCR shipped 2026-05-23 as pure transcription (qianfan:free → paid fallback); manual-entry ticker autocomplete shipped 2026-05-22 (`lib/data/known-funds.ts` seed + holdings dedupe); advisor-assist OCR (auto-handoff to chat with `propose_holding` cards) gated on Phase 6 |
 | 4b | Broker scraping / API integration | Out of scope | Revisit only if a clear personal need emerges |
-| 5 | Long-term memory + chat archival | Designed, pending impl | Hand-rolled bitemporal `user_preferences` + 4-tool surface + always-on injection + Settings → Memory + chat sidebar (5a). Session lifecycle + archive-time extraction + chat summarization + recall (5b). Design in [docs/features/memory.md](./docs/features/memory.md) |
+| 5 | Long-term memory + chat archival | 🟡 Partial | **5a shipped 2026-05-23** — bitemporal `user_preferences` + 4-tool surface + always-on injection + Settings → Memory + chat sidebar (auto-title, 30-day trash, in-panel list) + empty-turn fail-safe. **5b pending** — session lifecycle + archive-time extraction + chat summarization + recall. Design in [docs/features/memory.md](./docs/features/memory.md) |
 | 5b | Scheduled jobs / digests / notifications | Pending | Depends on 3b and 6 |
 | 6 | Multi-user (Google + GitHub SSO + passkey, public-discoverable) | Pending | Data-layer migration to per-user, OAuth, Turnstile, quotas, account page |
 
@@ -1313,7 +1313,7 @@ sessions (preferences, risk tolerance, constraints), long sessions stay
 affordable on OpenRouter, and the chat sidebar gives discrete sessions
 real persistence + lifecycle.
 
-> **Status:** Designed, pending implementation. Full design (schema, tool
+> **Status:** 5a shipped 2026-05-23; 5b pending. Full design (schema, tool
 > surface, injection format, session lifecycle, sidebar UX, design
 > rationale) lives in **[docs/features/memory.md](./docs/features/memory.md)**.
 > This roadmap entry covers phase scope, sequencing, and acceptance.
@@ -1333,12 +1333,25 @@ real persistence + lifecycle.
   discipline). A `recall` tool covers the long tail; ships in 5b once
   there's a long tail to recall.
 
-### 5a — Memory foundation (explicit save + injection + sidebar)
+### 5a — Memory foundation (explicit save + injection + sidebar) — ✅ shipped 2026-05-23
 
-Schema, four tools (`save_preference` / `update_preference` /
-`forget_preference` / `list_preferences`), always-on injection at
-session start, Settings → Memory page (with 30-day trash bin), and
-the chat sidebar with auto-titling + delete.
+Shipped:
+- Bitemporal `user_preferences` schema + queries + 7 vitest cases
+  (`c972543`).
+- Four tools (`save_preference` / `update_preference` /
+  `forget_preference` / `list_preferences`) + always-on system-prompt
+  injection with frozen-snapshot cache discipline (`d7ce80c`).
+- Settings → Memory section: active notes grouped by category +
+  "Recently forgotten (30 days)" + restore; forget is reversible so no
+  confirm dialog (`5f7f3d4`, `4d1eeab`).
+- Chat sidebar: auto-titling (cheap `TITLE_MODEL`, default
+  `openrouter/free`), soft-delete + 30-day trash + restore/purge,
+  persistent "Advisor is AI and can make mistakes." disclaimer (`48791ac`).
+- In-panel thread-list view swap on desktop/tablet (matches the right-rail
+  panel pattern; mobile keeps its drawer) (`0d7f417`).
+- Fail-safe for empty LLM turns: surface tool-result text, or a calm note
+  + "Try again" button instead of a blank/scary message (`4d1eeab`,
+  `bef8262`).
 
 **5b is purely additive on this schema.** The provenance columns
 (`source`, `source_session_id`, `source_turn_ids`, `confidence`) exist
@@ -1795,9 +1808,10 @@ that was edited.
 2. **Where we are (2026-05-23):** Phase 1 / 2.5 / 2.6 shipped. Phase 3b
    mostly shipped (Thai SEC provider + holdings.quote_source + demo
    pre-seed; RSS news still pending). Phase 4 OCR shipped as pure
-   transcription. Env-var docs centralized in AGENTS.md. **Phase 5
-   design complete** ([docs/features/memory.md](./docs/features/memory.md)),
-   implementation pending. Phase 6 untouched.
+   transcription. Env-var docs centralized in AGENTS.md. **Phase 5a
+   shipped** (long-term memory foundation + chat sidebar;
+   [docs/features/memory.md](./docs/features/memory.md)); **Phase 5b
+   pending**. Phase 6 untouched.
 3. **What to pick next** (ranked by impact/effort, ready to dispatch as
    parallel worktree agents — see "Working in parallel" below):
    - **ANALYSIS chart series (DRIFT / GEO / SECTOR / CONTRIB)** —
@@ -1806,15 +1820,12 @@ that was edited.
      compute can be real. Touches PortfolioScreen + a new
      `lib/portfolio/analytics.ts` + `/api/analysis` route (replace the
      static-import path).
-   - **Phase 5a (memory foundation)** — ~1.5 days. Bitemporal
-     `user_preferences` schema + 4 tools (save/update/forget/list) +
-     always-on injection + Settings → Memory page + chat sidebar with
-     auto-titling. Design in [docs/features/memory.md](./docs/features/memory.md).
-     Makes chat feel personal across sessions.
    - **Phase 5b (session lifecycle + extraction + summarization + recall)**
-     — ~1 day, pairs with 5a (purely additive on the same schema).
-     Archive job, extraction prompt, chat-history summarization, recall
-     tool, sidebar FTS.
+     — ~1 day, additive on the 5a schema. Session state machine
+     (active/idle/archived/deleted) + 7-day archive job + extraction
+     prompt (writes `source='extracted'` rows) + chat-history
+     summarization + `recall_preferences` tool + sidebar FTS. Needs a job
+     runner (also unblocks the parked "scheduled jobs" phase).
    - **Phase 4 manual-entry autocomplete** — half-day, closes Phase 4.
    - **Phase 6 (multi-user)** — multi-day, one-way door. Only start when
      committed to sharing with family/friends.
