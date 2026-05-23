@@ -942,13 +942,35 @@ once you have a clear personal need.
      hides units (e.g. a value-only portfolio overview) returns zero rows.
    - `app/api/import/image/route.ts`: multipart/form-data POST, 5 MB cap,
      JPG/PNG/WebP only, 10 RPM IP rate-limit, returns 503 cleanly when
-     `OPENROUTER_API_KEY` is unset.
+     `OPENROUTER_API_KEY` is unset. Returns 502 with the provider's message
+     when the OpenRouter request fails (e.g. data-policy guardrail blocks
+     all available endpoints) — the UI surfaces this so the operator can
+     act on it.
    - Image tab of `AddHoldingsSheet`: editable confirmation table
      (ticker / name / units / avgCost / quoteSource) with add-row + remove-row
      before save. Info banner surfaces "N rows pulled · M need units filled
      in". Save still requires units per row (a holding without quantity is
      unsavable); quoteSource auto-inferred from ticker shape
      (hyphenated → `thai_mutual_fund`, otherwise `yahoo`).
+   - **Production caveat — free-tier OCR vs. training-data policy.** The
+     `openrouter/free` default works only when the OpenRouter account has
+     enabled "Free endpoints that may train on request data" under
+     [Privacy settings](https://openrouter.ai/settings/privacy). Free-tier
+     vision providers monetize by training on submissions, so this is the
+     deal. **Acceptable for personal/dev use; NOT acceptable for production
+     deployments handling other users' portfolio screenshots** (which
+     include account-identifying ticker/unit data). For prod:
+     - Either pin a paid no-train vision model: `OCR_MODEL=anthropic/claude-haiku-4.5`
+       (or similar — Anthropic, OpenAI, Google all guarantee no-train via
+       OpenRouter when explicitly selected).
+     - Or disable the Image tab when the privacy setting is restrictive
+       (a future check could probe OpenRouter at boot and feature-flag the
+       UI accordingly).
+     - Or use a direct provider SDK (e.g. `@ai-sdk/anthropic`) bypassing
+       OpenRouter entirely, with explicit `no-store` headers.
+     The current code does not enforce this — it's an operator
+     responsibility. Track as a hard requirement before any public
+     deployment under [Phase 6](#phase-6--multi-user).
 3. **Manual entry**.
    - Build an autocomplete on `holdings` history + a small seed of common
      tickers (kept in `lib/data/known-funds.ts`, not the DB).
@@ -972,6 +994,12 @@ once you have a clear personal need.
   schema, low temperature, validation against `known-funds.ts`.
 - **CSV variance**: real broker exports have weird columns. Build the parser
   defensively; let the user map columns in the UI if auto-detect fails.
+- **Training-data leakage via free-tier vision models**: the default
+  `openrouter/free` router uses providers that train on submitted images.
+  Portfolio screenshots include identifying ticker + unit data. Mitigation
+  for prod: override `OCR_MODEL` with a paid no-train model (Anthropic /
+  OpenAI / Google via OpenRouter), or disable the Image tab when the
+  account has tight privacy settings. See production caveat above.
 
 ### Follow-up: advisor-assist OCR (depends on Phase 6 tool calls)
 
@@ -1311,6 +1339,10 @@ PRIVACY_URL=/legal/privacy
   demo" → isolated per-session DB, untouched by 6).
 - `OPENROUTER_API_KEY` never appears in browser-visible payloads
   (verify via DevTools).
+- `OCR_MODEL` is set to a paid no-train vision model (e.g.
+  `anthropic/claude-haiku-4.5`), NOT `openrouter/free`. Free-tier
+  providers train on portfolio screenshots — incompatible with handling
+  other users' data. See Phase 4 §Image OCR production caveat.
 
 ### What stays out of scope
 
@@ -1412,10 +1444,15 @@ WantedBy=multi-user.target
 3. Point your DNS A record at the VM.
 4. Install Node, Caddy, clone the repo, `npm ci`, `npm run build`.
 5. Create `/opt/macrotide/.env.local` (chmod 600) with `AUTH_SECRET`,
-   `PUBLIC_APP_URL`, `OPENROUTER_API_KEY`, `AI_MODELS`. Add Phase 6
-   vars (`OWNER_EMAIL`, `GOOGLE_CLIENT_ID` / `SECRET`, `GITHUB_CLIENT_ID`
-   / `SECRET`, `TURNSTILE_SITE_KEY` / `SECRET_KEY`,
-   `DAILY_TOKEN_BUDGET_FREE` / `_TRUSTED`) once multi-user lands.
+   `PUBLIC_APP_URL`, `OPENROUTER_API_KEY`, `AI_MODELS`. **If exposing the
+   Image OCR tab in prod, set `OCR_MODEL` to a paid no-train vision model
+   (e.g. `anthropic/claude-haiku-4.5`)** — the `openrouter/free` default
+   relies on providers that train on submissions, which is incompatible
+   with handling other users' portfolio screenshots. See Phase 4 §Image
+   OCR production caveat. Add Phase 6 vars (`OWNER_EMAIL`,
+   `GOOGLE_CLIENT_ID` / `SECRET`, `GITHUB_CLIENT_ID` / `SECRET`,
+   `TURNSTILE_SITE_KEY` / `SECRET_KEY`, `DAILY_TOKEN_BUDGET_FREE` /
+   `_TRUSTED`) once multi-user lands.
 6. `systemctl enable --now macrotide`, `systemctl reload caddy`.
 7. Visit the URL — create an account, register a passkey, done. (Or sign
    in with Google/GitHub once Phase 6 ships.)

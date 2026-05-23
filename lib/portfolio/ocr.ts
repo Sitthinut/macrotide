@@ -161,12 +161,8 @@ export async function extractHoldingsFromImage(input: OcrInput): Promise<OcrResu
 
     return normalizeRows(result.object.rows);
   } catch (err) {
-    // Distinguish "model ran but produced unusable output" (schema/parse —
-    // return empty rows, user retries) from "we couldn't reach a working
-    // vision model" (API/auth/guardrail — surface to UI so user can act).
     if (isProviderError(err)) {
-      const message = extractProviderMessage(err);
-      throw new OcrProviderUnavailableError(message);
+      throw new OcrProviderUnavailableError(extractProviderMessage(err));
     }
     return { rows: [] };
   }
@@ -182,31 +178,56 @@ export class OcrProviderUnavailableError extends Error {
 function isProviderError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const name = (err as { name?: string }).name ?? "";
-  // AI SDK error class names: AI_APICallError, AI_RetryError, etc.
-  return name.startsWith("AI_") && name !== "AI_NoObjectGeneratedError";
+  if (!name.startsWith("AI_")) return false;
+  if (name === "AI_NoObjectGeneratedError") return false;
+  // AI_RetryError wraps the real cause — if the wrapped reason is a model
+  // output / JSON parse failure (not a transport or auth issue), treat it
+  // as a "model failed to comply" and return empty rows so the UI shows
+  // a friendly "couldn't read" prompt rather than a scary 502.
+  const msg = (err as { message?: string }).message ?? "";
+  if (/invalid json|schema validation|no object generated|parse/i.test(msg)) {
+    return false;
+  }
+  return true;
 }
 
 function extractProviderMessage(err: unknown): string {
-  // Walk the error chain — AI_RetryError typically wraps the last AI_APICallError.
+  // Walk top → lastError → cause looking for OpenRouter's structured error body.
+  // The most informative field is error.metadata.raw (e.g. "google/gemma-4-31b-it:free
+  // is temporarily rate-limited upstream..."); fall back to error.message.
+  const candidates: unknown[] = [];
   const visited = new Set<unknown>();
   let cur: unknown = err;
   while (cur && typeof cur === "object" && !visited.has(cur)) {
     visited.add(cur);
-    const c = cur as { responseBody?: unknown; cause?: unknown; message?: string };
-    if (typeof c.responseBody === "string") {
+    candidates.push(cur);
+    const c = cur as { lastError?: unknown; cause?: unknown };
+    if (c.lastError && !visited.has(c.lastError)) {
+      candidates.push(c.lastError);
+      visited.add(c.lastError);
+    }
+    cur = c.cause;
+  }
+  for (const node of candidates) {
+    const n = node as { responseBody?: unknown };
+    if (typeof n.responseBody === "string") {
       try {
-        const parsed = JSON.parse(c.responseBody) as { error?: { message?: string } };
-        if (parsed?.error?.message) return parsed.error.message;
+        const parsed = JSON.parse(n.responseBody) as {
+          error?: { message?: string; metadata?: { raw?: string } };
+        };
+        const raw = parsed?.error?.metadata?.raw;
+        if (raw) return raw;
+        const msg = parsed?.error?.message;
+        if (msg) return msg;
       } catch {
         /* fall through */
       }
     }
-    if (c.cause) {
-      cur = c.cause;
-      continue;
-    }
-    if (c.message) return c.message;
-    break;
+  }
+  // Last resort: any message from the chain.
+  for (const node of candidates) {
+    const m = (node as { message?: string }).message;
+    if (m) return m;
   }
   return "Vision model provider is unavailable. Try again later.";
 }
