@@ -53,8 +53,8 @@ verification · ⏸️ needs a user decision before it can proceed.
 | 9 | Phase 2 tool-call execution — tools mutate state via `requireUser` + per-user queries | `team/tool-calls` | ⬜ | 🧪 browser verify |
 | 10 | Plan-edit proposal cards — accept/reject UI wired to apply path | `team/plan-edit-cards` | ⬜ | Depends on #9 |
 | 11 | ANALYSIS scores — replace `/api/analysis` placeholder with real computed scores | `team/analysis-scores` | ⬜ | Depends on #9 |
-| 12 | Charts — **recharts** (3.8.1, installed) interactive charts w/ hover+tooltips; audit real-vs-mock (`DRIFT_SERIES`), migrate meaningful charts | `team/dashboard` | 🔨 | combined w/ #13 (shared PortfolioScreen). Running early in parallel (no Phase-6 dep) |
-| 13 | Plan & Health review + redesign — audit `PortfolioScreen`/`AppPanels`/`api/plan`, ship worthwhile signals | `team/dashboard` | 🔨 | combined w/ #12 |
+| 12 | Charts — **recharts** interactive charts w/ hover+tooltips (`InteractiveCharts.tsx`, `'use client'`) | merged→`main` | ✅ | ✅ merged (8b00b79). 🧪 eyeball the new charts in-browser |
+| 13 | Plan & Health redesign — real signals in `lib/portfolio/health.ts` (drift, blended TER, concentration, cash drag, rebalance hint w/ good/watch/action tone) | merged→`main` | ✅ | ✅ merged (8b00b79). 21 health tests. 🧪 eyeball PortfolioScreen + Plan&Health panel |
 
 ### ⏳ Needs the user (collected — do these when you're back)
 - Apply migration `0007` to the real `data/app.db` (after backup) + set `OWNER_EMAIL`, then run `npx tsx --env-file=.env.local scripts/backfill-owner.ts`.
