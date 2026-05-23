@@ -34,7 +34,7 @@ interface OcrApiResponse {
   rows: Array<{
     ticker: string;
     englishName?: string;
-    units: number;
+    units?: number;
     avgCost?: number;
     quoteSource: QuoteSource;
   }>;
@@ -78,6 +78,7 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
   const [imgProcessing, setImgProcessing] = useState(false);
   const [ocrRows, setOcrRows] = useState<OcrRow[] | null>(null);
   const [ocrError, setOcrError] = useState<string | null>(null);
+  const [ocrInfo, setOcrInfo] = useState<string | null>(null);
   const [rows, setRows] = useState<Row[]>([
     { ticker: "", units: "", value: "" },
     { ticker: "", units: "", value: "" },
@@ -130,6 +131,7 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
 
     setImgProcessing(true);
     setOcrError(null);
+    setOcrInfo(null);
     setOcrRows(null);
 
     try {
@@ -153,12 +155,18 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
         body.rows.map((r) => ({
           ticker: r.ticker,
           englishName: r.englishName ?? "",
-          units: String(r.units),
+          units: r.units != null ? String(r.units) : "",
           avgCost: r.avgCost != null ? String(r.avgCost) : "",
           quoteSource: r.quoteSource,
           error: null,
         })),
       );
+      const missingUnits = body.rows.filter((r) => r.units == null).length;
+      if (missingUnits > 0) {
+        setOcrInfo(
+          `Pulled ${body.rows.length} rows · ${missingUnits} need units filled in before saving.`,
+        );
+      }
     } catch (err) {
       setOcrError(err instanceof Error ? err.message : "Failed to reach OCR endpoint.");
     } finally {
@@ -182,6 +190,7 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
     setImgPreview(null);
     setOcrRows(null);
     setOcrError(null);
+    setOcrInfo(null);
     setImgProcessing(false);
   };
 
@@ -676,6 +685,22 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
                 }}
               >
                 {ocrError}
+              </div>
+            )}
+
+            {ocrInfo && !ocrError && (
+              <div
+                style={{
+                  marginBottom: 8,
+                  padding: "8px 10px",
+                  background: "var(--card-soft)",
+                  borderRadius: 8,
+                  color: "var(--muted)",
+                  fontSize: 12,
+                  lineHeight: 1.4,
+                }}
+              >
+                {ocrInfo}
               </div>
             )}
 

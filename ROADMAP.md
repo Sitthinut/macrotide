@@ -929,19 +929,26 @@ once you have a clear personal need.
    - `app/api/import/csv/route.ts`: accepts `multipart/form-data`.
    - Wire the CSV tab of `AddHoldingsSheet`.
    - Sample file at `data/sample-holdings.csv`.
-2. **Image OCR** (shipped 2026-05-22).
+2. **Image OCR** (shipped 2026-05-22, partial-row pass 2026-05-23).
    - `lib/portfolio/ocr.ts`: send image to an OpenRouter vision model via
-     Vercel AI SDK `generateObject` with a strict Zod schema → return
+     Vercel AI SDK `generateObject` with a Zod schema → return
      `{ rows: ProposedRow[] }`. Defaults to `openrouter/free` — OpenRouter's
      free-models router, which picks a free vision-capable backend per call
      so this path never burns paid credits. Override with `OCR_MODEL`.
+   - **Partial rows on purpose:** ticker is the only required field. `units`,
+     `avgCost`, `englishName` are all optional — the model surfaces every
+     holding it can identify, and the user completes missing fields in the
+     confirmation table. Avoids the failure mode where a screenshot that
+     hides units (e.g. a value-only portfolio overview) returns zero rows.
    - `app/api/import/image/route.ts`: multipart/form-data POST, 5 MB cap,
      JPG/PNG/WebP only, 10 RPM IP rate-limit, returns 503 cleanly when
      `OPENROUTER_API_KEY` is unset.
    - Image tab of `AddHoldingsSheet`: editable confirmation table
      (ticker / name / units / avgCost / quoteSource) with add-row + remove-row
-     before save. Inline per-row error states; quoteSource auto-inferred from
-     ticker shape (hyphenated → `thai_mutual_fund`, otherwise `yahoo`).
+     before save. Info banner surfaces "N rows pulled · M need units filled
+     in". Save still requires units per row (a holding without quantity is
+     unsavable); quoteSource auto-inferred from ticker shape
+     (hyphenated → `thai_mutual_fund`, otherwise `yahoo`).
 3. **Manual entry**.
    - Build an autocomplete on `holdings` history + a small seed of common
      tickers (kept in `lib/data/known-funds.ts`, not the DB).
@@ -965,6 +972,46 @@ once you have a clear personal need.
   schema, low temperature, validation against `known-funds.ts`.
 - **CSV variance**: real broker exports have weird columns. Build the parser
   defensively; let the user map columns in the UI if auto-detect fails.
+
+### Follow-up: advisor-assist OCR (depends on Phase 6 tool calls)
+
+The cheap-now OCR (partial rows + confirmation table) handles the easy case
+where the user can read missing fields off the screenshot themselves. The
+harder case: user uploads a screenshot, OCR pulls 7 tickers, 3 are missing
+units — and the user doesn't remember the exact unit counts either. Today
+that user is stuck.
+
+The advisor-assist version turns this into a conversation:
+
+1. On upload, `/api/import/image` still returns `{ rows: ProposedRow[] }`.
+2. If any row is incomplete, the UI offers "Walk through these with the
+   advisor" instead of (or alongside) the manual confirmation table.
+3. Clicking opens a chat thread pre-loaded with structured proposal cards —
+   one per holding — like the existing `propose_plan_edit` flow.
+4. The advisor asks targeted questions ("I see K-WORLDX but couldn't read
+   units — do you have a confirmation slip or recent statement?") and uses
+   a new `propose_holding` tool to fill in fields based on the conversation.
+5. User accepts/rejects each card; accepted cards POST to `/api/holdings`.
+
+Shape mirrors Phase 2's plan-edit pattern. Schema addition:
+
+```sql
+CREATE TABLE holding_proposals (
+  id           TEXT PRIMARY KEY,
+  thread_id    TEXT NOT NULL REFERENCES chat_threads(id),
+  bucket_id    TEXT REFERENCES buckets(id),
+  draft        TEXT NOT NULL,           -- JSON ProposedRow
+  rationale    TEXT,
+  status       TEXT NOT NULL,           -- "pending" | "accepted" | "rejected"
+  created_at   TEXT NOT NULL,
+  resolved_at  TEXT
+);
+```
+
+**Depends on:** Phase 6 tool-call surface being solid (chat tools that mutate
+state, structured proposal cards). Don't start this before Phase 6's
+`propose_plan_edit` lands — it's the same pattern and should reuse the same
+infrastructure.
 
 ---
 

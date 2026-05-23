@@ -22,7 +22,12 @@ vi.mock("@ai-sdk/openai-compatible", () => ({
   createOpenAICompatible: vi.fn(() => (modelId: string) => ({ modelId })),
 }));
 
-import { extractHoldingsFromImage, inferQuoteSource, isAllowedMimeType } from "./ocr";
+import {
+  extractHoldingsFromImage,
+  inferQuoteSource,
+  isAllowedMimeType,
+  OcrProviderUnavailableError,
+} from "./ocr";
 
 const FAKE_KEY = "sk-or-test";
 
@@ -98,17 +103,21 @@ describe("extractHoldingsFromImage", () => {
     ]);
   });
 
-  it("drops rows with non-positive units (defensive normalization)", async () => {
+  it("keeps rows even when units is missing or non-positive (user fills in later)", async () => {
     mockImpl.value = {
       rows: [
-        { ticker: "K-FIXED-A", units: 0 }, // invalid
-        { ticker: "K-USA-A", units: -3 }, // invalid
+        { ticker: "K-FIXED-A" }, // no units at all
+        { ticker: "K-USA-A", units: 0 }, // non-positive → treat as missing
+        { ticker: "K-WORLDX", units: -3 }, // non-positive → treat as missing
         { ticker: "AAPL", units: 5 }, // valid
       ],
     };
     const result = await extractHoldingsFromImage(fakeImage);
-    expect(result.rows).toHaveLength(1);
-    expect(result.rows[0].ticker).toBe("AAPL");
+    expect(result.rows).toHaveLength(4);
+    expect(result.rows[0].units).toBeUndefined();
+    expect(result.rows[1].units).toBeUndefined();
+    expect(result.rows[2].units).toBeUndefined();
+    expect(result.rows[3].units).toBe(5);
   });
 
   it("omits avgCost when model returns nothing or non-positive", async () => {
@@ -123,10 +132,24 @@ describe("extractHoldingsFromImage", () => {
     expect(result.rows[1].avgCost).toBeUndefined();
   });
 
-  it("returns { rows: [] } cleanly when the SDK rejects (schema violation, transport error, etc.)", async () => {
+  it("returns { rows: [] } cleanly on schema/parse failures (model ran but output was unusable)", async () => {
     mockImpl.throw = new Error("NoObjectGeneratedError: model returned freeform text");
     const result = await extractHoldingsFromImage(fakeImage);
     expect(result).toEqual({ rows: [] });
+  });
+
+  it("throws OcrProviderUnavailableError on AI SDK transport errors with the provider's message", async () => {
+    const transportErr = Object.assign(new Error("Provider returned error"), {
+      name: "AI_APICallError",
+      responseBody: JSON.stringify({
+        error: { message: "No endpoints available matching your guardrail restrictions." },
+      }),
+    });
+    mockImpl.throw = transportErr;
+    await expect(extractHoldingsFromImage(fakeImage)).rejects.toBeInstanceOf(
+      OcrProviderUnavailableError,
+    );
+    await expect(extractHoldingsFromImage(fakeImage)).rejects.toThrow(/guardrail/);
   });
 
   it("returns { rows: [] } when the model returns an empty array", async () => {

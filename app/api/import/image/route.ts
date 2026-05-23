@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { clientIp, type RateLimitConfig, rateLimit } from "@/lib/api/rate-limit";
 import { withDb } from "@/lib/api/with-db";
-import { extractHoldingsFromImage, isAllowedMimeType, type ProposedRow } from "@/lib/portfolio/ocr";
+import {
+  extractHoldingsFromImage,
+  isAllowedMimeType,
+  OcrProviderUnavailableError,
+  type ProposedRow,
+} from "@/lib/portfolio/ocr";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -82,8 +87,18 @@ export async function POST(req: Request) {
   // this endpoint does NOT write to the DB — the confirmation pass happens
   // client-side, and the final save round-trips through /api/holdings.
   return withDb(async () => {
-    const { rows } = await extractHoldingsFromImage({ data: buffer, mimeType });
-    const payload: { rows: ProposedRow[] } = { rows };
-    return NextResponse.json(payload, { status: 200 });
+    try {
+      const { rows } = await extractHoldingsFromImage({ data: buffer, mimeType });
+      const payload: { rows: ProposedRow[] } = { rows };
+      return NextResponse.json(payload, { status: 200 });
+    } catch (err) {
+      if (err instanceof OcrProviderUnavailableError) {
+        return NextResponse.json(
+          { error: "provider_unavailable", message: err.message },
+          { status: 502 },
+        );
+      }
+      throw err;
+    }
   });
 }

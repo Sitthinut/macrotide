@@ -21,7 +21,7 @@ import type { QuoteSource } from "@/lib/market/sources";
 export interface ProposedRow {
   ticker: string;
   englishName?: string;
-  units: number;
+  units?: number;
   avgCost?: number;
   quoteSource: QuoteSource;
 }
@@ -43,16 +43,19 @@ const DEFAULT_OCR_MODEL = "openrouter/free";
 
 const SYSTEM_PROMPT = `You extract Thai mutual fund and stock holdings from a broker / fund-house screenshot.
 
+Goal: surface every holding you can identify, even if some fields are missing.
+The user will review and complete the rows in a confirmation table, so partial
+data is useful — don't drop a row just because one field is unreadable.
+
 Rules:
-- Return ONLY rows you can read with high confidence from the image.
-- Never invent a ticker. If a ticker is unreadable, omit the whole row.
-- Prefer leaving englishName undefined over guessing the official fund name.
-- Units is the share / unit count (a positive number). avgCost is the average
-  cost per unit (NOT the total market value). If only the total value is
-  shown, leave avgCost undefined — the user can fix it in the confirmation
-  table.
-- If the image is not a portfolio / holdings list, return { "rows": [] }.
-- If you are unsure, return { "rows": [] } rather than a noisy best-effort.`;
+- Ticker is the only required field. If you can't read the ticker, omit the row.
+- Never invent a ticker. Copy it exactly as printed.
+- englishName, units, avgCost are all optional — leave any field undefined when
+  it's not clearly visible. Never guess.
+- units is the share / unit count (positive number). avgCost is the average
+  cost PER UNIT — not the total market value. If only a total/market value is
+  shown, leave avgCost undefined.
+- If the image is not a portfolio / holdings list at all, return { "rows": [] }.`;
 
 const RowSchema = z.object({
   ticker: z
@@ -66,7 +69,11 @@ const RowSchema = z.object({
     .max(200)
     .optional()
     .describe("Fund's official English name if clearly visible. Omit if unsure."),
-  units: z.number().positive().describe("Unit / share count, positive number."),
+  units: z
+    .number()
+    .positive()
+    .optional()
+    .describe("Unit / share count, positive number. Omit if not clearly visible."),
   avgCost: z
     .number()
     .positive()
@@ -153,14 +160,55 @@ export async function extractHoldingsFromImage(input: OcrInput): Promise<OcrResu
     });
 
     return normalizeRows(result.object.rows);
-  } catch {
-    // generateObject throws on schema-validation failure, on
-    // NoObjectGeneratedError, and on provider transport errors. For all of
-    // these, the safest user-facing outcome is "no rows extracted" — the user
-    // can retry, try a different screenshot, or fall back to manual entry.
-    // We intentionally don't surface the raw provider error to the client.
+  } catch (err) {
+    // Distinguish "model ran but produced unusable output" (schema/parse —
+    // return empty rows, user retries) from "we couldn't reach a working
+    // vision model" (API/auth/guardrail — surface to UI so user can act).
+    if (isProviderError(err)) {
+      const message = extractProviderMessage(err);
+      throw new OcrProviderUnavailableError(message);
+    }
     return { rows: [] };
   }
+}
+
+export class OcrProviderUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OcrProviderUnavailableError";
+  }
+}
+
+function isProviderError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const name = (err as { name?: string }).name ?? "";
+  // AI SDK error class names: AI_APICallError, AI_RetryError, etc.
+  return name.startsWith("AI_") && name !== "AI_NoObjectGeneratedError";
+}
+
+function extractProviderMessage(err: unknown): string {
+  // Walk the error chain — AI_RetryError typically wraps the last AI_APICallError.
+  const visited = new Set<unknown>();
+  let cur: unknown = err;
+  while (cur && typeof cur === "object" && !visited.has(cur)) {
+    visited.add(cur);
+    const c = cur as { responseBody?: unknown; cause?: unknown; message?: string };
+    if (typeof c.responseBody === "string") {
+      try {
+        const parsed = JSON.parse(c.responseBody) as { error?: { message?: string } };
+        if (parsed?.error?.message) return parsed.error.message;
+      } catch {
+        /* fall through */
+      }
+    }
+    if (c.cause) {
+      cur = c.cause;
+      continue;
+    }
+    if (c.message) return c.message;
+    break;
+  }
+  return "Vision model provider is unavailable. Try again later.";
 }
 
 function normalizeRows(rows: Array<z.infer<typeof RowSchema>>): OcrResult {
@@ -168,12 +216,13 @@ function normalizeRows(rows: Array<z.infer<typeof RowSchema>>): OcrResult {
   for (const raw of rows) {
     const ticker = raw.ticker.trim().toUpperCase();
     if (!ticker) continue;
-    if (!Number.isFinite(raw.units) || raw.units <= 0) continue;
     const row: ProposedRow = {
       ticker,
-      units: raw.units,
       quoteSource: inferQuoteSource(ticker),
     };
+    if (typeof raw.units === "number" && Number.isFinite(raw.units) && raw.units > 0) {
+      row.units = raw.units;
+    }
     if (raw.englishName && raw.englishName.trim()) {
       row.englishName = raw.englishName.trim();
     }
