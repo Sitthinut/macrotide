@@ -47,10 +47,13 @@ function LoginInner() {
   }, []);
 
   // Already signed in? Skip the login screen — unless we're prompting for a
-  // passkey after a fresh OAuth sign-in.
+  // passkey after a fresh OAuth sign-in. Skip while `busy`: during account
+  // creation, signUp.email() auto-signs-in and flips `session` before the
+  // following addPasskey() can run, so a redirect here would preempt the
+  // WebAuthn prompt. The active handler does its own redirect once done.
   useEffect(() => {
-    if (session?.user && !passkeyPrompt) router.replace("/");
-  }, [session, router, passkeyPrompt]);
+    if (session?.user && !passkeyPrompt && !busy) router.replace("/");
+  }, [session, router, passkeyPrompt, busy]);
 
   // Header sent on account-creation / OAuth POSTs so the server-side Turnstile
   // gate can verify it. Empty when Turnstile isn't configured (dev bypass).
