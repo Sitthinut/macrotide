@@ -153,10 +153,12 @@ different sources without a schema change.
 - `AUTH_DISABLED=1` opt-out for trusted local dev only. Default is
   auth-required.
 - `AUTH_SECRET` is mandatory in production; throws on boot if unset.
-- Pre-Phase-6, every authenticated request operates on the single owner
-  dataset. There is no `user_id` column on app tables yet.
-- When Phase 6 ships, `OWNER_EMAIL` env var identifies the account that
-  inherits all pre-migration data.
+- Multi-user mode adds a nullable `user_id` to app tables (migration `0007`).
+  A signed-in owner's rows are stamped with their id; demo and built-in rows
+  stay `NULL` (shared). Pre-multi-user rows start `NULL`.
+- `OWNER_EMAIL` — read only by [scripts/backfill-owner.ts](./scripts/backfill-owner.ts),
+  not at runtime — names the account that inherits those `NULL`-owned rows and
+  is granted the `trusted` tier. Run the script once after migrating.
 
 ## Environment variables
 
@@ -188,6 +190,7 @@ table in sync when adding/renaming vars and also update
 | `AUTH_RP_NAME` | `Macrotide` | [lib/auth/index.ts](./lib/auth/index.ts) | Passkey relying-party display name. |
 | `AUTH_RP_ID` | inferred from `PUBLIC_APP_URL` | [lib/auth/index.ts](./lib/auth/index.ts) | Override only if you understand WebAuthn `rpID` rules. |
 | `PUBLIC_APP_URL` | `http://localhost:3000` (implicit) | [lib/auth/index.ts](./lib/auth/index.ts), [lib/portfolio/ocr.ts](./lib/portfolio/ocr.ts) | Canonical URL. Used for OpenRouter `HTTP-Referer` and WebAuthn origin. Changing this in prod breaks existing passkeys. |
+| `OWNER_EMAIL` | unset (script no-op) | [scripts/backfill-owner.ts](./scripts/backfill-owner.ts) | **Script-only, not read at runtime.** Names the account that inherits `NULL`-owned rows and gets the `trusted` tier. Run `npx tsx --env-file=.env.local scripts/backfill-owner.ts` once after migrating. Idempotent. |
 
 ### Auth — OAuth + signup gate (Phase 6 — 6b/6c)
 
