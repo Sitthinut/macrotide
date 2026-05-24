@@ -53,6 +53,9 @@
     "typescript": "^6.0.3",
     "vitest": "^4.1.7"
   },
+  "overrides": {
+    "postcss": "^8.5.10"
+  },
   "simple-git-hooks": {
     "pre-commit": "npx lint-staged"
   },
