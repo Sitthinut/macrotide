@@ -5,6 +5,11 @@
   "schedule": ["before 6am on monday"],
   "prConcurrentLimit": 5,
   "platformAutomerge": true,
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "schedule": ["at any time"],
+    "automerge": true
+  },
   "lockFileMaintenance": {
     "enabled": true,
     "schedule": ["before 6am on monday"]
