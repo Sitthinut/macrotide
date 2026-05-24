@@ -112,15 +112,16 @@ export function ConnectScreen({ onConnect }: ConnectScreenProps) {
               marginBottom: 28,
             }}
           >
-            Connect your brokerage, see your funds in one place, and ask an AI to critique your
-            thinking. Open-source. Your data stays local.
+            Add your funds, see them in one place, and ask an AI to critique your thinking.
+            Open-source and self-hostable.
           </p>
           <ul className="bullet-list" style={{ marginBottom: 32 }}>
             <li>
-              <span className="marker">01</span>Read-only access — we can never trade
+              <span className="marker">01</span>Macrotide never trades — it only reads the holdings
+              you add
             </li>
             <li>
-              <span className="marker">02</span>Portfolio analysis runs on-device
+              <span className="marker">02</span>Self-hosted — your data isn&apos;t sold or shared
             </li>
             <li>
               <span className="marker">03</span>Chat with a model that knows your holdings
@@ -132,11 +133,27 @@ export function ConnectScreen({ onConnect }: ConnectScreenProps) {
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <button className="btn primary full" onClick={() => setStep(1)}>
-            Connect your brokerage <Icon name="arrowRight" size={14} />
+            Connect your brokerage{" "}
+            <span className="tag" style={{ fontSize: 9 }}>
+              Preview
+            </span>
+            <Icon name="arrowRight" size={14} />
           </button>
           <button className="btn ghost full" onClick={onConnect}>
             Explore with demo data
           </button>
+          <p
+            style={{
+              fontSize: 11.5,
+              color: "var(--muted)",
+              lineHeight: 1.5,
+              marginTop: 2,
+              textAlign: "center",
+            }}
+          >
+            Brokerage sync is a preview of planned functionality — no live integration yet. For now,
+            explore the demo or add holdings manually (CSV / screenshot) once you&apos;re in.
+          </p>
         </div>
       </div>
     );
@@ -233,8 +250,8 @@ export function ConnectScreen({ onConnect }: ConnectScreenProps) {
                 lineHeight: 1.5,
               }}
             >
-              Read-only OAuth via the brokerage&apos;s partner API. We see holdings &amp; NAVs,
-              never your password or trading rights.
+              Planned: read-only OAuth via the brokerage&apos;s partner API — holdings &amp; NAVs
+              only, never your password or trading rights. Not yet live.
             </div>
           </div>
         </div>
