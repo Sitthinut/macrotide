@@ -25,6 +25,9 @@ jobs:
       - name: Lint (Biome)
         run: npm run lint
 
+      - name: Test (Vitest)
+        run: npm test
+
       - name: Build
         env:
           # Build-time only; never used to sign real sessions. lib/auth requires
