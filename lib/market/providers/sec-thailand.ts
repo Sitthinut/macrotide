@@ -102,38 +102,78 @@ function apiKey(): string {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+// Global rate gate. The SEC ceiling is 5 000 calls / 300 s (~16.7/s). A full
+// nightly catalog crawl fires ~10–15k calls across a concurrency pool, so a
+// per-page sleep alone won't keep us under the cap — concurrent callers would
+// burst past it. This serializes call *start times* to at least
+// MIN_INTERVAL_MS apart process-wide (~14/s), leaving headroom no matter the
+// concurrency. Cheap single-symbol lookups pay at most one interval.
+// Tunable throttle + retry knobs. Defaults are the production values; tests
+// override them via __setSecThailandRetry to avoid real backoff waits.
+const RETRY_DEFAULTS = {
+  minIntervalMs: 70, // ~14 calls/s, under the 16.7/s ceiling
+  maxRetries: 5,
+  baseDelayMs: 500,
+  maxBackoffMs: 30_000,
+};
+let retry = { ...RETRY_DEFAULTS };
+let nextSlot = 0;
+
+async function rateGate(): Promise<void> {
+  const now = Date.now();
+  const start = Math.max(now, nextSlot);
+  nextSlot = start + retry.minIntervalMs;
+  if (start > now) await sleep(start - now);
+}
+
 async function secFetch<T>(path: string, key: string): Promise<T | null> {
   const url = `${BASE_URL}${path}`;
-  const res = await fetch(url, {
-    headers: {
-      "Ocp-Apim-Subscription-Key": key,
-      Accept: "application/json",
-    },
-    cache: "no-store",
-  });
-  if (res.status === 204) return null;
-  if (res.status === 401 || res.status === 403) {
-    throw new ProviderError(
-      `Thai SEC API rejected the subscription key (${res.status})`,
-      "sec-thailand",
-      res.status,
-    );
+  for (let attempt = 0; ; attempt++) {
+    await rateGate();
+    const res = await fetch(url, {
+      headers: {
+        "Ocp-Apim-Subscription-Key": key,
+        Accept: "application/json",
+      },
+      cache: "no-store",
+    });
+    if (res.status === 204) return null;
+    if (res.status === 401 || res.status === 403) {
+      throw new ProviderError(
+        `Thai SEC API rejected the subscription key (${res.status})`,
+        "sec-thailand",
+        res.status,
+      );
+    }
+    // Retryable: rate-limit (421/429) and server errors (5xx). 401/403 above
+    // are auth errors and never retried.
+    if (res.status === 421 || res.status === 429 || res.status >= 500) {
+      if (attempt >= retry.maxRetries) {
+        throw new ProviderError(
+          `Thai SEC API still failing after ${retry.maxRetries} retries (${res.status}) for ${path}`,
+          "sec-thailand",
+          res.status,
+        );
+      }
+      // Honor Retry-After when present, else exponential backoff with jitter.
+      const retryAfterSec = Number(res.headers.get("retry-after"));
+      const backoff =
+        Number.isFinite(retryAfterSec) && retryAfterSec > 0
+          ? retryAfterSec * 1000
+          : Math.min(retry.maxBackoffMs, retry.baseDelayMs * 2 ** attempt) +
+            Math.floor(Math.random() * 250);
+      await sleep(backoff);
+      continue;
+    }
+    if (!res.ok) {
+      throw new ProviderError(
+        `Thai SEC API returned ${res.status} for ${path}`,
+        "sec-thailand",
+        res.status,
+      );
+    }
+    return (await res.json()) as T;
   }
-  if (res.status === 421 || res.status === 429) {
-    throw new ProviderError(
-      `Thai SEC API rate-limited (${res.status})`,
-      "sec-thailand",
-      res.status,
-    );
-  }
-  if (!res.ok) {
-    throw new ProviderError(
-      `Thai SEC API returned ${res.status} for ${path}`,
-      "sec-thailand",
-      res.status,
-    );
-  }
-  return (await res.json()) as T;
 }
 
 async function secFetchPaginated<T>(
@@ -470,4 +510,11 @@ export async function fetchFundAum(
 /** Test-only — reset the per-symbol cache. */
 export function __resetSecThailandCache(): void {
   symbolCache.clear();
+  retry = { ...RETRY_DEFAULTS };
+  nextSlot = 0;
+}
+
+/** Test-only: override throttle/retry timing so tests don't incur real waits. */
+export function __setSecThailandRetry(overrides: Partial<typeof RETRY_DEFAULTS>): void {
+  retry = { ...retry, ...overrides };
 }
