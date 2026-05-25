@@ -88,17 +88,30 @@ export function NavChart({
     return <EmptyState height={height} emptyHint={emptyHint} />;
   }
 
-  // Rebase the benchmark onto the portfolio's starting value so the two lines
-  // share a scale (same approach the old hand-drawn chart used).
+  // Overlay the benchmark aligned to the portfolio's own date labels, then
+  // rebase it onto the portfolio's starting value so both lines share a scale.
+  // Tolerant of different lengths / non-overlapping trading days: we forward-
+  // fill the benchmark across the portfolio's points and rebase on the first
+  // available benchmark value (the old exact-length check silently dropped the
+  // line whenever the two series differed in length, which was always).
   let merged = data.map((d) => ({ d: d.d, v: d.v, bench: null as number | null }));
-  if (benchmarkData && benchmarkData.length === data.length) {
+  if (benchmarkData && benchmarkData.length > 0) {
+    const byLabel = new Map(benchmarkData.map((b) => [b.d, b.v]));
     const portfolioStart = data[0].v;
-    const benchStart = benchmarkData[0].v || 1;
-    merged = data.map((d, i) => ({
-      d: d.d,
-      v: d.v,
-      bench: (benchmarkData[i].v / benchStart) * portfolioStart,
-    }));
+    let lastBench: number | null = null;
+    const aligned = data.map((d) => {
+      const bv = byLabel.get(d.d);
+      if (bv !== undefined) lastBench = bv;
+      return lastBench;
+    });
+    const benchStart = aligned.find((v) => v != null) ?? null;
+    if (benchStart) {
+      merged = data.map((d, i) => ({
+        d: d.d,
+        v: d.v,
+        bench: aligned[i] != null ? ((aligned[i] as number) / benchStart) * portfolioStart : null,
+      }));
+    }
   }
 
   return (

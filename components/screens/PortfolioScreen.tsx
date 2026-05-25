@@ -11,14 +11,15 @@ import {
   usePortfolioView,
   useSelectedModelId,
 } from "@/lib/fetchers/legacy";
-import type { SeriesRange } from "@/lib/fetchers/portfolio";
+import { type SeriesRange, useBenchmarkSeries } from "@/lib/fetchers/portfolio";
 import { invalidate } from "@/lib/fetchers/swr";
 import { fmtPct } from "@/lib/format";
+import { BENCHMARK_OPTIONS } from "@/lib/market/benchmark-options";
 import { DEFAULT_QUOTE_SOURCE, isQuoteSource } from "@/lib/market/sources";
+import { formatSeriesDate } from "@/lib/portfolio/adapter";
 import { computeHealth, rebalanceHint, summarizeHealth } from "@/lib/portfolio/health";
 import { scorePortfolio } from "@/lib/portfolio/score";
-import { BENCHMARKS } from "@/lib/static/analysis";
-import type { AssetClass, BenchmarkKey, Holding, Portfolio } from "@/lib/static/types";
+import type { AssetClass, Holding, Portfolio } from "@/lib/static/types";
 
 function holdingToFormValues(h: Holding, fallbackBucketId: string): HoldingFormValues {
   return {
@@ -87,7 +88,7 @@ export function PortfolioScreen({
   const [activePfId, setActivePfId] = useState<string>("all");
   const [range, setRange] = useState<string>("6M");
   const [filter, setFilter] = useState<AssetClass | "all">("all");
-  const [benchmark, setBenchmark] = useState<"none" | BenchmarkKey>("none");
+  const [benchmark, setBenchmark] = useState<string>("none");
   const [feedback, setFeedback] = useState<Record<string, "up" | "down" | null>>({});
   const [holdingSheet, setHoldingSheet] = useState<Holding | null>(null);
 
@@ -167,6 +168,21 @@ export function PortfolioScreen({
   const { portfolios, aggregate, isLoading } = usePortfolioView(seriesRange);
   const { models } = useModelPortfoliosView();
   const planSelectedModelId = useSelectedModelId();
+
+  // Real benchmark overlay: fetch the selected index over the SAME range as the
+  // chart, then map it onto the portfolio's date-label space so NavChart can
+  // align + rebase it. Empty series (upstream cold / backing off) → no overlay.
+  const { data: benchmarkResp } = useBenchmarkSeries(
+    benchmark === "none" ? null : benchmark,
+    seriesRange,
+  );
+  const benchmarkSeries = useMemo(
+    () =>
+      benchmarkResp && benchmarkResp.series.length > 0
+        ? benchmarkResp.series.map((p) => ({ d: formatSeriesDate(p.date), v: p.value }))
+        : null,
+    [benchmarkResp],
+  );
 
   const activePf = useMemo<Portfolio | null>(() => {
     if (activePfId === "all" || !portfolios) return null;
@@ -484,12 +500,8 @@ export function PortfolioScreen({
         </div>
         <NavChart
           data={view.series}
-          benchmarkData={benchmark !== "none" ? BENCHMARKS[benchmark] : null}
-          benchmarkLabel={
-            { sp500: "S&P 500", set: "SET", m60_40: "60/40", none: null }[benchmark] as
-              | string
-              | null
-          }
+          benchmarkData={benchmark !== "none" ? benchmarkSeries : null}
+          benchmarkLabel={benchmark !== "none" ? (benchmarkResp?.label ?? null) : null}
           height={130}
           accent="var(--accent)"
           emptyHint={
@@ -510,21 +522,14 @@ export function PortfolioScreen({
           >
             VS
           </span>
-          {(
-            [
-              { v: "none", l: "None" },
-              { v: "sp500", l: "S&P 500" },
-              { v: "set", l: "SET" },
-              { v: "m60_40", l: "60/40" },
-            ] as { v: "none" | BenchmarkKey; l: string }[]
-          ).map((b) => (
+          {[{ key: "none", label: "None" }, ...BENCHMARK_OPTIONS].map((b) => (
             <span
-              key={b.v}
+              key={b.key}
               className="chip"
-              data-active={benchmark === b.v}
-              onClick={() => setBenchmark(b.v)}
+              data-active={benchmark === b.key}
+              onClick={() => setBenchmark(b.key)}
             >
-              {b.l}
+              {b.label}
             </span>
           ))}
         </div>

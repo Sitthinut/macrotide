@@ -8,7 +8,11 @@
 **Vision.** An AI investment companion for Thai index investors — hold your
 mutual-fund holdings, see allocation/fees/NAV trends honestly, and chat with an
 advisor that has structured, read-and-propose access to your portfolio, plan,
-and journal. Personal-use experiment, soft-public for family and friends.
+and journal. Personal-use experiment, soft-public for family and friends. The
+advisor is the heart of the product — chat is its first surface, not its limit;
+richer AI features (a grounded daily read, an AI-curated news brief, proactive
+portfolio reviews) are where the value compounds. The core promise is simple:
+help an index investor **at least match their index, ideally beat it.**
 
 The app is past its static-data prototype stage: persistence, AI chat with
 advisor tool-calls, market data, portfolio import, long-term memory, and the
@@ -73,11 +77,62 @@ signup, so data isolation is load-bearing):
 - `PUBLIC_APP_URL` is pinned in production — changing it breaks passkey `rpID`
   and OAuth callback URIs.
 
-## Next — durable data + freshness
+## Next — depth that makes the advisor worth using
 
-Lower urgency than launch, but the obvious follow-ups once the door is open.
+Launch opens the door; this is where the product earns its keep. An AI advisor
+that does more than chat, and a portfolio view honest enough to tell you whether
+you're matching or beating your index.
 
-### Reliable market-data source (Yahoo 429s)
+### Richer AI features (not just chat)
+
+Chat is the advisor's first surface, not its limit. Build out:
+
+- **AI market digest — "Today, in your words."** A short, plain-language read of
+  the day, grounded in the user's *actual* holdings + live index/NAV data — not
+  a generic market recap. Generated on demand (and later off the scheduled
+  refresh). Replaces the removed hardcoded card. *(Moved up from the backlog —
+  this is core, not parked.)*
+- **AI-curated news brief.** Today's Markets feed ("From the long-term investing
+  desk") is a flat RSS list. Turn it into a synthesized daily brief: cluster the
+  day's items into a few short stories, each with a one-line "why it matters for
+  a long-term index investor" and 2–4 curated links (original reporting first,
+  then corroboration) instead of one headline per row.
+- **Proactive portfolio review.** A periodic AI assessment — "what changed since
+  last time, and does it need action?" — surfaced without the user asking:
+  drift, fee creep, concentration, cash drag, rebalance nudges.
+- **Agentic-turn reliability.** Pinning demo/free chat to `openrouter/free` for a
+  5-step tool-calling task yields frequent empty / early-stop turns (a tool read
+  with no follow-up prose or `propose_*` call → the "I didn't have a reply" UI
+  fallback). Use a stronger small model for tool-calling chat, and/or persist and
+  surface tool-only steps instead of dropping them. *(The `read_performance` tool,
+  plan-anchored rebalancing guidance, and the anti-hallucination rule have
+  shipped — see the changelog; this reliability item is what's left.)*
+
+### Benchmarks that are the user's own
+
+The overlay now renders with **real, aligned** index series (SET / S&P 500 /
+Nasdaq / Nikkei) and the advisor reasons about returns vs them — see the
+changelog. What's left is making the benchmark genuinely *theirs*:
+
+- **Editable / goal-based.** Beyond the preset index list, let the user pick or
+  add the benchmark(s) that match their goal — their own SET index fund, a
+  global index, or a blend — and persist the choice. The benchmark should be
+  the one they're actually trying to match or beat, not only a preset.
+
+### Data freshness & auto-refresh
+
+The dashboard is essentially fetch-on-mount today: the SWR layer
+([lib/fetchers/swr.ts](./lib/fetchers/swr.ts)) runs with defaults — revalidate
+on focus/reconnect, **no polling** — so an open screen never updates on its own.
+And the 5-min quote TTL is dead code (`void QUOTE_TTL_MS` in
+[lib/market/cache.ts](./lib/market/cache.ts)); quote freshness actually rides the
+24h history TTL, so intraday index moves can be up to a day stale on a warm
+cache. Decide a per-surface cadence (indices/FX ~1 min in market hours, news
+~15–30 min, NAVs daily after the SEC window), wire `refreshInterval` where it
+earns its keep, and fix the quote TTL. The scheduled NAV refresh below is the
+server-side half of this.
+
+### Durable market-data source (Yahoo 429s)
 
 Indices + FX come from Yahoo's unauthenticated chart endpoint, which rate-
 limits server-side requests (HTTP 429), often blanket-blocking a deploy's IP.
@@ -120,11 +175,6 @@ Deliberate "laters," revisited on real need rather than on a schedule:
   scheduler/cron decision and (for digests) email transport, which the project
   deliberately avoids. Scheduled **NAV refresh** stays a Next item above (cheap,
   useful even solo).
-- **AI-generated market digest** ("Today, in your words" on the Markets
-  screen) — a short, plain-language read of the day grounded in the user's
-  actual holdings + live index/NAV data. The old card showed a hardcoded digest
-  with fabricated portfolio figures, so it was removed; bring it back only when
-  it's generated from real data (advisor + market signals).
 - **Vector recall / offline memory consolidation** — current FTS-based recall
   is enough; revisit only if recall quality demands embeddings.
 - **Broker scraping / unofficial APIs** — TOS + maintenance burden; only if a

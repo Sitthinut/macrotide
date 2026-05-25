@@ -114,3 +114,21 @@ export interface MarketNewsResponse {
 export function useMarketNews() {
   return useResource<MarketNewsResponse>("/api/market/news");
 }
+
+export interface BenchmarkSeriesResponse {
+  key: string;
+  label: string;
+  series: { date: string; value: number }[];
+}
+
+/**
+ * Real index series for the Portfolio "VS" overlay. Pass `null` (e.g. when the
+ * selection is "none") to skip the request. `range` should match the chart's
+ * current range so the benchmark spans the same window as the portfolio.
+ */
+export function useBenchmarkSeries(key: string | null, range: SeriesRange = "6mo") {
+  const url = key
+    ? `/api/market/benchmark?key=${encodeURIComponent(key)}&range=${encodeURIComponent(range)}`
+    : null;
+  return useResource<BenchmarkSeriesResponse>(url);
+}
