@@ -8,19 +8,28 @@ export type ModelPortfolioInsert = typeof modelPortfolios.$inferInsert;
 export type ModelPortfolioUpdate = Partial<Omit<ModelPortfolioInsert, "id" | "createdAt">>;
 
 export function listModelPortfolios(): ModelPortfolio[] {
-  return getDb()
-    .select()
-    .from(modelPortfolios)
-    .where(ownedBy(modelPortfolios.userId))
-    .orderBy(modelPortfolios.createdAt)
-    .all();
+  return (
+    getDb()
+      .select()
+      .from(modelPortfolios)
+      // Built-ins are null-owned on purpose and shared with every user.
+      .where(ownedBy(modelPortfolios.userId, { alsoWhere: eq(modelPortfolios.builtIn, true) }))
+      .orderBy(modelPortfolios.createdAt)
+      .all()
+  );
 }
 
 export function getModelPortfolio(id: string): ModelPortfolio | undefined {
   return getDb()
     .select()
     .from(modelPortfolios)
-    .where(and(eq(modelPortfolios.id, id), ownedBy(modelPortfolios.userId)))
+    .where(
+      and(
+        eq(modelPortfolios.id, id),
+        // Built-ins are readable by everyone; user customizations are private.
+        ownedBy(modelPortfolios.userId, { alsoWhere: eq(modelPortfolios.builtIn, true) }),
+      ),
+    )
     .get();
 }
 
