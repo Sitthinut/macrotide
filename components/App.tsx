@@ -13,7 +13,7 @@ import { Icon } from "@/components/Icon";
 import { type PortfolioFormValues, PortfolioSheet } from "@/components/PortfolioSheet";
 import { AccountScreen } from "@/components/screens/AccountScreen";
 import { AdminScreen } from "@/components/screens/AdminScreen";
-import { ChatScreen } from "@/components/screens/ChatScreen";
+import { ChatScreen, type SeedPrompt } from "@/components/screens/ChatScreen";
 import { JournalScreen } from "@/components/screens/JournalScreen";
 import { MarketsScreen } from "@/components/screens/MarketsScreen";
 import { ModelPortfoliosScreen } from "@/components/screens/ModelPortfoliosScreen";
@@ -105,7 +105,7 @@ export function App() {
     return "system";
   });
   const [screen, setScreen] = useState<Screen>("portfolio");
-  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
+  const [pendingPrompt, setPendingPrompt] = useState<SeedPrompt | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [, setExtraHoldings] = useState<AddedHolding[]>([]);
   const [, setSavedReading] = useState<unknown[]>([]);
@@ -210,7 +210,10 @@ export function App() {
       else setScreen(target);
     };
     const promptHandler = (e: Event) => {
-      setPendingPrompt((e as CustomEvent<string>).detail);
+      // detail is either a plain string (shown verbatim) or a { display, send }
+      // split — the OCR handoff uses the latter to keep the raw transcription
+      // out of the visible user bubble.
+      setPendingPrompt((e as CustomEvent<SeedPrompt>).detail);
       if (isWide) setActiveApp("chat");
       else setScreen("chat");
     };

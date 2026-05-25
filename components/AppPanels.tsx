@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { ChatThreadList } from "@/components/ChatThreadList";
 import { Icon } from "@/components/Icon";
-import { ChatScreen } from "@/components/screens/ChatScreen";
+import { ChatScreen, type SeedPrompt } from "@/components/screens/ChatScreen";
 import {
   useJournalView,
   useModelPortfoliosView,
@@ -38,7 +38,7 @@ export function ChatPanel({
   onPromptConsumed,
   onClose,
 }: {
-  seedPrompt: string | null;
+  seedPrompt: SeedPrompt | null;
   onPromptConsumed: () => void;
   onClose: () => void;
 }) {

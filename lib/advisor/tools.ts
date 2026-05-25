@@ -16,6 +16,7 @@ import { createJournalEntry, type JournalKind, listJournalEntries } from "../db/
 import { getModelPortfolio } from "../db/queries/models";
 import { getPlan } from "../db/queries/plan";
 import { listFundQuotes } from "../db/queries/quotes";
+import { QUOTE_SOURCES } from "../market/sources";
 import { adaptModelPortfolio, adaptPortfolios } from "../portfolio/adapter";
 import { computeHealth, summarizeHealth } from "../portfolio/health";
 import { parsePlan } from "../portfolio/plan-parser";
@@ -253,12 +254,114 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
     },
   });
 
+  const propose_holding = tool({
+    description:
+      "Propose adding ONE holding (fund/ETF/stock position) to the user's " +
+      "portfolio. This does NOT write anything — it shows the user a " +
+      "HoldingProposalCard they can Accept or dismiss; the row is saved only on " +
+      "Accept (POST /api/holdings/propose, per-user scoped). Call this ONCE PER " +
+      "POSITION when extracting holdings from a brokerage statement / OCR " +
+      "transcription, or when the user describes a position to add. Use the " +
+      "ticker exactly as shown; put the human-readable fund/stock name in " +
+      "englishName. If you can read a unit count use it; if the statement only " +
+      "shows a market value and a NAV/price, set units = value / price and put " +
+      "that price in avgCost. Don't invent numbers you can't read — omit a field " +
+      "rather than guess. Choose bucketId from the user's existing buckets — call " +
+      "read_portfolio to see them and pick the one that fits by context (e.g. an " +
+      "SSF bucket for an SSF fund). If the user has more than one bucket and the " +
+      "right one isn't clear, ASK which bucket before proposing rather than " +
+      "guessing. After proposing, tell the user you've drafted the row(s) for " +
+      "them to confirm.",
+    inputSchema: z.object({
+      ticker: z
+        .string()
+        .min(1)
+        .max(40)
+        .describe("Fund/ETF/stock symbol exactly as shown (e.g. 'K-USA-A(A)', 'VOO')."),
+      englishName: z
+        .string()
+        .min(1)
+        .max(200)
+        .describe("Human-readable fund/stock name (e.g. 'S&P 500 ETF'). Falls back to the ticker."),
+      thaiName: z.string().max(200).optional().describe("Thai name if the statement shows one."),
+      units: z
+        .number()
+        .positive()
+        .describe("Number of units/shares held. Required — derive from value/price if needed."),
+      avgCost: z
+        .number()
+        .positive()
+        .optional()
+        .describe("Average cost or NAV/price per unit, if the statement shows it."),
+      ter: z.number().min(0).optional().describe("Total expense ratio as a fraction (e.g. 0.003)."),
+      assetClass: z
+        .enum(["equity", "bond", "alternative", "cash"])
+        .optional()
+        .describe("Asset class if you can infer it from the fund name; otherwise omit."),
+      region: z.string().max(60).optional().describe("Region/geography if inferable (e.g. 'US')."),
+      quoteSource: z
+        .enum(QUOTE_SOURCES)
+        .optional()
+        .describe(
+          "Price source: 'thai_mutual_fund' for SEC-registered Thai mutual funds, " +
+            "'yahoo' for stocks/ETFs/indices. Defaults to 'yahoo'.",
+        ),
+      bucketId: z
+        .string()
+        .optional()
+        .describe(
+          "Target portfolio bucket id, chosen from the user's existing buckets " +
+            "(see read_portfolio) by context. If you're unsure which of several " +
+            "buckets fits, ask the user first rather than guessing. If omitted, " +
+            "the accept path falls back to the user's first bucket.",
+        ),
+      source: z
+        .string()
+        .max(80)
+        .optional()
+        .describe("Provenance label shown in the UI (e.g. brokerage name)."),
+      rationale: z
+        .string()
+        .min(1)
+        .max(300)
+        .describe("One short line shown on the card (e.g. what statement line this came from)."),
+    }),
+    execute: async (input) => {
+      // The `holding` field carries the shape the HoldingProposalCard expects
+      // and that POST /api/holdings/propose accepts. The client picks it off the
+      // tool output in the stream and renders the card; accept flows through the
+      // route (applyHoldingProposal). No DB mutation here.
+      const holding = {
+        ticker: input.ticker.trim().toUpperCase(),
+        englishName: input.englishName.trim(),
+        thaiName: input.thaiName?.trim() ?? null,
+        units: input.units,
+        avgCost: input.avgCost ?? null,
+        ter: input.ter ?? null,
+        assetClass: input.assetClass ?? null,
+        region: input.region?.trim() ?? null,
+        quoteSource: input.quoteSource ?? "yahoo",
+        bucketId: input.bucketId?.trim() ?? null,
+        source: input.source?.trim() ?? null,
+        rationale: input.rationale,
+      };
+      return {
+        ok: true as const,
+        holding,
+        message: `Drafted ${holding.ticker}${
+          Number.isFinite(holding.units) ? ` (${holding.units} units)` : ""
+        } — confirm on the card to add it to your portfolio.`,
+      };
+    },
+  });
+
   return {
     read_portfolio,
     read_plan,
     read_journal,
     write_journal,
     propose_plan_edit,
+    propose_holding,
   };
 }
 

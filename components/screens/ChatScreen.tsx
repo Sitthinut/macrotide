@@ -16,6 +16,23 @@ interface PlanProposal {
   rm: string | null;
 }
 
+// A holding the advisor proposed via the propose_holding tool. Mirrors the
+// payload POST /api/holdings/propose accepts; rendered as a HoldingProposalCard.
+interface HoldingProposal {
+  ticker: string;
+  englishName: string;
+  thaiName: string | null;
+  units: number;
+  avgCost: number | null;
+  ter: number | null;
+  assetClass: string | null;
+  region: string | null;
+  quoteSource: string;
+  bucketId: string | null;
+  source: string | null;
+  rationale: string;
+}
+
 interface Message {
   role: "user" | "ai";
   text: string;
@@ -26,6 +43,11 @@ interface Message {
   proposal?: PlanProposal;
   applied?: boolean;
   rejected?: boolean;
+  // A turn can yield MANY holding proposals (one per extracted statement row),
+  // so unlike `proposal` these are a keyed list with per-card accept/reject
+  // state tracked by index.
+  holdings?: HoldingProposal[];
+  holdingStatus?: Record<number, "applied" | "rejected">;
   // Set on a failed/empty assistant turn so the UI can offer a "Try again"
   // button that re-sends the preceding user message.
   canRetry?: boolean;
@@ -42,9 +64,15 @@ interface MsgFeedback {
   saved?: boolean;
 }
 
+// A seed message can be a plain string (shown verbatim as the user turn) or a
+// split { display, send } pair: `display` is the short visible bubble, `send`
+// is the larger payload actually sent to the model. The OCR handoff uses the
+// split form so the raw transcription stays out of the visible message body.
+export type SeedPrompt = string | { display: string; send: string };
+
 export interface ChatScreenProps {
   persona?: string;
-  seedPrompt?: string | null;
+  seedPrompt?: SeedPrompt | null;
   onPromptConsumed?: () => void;
 }
 
@@ -114,6 +142,86 @@ function PlanProposalCard({
         </button>
         <button className="btn primary sm" onClick={onApply} style={{ flex: 1 }}>
           <Icon name="check" size={12} /> Apply to plan
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function HoldingProposalCard({
+  holding,
+  status,
+  onApply,
+  onReject,
+}: {
+  holding: HoldingProposal;
+  status?: "applied" | "rejected";
+  onApply: () => void;
+  onReject: () => void;
+}) {
+  if (status === "applied") {
+    return (
+      <div
+        className="plan-proposal"
+        style={{ background: "var(--accent-soft)", borderColor: "transparent" }}
+      >
+        <div className="label">
+          <span>✓ ADDED · {holding.ticker.toUpperCase()}</span>
+        </div>
+        <div style={{ fontSize: 12.5, color: "var(--accent-ink)" }}>
+          Saved to your portfolio. View it in your holdings.
+        </div>
+      </div>
+    );
+  }
+  if (status === "rejected") {
+    return (
+      <div
+        className="plan-proposal"
+        style={{ background: "var(--card-soft)", borderColor: "var(--line)" }}
+      >
+        <div
+          style={{
+            fontSize: 12,
+            color: "var(--muted)",
+            fontFamily: "var(--font-mono)",
+            letterSpacing: "0.04em",
+          }}
+        >
+          ○ SKIPPED · {holding.ticker.toUpperCase()}
+        </div>
+      </div>
+    );
+  }
+  const facts = [
+    `${holding.units} units`,
+    holding.avgCost != null ? `@ ฿${holding.avgCost.toLocaleString()}` : null,
+    holding.assetClass,
+    holding.region,
+  ].filter(Boolean);
+  return (
+    <div className="plan-proposal">
+      <div className="label">
+        <Icon name="sparkle" size={12} />
+        <span>ADD HOLDING · {holding.ticker.toUpperCase()}</span>
+      </div>
+      <div className="diff">
+        <span className="add">
+          {holding.englishName}
+          {facts.length > 0 ? `\n${facts.join(" · ")}` : ""}
+        </span>
+      </div>
+      {holding.rationale && (
+        <div style={{ fontSize: 11.5, color: "var(--ink-soft)", lineHeight: 1.45 }}>
+          {holding.rationale}
+        </div>
+      )}
+      <div className="actions">
+        <button className="btn ghost sm" onClick={onReject}>
+          Skip
+        </button>
+        <button className="btn primary sm" onClick={onApply} style={{ flex: 1 }}>
+          <Icon name="check" size={12} /> Add to portfolio
         </button>
       </div>
     </div>
@@ -401,6 +509,10 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
       // some cheaper models do this routinely. We surface the tool's own
       // message so the turn is never blank when work actually happened.
       const toolMessages: string[] = [];
+      // propose_holding can fire multiple times in one turn (one per extracted
+      // statement row). Accumulate them here and attach the growing list to the
+      // streaming assistant message so each card appears as it arrives.
+      const holdingProposals: HoldingProposal[] = [];
 
       while (true) {
         const { value, done } = await reader.read();
@@ -448,6 +560,32 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
                 };
                 setMessages((prev) =>
                   prev.map((m) => (m.id === placeholderId ? { ...m, proposal } : m)),
+                );
+              }
+            }
+            // propose_holding emits a `holding` in its tool output. Collect each
+            // one and re-attach the full list so the cards render incrementally.
+            if (toolOut && typeof toolOut === "object" && "holding" in toolOut) {
+              const h = (toolOut as { holding?: unknown }).holding;
+              if (h && typeof h === "object" && "ticker" in h && "units" in h) {
+                const raw = h as Partial<HoldingProposal>;
+                holdingProposals.push({
+                  ticker: String(raw.ticker ?? ""),
+                  englishName: String(raw.englishName ?? raw.ticker ?? ""),
+                  thaiName: raw.thaiName ?? null,
+                  units: Number(raw.units ?? 0),
+                  avgCost: raw.avgCost ?? null,
+                  ter: raw.ter ?? null,
+                  assetClass: raw.assetClass ?? null,
+                  region: raw.region ?? null,
+                  quoteSource: String(raw.quoteSource ?? "yahoo"),
+                  bucketId: raw.bucketId ?? null,
+                  source: raw.source ?? null,
+                  rationale: String(raw.rationale ?? ""),
+                });
+                const snapshot = [...holdingProposals];
+                setMessages((prev) =>
+                  prev.map((m) => (m.id === placeholderId ? { ...m, holdings: snapshot } : m)),
                 );
               }
             }
@@ -504,17 +642,21 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
     }
   };
 
-  const ask = (prompt: string) => {
-    if (!prompt.trim() || loading) return;
-    const newUserMsg: Message = { role: "user", text: prompt, ts: Date.now(), id: makeId() };
+  // `display` is the visible user bubble; `send` is what's actually sent to the
+  // model. They differ only for the OCR handoff, where the raw transcription
+  // rides along in `send` but stays out of the visible body. Default: identical.
+  const ask = (display: string, send: string = display) => {
+    if (!display.trim() || loading) return;
+    const newUserMsg: Message = { role: "user", text: display, ts: Date.now(), id: makeId() };
     const nextHistory = [...messages, newUserMsg];
     setMessages(nextHistory);
     setInput("");
 
-    // Plan edits now flow through the advisor's propose_plan_edit tool: the
-    // model emits a proposal in the chat stream, which askLive picks up and
-    // renders as a PlanProposalCard. No client-side heuristic / fake preview.
-    void askLive(prompt, messages);
+    // Plan edits now flow through the advisor's propose_plan_edit tool, and
+    // holding extraction through propose_holding: the model emits proposals in
+    // the chat stream, which askLive picks up and renders as cards. No
+    // client-side heuristic / fake preview.
+    void askLive(send, messages);
   };
 
   // Re-send the user message that produced a failed/empty assistant turn.
@@ -540,7 +682,8 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
 
   useEffect(() => {
     if (seedPrompt) {
-      ask(seedPrompt);
+      if (typeof seedPrompt === "string") ask(seedPrompt);
+      else ask(seedPrompt.display, seedPrompt.send);
       onPromptConsumed?.();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -577,6 +720,65 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
         ),
       );
     }
+  };
+
+  // Accept a single holding proposal: optimistically mark it applied, POST to
+  // the per-user-scoped accept route, then invalidate the holdings SWR cache so
+  // the portfolio refreshes. Rolls back on failure. `msgIdx` is the message in
+  // the stream; `holdingIdx` is which card within that message's list.
+  const applyHolding = async (msgIdx: number, holdingIdx: number, holding: HoldingProposal) => {
+    setMessages((prev) =>
+      prev.map((x, i) =>
+        i === msgIdx ? { ...x, holdingStatus: { ...x.holdingStatus, [holdingIdx]: "applied" } } : x,
+      ),
+    );
+    try {
+      const res = await fetch("/api/holdings/propose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bucketId: holding.bucketId,
+          ticker: holding.ticker,
+          englishName: holding.englishName,
+          thaiName: holding.thaiName,
+          assetClass: holding.assetClass,
+          region: holding.region,
+          units: holding.units,
+          avgCost: holding.avgCost,
+          ter: holding.ter,
+          quoteSource: holding.quoteSource,
+          source: holding.source,
+        }),
+      });
+      if (!res.ok) throw new Error(`holding save ${res.status}`);
+      invalidate(/^\/api\/holdings/);
+    } catch (err) {
+      // Roll back the optimistic apply and surface the error inline.
+      setMessages((prev) =>
+        prev.map((x, i) => {
+          if (i !== msgIdx) return x;
+          const next = { ...x.holdingStatus };
+          delete next[holdingIdx];
+          return {
+            ...x,
+            holdingStatus: next,
+            text: `${x.text}\n\n(Couldn't save ${holding.ticker}: ${
+              err instanceof Error ? err.message : "unknown error"
+            }. Try again?)`,
+          };
+        }),
+      );
+    }
+  };
+
+  const rejectHolding = (msgIdx: number, holdingIdx: number) => {
+    setMessages((prev) =>
+      prev.map((x, i) =>
+        i === msgIdx
+          ? { ...x, holdingStatus: { ...x.holdingStatus, [holdingIdx]: "rejected" } }
+          : x,
+      ),
+    );
   };
 
   return (
@@ -688,7 +890,16 @@ export function ChatScreen({ persona = "advisor", seedPrompt, onPromptConsumed }
                 }}
               />
             )}
-            {m.role === "ai" && i > 0 && !m.proposal && (
+            {m.holdings?.map((h, hIdx) => (
+              <HoldingProposalCard
+                key={`${m.id}-holding-${hIdx}`}
+                holding={h}
+                status={m.holdingStatus?.[hIdx]}
+                onApply={() => applyHolding(i, hIdx, h)}
+                onReject={() => rejectHolding(i, hIdx)}
+              />
+            ))}
+            {m.role === "ai" && i > 0 && !m.proposal && !m.holdings?.length && (
               <FeedbackRow
                 label="HELPFUL?"
                 value={msgFeedback[i]?.rating ?? null}

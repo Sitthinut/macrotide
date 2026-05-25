@@ -188,6 +188,26 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
     setImgProcessing(false);
   };
 
+  // Hand the OCR transcription to the chat advisor. The advisor extracts
+  // holdings and surfaces them as propose_holding cards the user can Accept —
+  // the raw text stays intermediate (it rides in the hidden `send` payload, not
+  // the visible bubble). Reuses the existing `ai-prompt` handoff that App.tsx
+  // listens for; it switches to chat and seeds the message.
+  const sendOcrToAdvisor = () => {
+    if (!ocrText) return;
+    const display =
+      "I uploaded a brokerage statement — please pull out my holdings so I can add them.";
+    const send =
+      "I uploaded a brokerage statement and had it transcribed. Extract each holding " +
+      "(ticker, fund/stock name, units, and price/cost if shown) and call propose_holding " +
+      "once per position so I can review and add them. Don't invent any numbers you can't " +
+      "read.\n\nTRANSCRIPTION:\n" +
+      ocrText;
+    window.dispatchEvent(new CustomEvent("ai-prompt", { detail: { display, send } }));
+    resetOcrState();
+    onClose();
+  };
+
   const submit = async () => {
     if (!bucketId) {
       setSubmitError("Pick a portfolio first");
@@ -481,7 +501,7 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
             <textarea
               className="sheet-input"
               placeholder={
-                "e.g.\nK-USA-A: 8,945 units\nSCBS&P500: 12,450 units\nK-FIXED, 14820, 178420"
+                "e.g.\nK-USA-A: 8,945 units\nSCBS&P500: 12,450 units\nK-FIXED-A, 14820, 178420"
               }
               value={pasteText}
               onChange={(e) => setPasteText(e.target.value)}
@@ -531,6 +551,9 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
             </div>
             <div
               style={{
+                display: "flex",
+                gap: 6,
+                alignItems: "flex-start",
                 marginTop: 10,
                 padding: 10,
                 background: "var(--accent-soft)",
@@ -540,9 +563,12 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
                 lineHeight: 1.5,
               }}
             >
-              ⓘ <strong style={{ fontWeight: 500 }}>How it works:</strong> the screenshot is sent to
-              a free-tier OpenRouter vision model just long enough to extract the rows. Not stored.
-              You review every row before anything is saved.
+              <span aria-hidden>ⓘ</span>
+              <span>
+                <strong style={{ fontWeight: 500 }}>How it works:</strong> your screenshot is read
+                by AI just long enough to pull out the rows, then discarded — it&apos;s never
+                stored. You review every row before anything is saved.
+              </span>
             </div>
           </>
         )}
@@ -673,10 +699,21 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
                     lineHeight: 1.4,
                   }}
                 >
-                  This is what the model read. Use the <strong>Manual</strong> tab to enter rows, or
-                  paste this into chat and ask the advisor to structure it for you.
+                  This is what the model read. Hand it to the advisor below and it'll pull out each
+                  holding as a card you can add — no copy/paste. Or use the <strong>Manual</strong>{" "}
+                  tab to enter rows yourself.
                 </div>
               </div>
+            )}
+
+            {ocrText && (
+              <button
+                className="btn primary full"
+                onClick={sendOcrToAdvisor}
+                style={{ marginBottom: 8 }}
+              >
+                <Icon name="sparkle" size={13} /> Extract holdings with advisor
+              </button>
             )}
 
             <button className="btn ghost sm full" onClick={resetOcrState}>
@@ -840,7 +877,7 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
           <Icon name="sparkle" size={14} />
           <div>
             <strong style={{ fontWeight: 500 }}>Or ask the advisor:</strong> say &quot;Add 50k of
-            K-FIXED from my SCB account&quot; in chat. The agent confirms before applying.
+            K-FIXED-A from my SCB account&quot; in chat. The advisor confirms before applying.
           </div>
         </div>
 

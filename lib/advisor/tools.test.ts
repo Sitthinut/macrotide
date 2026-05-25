@@ -5,7 +5,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { runWithDbContext } from "../db/context";
 import { createBucket } from "../db/queries/buckets";
-import { createHolding } from "../db/queries/holdings";
+import { createHolding, listHoldings } from "../db/queries/holdings";
 import { listJournalEntries } from "../db/queries/journal";
 import { getPlan, upsertPlan } from "../db/queries/plan";
 import * as schema from "../db/schema";
@@ -183,6 +183,64 @@ describe("advisor tools — propose_plan_edit", () => {
     expect(result.out.proposal.rm).toBeNull();
     // Crucially: proposing did NOT change the persisted plan.
     expect(result.planAfter?.markdown).toBe("## Principles\n- index only");
+  });
+});
+
+describe("advisor tools — propose_holding", () => {
+  it("emits a holding in the card shape and does NOT write a holding", async () => {
+    const result = await withFresh(async () => {
+      createBucket(BUCKET);
+      const tools = createAdvisorTools({ userId: null });
+      const out = (await run(tools.propose_holding, {
+        ticker: "voo",
+        englishName: "Vanguard S&P 500 ETF",
+        units: 12.5,
+        avgCost: 400,
+        assetClass: "equity",
+        region: "US",
+        quoteSource: "yahoo",
+        rationale: "Read from the statement.",
+      })) as {
+        ok: boolean;
+        holding: {
+          ticker: string;
+          englishName: string;
+          units: number;
+          avgCost: number | null;
+          assetClass: string | null;
+          quoteSource: string;
+          bucketId: string | null;
+        };
+      };
+      // Proposing must not have written anything.
+      const holdingsAfter = listHoldings();
+      return { out, count: holdingsAfter.length };
+    });
+    expect(result.out.ok).toBe(true);
+    // Ticker is normalized to upper-case in the proposal payload.
+    expect(result.out.holding.ticker).toBe("VOO");
+    expect(result.out.holding.englishName).toBe("Vanguard S&P 500 ETF");
+    expect(result.out.holding.units).toBe(12.5);
+    expect(result.out.holding.avgCost).toBe(400);
+    expect(result.out.holding.assetClass).toBe("equity");
+    expect(result.out.holding.quoteSource).toBe("yahoo");
+    // Crucially: proposing did NOT insert a holding.
+    expect(result.count).toBe(0);
+  });
+
+  it("defaults quoteSource to yahoo and nulls absent optional fields", async () => {
+    const out = (await withFresh(async () => {
+      const tools = createAdvisorTools({ userId: null });
+      return run(tools.propose_holding, {
+        ticker: "K-USA-A",
+        englishName: "K US Equity",
+        units: 100,
+        rationale: "row 1",
+      });
+    })) as { holding: { quoteSource: string; avgCost: number | null; assetClass: string | null } };
+    expect(out.holding.quoteSource).toBe("yahoo");
+    expect(out.holding.avgCost).toBeNull();
+    expect(out.holding.assetClass).toBeNull();
   });
 });
 

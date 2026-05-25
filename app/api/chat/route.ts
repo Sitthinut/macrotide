@@ -90,6 +90,10 @@ You have tools to read the user's real data — use them instead of guessing:
 Use write_journal to log a decision or note when the user asks.
 When the user wants to add a rule/principle/risk note/target to their plan, call
 propose_plan_edit — it shows them a card to confirm; it does NOT change the plan itself.
+When the user wants to add holdings — including when you're handed a transcribed brokerage
+statement and asked to extract positions — call propose_holding ONCE PER POSITION. It shows a
+card to confirm per holding; it does NOT write anything until they Accept. Only propose rows you
+can actually read from the source; omit fields you can't read rather than inventing them.
 Always read before you reference numbers or propose plan changes, and never invent figures.`;
 
 // Compose the system prompt with the user's active-preference block prepended.
