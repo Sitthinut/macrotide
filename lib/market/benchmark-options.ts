@@ -1,4 +1,4 @@
-// Client-safe benchmark catalogue. No server-only imports here so both the
+// Client-safe benchmark catalog. No server-only imports here so both the
 // browser (the Portfolio "VS" selector) and the server (read_performance,
 // the /api/market/benchmark route) can share one list. The async series
 // fetchers live in ./benchmarks (server-only).

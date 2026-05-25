@@ -9,7 +9,7 @@ import { getSessionUser, type SessionUser } from "./session";
 // var, the same canonical owner identifier the backfill script reads.
 //
 // Until now `OWNER_EMAIL` was script-only (run once during migration). The
-// admin tier UI is the first feature that needs to recognise the owner at
+// admin tier UI is the first feature that needs to recognize the owner at
 // runtime, so we read the same var here. Keep it in the deployment env (not
 // just .env.local for the one-off script) for the admin screen to work.
 //

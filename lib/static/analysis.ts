@@ -42,7 +42,7 @@ export const ANALYSIS: Analysis = {
     {
       type: "strength",
       severity: "good",
-      title: "Good behaviour during March drawdown",
+      title: "Good behavior during March drawdown",
       body: "You added ฿40k during the Feb–Mar dip rather than selling. That contributed ~1.4 pp to YTD returns.",
     },
   ],

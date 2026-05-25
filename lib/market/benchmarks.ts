@@ -3,7 +3,7 @@ import { findBenchmark } from "./benchmark-options";
 import { getCachedSeries } from "./cache";
 import type { SeriesRange } from "./providers/types";
 
-// Re-export the client-safe catalogue so server callers can keep importing
+// Re-export the client-safe catalog so server callers can keep importing
 // everything benchmark-related from this one module.
 export { BENCHMARK_OPTIONS, type BenchmarkOption, findBenchmark } from "./benchmark-options";
 

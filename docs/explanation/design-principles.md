@@ -8,7 +8,7 @@ rules rather than restating them.
 
 ## Secure by default
 
-The safe configuration is the **default**; you opt *in* to riskier behaviour
+The safe configuration is the **default**; you opt *in* to riskier behavior
 ([Saltzer & Schroeder, 1975](https://en.wikipedia.org/wiki/Saltzer_and_Schroeder%27s_design_principles)).
 A fresh clone with no env vars set:
 

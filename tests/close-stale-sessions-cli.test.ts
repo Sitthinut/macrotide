@@ -2,7 +2,7 @@
 //
 // Coverage:
 //   1. parseArgs — unit-tested as a pure function (no DB, no I/O).
-//   2. Dry-run behaviour — uses an :memory: freshDb context so nothing is
+//   2. Dry-run behavior — uses an :memory: freshDb context so nothing is
 //      written to a real DB. The test verifies that findIdleThreads picks up
 //      the stale candidates correctly, which is exactly what the dry-run path
 //      reports.

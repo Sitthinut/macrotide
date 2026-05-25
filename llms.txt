@@ -14,10 +14,11 @@ root so they resolve when browsing the source.
 
 - [Root README](./README.md): What the project is, tech stack, quick start, and the **Status** board (the authoritative table of what's shipped vs planned).
 - [AGENTS.md](./AGENTS.md): Rules for AI agents — DB routing, secrets, the canonical environment-variable table, product copy. Read before changing code.
-- [Docs index](./docs/README.md): The L0/L1 map of all documentation, organised by Diátaxis mode.
+- [Docs index](./docs/README.md): The L0/L1 map of all documentation, organized by Diátaxis mode.
 
 ## Documentation
 
+- [Product direction](./docs/explanation/product-direction.md): Why Macrotide exists — north star, personas, the Learn → Analyze → Research → Select loop, index-purist stance, success signals.
 - [Getting started](./docs/tutorials/getting-started.md): Guided first run — clone, demo, first holding, first chat.
 - [Local development](./docs/how-to/local-development.md): Env setup, npm scripts, seeding, tests, pre-commit hook.
 - [Import a portfolio](./docs/how-to/import-a-portfolio.md): CSV, image OCR, and manual entry.
@@ -29,7 +30,7 @@ root so they resolve when browsing the source.
 ## Reference
 
 - [Configuration](./docs/reference/configuration.md): How config works; links to the canonical env-var table in AGENTS.md.
-- [API routes](./docs/reference/api.md): Catalogue of app/api/* route handlers.
+- [API routes](./docs/reference/api.md): Catalog of app/api/* route handlers.
 - [Data model](./docs/reference/data-model.md): SQLite tables and relationships.
 - [Auth & AI providers](./docs/reference/auth-and-providers.md): Passkeys, OpenRouter, rate limiting.
 - [Deploy](./docs/how-to/deploy.md): Single-VM (Caddy/systemd) and tailnet deployment.

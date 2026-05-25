@@ -7,7 +7,7 @@ Project-specific rules for AI agents working on this repo.
 > dives — the guide lives in [docs/](./docs), with [llms.txt](./llms.txt) as a
 > machine-readable entry point. Load progressively: `llms.txt` →
 > [docs/README.md](./docs/README.md) → the one section you need. When you change
-> behaviour, update the doc that owns that fact in the same commit (see below).
+> behavior, update the doc that owns that fact in the same commit (see below).
 
 ## Source of truth for "what's done"
 

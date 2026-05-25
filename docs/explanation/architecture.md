@@ -117,7 +117,7 @@ lib/api/with-db.ts         Owner-vs-demo DB routing (AsyncLocalStorage)
 lib/db/schema.ts           The data model (source of truth)
 lib/db/queries/            All DB access, server-only
 lib/auth/                  better-auth singleton + session helpers
-lib/ai/                    OpenRouter provider, summarisation
+lib/ai/                    OpenRouter provider, summarization
 lib/advisor/, lib/memory/  Advisor tools + long-term memory
 lib/market/                Provider registry, cache, Yahoo + Thai SEC
 lib/portfolio/             Analytics, plan parsing, plan-edit, OCR, health/score

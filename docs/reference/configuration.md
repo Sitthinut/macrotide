@@ -11,13 +11,13 @@ production (e.g. a systemd `EnvironmentFile`; see [deploy.md](../how-to/deploy.m
 - `.env.example` is a **thin template** — copy it to `.env.local` and fill in.
 - The app is **secure by default**: a fresh checkout with no vars set refuses to
   render the dashboard (auth required) and returns AI chat stubs (no key). You
-  opt *in* to riskier or richer behaviour. See
+  opt *in* to riskier or richer behavior. See
   [design principles](../explanation/design-principles.md).
 
 ## The canonical variable table
 
 To avoid drift, every variable — its default, the code that reads it, and its
-behaviour — is documented in **one** place:
+behavior — is documented in **one** place:
 
 ➡️ **[AGENTS.md § Environment variables](../../AGENTS.md#environment-variables)**
 

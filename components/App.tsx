@@ -113,7 +113,7 @@ export function App() {
   const [selectedModelOverride, setSelectedModelOverride] = useState<string | null>(null);
   const selectedModelId = selectedModelOverride ?? planSelectedModelId ?? "bogle3";
   // Which app panel is open on the right.
-  // Default behaviour depends on viewport (thresholds mirror useViewport):
+  // Default behavior depends on viewport (thresholds mirror useViewport):
   //   - Desktop (≥1000): chat opens by default — side-by-side fits.
   //   - Tablet (700–999):  closed by default — panel is an overlay.
   //   - Mobile (<700):     no panel rail at all; chat lives as its own screen.
@@ -346,7 +346,7 @@ export function App() {
       return <AccountScreen onBack={() => setScreen("portfolio")} />;
     }
     if (screen === "admin") {
-      // Defence in depth: even if a non-owner reaches this branch, the API
+      // Defense in depth: even if a non-owner reaches this branch, the API
       // returns 403 and AdminScreen renders an access-denied message.
       return <AdminScreen onBack={() => setScreen("portfolio")} />;
     }
@@ -377,7 +377,7 @@ export function App() {
     </>
   );
 
-  // ===== MOBILE SHELL (unchanged behaviour from original) =====
+  // ===== MOBILE SHELL (unchanged behavior from original) =====
   if (!isWide) {
     const hideNav =
       screen === "settings" || screen === "models" || screen === "account" || screen === "admin";

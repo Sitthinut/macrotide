@@ -86,7 +86,7 @@ Sources:
 ### What it is
 
 A Rust desktop "personal AI" with one of the more serious
-open-source memory implementations surveyed. Its centrepiece is the **Memory
+open-source memory implementations surveyed. Its centerpiece is the **Memory
 Tree** — a deterministic hierarchical-summary pipeline, explicitly *not* a vector
 database with a thin memory wrapper.
 
@@ -262,7 +262,7 @@ Sources:
 ### What it is
 
 The OS-as-metaphor system from the MemGPT paper, productised as
-Letta. Memory is a hierarchy modelled on a computer's memory pyramid, and the
+Letta. Memory is a hierarchy modeled on a computer's memory pyramid, and the
 agent **manages its own memory** through tool calls.
 
 ### Memory model
@@ -350,7 +350,7 @@ over memory state (no side effects, no DB dependency):
 
 - **Memory Managers** — extract new memories, update/remove outdated ones, and
   consolidate or generalise from existing ones based on new conversation.
-- **Prompt Optimizers** — update prompt rules and core behaviour from
+- **Prompt Optimizers** — update prompt rules and core behavior from
   conversation signal.
 
 Crucially, LangMem offers **both** write paths and refuses to pick one for you:
@@ -482,7 +482,7 @@ carry.
 
 
 
-- **Hybrid stores won.** The vector-vs-graph argument settled in favour of
+- **Hybrid stores won.** The vector-vs-graph argument settled in favor of
   "both" — vectors for semantic entry points, a graph for multi-hop relational
   depth, a short-term episodic buffer (see the Store column). Nuance the matrix
   can't show: on *single-hop* factual lookup, GraphRAG can *under*-perform

@@ -27,7 +27,7 @@ vision model via OpenRouter ([POST /api/import/image](../reference/api.md)),
 which **transcribes the raw text** — it does not yet parse structured rows for
 you; you review and confirm what it read.
 
-Requirements and behaviour:
+Requirements and behavior:
 
 - Needs `OPENROUTER_API_KEY`. Without it the endpoint returns **503** with a
   message pointing you at the key. See [auth-and-providers.md](../reference/auth-and-providers.md).
