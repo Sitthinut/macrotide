@@ -505,6 +505,33 @@ export function seedDemoData(db: Db): void {
       assetClass: "alternative",
       ter: 0.8,
     },
+    // ── Equity — held funds that demonstrate fee-creep ───────────────────────
+    // These abbrNames match demo holdings tickers so computeFeeCreep() can pair
+    // them with catalog entries and surface cheaper same-class alternatives.
+    {
+      projId: "DEMO_013",
+      abbrName: "K-USA-A(A)",
+      englishName: "K USA Equity Fund (Class A Accumulation)",
+      thaiName: "กองทุนเปิดกสิกรไทย ยูเอสเอ ทุนซื้อคืน",
+      amcName: "Kasikorn Asset Management",
+      fundType: "Foreign Investment Fund",
+      policyDesc:
+        "Actively managed fund investing in US equities. Higher management fee than passive alternatives.",
+      assetClass: "equity",
+      ter: 1.4, // demo holding has ter 1.4; ONE-SP500-UH (0.45) is cheaper
+    },
+    {
+      projId: "DEMO_014",
+      abbrName: "KFGBRAND-A",
+      englishName: "Krungsri Global Brands Equity Fund (Class A)",
+      thaiName: "กองทุนเปิดกรุงศรี โกลบอลแบรนด์ ชนิดเอ",
+      amcName: "Krungsri Asset Management",
+      fundType: "Foreign Investment Fund",
+      policyDesc:
+        "Actively managed global equity fund focusing on consumer brand companies. High active fee.",
+      assetClass: "equity",
+      ter: 1.85, // demo holding has ter 1.85; SCBWINA(A) (0.75) is cheaper
+    },
     // ── Cash / money-market ───────────────────────────────────────────────────
     {
       projId: "DEMO_012",
