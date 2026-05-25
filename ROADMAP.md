@@ -64,11 +64,11 @@ link to their section below.
 | 2.5 | Passkey + demo | ✅ Shipped | Single-owner auth + per-session in-memory demo DB. |
 | 2.6 | Chat persistence & cleanup | ✅ Shipped | Chat history persists; plan-edit Apply wired; mock imports migrated out. |
 | 3 / 3b / 3c | Market data | ✅ Shipped | SET/global indices (Yahoo), Thai fund NAVs + history (Thai SEC), RSS news. |
-| 4 | Portfolio import | 🟡 Partial | CSV + manual autocomplete + image OCR (transcription) shipped. **Advisor-assist OCR** open — see [below](#open--advisor-assist-ocr). |
+| 4 | Portfolio import | ✅ Shipped | CSV + manual autocomplete + image OCR, with advisor-assist handoff (transcription → reviewable holding cards). |
 | 4b | Broker scraping / API | 📥 Backlog | TOS/maintenance burden — see [Backlog](#backlog). |
 | 5 | Long-term memory + chat archival | ✅ Shipped | Memory foundation + session lifecycle + real-time extraction + recall/FTS. Guide: [docs/explanation/memory.md](./docs/explanation/memory.md). 5c+ → [Backlog](#backlog). |
 | 5b | Scheduled NAV refresh | ⬜ Not started | Cheap + useful solo — see [below](#open--phase-5b-scheduled-nav-refresh). Digests/notifications → [Backlog](#backlog). |
-| 6 | Multi-user (public launch) | 🟡 Code shipped; launch prep open | Per-user scoping + tier gating shipped + fail-closed hardening. **Open: Turnstile keys, `/legal/*` review, browser-verify, owner admin UI.** See [below](#open--phase-6-finish-the-public-launch). OAuth → [Backlog](#backlog). |
+| 6 | Multi-user (public launch) | 🟡 Code shipped; launch prep open | Per-user scoping, tier gating, fail-closed hardening, and owner admin UI all shipped. **Open: `/legal/*` review + browser-verify.** See [below](#open--phase-6-finish-the-public-launch). OAuth → [Backlog](#backlog). |
 
 ## Why this build order
 
@@ -101,10 +101,11 @@ signup, so data isolation is load-bearing):
    [lib/db/queries/scope.ts](./lib/db/queries/scope.ts).
 2. **Per-user `plans` — ✅ done.** Migration `0008`; `getPlan`/`upsertPlan`
    scoped per user. See [lib/db/queries/plan.ts](./lib/db/queries/plan.ts).
-3. **Owner admin surface — 🔨 built, pending integration.** A small owner-only
-   page (list users, flip `free`↔`trusted`) replacing manual `UPDATE
-   account_tier` SQL. Tier is read per request, so a change applies on the
-   user's **next request** — no realtime plumbing needed.
+3. **Owner admin surface — ✅ done.** An owner-only page (list users, flip
+   `free`↔`trusted`) replacing manual `UPDATE account_tier` SQL — gated on
+   `OWNER_EMAIL` and enforced server-side on every request, with a self-demote
+   guard. Tier is read per request, so a change applies on the user's **next
+   request**.
 4. **Default posture — ✅ at code level.** New signups get `free` (own isolated
    data, free models only); the owner promotes to `trusted`. A "your account is
    pending an upgrade" affordance is a remaining nicety.
@@ -119,8 +120,8 @@ signup, so data isolation is load-bearing):
       operator name, effective date).
 - [ ] **Browser-verify** end-to-end, including per-user isolation with a second
       test account, passkey revoke + lockout guard, and the limit banner.
-- [ ] Integrate the owner admin UI (decide: make `OWNER_EMAIL` a runtime env
-      var, or add a durable `role`/`isOwner` column).
+- [x] Owner admin UI integrated — gates on `OWNER_EMAIL` read at runtime (so it
+      must be present in the running app's env, not just for the backfill script).
 
 **Locked invariants for this phase** (keep them tested):
 
@@ -152,40 +153,6 @@ only the scheduling is missing. The `closeStaleSessions` memory backstop
 primary close path is real-time, so this is just a safety sweep. Needs a
 scheduler/cron decision. (Weekly digest email + push notifications →
 [Backlog](#backlog).)
-
-### Open — advisor-assist OCR
-
-**Today:** `/api/import/image` returns a raw `{ text }` transcription; the Image
-tab shows it for the user to retype or paste into chat. The human bridges OCR
-and the advisor.
-
-**Planned:** the Image tab hands the transcription straight to the advisor as
-intermediate state (the user never sees the raw OCR). The advisor reasons over
-it and emits a `propose_holding` card per row — structurally identical to the
-`propose_plan_edit` cards — which the user accepts/rejects; accepts write the
-holding.
-
-Why hide the transcription: raw OCR is noisy (typos, stray line breaks), and
-the user catches a wrong ticker on the clean card anyway. Why the split-labor
-shape: cheap vision models OCR but can't reliably do structured output; a
-smarter model structures + converses. Sketch for the persistence the cards need:
-
-```sql
-CREATE TABLE holding_proposals (
-  id           TEXT PRIMARY KEY,
-  thread_id    TEXT NOT NULL REFERENCES chat_threads(id),
-  bucket_id    TEXT REFERENCES buckets(id),
-  draft        TEXT NOT NULL,  -- JSON: { ticker, englishName?, units?, avgCost?, quoteSource }
-  rationale    TEXT,           -- advisor reasoning, shown on the card
-  source_text  TEXT,           -- OCR excerpt this draft came from (audit; auto-purge per retention rules)
-  status       TEXT NOT NULL,  -- "pending" | "accepted" | "rejected"
-  created_at   TEXT NOT NULL,
-  resolved_at  TEXT
-);
-```
-
-Reuses the `propose_plan_edit` infrastructure and the exported `ProposedRow`
-type in `lib/portfolio/ocr.ts`.
 
 ---
 

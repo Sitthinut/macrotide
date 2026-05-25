@@ -25,8 +25,8 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   headers; chat history + thread-list sidebar with recency grouping and
   per-thread delete.
 - **Advisor tool-calls** — read portfolio / plan / journal, write journal,
-  propose plan edit; capped tool loop; per-user scoped. Plan-edit **proposal
-  cards** that write through to the plan on accept.
+  propose plan edit, propose holding; capped tool loop; per-user scoped.
+  **Proposal cards** (plan edits and holdings) that write through only on accept.
 - **Portfolio analysis** — transparent 0–100 score (deterministic, from drift /
   fees / concentration / cash, with a per-component breakdown); the Plan &
   Health panel is driven by real signals (drift, blended TER, concentration,
@@ -41,7 +41,11 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 - **Portfolio import** — CSV upload, manual-entry ticker autocomplete (seed of
   known Thai funds + global indices, merged with the user's holdings), and
   **image OCR** (statement screenshot → raw transcription via an OpenRouter
-  vision model, free → paid fallback).
+  vision model, free → paid fallback). The Image tab can hand the transcription
+  to the advisor, which proposes reviewable holding rows you accept or dismiss.
+- **Holding sources** — tag where each holding is held with a free-text source
+  (suggestions from your past sources + common Thai fund platforms); rename a
+  source across all your holdings from Settings → Sources.
 - **Long-term memory** — bitemporal `user_preferences`, memory tools, always-on
   system-prompt injection, Settings → Memory, chat sidebar (auto-title, 30-day
   trash). Plus session lifecycle (active/idle/archived), real-time session-close
@@ -51,11 +55,15 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 - **Multi-user with per-user data isolation** — `user_id` on app tables with
   **fail-closed scoping** (each account sees only its own rows; built-ins opt
   in explicitly), per-user investment plans, owner backfill from `OWNER_EMAIL`,
-  `requireUser()` on API routes.
+  `requireUser()` on API routes; holdings are scoped through their owning bucket
+  (ownership validated on read + write).
 - **Identity providers** — Google + GitHub OAuth (env-gated; boots passkey-only
   with nothing set), post-OAuth passkey-registration prompt.
 - **Quotas + tier gating** — `free` (free-model router only) vs `trusted`
   (owner model chain), daily token cap, per-user usage logging, limit UI.
+- **Owner admin** — an owner-only screen (gated on `OWNER_EMAIL`, enforced
+  server-side on every request) to list users and flip account tiers
+  `free`↔`trusted`, replacing hand-written SQL; guarded against self-demote.
 - **Sign-up gate** — Cloudflare Turnstile (dev-bypass when unset), wired auth
   rate limit, and an inline consent notice ("By continuing, you agree…") at
   account creation. `/legal/terms` + `/legal/privacy` are operator-configurable
