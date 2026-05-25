@@ -47,6 +47,41 @@ export function ModelPortfoliosScreen({
     }
   };
 
+  // Duplicate-to-customize: fork a (built-in or any) model into a user-owned,
+  // editable copy. The POST path stamps the current user via ownerId(), so the
+  // copy is `built_in = false` and fully editable, while the shared original is
+  // never mutated. Opens the new copy so the user can immediately edit it.
+  const duplicateModel = async (m: ModelPortfolio) => {
+    try {
+      const copy: ModelPortfolio = {
+        ...m,
+        id: `custom_${Date.now()}`,
+        name: `${m.name} (copy)`,
+        isCustom: true,
+      };
+      const res = await fetch("/api/models", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(modelPortfolioToInsert(copy)),
+      });
+      const saved = res.ok ? await res.json() : null;
+      await invalidate("/api/models");
+      setOpenId(saved?.id ?? copy.id);
+    } catch (err) {
+      console.error("Failed to duplicate model:", err);
+    }
+  };
+
+  const deleteModel = async (id: string) => {
+    try {
+      await fetch(`/api/models/${id}`, { method: "DELETE" });
+      await invalidate("/api/models");
+      setOpenId(null);
+    } catch (err) {
+      console.error("Failed to delete model:", err);
+    }
+  };
+
   if (open) {
     return (
       <ModelDetail
@@ -54,6 +89,8 @@ export function ModelPortfoliosScreen({
         selected={selectedId === open.id}
         onBack={() => setOpenId(null)}
         onSelect={onSelect}
+        onDuplicate={() => duplicateModel(open)}
+        onDelete={() => deleteModel(open.id)}
       />
     );
   }
@@ -321,12 +358,19 @@ function ModelDetail({
   selected,
   onBack,
   onSelect,
+  onDuplicate,
+  onDelete,
 }: {
   model: ModelPortfolio;
   selected: boolean;
   onBack: () => void;
   onSelect: (id: string) => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
 }) {
+  // Built-ins are a shared, read-only library — you fork them to customize.
+  // User-owned ("custom") models are editable/deletable in place.
+  const isCustom = model.isCustom === true;
   return (
     <div className="screen">
       <div className="topbar">
@@ -553,6 +597,20 @@ function ModelDetail({
           {selected ? "● Currently your target" : "Set as my target allocation"}
           {!selected && <Icon name="arrowRight" size={13} />}
         </button>
+        {!isCustom && (
+          <button className="btn ghost full" style={{ marginTop: 8 }} onClick={onDuplicate}>
+            <Icon name="copy" size={13} /> Duplicate to customize
+          </button>
+        )}
+        {isCustom && (
+          <button
+            className="btn ghost full"
+            style={{ marginTop: 8, color: "var(--loss)" }}
+            onClick={onDelete}
+          >
+            <Icon name="trash" size={13} /> Delete this template
+          </button>
+        )}
         <button
           className="btn ghost full"
           style={{ marginTop: 8 }}
