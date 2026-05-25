@@ -1,6 +1,6 @@
 # API routes
 
-Catalogue of the Next.js App Router route handlers under
+Catalog of the Next.js App Router route handlers under
 [`app/api/`](../../app/api). This is a hand-maintained map; the route files
 themselves are the source of truth for exact request/response shapes.
 

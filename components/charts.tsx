@@ -187,7 +187,7 @@ export function PerfChart({
       {(() => {
         // Spread ~6 evenly-spaced labels across the x-axis regardless of how
         // many points the series has. With raw daily NAV history (100+ pts)
-        // labelling every-other point would render as overlapping text.
+        // labeling every-other point would render as overlapping text.
         const labelCount = Math.min(pts.length, 6);
         if (labelCount < 2) return null;
         const step = (pts.length - 1) / (labelCount - 1);

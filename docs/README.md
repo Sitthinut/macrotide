@@ -8,7 +8,7 @@ New here? Start with the **[Getting started tutorial](./tutorials/getting-starte
 Want the 90-second pitch and quick start? See the **[root README](../README.md)**.
 Are you an AI agent about to change code? Read **[AGENTS.md](../AGENTS.md)** first.
 
-## How these docs are organised
+## How these docs are organized
 
 The docs follow the [Diátaxis](https://diataxis.fr/) framework — four sections,
 each answering a different question. Pick by what you're trying to do:
@@ -49,7 +49,7 @@ Feature deep dives and the prior-art research behind them live under
 | Doc | Contains |
 |---|---|
 | [configuration.md](./reference/configuration.md) | How configuration works; points to the canonical env-var table in AGENTS.md |
-| [api.md](./reference/api.md) | Catalogue of `app/api/*` route handlers |
+| [api.md](./reference/api.md) | Catalog of `app/api/*` route handlers |
 | [data-model.md](./reference/data-model.md) | The SQLite tables and how they relate |
 | [auth-and-providers.md](./reference/auth-and-providers.md) | Passkeys, OpenRouter, rate limits, where data lives |
 | [Security policy](../SECURITY.md) | Threat model, reporting (lives at repo root) |

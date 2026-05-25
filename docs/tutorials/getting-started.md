@@ -97,7 +97,7 @@ Advisor can read your portfolio, plan, and journal, propose plan edits as cards
 you accept or reject, and remember durable facts you tell it across chats.
 
 - With `OPENROUTER_API_KEY` set, you get real model responses.
-- Without it, you get a clearly-labelled stub so the UI is still explorable.
+- Without it, you get a clearly-labeled stub so the UI is still explorable.
 
 Tell it something durable — *"remember I only invest in funds, not individual
 stocks"* — and it saves that to memory, visible under **Settings → Memory**.

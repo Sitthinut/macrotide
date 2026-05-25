@@ -39,7 +39,7 @@ export const LEARN_CONTENT: LearnContent = {
     { id: "t1", label: "Allocation", count: 12 },
     { id: "t2", label: "Rebalancing", count: 8 },
     { id: "t3", label: "Fees & taxes", count: 6 },
-    { id: "t4", label: "Behaviour", count: 9 },
+    { id: "t4", label: "Behavior", count: 9 },
     { id: "t5", label: "Thai market", count: 5 },
     { id: "t6", label: "Global indices", count: 7 },
   ],

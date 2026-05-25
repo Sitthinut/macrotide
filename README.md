@@ -125,7 +125,7 @@ ROADMAP, LICENSE); everything else navigable lives under `docs/`.
 
 ## Documentation
 
-Full docs live in **[docs/](./docs)**, organised with the
+Full docs live in **[docs/](./docs)**, organized with the
 [Diátaxis](https://diataxis.fr/) framework:
 
 - **New here?** [docs/tutorials/getting-started.md](./docs/tutorials/getting-started.md)

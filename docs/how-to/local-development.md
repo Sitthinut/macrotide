@@ -16,7 +16,7 @@ AUTH_DISABLED=1          # skip the passkey gate (trusted local dev only)
 OPENROUTER_API_KEY=...   # optional — real AI chat instead of a stub
 ```
 
-The authoritative list of every variable the app reads — defaults, behaviour,
+The authoritative list of every variable the app reads — defaults, behavior,
 and the code that reads each one — is the env-var table in
 [AGENTS.md](../../AGENTS.md#environment-variables). `.env.example` is a thin
 template; AGENTS.md is the single source of truth. See also
