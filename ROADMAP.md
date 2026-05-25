@@ -298,7 +298,7 @@ exposes the gaps that need polish; polishing on mock data risks rework.
 | 4b | Broker scraping / API integration | Out of scope | Revisit only if a clear personal need emerges |
 | 5 | Long-term memory + chat archival | ✅ 5a+5b shipped 2026-05-23 | **5a** — bitemporal `user_preferences` + 4-tool surface + always-on injection + Settings → Memory + chat sidebar (auto-title, 30-day trash, in-panel list) + empty-turn fail-safe. **5b** — session lifecycle (active/idle/archived); **real-time session-close extraction** (incremental, watermark `extracted_through_id` migration `0006`, running-summary context; `closeStaleSessions` backstop) writing `source='extracted'` + confidence floor; chat summarization at ~80% context (migration-free `role='summary'`, banner); `recall_preferences` tool + sidebar FTS. **5c+** (vector recall / offline consolidation) future. Guide: [docs/explanation/memory.md](./docs/explanation/memory.md); prior-art: [docs/explanation/research/memory-systems.md](./docs/explanation/research/memory-systems.md) |
 | 5b | Scheduled jobs / digests / notifications | Pending | Depends on 3b and 6 |
-| 6 | Multi-user (Google + GitHub SSO + passkey, public-discoverable) | 🟡 Code shipped 2026-05-23, needs setup | **6a–6e code merged** (autonomous run): per-user data layer (migration `0007`, `ownedBy` scoping, `requireUser`), OAuth env-gated, Turnstile signup gate, quotas/tier gating, account page. 🧪 user must: apply `0007` + `OWNER_EMAIL` backfill, set `AUTH_SECRET`, register OAuth apps, get Turnstile keys, browser-verify. See autonomous-run § |
+| 6 | Multi-user (Google + GitHub SSO + passkey, public-discoverable) | 🟡 Code shipped, owner set up; needs OAuth/Turnstile + verify | **6a–6e code merged** + fail-closed scoping & per-user plans hardening (migration `0008`, 2026-05-24). Owner setup done: `AUTH_SECRET` set, `0007`+`0008` applied, `OWNER_EMAIL` backfill run → owner is `trusted`. 🧪 user still must: register OAuth apps, get Turnstile keys, review `/legal/*`, browser-verify (incl. per-user isolation). Remaining build: owner admin tier UI (should-do). |
 
 ## Phase 1 — Persistence
 
@@ -1763,30 +1763,30 @@ Context: the intended rollout is a **public link** (e.g. on a personal
 site) shared with family/friends. That means *anyone* can reach the
 signup page, so data isolation — not just cost — becomes load-bearing.
 The cost/abuse side is already handled (free-tier model gating + daily
-token cap + Turnstile bot gate + env-gated OAuth). The gaps below are
-about isolation and operability and are **blockers for a public link**:
+token cap + Turnstile bot gate + env-gated OAuth). Status of the
+isolation/operability gaps — **both data-isolation blockers shipped
+2026-05-24**:
 
-1. **Fail-closed scoping (blocker).** Switch `ownedBy()` from
-   `user_id = me OR user_id IS NULL` to default-deny: unowned rows are
-   invisible, and genuinely-public rows (the built-in model library)
-   carry an explicit `is_shared`/`built_in = 1` flag instead of relying
-   on `NULL`. Removes the "forgot to stamp the owner → leaks to
-   everyone" footgun. See the fail-open risk above.
-2. **Per-user `plans` (blocker).** `plans` is a single shared row
-   (`id = 1`); `upsertPlan` on a fixed PK means a second user who saves
-   a plan **overwrites the owner's**. Re-key the plan by `user_id`
-   (composite or per-user row) before any second account exists. See
-   [lib/db/queries/plan.ts](./lib/db/queries/plan.ts).
-3. **Owner admin surface (should-do).** Replace manual
+1. **Fail-closed scoping — ✅ done (2026-05-24).** `ownedBy()` is now
+   default-deny for logged-in users (`user_id = me`); the built-in model
+   library opts in explicitly via an `alsoWhere` (`built_in = true`)
+   predicate rather than a blanket `NULL` fallback. A second user can no
+   longer see another's rows (tested).
+   See [lib/db/queries/scope.ts](./lib/db/queries/scope.ts).
+2. **Per-user `plans` — ✅ done (2026-05-24).** Migration `0008`
+   (autoincrement `id` + UNIQUE on `user_id`); `getPlan`/`upsertPlan` are
+   scoped per user, so a second user no longer overwrites the owner's
+   plan. See [lib/db/queries/plan.ts](./lib/db/queries/plan.ts).
+3. **Owner admin surface — ⬜ should-do (not built).** Replace manual
    `UPDATE account_tier …` SQL with a small owner-only page: list users,
    flip `free`↔`trusted`, optionally disable an account. No new realtime
    plumbing needed — tier is read per request (`getTier()` in the chat
    route), so a change applies on the user's **next request**.
-4. **Default posture.** Public signups land on `free` (own isolated
-   data, free models only); the owner promotes known family/friends to
-   `trusted`. New-user provisioning already defaults to `free` — this is
-   mostly the admin UI in (3) plus a clear "your account is pending an
-   upgrade" affordance.
+4. **Default posture — ✅ at code level.** New signups provision `free`
+   (own isolated data, free models only); the owner promotes
+   family/friends to `trusted` — via the backfill script today, or the
+   admin UI in (3). A "your account is pending an upgrade" affordance is
+   the remaining nicety.
 
 Realtime *collaborative* editing (multiple users editing one record
 live) is explicitly **out of scope** — index investing is single-owner
