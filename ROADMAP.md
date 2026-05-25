@@ -100,47 +100,24 @@ Chat is the advisor's first surface, not its limit. Build out:
 - **Proactive portfolio review.** A periodic AI assessment — "what changed since
   last time, and does it need action?" — surfaced without the user asking:
   drift, fee creep, concentration, cash drag, rebalance nudges.
-- **Let the advisor reason about performance.** Today it literally can't answer
-  "am I beating the SET?" — there is no advisor tool exposing the return series
-  (`getPortfolioSeries` in [lib/db/queries/series.ts](./lib/db/queries/series.ts)
-  powers the chart but isn't wired into
-  [lib/advisor/tools.ts](./lib/advisor/tools.ts)), and the benchmark series are
-  static fakes. Add a `read_performance` tool (period return + as-of) and feed it
-  real index series so vs-benchmark questions actually work.
-- **Resolve the self-defeating guardrail.** The chat system prompt
-  ([app/api/chat/route.ts](./app/api/chat/route.ts)) instructs the advisor to
-  *decline* personalized buy/sell advice — which directly contradicts the
-  product's headline (the on-screen "Suggested rebalance" card, the "Plan the
-  rebalance" CTA, the `propose_holding` tool). The model applies it erratically,
-  so the journey's most important ask sometimes returns a refusal or an empty
-  turn. Decide the stance (recommended: *enable* plan-anchored, educational
-  rebalancing guidance with a standing disclaimer) and align the prompt with the
-  on-screen flow. Add an anti-hallucination rule too — only reference tickers
-  returned by `read_portfolio` (it invented a holding, "SCBSET50", in testing).
 - **Agentic-turn reliability.** Pinning demo/free chat to `openrouter/free` for a
   5-step tool-calling task yields frequent empty / early-stop turns (a tool read
   with no follow-up prose or `propose_*` call → the "I didn't have a reply" UI
   fallback). Use a stronger small model for tool-calling chat, and/or persist and
-  surface tool-only steps instead of dropping them.
+  surface tool-only steps instead of dropping them. *(The `read_performance` tool,
+  plan-anchored rebalancing guidance, and the anti-hallucination rule have
+  shipped — see the changelog; this reliability item is what's left.)*
 
-### Benchmarks that work, and are the user's own
+### Benchmarks that are the user's own
 
-The core promise ("at least match your index") only lands if the benchmark
-comparison actually renders and reflects the user's *own* index.
+The overlay now renders with **real, aligned** index series (SET / S&P 500 /
+Nasdaq / Nikkei) and the advisor reasons about returns vs them — see the
+changelog. What's left is making the benchmark genuinely *theirs*:
 
-- **Fix the overlay — it currently no-ops.** The chart only draws the benchmark
-  when `benchmarkData.length === data.length`
-  ([InteractiveCharts.tsx](./components/InteractiveCharts.tsx),
-  [charts.tsx](./components/charts.tsx)), and the data is a static placeholder
-  ([lib/static/analysis.ts](./lib/static/analysis.ts) `BENCHMARKS`). Real
-  portfolio series rarely match that fixed length, so the line silently
-  disappears.
-- **Use real series, aligned.** Pull the benchmark index over the *same* range
-  as the portfolio, align it to the portfolio's dates, then rebase to a common
-  start — so the two lines are genuinely comparable.
-- **Editable / goal-based.** Drop the fixed `sp500 | set | m60_40` enum; let the
-  user pick or add the benchmark(s) that match their goal (their SET index fund,
-  a global index, a blend). The benchmark is theirs, not a preset.
+- **Editable / goal-based.** Beyond the preset index list, let the user pick or
+  add the benchmark(s) that match their goal — their own SET index fund, a
+  global index, or a blend — and persist the choice. The benchmark should be
+  the one they're actually trying to match or beat, not only a preset.
 
 ### Data freshness & auto-refresh
 

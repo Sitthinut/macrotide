@@ -24,14 +24,22 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   key, every major model), owner/demo provider routing, IP rate limit, security
   headers; chat history + thread-list sidebar with recency grouping and
   per-thread delete.
-- **Advisor tool-calls** — read portfolio / plan / journal, write journal,
-  propose plan edit, propose holding; capped tool loop; per-user scoped.
-  **Proposal cards** (plan edits and holdings) that write through only on accept.
+- **Advisor tool-calls** — read portfolio / **performance** / plan / journal,
+  write journal, propose plan edit, propose holding; capped tool loop; per-user
+  scoped. `read_performance` reports the portfolio's period return alongside the
+  same-window SET + S&P 500 returns, so the advisor can answer "am I beating my
+  index?" with real numbers. The advisor gives concrete, plan-anchored
+  buy/sell/hold + rebalancing guidance (educational, with a standing disclaimer)
+  and references only tickers its tools returned. **Proposal cards** (plan edits
+  and holdings) that write through only on accept.
 - **Portfolio analysis** — transparent 0–100 score (deterministic, from drift /
   fees / concentration / cash, with a per-component breakdown); the Plan &
   Health panel is driven by real signals (drift, blended TER, concentration,
   cash drag, rebalance hint).
-- **Interactive charts** (recharts) with hover + tooltips.
+- **Interactive charts** (recharts) with hover + tooltips, including a
+  portfolio-vs-benchmark overlay (SET / S&P 500 / Nasdaq / Nikkei) drawn from
+  real index series, aligned to the portfolio's dates and rebased to a common
+  start.
 - **Market data** — SET + global indices and FX (Yahoo); **Thai fund NAVs +
   NAV history** (Thai SEC Open API) behind a provider registry +
   `holdings.quote_source` taxonomy. Resilient to upstream rate-limits: a
@@ -40,7 +48,8 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   state instead of fabricated numbers when nothing loads, and the demo cache is
   pre-warmed (indices + NAV history) so charts render instantly.
 - **RSS news aggregator** — curated long-horizon editorial feeds on the markets
-  screen (parallel fetch, dedupe, 30-min cache, partial-failure resilience).
+  screen (parallel fetch, dedupe, 30-min cache, partial-failure resilience);
+  HTML entities in titles are decoded, including double-encoded ones.
 - **Portfolio import** — CSV upload, manual-entry ticker autocomplete (seed of
   known Thai funds + global indices, merged with the user's holdings), and
   **image OCR** (statement screenshot → raw transcription via an OpenRouter
