@@ -57,7 +57,9 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 - **Quotas + tier gating** — `free` (free-model router only) vs `trusted`
   (owner model chain), daily token cap, per-user usage logging, limit UI.
 - **Sign-up gate** — Cloudflare Turnstile (dev-bypass when unset), wired auth
-  rate limit, `/legal/terms` + `/legal/privacy` with accept checkbox.
+  rate limit, and an inline consent notice ("By continuing, you agree…") at
+  account creation. `/legal/terms` + `/legal/privacy` are operator-configurable
+  (name / contact / jurisdiction via env; nothing operator-specific committed).
 - **Account page** — single "Sign in" section with passkeys (revoke, with a
   last-passkey lockout guard) named from their AAGUIDs, linked OAuth providers,
   usage, and sign-out everywhere.

@@ -211,6 +211,22 @@ Rate limiting: `/api/auth/*` POSTs are IP-limited via `AUTH_RATE_LIMIT`
 (10/min/IP — [lib/api/rate-limit.ts](./lib/api/rate-limit.ts)), wired in
 [app/api/auth/[...all]/route.ts](./app/api/auth/[...all]/route.ts).
 
+### Legal pages
+
+All optional and operator-configurable so the repo ships nothing
+operator-specific; `/legal/terms` + `/legal/privacy` read them at render.
+
+| Var | Default | Read by | Notes |
+| --- | --- | --- | --- |
+| `OPERATOR_NAME` | unset → "a single individual" / "the operator" | [lib/legal/config.ts](./lib/legal/config.ts) | Who runs this instance, shown on both legal pages. |
+| `CONTACT_EMAIL` | unset → no email, just "contact the operator" | [lib/legal/config.ts](./lib/legal/config.ts) | Contact shown (as a `mailto`) on both pages. **No fallback to `OWNER_EMAIL`** — set this only to publish a real address. |
+| `LEGAL_JURISDICTION` | unset → governing-law clause omitted | [lib/legal/config.ts](./lib/legal/config.ts) | Governing-law jurisdiction (e.g. `Thailand`). |
+
+The "Last updated" date is the `LEGAL_LAST_UPDATED` constant in
+[lib/legal/config.ts](./lib/legal/config.ts) (bump it when editing the copy, not
+an env var). Sign-up consent is an inline notice under the create-account button
+("By continuing, you agree to the Terms and Privacy Policy"), not a checkbox.
+
 ### Database
 
 | Var | Default | Read by | Notes |

@@ -153,6 +153,18 @@ This finds your account by `OWNER_EMAIL`, attaches any pre-existing `NULL`-owned
 
 To promote anyone else (family/friends) to `trusted`, update their tier directly — `UPDATE account_tier SET tier='trusted' WHERE user_id=(SELECT id FROM user WHERE email='…')`. The change applies on their next request (tier is read per request, not cached).
 
+### 9. Review the legal pages
+
+`/legal/terms` and `/legal/privacy` ship as plain-language templates with nothing operator-specific baked in. Before sharing the link publicly, set these in `.env.local` (all optional):
+
+```sh
+OPERATOR_NAME=Your Name        # who runs this instance; unset → generic wording
+CONTACT_EMAIL=you@example.com  # shown as a mailto on both pages; unset → no email
+LEGAL_JURISDICTION=Thailand    # governing-law clause; unset → the clause is omitted
+```
+
+Then read both pages end-to-end and confirm the disclosures match how *you* run the instance. The "Last updated" date is the `LEGAL_LAST_UPDATED` constant in `lib/legal/config.ts` — bump it whenever you edit the copy. Sign-up consent is an inline notice under the create-account button, not a checkbox.
+
 ## Tailnet only (Tailscale Serve)
 
 Don't want to deal with public DNS / certs? Bind Macrotide to loopback and serve over Tailscale:
@@ -212,6 +224,7 @@ Before sharing the URL with anyone:
 - [ ] ufw deny-incoming + 22/80/443 only
 - [ ] HTTPS only (Caddy auto-cert + HSTS header)
 - [ ] `.env.local` is `chmod 600` and owned by the service user
+- [ ] Legal pages reviewed; `OPERATOR_NAME` / `CONTACT_EMAIL` / `LEGAL_JURISDICTION` set as desired
 - [ ] Off-site backup configured (restic / rclone / borg)
 - [ ] First demo session works from incognito (proves cookie isolation)
 - [ ] Owner data is not visible to a demo session (proves DB context isolation)

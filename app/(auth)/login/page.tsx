@@ -28,7 +28,6 @@ function LoginInner() {
   const [mode, setMode] = useState<Mode>("intro");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
-  const [acceptedTos, setAcceptedTos] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [config, setConfig] = useState<AuthConfig | null>(null);
@@ -287,24 +286,6 @@ function LoginInner() {
               onChange={(e) => setEmail(e.target.value)}
               style={input}
             />
-            <label style={tosLabel}>
-              <input
-                type="checkbox"
-                checked={acceptedTos}
-                onChange={(e) => setAcceptedTos(e.target.checked)}
-              />
-              <span>
-                I agree to the{" "}
-                <a href="/legal/terms" target="_blank" rel="noreferrer" style={legalLink}>
-                  Terms
-                </a>{" "}
-                and{" "}
-                <a href="/legal/privacy" target="_blank" rel="noreferrer" style={legalLink}>
-                  Privacy Policy
-                </a>
-                .
-              </span>
-            </label>
             {config?.turnstile.enabled && config.turnstile.siteKey && (
               <div style={{ margin: "8px 0" }}>
                 <Turnstile siteKey={config.turnstile.siteKey} onToken={setTurnstileToken} />
@@ -313,10 +294,21 @@ function LoginInner() {
             <button
               type="submit"
               style={primary}
-              disabled={busy || !email || !name || !acceptedTos || !turnstileSatisfied}
+              disabled={busy || !email || !name || !turnstileSatisfied}
             >
               {busy ? "Setting up…" : "Create passkey & continue"}
             </button>
+            <p style={consentNote}>
+              By continuing, you agree to the{" "}
+              <a href="/legal/terms" target="_blank" rel="noreferrer" style={legalLink}>
+                Terms
+              </a>{" "}
+              and{" "}
+              <a href="/legal/privacy" target="_blank" rel="noreferrer" style={legalLink}>
+                Privacy Policy
+              </a>
+              .
+            </p>
             <button type="button" style={ghost} onClick={() => setMode("intro")} disabled={busy}>
               Back
             </button>
@@ -433,15 +425,11 @@ const divider: React.CSSProperties = {
   margin: "4px 0",
 };
 
-const tosLabel: React.CSSProperties = {
-  display: "flex",
-  alignItems: "flex-start",
-  gap: 8,
+const consentNote: React.CSSProperties = {
   fontSize: 12,
   color: "var(--muted)",
-  textAlign: "left",
   lineHeight: 1.5,
-  margin: "4px 0 10px",
+  margin: "8px 0 2px",
 };
 
 const legalLink: React.CSSProperties = {
