@@ -13,6 +13,8 @@ import type { drizzle } from "drizzle-orm/better-sqlite3";
 import type * as schema from "../db/schema";
 import {
   buckets,
+  fundCatalog,
+  fundFees,
   fundQuotes,
   holdings,
   journalEntries,
@@ -20,6 +22,7 @@ import {
   navHistory,
   plans,
 } from "../db/schema";
+import { TER_FEE_TYPE } from "../market/fund-fees";
 import { INDICES } from "../market/indices";
 import { MODEL_PORTFOLIOS, PORTFOLIOS, USER_GOALS, USER_JOURNAL, USER_PLAN } from "./data";
 
@@ -352,6 +355,206 @@ export function seedDemoData(db: Db): void {
         target: fundQuotes.ticker,
         set: { nav: last?.nav ?? base, d1Pct, updatedAt: now },
       })
+      .run();
+  }
+
+  // ─── fund catalog demo seed ──────────────────────────────────────────────
+  // A representative sample of Thai-registered funds so the Select UI (FundSelect)
+  // shows real-looking data before the daily SEC refresh has populated the catalog.
+  // Covers the four asset classes and a range of TER levels to demonstrate the
+  // cheapest-first ranking.
+  const DEMO_FUNDS: Array<{
+    projId: string;
+    abbrName: string;
+    englishName: string;
+    thaiName: string;
+    amcName: string;
+    fundType: string;
+    policyDesc: string;
+    assetClass: "equity" | "bond" | "alternative" | "cash";
+    ter: number; // actual TER %
+  }> = [
+    // ── Equity — S&P 500 feeders ─────────────────────────────────────────────
+    {
+      projId: "DEMO_001",
+      abbrName: "SCBSP500",
+      englishName: "SCB S&P 500 Index Fund",
+      thaiName: "กองทุนเปิดไทยพาณิชย์ เอส แอนด์ พี 500",
+      amcName: "SCB Asset Management",
+      fundType: "Foreign Investment Fund",
+      policyDesc: "Feeder fund investing in S&P 500 index tracking fund. Tracks the S&P 500 Index.",
+      assetClass: "equity",
+      ter: 0.5,
+    },
+    {
+      projId: "DEMO_002",
+      abbrName: "K-SP500-A(D)",
+      englishName: "K S&P 500 Index Fund Class A (Dividend)",
+      thaiName: "กองทุนเปิดกสิกรไทย เอส แอนด์ พี 500",
+      amcName: "Kasikorn Asset Management",
+      fundType: "Foreign Investment Fund",
+      policyDesc: "Feeder fund investing in a fund tracking the S&P 500 Index.",
+      assetClass: "equity",
+      ter: 0.9,
+    },
+    {
+      projId: "DEMO_003",
+      abbrName: "ONE-SP500-UH",
+      englishName: "One S&P 500 Equity Index Fund (Unhedged)",
+      thaiName: "กองทุนเปิด วัน เอส แอนด์ พี 500",
+      amcName: "One Asset Management",
+      fundType: "Foreign Investment Fund",
+      policyDesc: "Invests in a master fund tracking the S&P 500 Index. Currency unhedged.",
+      assetClass: "equity",
+      ter: 0.45,
+    },
+    // ── Equity — global / MSCI World ─────────────────────────────────────────
+    {
+      projId: "DEMO_004",
+      abbrName: "TMBGQG",
+      englishName: "TMB Global Quality Growth Fund",
+      thaiName: "กองทุนเปิดทีเอ็มบี โกลบอล ควอลิตี้ โกรท",
+      amcName: "TMB Asset Management",
+      fundType: "Foreign Investment Fund",
+      policyDesc: "Invests in global equities tracking the MSCI World Index. Unhedged.",
+      assetClass: "equity",
+      ter: 1.5,
+    },
+    {
+      projId: "DEMO_005",
+      abbrName: "SCBWINA(A)",
+      englishName: "SCB World Index Fund",
+      thaiName: "กองทุนเปิดไทยพาณิชย์ เวิลด์ อินดิคัส",
+      amcName: "SCB Asset Management",
+      fundType: "Foreign Investment Fund",
+      policyDesc:
+        "Feeder fund investing in a fund tracking the MSCI ACWI Index. Global equity exposure.",
+      assetClass: "equity",
+      ter: 0.75,
+    },
+    // ── Equity — Thai domestic ────────────────────────────────────────────────
+    {
+      projId: "DEMO_006",
+      abbrName: "KFSDIV",
+      englishName: "Krungsri SET Dividend Fund",
+      thaiName: "กองทุนเปิดกรุงศรี เซ็ท ดิวิเดนด์",
+      amcName: "Krungsri Asset Management",
+      fundType: "General Fund",
+      policyDesc: "Invests in Thai equities with focus on high-dividend stocks from the SET Index.",
+      assetClass: "equity",
+      ter: 1.2,
+    },
+    // ── Bond — Thai fixed income ──────────────────────────────────────────────
+    {
+      projId: "DEMO_007",
+      abbrName: "K-FIXED-A",
+      englishName: "Kasikorn Fixed Income Fund Class A",
+      thaiName: "กองทุนเปิดกสิกรไทย ตราสารหนี้ เอ",
+      amcName: "Kasikorn Asset Management",
+      fundType: "Fixed Income Fund",
+      policyDesc:
+        "Invests primarily in Thai government bonds, corporate bonds, and money-market instruments.",
+      assetClass: "bond",
+      ter: 0.38,
+    },
+    {
+      projId: "DEMO_008",
+      abbrName: "SCBFIXED",
+      englishName: "SCB Fixed Income Fund",
+      thaiName: "กองทุนเปิดไทยพาณิชย์ ตราสารหนี้",
+      amcName: "SCB Asset Management",
+      fundType: "Fixed Income Fund",
+      policyDesc:
+        "Invests in Thai government and state enterprise bonds. Low-risk, capital preservation.",
+      assetClass: "bond",
+      ter: 0.42,
+    },
+    {
+      projId: "DEMO_009",
+      abbrName: "KTBGSB",
+      englishName: "KTB Government Savings Bond Fund",
+      thaiName: "กองทุนเปิดเคทีบี พันธบัตรออมทรัพย์",
+      amcName: "Krung Thai Asset Management",
+      fundType: "Fixed Income Fund",
+      policyDesc: "Invests in Thai government savings bonds. Capital preservation objective.",
+      assetClass: "bond",
+      ter: 0.3,
+    },
+    // ── Alternative — gold ────────────────────────────────────────────────────
+    {
+      projId: "DEMO_010",
+      abbrName: "TMBGOLDS",
+      englishName: "TMB Gold Savings Fund",
+      thaiName: "กองทุนเปิดทีเอ็มบี ทองคำ",
+      amcName: "TMB Asset Management",
+      fundType: "General Fund",
+      policyDesc:
+        "Invests in gold bullion and gold-related instruments. Tracks the gold spot price.",
+      assetClass: "alternative",
+      ter: 0.55,
+    },
+    // ── Alternative — property / REIT ─────────────────────────────────────────
+    {
+      projId: "DEMO_011",
+      abbrName: "KTBREALTY",
+      englishName: "KTB Real Estate and Infrastructure Fund",
+      thaiName: "กองทุนเปิดเคทีบี อสังหาริมทรัพย์",
+      amcName: "Krung Thai Asset Management",
+      fundType: "Property Fund",
+      policyDesc: "Invests in Thai real estate investment trusts (REITs) and infrastructure funds.",
+      assetClass: "alternative",
+      ter: 0.8,
+    },
+    // ── Cash / money-market ───────────────────────────────────────────────────
+    {
+      projId: "DEMO_012",
+      abbrName: "SCBMM",
+      englishName: "SCB Money Market Fund",
+      thaiName: "กองทุนเปิดไทยพาณิชย์ ตลาดเงิน",
+      amcName: "SCB Asset Management",
+      fundType: "Fixed Income Fund",
+      policyDesc:
+        "Invests in short-term money-market instruments, commercial paper, and bank deposits.",
+      assetClass: "cash",
+      ter: 0.15,
+    },
+  ];
+
+  const periodStart = "2025-01-01";
+
+  for (const f of DEMO_FUNDS) {
+    db.insert(fundCatalog)
+      .values({
+        projId: f.projId,
+        abbrName: f.abbrName,
+        thaiName: f.thaiName,
+        englishName: f.englishName,
+        amcName: f.amcName,
+        fundType: f.fundType,
+        policyDesc: f.policyDesc,
+        assetClass: f.assetClass,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoNothing()
+      .run();
+
+    // Seed a current (open-ended) TER row so findFunds() has fee data to rank on.
+    db.insert(fundFees)
+      .values({
+        projId: f.projId,
+        fundClassName: "A",
+        feeType: TER_FEE_TYPE,
+        feeTypeRaw: "Total Fee and Expense (ค่าธรรมเนียมและค่าใช้จ่ายรวมทั้งหมด)",
+        rateCeilingPct: f.ter * 1.2, // typical SEC ceiling ≈ 20% above actual
+        actualRatePct: f.ter,
+        periodStart,
+        periodEnd: null, // null = currently active
+        prospectusType: "Monthly",
+        lastUpdDate: yyyyMmDd(REFERENCE_TODAY),
+      })
+      .onConflictDoNothing()
       .run();
   }
 

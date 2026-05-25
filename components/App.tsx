@@ -9,6 +9,7 @@ import {
   PlanPanel,
   PortfoliosPanel,
 } from "@/components/AppPanels";
+import { FundSelectScreen } from "@/components/FundSelect";
 import { Icon } from "@/components/Icon";
 import { type PortfolioFormValues, PortfolioSheet } from "@/components/PortfolioSheet";
 import { AccountScreen } from "@/components/screens/AccountScreen";
@@ -40,6 +41,7 @@ function portfolioToFormValues(p: Portfolio): PortfolioFormValues {
 type Screen =
   | "portfolio"
   | "markets"
+  | "funds"
   | "chat"
   | "journal"
   | "models"
@@ -50,6 +52,7 @@ type Screen =
 const MOBILE_NAV: { id: Screen; icon: string; label: string }[] = [
   { id: "portfolio", icon: "home", label: "Portfolio" },
   { id: "markets", icon: "pulse", label: "Markets" },
+  { id: "funds", icon: "search", label: "Funds" },
   { id: "chat", icon: "chat", label: "Chat" },
   { id: "journal", icon: "book", label: "Journal" },
 ];
@@ -58,6 +61,7 @@ const MOBILE_NAV: { id: Screen; icon: string; label: string }[] = [
 const WIDE_NAV: { id: Screen; icon: string; label: string }[] = [
   { id: "portfolio", icon: "home", label: "Portfolio" },
   { id: "markets", icon: "pulse", label: "Markets" },
+  { id: "funds", icon: "search", label: "Funds" },
   { id: "journal", icon: "book", label: "Journal" },
 ];
 
@@ -288,6 +292,9 @@ export function App() {
     }
     if (screen === "markets") {
       return <MarketsScreen onOpenSettings={openMobileMenu} showMenu={!isWide} />;
+    }
+    if (screen === "funds") {
+      return <FundSelectScreen onOpenSettings={openMobileMenu} showMenu={!isWide} />;
     }
     if (screen === "chat") {
       return (
