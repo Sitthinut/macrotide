@@ -13,7 +13,6 @@ import { Icon } from "@/components/Icon";
 import { type PortfolioFormValues, PortfolioSheet } from "@/components/PortfolioSheet";
 import { AccountScreen } from "@/components/screens/AccountScreen";
 import { ChatScreen } from "@/components/screens/ChatScreen";
-import { ConnectScreen } from "@/components/screens/ConnectScreen";
 import { JournalScreen } from "@/components/screens/JournalScreen";
 import { MarketsScreen } from "@/components/screens/MarketsScreen";
 import { ModelPortfoliosScreen } from "@/components/screens/ModelPortfoliosScreen";
@@ -37,15 +36,7 @@ function portfolioToFormValues(p: Portfolio): PortfolioFormValues {
   };
 }
 
-type Screen =
-  | "connect"
-  | "portfolio"
-  | "markets"
-  | "chat"
-  | "journal"
-  | "models"
-  | "settings"
-  | "account";
+type Screen = "portfolio" | "markets" | "chat" | "journal" | "models" | "settings" | "account";
 
 const MOBILE_NAV: { id: Screen; icon: string; label: string }[] = [
   { id: "portfolio", icon: "home", label: "Portfolio" },
@@ -229,9 +220,6 @@ export function App() {
   };
 
   const renderScreen = () => {
-    if (screen === "connect") {
-      return <ConnectScreen onConnect={() => setScreen("portfolio")} />;
-    }
     if (screen === "portfolio") {
       return (
         <PortfolioScreen
@@ -328,8 +316,7 @@ export function App() {
 
   // ===== MOBILE SHELL (unchanged behaviour from original) =====
   if (!isWide) {
-    const hideNav =
-      screen === "connect" || screen === "settings" || screen === "models" || screen === "account";
+    const hideNav = screen === "settings" || screen === "models" || screen === "account";
     return (
       <>
         <div className="app-root">
@@ -357,20 +344,6 @@ export function App() {
   }
 
   // ===== WIDE SHELL (tablet + desktop) =====
-  // Onboarding and full-screen modal-ish routes still render solo.
-  if (screen === "connect") {
-    return (
-      <>
-        <div className="app-root">
-          <div className="app-frame" data-screen-label={screen} style={{ maxWidth: 520 }}>
-            {renderScreen()}
-          </div>
-        </div>
-        {sharedModals}
-      </>
-    );
-  }
-
   return (
     <>
       <div
@@ -435,9 +408,10 @@ export function App() {
                 </button>
                 <hr />
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     setAccountMenuOpen(false);
-                    setScreen("connect");
+                    await authClient.signOut();
+                    window.location.href = "/login";
                   }}
                 >
                   <Icon name="refresh" size={14} /> Sign out
