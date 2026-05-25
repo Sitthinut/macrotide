@@ -1,0 +1,45 @@
+# Macrotide — single-owner self-host (Mode B), containerized.
+#
+# Exposure model: bind to host loopback only. A reverse proxy in front
+# terminates TLS and routes the public hostname here. On the reference host
+# (Oracle) that proxy is a Cloudflare Tunnel (cloudflared) → no inbound ports
+# are opened on the box. See docs/how-to/deploy.md § "Docker + Cloudflare Tunnel".
+#
+# Secrets come from .env.local at runtime (chmod 600, gitignored, never baked
+# into the image). Port 3100 on the host avoids the 3000 already in use on the
+# reference box.
+
+name: macrotide
+
+services:
+  macrotide:
+    build: .
+    container_name: macrotide
+    restart: unless-stopped
+    env_file: .env.local
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_PATH=/app/data/app.db
+    ports:
+      - "127.0.0.1:3100:3000"
+    volumes:
+      # SQLite db + daily backups. Bind mount so the host's restic backup picks
+      # it up (mirrors the searxng/agent service convention).
+      - ./data:/app/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 1024M

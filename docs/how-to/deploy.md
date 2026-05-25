@@ -18,7 +18,184 @@ Two supported modes, both first-class:
   accounts, finish the public-launch hardening tracked in
   [ROADMAP.md](../../ROADMAP.md).
 
-The rest of this doc is the full runbook for Mode B (and the Tailnet variant).
+The rest of this doc is the full runbook for Mode B. Pick **one** front-door:
+
+- **Docker + Cloudflare Tunnel** (below) — recommended when the host already runs
+  Docker and the domain is on Cloudflare. No public inbound ports; TLS terminates
+  at Cloudflare's edge; the origin IP stays hidden.
+- **Single VM (Ubuntu + Caddy)** — bare Node + systemd + a public A-record. Use
+  when you're not on Docker/Cloudflare.
+- **Tailnet only (Tailscale Serve)** — private access over your tailnet, no public
+  domain.
+
+## Docker + Cloudflare Tunnel (recommended)
+
+Containerized self-host where a [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
+publishes a subdomain (e.g. `macrotide.example.com`) without opening a single
+inbound port. The repo ships `Dockerfile` + `docker-compose.yml`; the container
+binds host loopback `127.0.0.1:3100`, and `cloudflared` makes an **outbound**
+connection to Cloudflare that routes the public hostname back to it.
+
+Why a subdomain (not a path on the apex): the WebAuthn passkey scope and the
+session cookie are bound to the host. A dedicated subdomain keeps macrotide's
+auth fully isolated from whatever serves the apex.
+
+**Prerequisites:** Docker Engine + Compose plugin on the host; the domain's DNS
+managed in Cloudflare.
+
+### 1. Clone + configure
+
+```sh
+sudo mkdir -p /opt/services/macrotide && sudo chown $USER:$USER /opt/services/macrotide
+cd /opt/services/macrotide
+git clone https://github.com/<your-fork>/macrotide.git .
+
+cp .env.example .env.local
+chmod 600 .env.local
+```
+
+Edit `.env.local`. For a subdomain deploy the host-specific keys matter:
+
+```sh
+PUBLIC_APP_URL=https://macrotide.example.com
+# WebAuthn relying-party ID. Defaults to the PUBLIC_APP_URL host, which is what
+# you want — the SUBDOMAIN, never the apex. Setting it to `example.com` would
+# scope passkeys to the whole domain. Leave unset to inherit, or pin it:
+AUTH_RP_ID=macrotide.example.com
+AUTH_SECRET=        # fresh: openssl rand -base64 32 — do NOT reuse a dev secret
+OPENROUTER_API_KEY=sk-or-...
+AI_MODELS=openrouter/free,openrouter/auto
+# Separate key so demo traffic never burns the owner quota (hardening item):
+DEMO_OPENROUTER_API_KEY=sk-or-...
+SEC_API_KEY=...     # same subscription key works in every environment
+OWNER_EMAIL=you@actual-email   # must match the passkey account you register
+```
+
+Cookies stay host-scoped by default (better-auth) — do not configure a
+`.example.com` cookie domain, or sessions would leak to the apex.
+
+### 2. Build + run
+
+```sh
+docker compose up -d --build
+# First boot applies all Drizzle migrations against /app/data/app.db.
+docker compose logs -f macrotide          # watch startup
+curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3100/login   # 200
+```
+
+The image carries the full source tree + node_modules on purpose: migrations are
+read from `lib/db/migrations/` at startup, and the fund-catalog job runs the
+TypeScript in `scripts/` via `tsx` (step 5).
+
+### 3. Install cloudflared + create the tunnel
+
+```sh
+# Cloudflare APT repo (ARM64/amd64 auto-detected)
+sudo mkdir -p --mode=0755 /usr/share/keyrings
+curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
+  | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(lsb_release -cs) main" \
+  | sudo tee /etc/apt/sources.list.d/cloudflared.list
+sudo apt-get update && sudo apt-get install -y cloudflared
+
+# Authenticate (opens a browser link — pick the zone for your domain)
+cloudflared tunnel login
+# Create a named tunnel; this writes a credentials JSON under ~/.cloudflared/
+cloudflared tunnel create macrotide
+# Map the public hostname to the tunnel (creates a proxied CNAME in Cloudflare DNS)
+cloudflared tunnel route dns macrotide macrotide.example.com
+```
+
+### 4. Tunnel config + run as a service
+
+```sh
+sudo mkdir -p /etc/cloudflared
+TUNNEL_ID=$(cloudflared tunnel list --output json | python3 -c 'import sys,json;print([t["id"] for t in json.load(sys.stdin) if t["name"]=="macrotide"][0])')
+sudo cp ~/.cloudflared/${TUNNEL_ID}.json /etc/cloudflared/macrotide.json
+
+sudo tee /etc/cloudflared/config.yml > /dev/null <<EOF
+tunnel: ${TUNNEL_ID}
+credentials-file: /etc/cloudflared/macrotide.json
+
+ingress:
+  - hostname: macrotide.example.com
+    service: http://127.0.0.1:3100
+  - service: http_status:404
+EOF
+
+sudo cloudflared service install
+sudo systemctl enable --now cloudflared
+sudo systemctl status cloudflared --no-pager
+```
+
+Verify end-to-end:
+
+```sh
+curl -I https://macrotide.example.com        # HTTP/2 200 from /login, CF + Macrotide headers
+# Then open it, sign up, register a passkey — origin = macrotide.example.com.
+```
+
+Cloudflare proxies the hostname (orange cloud) and serves the edge cert
+automatically; you never touch Let's Encrypt or open 80/443. Keep the host
+firewall tailnet-only — the tunnel needs only outbound 443.
+
+### 5. Fund-catalog refresh (containerized)
+
+Run the daily SEC refresh *inside* the container (it shares the DB + env) via a
+host timer that `docker exec`s the `tsx` job:
+
+```sh
+sudo tee /etc/systemd/system/macrotide-fund-catalog.service > /dev/null <<'EOF'
+[Unit]
+Description=Macrotide — fund-catalog refresh (SEC fees)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker exec macrotide npx tsx --tsconfig tsconfig.scripts.json scripts/refresh-fund-catalog.ts
+EOF
+
+sudo tee /etc/systemd/system/macrotide-fund-catalog.timer > /dev/null <<'EOF'
+[Unit]
+Description=Run Macrotide fund-catalog refresh daily at 11:00 UTC
+
+[Timer]
+OnCalendar=*-*-* 11:00:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now macrotide-fund-catalog.timer
+# First run now (cap with --limit=20 to smoke-test):
+docker exec macrotide npx tsx --tsconfig tsconfig.scripts.json scripts/refresh-fund-catalog.ts --limit=20
+```
+
+A full crawl is ~10,000–15,000 SEC calls and completes in ~15–30 min at the
+5,000-calls/300-second budget (the provider self-throttles + retries) — well
+inside the daily window.
+
+### 6. Backups
+
+The SQLite db + daily snapshots live in `/opt/services/macrotide/data/`
+(bind-mounted into the container). Point your existing off-site backup at it —
+e.g. add `/opt/services/macrotide/data` to the host's restic/rclone paths.
+
+### 7. Updating
+
+```sh
+cd /opt/services/macrotide
+git pull
+docker compose up -d --build       # rebuild; migrations apply on next boot
+```
+
+The remaining sections (owner promotion, legal pages, hardening checklist) below
+apply to this path too — just substitute "restart the systemd unit" with
+"`docker compose restart macrotide`".
 
 ## Single VM (Ubuntu + Caddy)
 

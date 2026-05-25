@@ -1,0 +1,14 @@
+# Keep secrets and host-only state out of the build context (Docker uses this,
+# NOT .gitignore). .env*.local must never be baked into an image layer — secrets
+# are injected at runtime via compose `env_file`.
+.env
+.env*.local
+.git
+.github
+node_modules
+.next
+data
+*.log
+.DS_Store
+.playwright-cli
+coverage
