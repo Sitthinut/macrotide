@@ -20,10 +20,21 @@ import {
   navHistory,
   plans,
 } from "../db/schema";
+import { INDICES } from "../market/indices";
 import { MODEL_PORTFOLIOS, PORTFOLIOS, USER_GOALS, USER_JOURNAL, USER_PLAN } from "./data";
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 const REFERENCE_TODAY = new Date("2026-05-21T00:00:00Z");
+
+// Plausible base levels for the demo index cache (the mock MARKETS list doesn't
+// map 1:1 to these Yahoo symbols). The synthetic series ends at these values.
+const DEMO_INDEX_VALUES: Record<string, number> = {
+  "^SET.BK": 1428.42,
+  "^GSPC": 5821.1,
+  "^IXIC": 18942.8,
+  "^N225": 38500,
+  "THB=X": 36.5,
+};
 
 // All demo seed holdings are Thai mutual funds, per the existing seed.
 // Kept as a constant so the combined cache key matches what the live
@@ -307,6 +318,41 @@ export function seedDemoData(db: Db): void {
           .run();
       }
     }
+  }
+
+  // Warm the Yahoo index cache (yahoo:<symbol>) so the demo Markets screen
+  // shows real-looking indices with an "as of" date, instead of cold-falling-
+  // back to the mock list and surfacing a "sources unavailable" banner (the
+  // demo DB never hits Yahoo). updatedAt:now keeps these "fresh" so the live
+  // path serves them without a network call.
+  for (const def of INDICES) {
+    const base = DEMO_INDEX_VALUES[def.symbol];
+    if (base == null) continue;
+    const cacheKey = `yahoo:${def.symbol}`;
+    const series = generateSeries(def.symbol, base, null, REFERENCE_TODAY);
+    for (const row of series) {
+      db.insert(navHistory)
+        .values({ ticker: cacheKey, date: row.date, nav: row.nav })
+        .onConflictDoUpdate({ target: [navHistory.ticker, navHistory.date], set: { nav: row.nav } })
+        .run();
+    }
+    const last = series[series.length - 1];
+    const prev = series.length > 1 ? series[series.length - 2] : null;
+    const d1Pct = last && prev ? ((last.nav - prev.nav) / prev.nav) * 100 : null;
+    db.insert(fundQuotes)
+      .values({
+        ticker: cacheKey,
+        nav: last?.nav ?? base,
+        d1Pct,
+        ytdPct: computeYtdPct(series, REFERENCE_TODAY),
+        y1Pct: computeReturnPct(series, REFERENCE_TODAY, 365),
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: fundQuotes.ticker,
+        set: { nav: last?.nav ?? base, d1Pct, updatedAt: now },
+      })
+      .run();
   }
 
   db.insert(plans)

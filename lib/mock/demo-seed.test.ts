@@ -33,7 +33,9 @@ describe("seedDemoData synthetic NAV history", () => {
     );
 
     const counts = sqlite
-      .prepare("SELECT ticker, COUNT(*) AS n FROM nav_history GROUP BY ticker")
+      .prepare(
+        "SELECT ticker, COUNT(*) AS n FROM nav_history WHERE ticker LIKE 'thai_mutual_fund:%' GROUP BY ticker",
+      )
       .all() as Array<{ ticker: string; n: number }>;
 
     expect(counts.length).toBe(uniqueTickers.length);
@@ -57,13 +59,35 @@ describe("seedDemoData synthetic NAV history", () => {
     }>;
 
     for (const { ticker } of [...navKeys, ...quoteKeys]) {
-      expect(ticker).toMatch(/^thai_mutual_fund:.+/);
+      // Holdings seed under thai_mutual_fund:; the index cache warms under yahoo:.
+      expect(ticker).toMatch(/^(thai_mutual_fund|yahoo):.+/);
     }
 
     // Sanity: a known holding's combined key is present in both tables.
     const expectedKey = "thai_mutual_fund:K-FIXED-A";
     expect(navKeys.some((r) => r.ticker === expectedKey)).toBe(true);
     expect(quoteKeys.some((r) => r.ticker === expectedKey)).toBe(true);
+  });
+
+  it("warms the Yahoo index cache so demo Markets shows real data, not the unavailable banner", () => {
+    const { sqlite, db } = freshDb();
+    seedDemoData(db);
+
+    for (const symbol of ["^SET.BK", "^GSPC", "^IXIC", "^N225", "THB=X"]) {
+      const key = `yahoo:${symbol}`;
+      const quote = sqlite
+        .prepare("SELECT nav, updated_at FROM fund_quotes WHERE ticker = ?")
+        .get(key) as { nav: number; updated_at: string } | undefined;
+      expect(quote, `${key} should have a cached quote`).toBeDefined();
+      expect(quote?.nav).toBeGreaterThan(0);
+
+      const navCount = (
+        sqlite.prepare("SELECT COUNT(*) AS n FROM nav_history WHERE ticker = ?").get(key) as {
+          n: number;
+        }
+      ).n;
+      expect(navCount, `${key} should have a NAV series`).toBeGreaterThan(100);
+    }
   });
 
   it("produces only finite, positive NAVs with no >50% daily jumps", () => {

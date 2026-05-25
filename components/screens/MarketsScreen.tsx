@@ -8,9 +8,9 @@ import {
   useMarketIndices,
   useMarketNews,
 } from "@/lib/fetchers/portfolio";
+import { fmtRelativeDate } from "@/lib/format";
 import { LEARN_CONTENT } from "@/lib/static/learn";
-import { MARKETS } from "@/lib/static/markets";
-import type { LearnArticle, MarketIndex, Markets } from "@/lib/static/types";
+import type { LearnArticle, MarketIndex } from "@/lib/static/types";
 
 export interface MarketsScreenProps {
   onOpenSettings: () => void;
@@ -25,7 +25,6 @@ export function MarketsScreen({ onOpenSettings, showMenu = true }: MarketsScreen
       <div className="topbar">
         <div className="brand" style={{ flex: 1 }}>
           <span>Markets</span>
-          <span className="brand-chip">19 MAY · ICT</span>
         </div>
         {showMenu && (
           <button className="icon-btn" aria-label="More" onClick={onOpenSettings}>
@@ -49,14 +48,20 @@ export function MarketsScreen({ onOpenSettings, showMenu = true }: MarketsScreen
   );
 }
 
-function adaptIndices(rows: MarketIndexResponse[]): { indices: MarketIndex[]; failures: number } {
+function adaptIndices(rows: MarketIndexResponse[]): {
+  indices: MarketIndex[];
+  failures: number;
+  asOf: string | null;
+} {
   let failures = 0;
+  let asOf: string | null = null;
   const indices: MarketIndex[] = [];
   for (const r of rows) {
     if (!r.ok || r.price == null) {
       failures++;
       continue;
     }
+    if (r.asOf && (!asOf || r.asOf > asOf)) asOf = r.asOf;
     indices.push({
       sym: r.label,
       name: r.name,
@@ -65,129 +70,96 @@ function adaptIndices(rows: MarketIndexResponse[]): { indices: MarketIndex[]; fa
       isYield: r.symbol === "THB=X",
     });
   }
-  return { indices, failures };
+  return { indices, failures, asOf };
 }
 
 function MarketsToday() {
   const { data: liveRows, isLoading } = useMarketIndices();
   const live = useMemo(() => (liveRows ? adaptIndices(liveRows) : null), [liveRows]);
 
-  // Live data wins when we have it; otherwise fall back to mock so the screen
-  // still tells a coherent story while NAV is being refreshed or rate-limited.
-  const markets: Markets = useMemo(
-    () => (live && live.indices.length > 0 ? { ...MARKETS, indices: live.indices } : MARKETS),
-    [live],
-  );
+  // Only ever show real, fetched index values — never fabricated mock numbers.
+  // When nothing loads we render an honest unavailable state instead.
+  const indices = live?.indices ?? [];
+  const asOf = indices.length > 0 ? (live?.asOf ?? null) : null;
 
-  const banner =
-    !isLoading && live && live.failures > 0
-      ? `${live.failures} index source${live.failures > 1 ? "s" : ""} temporarily unavailable.`
-      : null;
-
-  return <MarketsTodayInner markets={markets} banner={banner} />;
+  return <MarketsTodayInner indices={indices} asOf={asOf} loading={isLoading && !liveRows} />;
 }
 
-function MarketsTodayInner({ markets, banner }: { markets: Markets; banner: string | null }) {
+function MarketsTodayInner({
+  indices,
+  asOf,
+  loading,
+}: {
+  indices: MarketIndex[];
+  asOf: string | null;
+  loading: boolean;
+}) {
   return (
     <div>
-      {banner && (
-        <div
-          className="section"
-          style={{ marginTop: 0, paddingTop: 0, paddingBottom: 0, marginBottom: 8 }}
-        >
-          <div
-            style={{
-              padding: "8px 12px",
-              background: "var(--card-soft)",
-              border: "1px solid var(--line-soft)",
-              borderRadius: 8,
-              fontSize: 11.5,
-              color: "var(--muted)",
-              fontFamily: "var(--font-mono)",
-              letterSpacing: "0.02em",
-            }}
-          >
-            ⓘ {banner}
-          </div>
-        </div>
-      )}
+      {/* The AI-written "Today, in your words" digest is intentionally absent
+          until it's generated from real data — see ROADMAP. We don't ship a
+          static digest with fabricated portfolio figures. */}
       <div className="section" style={{ marginTop: 0 }}>
-        <div
-          className="card"
-          style={{
-            background: "var(--ink)",
-            color: "var(--bg)",
-            borderColor: "transparent",
-          }}
-        >
-          <div className="row" style={{ marginBottom: 8, color: "var(--accent)" }}>
-            <Icon name="sparkle" size={13} />
-            <span
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 10,
-                letterSpacing: "0.05em",
-              }}
-            >
-              TODAY, IN YOUR WORDS
-            </span>
-          </div>
-          <div
-            style={{
-              fontSize: 15,
-              lineHeight: 1.45,
-              color: "var(--bg)",
-              letterSpacing: "-0.005em",
-            }}
-          >
-            &quot;{markets.digest}&quot;
-          </div>
-        </div>
-      </div>
-
-      <div className="section">
         <div className="section-header">
           <h3>Indices</h3>
+          {asOf && (
+            <span className="link" style={{ color: "var(--muted)" }}>
+              as of {fmtRelativeDate(asOf)}
+            </span>
+          )}
         </div>
-        <div className="card" style={{ padding: 0 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
-            {markets.indices.map((idx, i) => (
-              <div
-                key={idx.sym}
-                style={{
-                  padding: 12,
-                  borderRight: i % 2 === 0 ? "1px solid var(--line-soft)" : "none",
-                  borderBottom:
-                    i < markets.indices.length - 2 ? "1px solid var(--line-soft)" : "none",
-                }}
-              >
+        {indices.length > 0 ? (
+          <div className="card" style={{ padding: 0 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
+              {indices.map((idx, i) => (
                 <div
+                  key={idx.sym}
                   style={{
-                    fontSize: 10,
-                    color: "var(--muted)",
-                    fontFamily: "var(--font-mono)",
-                    letterSpacing: "0.04em",
+                    padding: 12,
+                    borderRight: i % 2 === 0 ? "1px solid var(--line-soft)" : "none",
+                    borderBottom: i < indices.length - 2 ? "1px solid var(--line-soft)" : "none",
                   }}
                 >
-                  {idx.sym}
+                  <div
+                    style={{
+                      fontSize: 10,
+                      color: "var(--muted)",
+                      fontFamily: "var(--font-mono)",
+                      letterSpacing: "0.04em",
+                    }}
+                  >
+                    {idx.sym}
+                  </div>
+                  <div className="num" style={{ fontSize: 16, marginTop: 3, fontWeight: 500 }}>
+                    {idx.val.toLocaleString("en-US", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                    {idx.isYield ? "%" : ""}
+                  </div>
+                  <div
+                    className={`delta ${idx.d >= 0 ? "up" : "down"}`}
+                    style={{ fontSize: 11, marginTop: 1 }}
+                  >
+                    {idx.d >= 0 ? "▲" : "▼"} {Math.abs(idx.d).toFixed(2)}%
+                  </div>
                 </div>
-                <div className="num" style={{ fontSize: 16, marginTop: 3, fontWeight: 500 }}>
-                  {idx.val.toLocaleString("en-US", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
-                  {idx.isYield ? "%" : ""}
-                </div>
-                <div
-                  className={`delta ${idx.d >= 0 ? "up" : "down"}`}
-                  style={{ fontSize: 11, marginTop: 1 }}
-                >
-                  {idx.d >= 0 ? "▲" : "▼"} {Math.abs(idx.d).toFixed(2)}%
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div
+            className="card"
+            style={{
+              padding: "18px 16px",
+              textAlign: "center",
+              color: "var(--muted)",
+              fontSize: 13,
+            }}
+          >
+            {loading ? "Loading market data…" : "Market data is unavailable right now."}
+          </div>
+        )}
       </div>
 
       <MarketsNewsSection />

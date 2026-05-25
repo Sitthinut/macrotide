@@ -7,6 +7,12 @@ import { resolveProvider } from "./registry";
 
 const QUOTE_TTL_MS = 5 * 60_000; // 5 min for live quote
 const HISTORY_TTL_MS = 24 * 60 * 60_000; // 24 h for daily series
+const FAIL_BACKOFF_MS = 3 * 60_000; // after an upstream error, don't refetch this key for 3 min
+
+// Negative cache: last upstream-failure time per (source:ticker) key. Stops a
+// 429'd symbol from being re-hit on every page load — that hammer-loop is what
+// provokes more 429s. Process-local; resets on restart, which is fine.
+const recentFailures = new Map<string, number>();
 
 /**
  * The cache table (fund_quotes / nav_history) is keyed by a single TEXT column
@@ -57,26 +63,68 @@ export async function getCachedSeries(
   const cachedQuote = db.select().from(fundQuotes).where(eq(fundQuotes.ticker, key)).get();
 
   if (cachedQuote && isFresh(cachedQuote.updatedAt, HISTORY_TTL_MS)) {
-    const sinceDate = rangeStart(range);
-    const rows = db
-      .select()
-      .from(navHistory)
-      .where(and(eq(navHistory.ticker, key), gte(navHistory.date, sinceDate)))
-      .orderBy(navHistory.date)
-      .all();
-    return {
-      ticker,
-      series: rows.map((r) => ({ date: r.date, close: r.nav })),
-      quote: {
-        price: cachedQuote.nav,
-        previousClose: cachedQuote.nav - (cachedQuote.d1Pct ?? 0),
-        asOf: cachedQuote.updatedAt,
-      },
-    };
+    return readCached(db, key, ticker, range, cachedQuote);
   }
 
-  const provider = resolveProvider(source, ticker);
-  const fresh = await provider.fetchSeries(ticker, range, interval);
+  // Skip the live call if this key failed within the backoff window — serve
+  // stale if we have it, otherwise surface the outage.
+  const lastFail = recentFailures.get(key);
+  const backingOff = lastFail !== undefined && Date.now() - lastFail < FAIL_BACKOFF_MS;
+
+  if (!backingOff) {
+    const provider = resolveProvider(source, ticker);
+    try {
+      const fresh = await provider.fetchSeries(ticker, range, interval);
+      recentFailures.delete(key);
+      return persistFresh(db, key, ticker, fresh);
+    } catch (err) {
+      recentFailures.set(key, Date.now());
+      // Fall back to the last good values rather than blanking the symbol on a
+      // transient upstream error (e.g. Yahoo 429). Only rethrow on a cold cache.
+      if (!cachedQuote) throw err;
+    }
+  }
+
+  if (cachedQuote) return readCached(db, key, ticker, range, cachedQuote);
+  throw new Error(`No cached data for ${key}; upstream is backing off`);
+}
+
+/** Read the cached series + quote for a key (used for fresh and stale serves). */
+function readCached(
+  db: ReturnType<typeof getDb>,
+  key: string,
+  ticker: string,
+  range: SeriesRange,
+  cachedQuote: { nav: number; d1Pct: number | null; updatedAt: string },
+): CachedSeries {
+  const sinceDate = rangeStart(range);
+  const rows = db
+    .select()
+    .from(navHistory)
+    .where(and(eq(navHistory.ticker, key), gte(navHistory.date, sinceDate)))
+    .orderBy(navHistory.date)
+    .all();
+  return {
+    ticker,
+    series: rows.map((r) => ({ date: r.date, close: r.nav })),
+    quote: {
+      price: cachedQuote.nav,
+      previousClose: cachedQuote.nav - (cachedQuote.d1Pct ?? 0),
+      asOf: cachedQuote.updatedAt,
+    },
+  };
+}
+
+/** Upsert a freshly-fetched series into the cache and return it. */
+function persistFresh(
+  db: ReturnType<typeof getDb>,
+  key: string,
+  ticker: string,
+  fresh: {
+    quote: { price: number; previousClose: number };
+    series: { t: number; close: number }[];
+  },
+): CachedSeries {
   if (fresh.series.length === 0) {
     return { ticker, series: [], quote: null };
   }
