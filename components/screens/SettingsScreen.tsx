@@ -224,7 +224,7 @@ export function SettingsScreen({ theme, onThemeChange, onBack }: SettingsScreenP
           <div className="row between">
             <div className="row">
               <div className="broker-logo" style={{ width: 36, height: 36 }}>
-                F
+                +
               </div>
               <div>
                 <div
@@ -234,7 +234,7 @@ export function SettingsScreen({ theme, onThemeChange, onBack }: SettingsScreenP
                     letterSpacing: "-0.01em",
                   }}
                 >
-                  Demo Broker
+                  No brokerage connected
                 </div>
                 <div
                   style={{
@@ -243,11 +243,11 @@ export function SettingsScreen({ theme, onThemeChange, onBack }: SettingsScreenP
                     fontFamily: "var(--font-mono)",
                   }}
                 >
-                  Last sync · 14:32 · 8 funds
+                  Add holdings manually · sync coming soon
                 </div>
               </div>
             </div>
-            <span className="tag green">connected</span>
+            <span className="tag">soon</span>
           </div>
         </div>
         <div
