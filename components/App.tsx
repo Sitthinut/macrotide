@@ -12,6 +12,7 @@ import {
 import { Icon } from "@/components/Icon";
 import { type PortfolioFormValues, PortfolioSheet } from "@/components/PortfolioSheet";
 import { AccountScreen } from "@/components/screens/AccountScreen";
+import { AdminScreen } from "@/components/screens/AdminScreen";
 import { ChatScreen } from "@/components/screens/ChatScreen";
 import { JournalScreen } from "@/components/screens/JournalScreen";
 import { MarketsScreen } from "@/components/screens/MarketsScreen";
@@ -21,7 +22,7 @@ import { SettingsScreen, type Theme } from "@/components/screens/SettingsScreen"
 import { authClient } from "@/lib/auth/client";
 import { usePortfolioView, useSelectedModelId } from "@/lib/fetchers/legacy";
 import { usePlan } from "@/lib/fetchers/portfolio";
-import { invalidate } from "@/lib/fetchers/swr";
+import { invalidate, useResource } from "@/lib/fetchers/swr";
 import type { Portfolio } from "@/lib/static/types";
 import { useScrollHide } from "@/lib/useScrollHide";
 import { useViewport } from "@/lib/useViewport";
@@ -36,7 +37,15 @@ function portfolioToFormValues(p: Portfolio): PortfolioFormValues {
   };
 }
 
-type Screen = "portfolio" | "markets" | "chat" | "journal" | "models" | "settings" | "account";
+type Screen =
+  | "portfolio"
+  | "markets"
+  | "chat"
+  | "journal"
+  | "models"
+  | "settings"
+  | "account"
+  | "admin";
 
 const MOBILE_NAV: { id: Screen; icon: string; label: string }[] = [
   { id: "portfolio", icon: "home", label: "Portfolio" },
@@ -71,6 +80,12 @@ export function App() {
   // AUTH_DISABLED sessions have no better-auth user, so we fall back to the
   // generic "Demo user" labels.
   const accountUser = authClient.useSession().data?.user;
+  // Owner gate for the Admin entry point. The /api/admin/status endpoint is the
+  // single source of truth (mirrors the server-side OWNER_EMAIL check); the UI
+  // only uses it to decide whether to SHOW the menu item — every admin action
+  // is independently authorized server-side.
+  const { data: adminStatus } = useResource<{ isOwner: boolean }>("/api/admin/status");
+  const isOwner = adminStatus?.isOwner ?? false;
   const accountName = accountUser?.name?.trim() || "Demo user";
   const accountSub = accountUser?.email || "Live · Demo Broker";
   const accountInitials =
@@ -287,6 +302,11 @@ export function App() {
     if (screen === "account") {
       return <AccountScreen onBack={() => setScreen("portfolio")} />;
     }
+    if (screen === "admin") {
+      // Defence in depth: even if a non-owner reaches this branch, the API
+      // returns 403 and AdminScreen renders an access-denied message.
+      return <AdminScreen onBack={() => setScreen("portfolio")} />;
+    }
     return null;
   };
 
@@ -316,7 +336,8 @@ export function App() {
 
   // ===== MOBILE SHELL (unchanged behaviour from original) =====
   if (!isWide) {
-    const hideNav = screen === "settings" || screen === "models" || screen === "account";
+    const hideNav =
+      screen === "settings" || screen === "models" || screen === "account" || screen === "admin";
     return (
       <>
         <div className="app-root">
@@ -406,6 +427,16 @@ export function App() {
                 >
                   <Icon name="user" size={14} /> Account
                 </button>
+                {isOwner && (
+                  <button
+                    onClick={() => {
+                      setAccountMenuOpen(false);
+                      setScreen("admin");
+                    }}
+                  >
+                    <Icon name="settings" size={14} /> Admin
+                  </button>
+                )}
                 <hr />
                 <button
                   onClick={async () => {
