@@ -203,6 +203,78 @@ Macrotide's runtime calls `backupIfStale()` on boot, snapshotting to `data/backu
 0 4 * * * ubuntu rclone copy /opt/macrotide/data/backups/ b2:macrotide-backups/ --transfers 4
 ```
 
+## Scheduled jobs (systemd timers)
+
+Macrotide uses **systemd timers** (not in-process cron) for periodic background work. The VM runs UTC; Bangkok is UTC+7 with no DST, so UTC times are fixed offsets.
+
+### Fund-catalog refresh
+
+The SEC publishes fresh fee data after ~10:30 UTC daily. The timer fires at **11:00 UTC** to give a comfortable margin.
+
+Create the service unit:
+
+```sh
+sudo tee /etc/systemd/system/macrotide-fund-catalog.service > /dev/null <<'EOF'
+[Unit]
+Description=Macrotide — fund-catalog refresh (SEC fees)
+After=network.target macrotide.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/opt/macrotide
+EnvironmentFile=/opt/macrotide/.env.local
+ExecStart=npx -y tsx --tsconfig tsconfig.scripts.json scripts/refresh-fund-catalog.ts
+StandardOutput=journal
+StandardError=journal
+EOF
+```
+
+Create the timer unit:
+
+```sh
+sudo tee /etc/systemd/system/macrotide-fund-catalog.timer > /dev/null <<'EOF'
+[Unit]
+Description=Run Macrotide fund-catalog refresh daily at 11:00 UTC
+
+[Timer]
+OnCalendar=*-*-* 11:00:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
+EOF
+```
+
+Enable and start the timer:
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now macrotide-fund-catalog.timer
+# Verify the next trigger:
+systemctl list-timers macrotide-fund-catalog.timer
+```
+
+To run immediately (e.g. on first deploy or after a schema migration):
+
+```sh
+sudo systemctl start macrotide-fund-catalog.service
+journalctl -u macrotide-fund-catalog.service -f
+```
+
+Use `--limit=N` during initial testing to cap the number of funds processed:
+
+```sh
+# Override ExecStart for a one-off test run:
+sudo systemd-run --unit=macrotide-catalog-test \
+  --property=EnvironmentFile=/opt/macrotide/.env.local \
+  --property=WorkingDirectory=/opt/macrotide \
+  --uid=ubuntu \
+  npx -y tsx --tsconfig tsconfig.scripts.json scripts/refresh-fund-catalog.ts --limit=20
+journalctl -u macrotide-catalog-test -f
+```
+
 ## Updating
 
 ```sh

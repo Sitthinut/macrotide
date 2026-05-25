@@ -20,6 +20,7 @@
     "db:seed": "tsx lib/mock/seed.ts",
     "market:refresh": "curl -s -X POST http://localhost:3000/api/admin/refresh-market | python3 -m json.tool",
     "jobs:close-stale": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/close-stale-sessions.ts",
+    "jobs:refresh-catalog": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/refresh-fund-catalog.ts",
     "smoke:sec": "tsx --env-file=.env.local scripts/smoke-sec-thailand.ts",
     "prepare": "simple-git-hooks"
   },

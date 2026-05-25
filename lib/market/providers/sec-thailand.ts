@@ -33,6 +33,7 @@
 //   { message, page_size, next_cursor, items: [...] }
 // Default/max page_size = 100; empty next_cursor signals last page.
 
+import type { SecFundFeeItem } from "../fund-fees";
 import {
   type Provider,
   ProviderError,
@@ -331,6 +332,74 @@ export const secThailandProvider: Provider = {
     return { quote, series };
   },
 };
+
+// ─── Fund catalog enumeration ────────────────────────────────────────────────
+
+/**
+ * Raw profile item returned by the /v2/fund/general-info/profiles endpoint
+ * when enumerating the full fund universe (no query filter).
+ */
+export interface SecFundProfile {
+  proj_id: string;
+  proj_abbr_name: string;
+  proj_name_th?: string | null;
+  proj_name_en?: string | null;
+  amc_name?: string | null;
+  fund_type_en?: string | null;
+  fund_type_th?: string | null;
+  policy_desc?: string | null;
+  fund_class_name?: string | null;
+  fund_status?: string | null;
+}
+
+/**
+ * Enumerate every fund profile from the SEC. Follows cursor pagination until
+ * exhausted. De-dupes on proj_id, keeping the first occurrence (profiles
+ * endpoint may return multiple rows for parent + share classes — we want one
+ * catalog row per parent project).
+ *
+ * Limit is applied AFTER de-dup so the caller gets up to `limit` unique
+ * proj_ids (useful for spike/dev runs; omit or set 0 for full crawl).
+ */
+export async function enumerateFundProfiles(limit = 0): Promise<SecFundProfile[]> {
+  const key = apiKey();
+  const seen = new Set<string>();
+  const profiles: SecFundProfile[] = [];
+
+  let cursor = "";
+  for (let safety = 0; safety < 500; safety++) {
+    const params = new URLSearchParams({ page_size: String(PAGE_SIZE) });
+    if (cursor) params.set("next_cursor", cursor);
+    const env = await secFetch<PaginatedEnvelope<SecFundProfile>>(
+      `/v2/fund/general-info/profiles?${params.toString()}`,
+      key,
+    );
+    if (!env?.items?.length) break;
+
+    for (const item of env.items) {
+      if (!item.proj_id) continue;
+      if (seen.has(item.proj_id)) continue;
+      seen.add(item.proj_id);
+      profiles.push(item);
+      if (limit > 0 && profiles.length >= limit) break;
+    }
+
+    if (!env.next_cursor || (limit > 0 && profiles.length >= limit)) break;
+    cursor = env.next_cursor;
+    await sleep(REQUEST_DELAY_MS);
+  }
+
+  return profiles;
+}
+
+/**
+ * Fetch all fee rows for one fund (identified by its proj_id) from the SEC
+ * factsheet fees endpoint. Returns an empty array on 204 / no data.
+ */
+export async function fetchFundFees(projId: string): Promise<SecFundFeeItem[]> {
+  const key = apiKey();
+  return secFetchPaginated<SecFundFeeItem>("/v2/fund/factsheet/fees", { proj_id: projId }, key);
+}
 
 /** Test-only — reset the per-symbol cache. */
 export function __resetSecThailandCache(): void {
