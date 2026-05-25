@@ -25,6 +25,10 @@ you ship or change anything user-visible:
    [auth-and-providers.md](./docs/reference/auth-and-providers.md), and `.env.example` together. Never one without the
    others.
 4. If you change auth / security posture, update [SECURITY.md](./SECURITY.md).
+5. If you add, move, rename, or repurpose a doc, update its line in
+   [llms.txt](./llms.txt) (the agent-facing doc map) so the link and its
+   one-line description still match. It tracks the docs *map*, not every code
+   change — only touch it when the set or purpose of docs shifts.
 
 Stale docs are the #1 failure mode here. After implementing, do a docs pass
 before committing — treat docs as part of the change, not a follow-up.
@@ -346,8 +350,6 @@ default from the browser; let the user override on the Settings page).
 ## When in doubt
 
 - For "where do I put X?" — check the table above.
-- For "is this in scope?" — check [ROADMAP.md](./ROADMAP.md) phase boundaries.
-  Don't expand scope to cover the next phase; record what you noticed in the
-  phase's "Risk" or "Out of scope" section.
-- For "should I commit?" — only when the user has authorized. See workspace
-  [../AGENTS.md](../AGENTS.md) for the git posture rule.
+- For "is this in scope?" — check [ROADMAP.md](./ROADMAP.md). Stay within the
+  current "Now" work; don't expand into "Next"/"Later". Record anything you
+  notice in the relevant section or the "Out of scope" notes.

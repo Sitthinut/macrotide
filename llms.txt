@@ -12,7 +12,7 @@ root so they resolve when browsing the source.
 
 ## Start here
 
-- [Root README](./README.md): What the project is, tech stack, quick start.
+- [Root README](./README.md): What the project is, tech stack, quick start, and the **Status** board (the authoritative table of what's shipped vs planned).
 - [AGENTS.md](./AGENTS.md): Rules for AI agents — DB routing, secrets, the canonical environment-variable table, product copy. Read before changing code.
 - [Docs index](./docs/README.md): The L0/L1 map of all documentation, organised by Diátaxis mode.
 
@@ -24,6 +24,7 @@ root so they resolve when browsing the source.
 - [Architecture](./docs/explanation/architecture.md): System shape, request lifecycle, demo/owner DB routing, where everything lives.
 - [Design principles](./docs/explanation/design-principles.md): Secure-by-default, the "Advisor" voice, single-owner → multi-user.
 - [Memory feature](./docs/explanation/memory.md): Long-term memory + chat-session lifecycle design.
+- [Decisions log](./docs/explanation/decisions/README.md): Locked decisions and the durable rules behind them (ADR-style).
 
 ## Reference
 
@@ -36,5 +37,6 @@ root so they resolve when browsing the source.
 
 ## Optional
 
-- [Roadmap](./ROADMAP.md): Full phase-by-phase status board (large; the authoritative status doc).
+- [Roadmap](./ROADMAP.md): Forward-looking Now / Next / Later plan and out-of-scope notes. For what's *done*, see the README Status board and the changelog.
+- [Changelog](./CHANGELOG.md): Notable changes per release, Keep a Changelog format.
 - [Memory-systems research](./docs/explanation/research/memory-systems.md): Prior-art survey behind the memory design.
