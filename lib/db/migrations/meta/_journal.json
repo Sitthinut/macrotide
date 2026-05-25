@@ -64,6 +64,20 @@
       "when": 1779667728860,
       "tag": "0008_tidy_bushwacker",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1779743211012,
+      "tag": "0009_bright_lady_deathstrike",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1779746250647,
+      "tag": "0010_motionless_sumo",
+      "breakpoints": true
     }
   ]
 }

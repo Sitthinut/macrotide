@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { __resetSecThailandCache, secThailandProvider } from "./sec-thailand";
+import {
+  __resetSecThailandCache,
+  __setSecThailandRetry,
+  secThailandProvider,
+} from "./sec-thailand";
 
 // All test data is synthetic. No real Thai fund codes appear in this file.
 const FAKE_PROJ_ID_MAIN = "proj-main-fund";
@@ -151,6 +155,9 @@ function makeFetchStub() {
 describe("sec-thailand provider", () => {
   beforeEach(() => {
     __resetSecThailandCache();
+    // Zero out throttle + backoff so the rate gate and retry loop don't incur
+    // real-time waits during tests (Date is faked but setTimeout is not).
+    __setSecThailandRetry({ minIntervalMs: 0, baseDelayMs: 0 });
     process.env.SEC_API_KEY = "test-key-synthetic";
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-05-22T12:00:00Z"));
@@ -244,13 +251,34 @@ describe("sec-thailand provider", () => {
     );
   });
 
-  it("treats HTTP 421 as a rate-limit error (new portal)", async () => {
+  it("retries a persistent 421 rate-limit then gives up after maxRetries", async () => {
+    __setSecThailandRetry({ maxRetries: 3, baseDelayMs: 0, minIntervalMs: 0 });
     const fetchStub = vi.fn(async () => new Response("too many", { status: 421 }));
     vi.stubGlobal("fetch", fetchStub);
 
     await expect(secThailandProvider.fetchSeries("EX-CLASS-A", "1mo", "1d")).rejects.toThrow(
-      /rate-limited \(421\)/,
+      /still failing after 3 retries \(421\)/,
     );
+    // 1 initial attempt + 3 retries = 4 calls.
+    expect(fetchStub).toHaveBeenCalledTimes(4);
+  });
+
+  it("recovers when a transient 429 is followed by success", async () => {
+    const base = makeFetchStub();
+    let firstCall = true;
+    const fetchStub = vi.fn(async (input: string | URL | Request) => {
+      if (firstCall) {
+        firstCall = false;
+        return new Response("rate limited", { status: 429 });
+      }
+      return base(input);
+    });
+    vi.stubGlobal("fetch", fetchStub);
+
+    // The initial 429 is retried, then the request succeeds.
+    const result = await secThailandProvider.fetchSeries("EX-CLASS-A", "1mo", "1d");
+    expect(result.quote.name).toBe("Example Parent Fund");
+    expect(firstCall).toBe(false); // the 429 path was exercised
   });
 
   it("caches resolved tickers across calls", async () => {

@@ -11,6 +11,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { listBuckets } from "../db/queries/buckets";
+import { findFunds, getCheaperAlternatives, getFundsByAbbr } from "../db/queries/funds";
 import { listHoldings } from "../db/queries/holdings";
 import { createJournalEntry, type JournalKind, listJournalEntries } from "../db/queries/journal";
 import { getModelPortfolio } from "../db/queries/models";
@@ -423,6 +424,278 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
     },
   });
 
+  // ─── fee-aware fund finder ─────────────────────────────────────────────────
+  //
+  // STANCE: Macrotide is an index-investing companion, not a stock picker. These
+  // tools help the advisor answer "which low-fee fund gives me exposure X?" —
+  // always proposing funds over individual stocks, always leading with fee as the
+  // controllable edge. See docs/explanation/product-direction.md "Index-purist
+  // stance" for the full rationale. The descriptions below are deliberately
+  // written to steer the model toward fee-first, index-first framing.
+
+  const find_funds = tool({
+    description:
+      "Search the SEC-registered Thai mutual fund catalog and return funds that " +
+      "match a TARGET EXPOSURE, sorted CHEAPEST FIRST by their all-in annual fee " +
+      "(TER). Use this tool whenever the user asks 'which fund gives me [exposure]', " +
+      "'what's the lowest-fee S&P 500 / global / bond fund', 'cheapest index fund', " +
+      "'cheapest SSF equity fund', or needs a concrete fund recommendation. " +
+      "The fee is THE controllable edge for an index investor — this tool names the " +
+      "best-value option for any exposure. " +
+      "Use indexOnly=true to restrict to passive/index-tracking funds (management " +
+      "style PN or PM) — always prefer these when the user wants market-cap exposure. " +
+      "Use taxIncentive to find SSF/ThaiESG/RMF wrappers, which add tax deductibility " +
+      "on top of the fee advantage. " +
+      "IMPORTANT: Macrotide is an index-investing companion. When the user asks about " +
+      "an individual stock or hot theme (e.g. 'should I buy NVIDIA'), do NOT use this " +
+      "tool to find that stock — instead call find_funds for the closest low-fee " +
+      "index or thematic fund that captures the same exposure, then explain why a " +
+      "diversified fund beats picking a single name.",
+    inputSchema: z.object({
+      assetClass: z
+        .enum(["equity", "bond", "alternative", "cash"])
+        .optional()
+        .describe(
+          "Asset class filter. Use 'equity' for stock index funds, 'bond' for fixed-income, " +
+            "'alternative' for REITs / gold / commodity funds, 'cash' for money-market.",
+        ),
+      indexOnly: z
+        .boolean()
+        .optional()
+        .describe(
+          "When true, restrict results to index / passive funds (management style PN or PM). " +
+            "Always prefer this for market-cap exposure questions — index funds have lower fees " +
+            "and no active management risk.",
+        ),
+      taxIncentive: z
+        .enum(["SSF", "ThaiESG", "RMF"])
+        .optional()
+        .describe(
+          "Filter by Thai tax-advantaged wrapper. SSF = Super Savings Fund (deduct up to 30% " +
+            "of income, max 200,000 THB); ThaiESG = Thai ESG Fund (deduct up to 30%, max 300,000 THB); " +
+            "RMF = Retirement Mutual Fund (deduct up to 30%, max 500,000 THB). " +
+            "Tax efficiency is part of net return — mention the wrapper when recommending these.",
+        ),
+      region: z
+        .enum(["foreign", "domestic", "mixed"])
+        .optional()
+        .describe(
+          "Geographic mandate: 'foreign' for funds investing outside Thailand (feeder funds, " +
+            "global index funds), 'domestic' for Thai-only exposure, 'mixed' for blended mandate.",
+        ),
+      query: z
+        .string()
+        .optional()
+        .describe(
+          "Free-text search against fund name and investment-policy text. Good for finding " +
+            "funds by index (e.g. 'S&P 500', 'MSCI World') or theme (e.g. 'gold', 'REIT'). " +
+            "Combine with assetClass for best results.",
+        ),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(30)
+        .optional()
+        .describe("Max funds to return (default 10). Keep this small — present the top options."),
+    }),
+    execute: async ({ assetClass, indexOnly, taxIncentive, region, query, limit }) => {
+      const funds = findFunds({
+        assetClass,
+        indexOnly,
+        taxIncentive,
+        region,
+        query,
+        activeOnly: true,
+        excludeFixedTerm: true,
+        limit: limit ?? 10,
+      });
+
+      if (funds.length === 0) {
+        return {
+          ok: true as const,
+          count: 0,
+          funds: [],
+          message:
+            "No funds found for that filter. Try a broader query, drop the asset-class filter, " +
+            "or relax the indexOnly / taxIncentive / region constraints.",
+        };
+      }
+
+      const items = funds.map((f) => ({
+        projId: f.projId,
+        abbr: f.abbrName ?? f.projId,
+        englishName: f.englishName ?? null,
+        amc: f.amcName ?? null,
+        assetClass: f.assetClass ?? null,
+        // TER is the headline fee — the all-in annual cost as a percent.
+        // Null means the SEC hasn't published a Total Fee and Expense for this fund.
+        terPct: f.ter,
+        terLabel: f.ter == null ? "TER not published" : `${f.ter.toFixed(2)}% p.a.`,
+        // Enrichment fields — the advisor uses these to describe the fund accurately.
+        managementStyle: f.managementStyle ?? null,
+        isIndex: f.managementStyle === "PN" || f.managementStyle === "PM",
+        taxIncentiveType: f.taxIncentiveType ?? null,
+        distributionPolicy: f.distributionPolicy ?? null,
+        investRegion: f.investRegion ?? null,
+        isFeederFund: f.isFeederFund,
+        feederMasterFund: f.feederMasterFund ?? null,
+      }));
+
+      const cheapest = items[0];
+      const hasTer = items.filter((i) => i.terPct != null).length;
+      const indexCount = items.filter((i) => i.isIndex).length;
+
+      const contextNote =
+        indexOnly && indexCount > 0
+          ? `All ${indexCount} result${indexCount === 1 ? "" : "s"} are index/passive funds. `
+          : indexCount > 0
+            ? `${indexCount} of ${items.length} are index/passive funds (marked isIndex=true). `
+            : "";
+
+      return {
+        ok: true as const,
+        count: funds.length,
+        funds: items,
+        cheapestAbbr: cheapest.abbr,
+        message:
+          `Found ${funds.length} fund${funds.length === 1 ? "" : "s"} — sorted cheapest first. ` +
+          contextNote +
+          (hasTer > 0
+            ? `Lowest TER: ${cheapest.terLabel} (${cheapest.abbr}). ` +
+              "Fee is the single most controllable factor in long-run return — " +
+              "lead with the cheapest option that matches the target exposure."
+            : "No TER data available for these funds — suggest the user verify fees " +
+              "on the fund factsheet before committing."),
+      };
+    },
+  });
+
+  const find_cheaper_alternatives = tool({
+    description:
+      "Given a fund the user already holds (by ticker/abbr or SEC project id), find " +
+      "cheaper funds in the same asset class or category — strictly lower TER, " +
+      "ranked lowest-fee first. Use this to surface the 'fee-creep' opportunity: " +
+      "'you hold X at Y% TER; here are cheaper funds with the same exposure.' " +
+      "Call read_portfolio first to see the user's holdings and identify candidates. " +
+      "Always present the fee delta prominently — it compounds against the user every year.",
+    inputSchema: z.object({
+      fundAbbr: z
+        .string()
+        .optional()
+        .describe(
+          "The fund's abbreviated ticker/symbol (e.g. 'K-USA-A(A)'). " +
+            "Provide this OR projId — not both.",
+        ),
+      projId: z
+        .string()
+        .optional()
+        .describe("The SEC project id (e.g. 'M0017_2538'). Provide this OR fundAbbr — not both."),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(10)
+        .optional()
+        .describe("Max alternatives to return (default 5)."),
+    }),
+    execute: async ({ fundAbbr, projId, limit }) => {
+      // Resolve projId from abbr if needed.
+      let resolvedProjId = projId?.trim();
+      let resolvedAbbr = fundAbbr?.trim();
+
+      if (!resolvedProjId && resolvedAbbr) {
+        const matches = getFundsByAbbr([resolvedAbbr]);
+        if (matches.length === 0) {
+          return {
+            ok: true as const,
+            count: 0,
+            alternatives: [],
+            message:
+              `Could not find a fund with abbreviation "${resolvedAbbr}" in the catalog. ` +
+              "The daily SEC refresh may not have run yet, or the abbreviation may differ from " +
+              "what's in the catalog. Try the SEC project id instead.",
+          };
+        }
+        resolvedProjId = matches[0].projId;
+        resolvedAbbr = matches[0].abbrName ?? resolvedAbbr;
+      }
+
+      if (!resolvedProjId) {
+        return {
+          ok: false as const,
+          count: 0,
+          alternatives: [],
+          message: "Provide either fundAbbr or projId.",
+        };
+      }
+
+      const peers = getCheaperAlternatives(resolvedProjId, limit ?? 5);
+
+      if (peers.length === 0) {
+        // Distinguish between "ref fund not found / no TER" vs "already the cheapest".
+        return {
+          ok: true as const,
+          count: 0,
+          alternatives: [],
+          referenceAbbr: resolvedAbbr ?? resolvedProjId,
+          message:
+            peers.length === 0
+              ? `No cheaper alternatives found for ${resolvedAbbr ?? resolvedProjId}. ` +
+                "Either it's already the lowest-fee option in its class, or the catalog " +
+                "doesn't have TER data for this fund yet."
+              : "",
+        };
+      }
+
+      // We need the reference TER to compute deltas.
+      // getCheaperAlternatives already filtered to strictly-cheaper; the ref TER
+      // is peers[0].ter + delta, but we don't have it directly here. Re-resolve.
+      const refFunds = getFundsByAbbr(resolvedAbbr ? [resolvedAbbr] : []);
+      const refProjIdFinal = resolvedProjId;
+      // Get ref TER from the first peer's ter vs the position — use the query result
+      // shape: peers are sorted cheapest-first and all have ter < refTer.
+      // We don't have refTer directly without calling getCurrentTer again, but
+      // we can infer it from the result list's context. For the message we
+      // compute an approximate delta from cheapest peer.
+      const cheapestPeer = peers[0];
+
+      const items = peers.map((f) => ({
+        projId: f.projId,
+        abbr: f.abbrName ?? f.projId,
+        englishName: f.englishName ?? null,
+        amc: f.amcName ?? null,
+        assetClass: f.assetClass ?? null,
+        terPct: f.ter,
+        terLabel: f.ter == null ? "TER not published" : `${f.ter.toFixed(2)}% p.a.`,
+        managementStyle: f.managementStyle ?? null,
+        isIndex: f.managementStyle === "PN" || f.managementStyle === "PM",
+        taxIncentiveType: f.taxIncentiveType ?? null,
+        investRegion: f.investRegion ?? null,
+        isFeederFund: f.isFeederFund,
+        feederMasterFund: f.feederMasterFund ?? null,
+      }));
+
+      void refFunds; // used for projId resolution only
+      void refProjIdFinal;
+
+      return {
+        ok: true as const,
+        count: peers.length,
+        alternatives: items,
+        referenceAbbr: resolvedAbbr ?? resolvedProjId,
+        cheapestAlternativeAbbr: cheapestPeer.abbrName ?? cheapestPeer.projId,
+        message:
+          `Found ${peers.length} cheaper alternative${peers.length === 1 ? "" : "s"} for ` +
+          `${resolvedAbbr ?? resolvedProjId} — all with lower TER, sorted cheapest first. ` +
+          `Best: ${cheapestPeer.abbrName ?? cheapestPeer.projId} at ` +
+          `${cheapestPeer.ter?.toFixed(2) ?? "?"}% p.a. ` +
+          "Even a 0.5% TER difference compounds materially over a 10-year horizon — " +
+          "present this as the fee-creep opportunity and offer to propose a switch.",
+      };
+    },
+  });
+
   return {
     read_portfolio,
     read_performance,
@@ -431,6 +704,8 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
     write_journal,
     propose_plan_edit,
     propose_holding,
+    find_funds,
+    find_cheaper_alternatives,
   };
 }
 

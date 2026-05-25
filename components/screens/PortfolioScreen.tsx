@@ -11,7 +11,12 @@ import {
   usePortfolioView,
   useSelectedModelId,
 } from "@/lib/fetchers/legacy";
-import { type SeriesRange, useBenchmarkSeries } from "@/lib/fetchers/portfolio";
+import {
+  type FeeCreepFinding,
+  type SeriesRange,
+  useBenchmarkSeries,
+  useFeeCreep,
+} from "@/lib/fetchers/portfolio";
 import { invalidate } from "@/lib/fetchers/swr";
 import { fmtPct } from "@/lib/format";
 import { BENCHMARK_OPTIONS } from "@/lib/market/benchmark-options";
@@ -167,6 +172,7 @@ export function PortfolioScreen({
 
   const { portfolios, aggregate, isLoading } = usePortfolioView(seriesRange);
   const { models } = useModelPortfoliosView();
+  const { data: feeCreepData } = useFeeCreep();
   const planSelectedModelId = useSelectedModelId();
 
   // Real benchmark overlay: fetch the selected index over the SAME range as the
@@ -247,6 +253,13 @@ export function PortfolioScreen({
     if (activePf?.targetModelId) return models.find((m) => m.id === activePf.targetModelId) ?? null;
     return models.find((m) => m.id === planSelectedModelId) ?? null;
   }, [models, activePf, planSelectedModelId]);
+
+  // Fee-creep findings scoped to the active view's holdings.
+  const feeCreepFindings = useMemo<FeeCreepFinding[]>(() => {
+    if (!feeCreepData || !view) return [];
+    const activeTickers = new Set(view.holdings.map((h) => h.ticker));
+    return feeCreepData.filter((f) => activeTickers.has(f.heldTicker));
+  }, [feeCreepData, view]);
 
   // Real, computed health signals — drift vs target, blended fee, concentration,
   // cash drag. No mock fixtures.
@@ -978,6 +991,160 @@ export function PortfolioScreen({
               />
             </div>
           )}
+        </div>
+      )}
+
+      {feeCreepFindings.length > 0 && (
+        <div className="section" style={{ marginTop: 14 }}>
+          <div className="section-header" style={{ padding: "0 4px" }}>
+            <h3>Fee check</h3>
+          </div>
+          <div
+            className="card"
+            style={{
+              borderColor: "var(--amber)",
+              background: "var(--amber-soft, color-mix(in srgb, var(--amber) 8%, transparent))",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 10,
+                fontFamily: "var(--font-mono)",
+                color: "var(--amber)",
+                letterSpacing: "0.04em",
+                marginBottom: 6,
+              }}
+            >
+              ● FEE CREEP — COMPARABLE EXPOSURE, LOWER COST
+            </div>
+            <div
+              style={{
+                fontSize: 12,
+                color: "var(--ink-soft)",
+                lineHeight: 1.5,
+                marginBottom: 10,
+              }}
+            >
+              {feeCreepFindings.length === 1
+                ? "One of your funds has a cheaper alternative offering comparable exposure."
+                : `${feeCreepFindings.length} of your funds have cheaper alternatives offering comparable exposure.`}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {feeCreepFindings.map((f) => (
+                <div
+                  key={f.heldTicker}
+                  style={{
+                    borderTop: "1px solid var(--line-soft)",
+                    paddingTop: 8,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                      marginBottom: 4,
+                    }}
+                  >
+                    <div>
+                      <span style={{ fontSize: 13, fontWeight: 500, letterSpacing: "-0.01em" }}>
+                        {f.heldTicker}
+                      </span>
+                      <span style={{ fontSize: 11, color: "var(--muted)", marginLeft: 6 }}>
+                        {f.heldName}
+                      </span>
+                    </div>
+                    <span
+                      className="num"
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: "var(--amber)",
+                        whiteSpace: "nowrap",
+                        marginLeft: 8,
+                      }}
+                    >
+                      {f.heldTer.toFixed(2)}% TER
+                    </span>
+                  </div>
+                  {f.alternatives.slice(0, 2).map((alt) => (
+                    <div
+                      key={alt.projId}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "3px 0",
+                        paddingLeft: 10,
+                      }}
+                    >
+                      <span style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
+                        {alt.abbrName}
+                        {alt.englishName ? (
+                          <span style={{ color: "var(--muted)", marginLeft: 4 }}>
+                            · {alt.englishName}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span
+                        className="num"
+                        style={{ fontSize: 11.5, color: "var(--gain)", whiteSpace: "nowrap" }}
+                      >
+                        {alt.ter.toFixed(2)}%
+                      </span>
+                    </div>
+                  ))}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      marginTop: 6,
+                      paddingLeft: 10,
+                    }}
+                  >
+                    <span style={{ fontSize: 11, color: "var(--muted)" }}>Potential saving:</span>
+                    <span
+                      className="num"
+                      style={{ fontSize: 12, fontWeight: 600, color: "var(--gain)" }}
+                    >
+                      −{f.savingsPp.toFixed(2)}pp/yr
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 12, display: "flex", gap: 6 }}>
+              <button
+                className="btn sm primary"
+                style={{ flex: 1 }}
+                onClick={() => {
+                  const top = feeCreepFindings[0];
+                  const alt = top.alternatives[0];
+                  window.dispatchEvent(
+                    new CustomEvent("ai-prompt", {
+                      detail: `I hold ${top.heldTicker} at a ${top.heldTer.toFixed(2)}% TER. ${alt.abbrName} offers comparable ${top.assetClass ?? "same-class"} exposure at ${(alt.ter ?? 0).toFixed(2)}%. Walk me through what it would take to switch, and whether the saving justifies the move.`,
+                    }),
+                  );
+                }}
+              >
+                <Icon name="chat" size={12} /> Ask advisor
+              </button>
+            </div>
+            <div
+              style={{
+                fontSize: 10,
+                color: "var(--muted)",
+                marginTop: 8,
+                lineHeight: 1.4,
+                borderTop: "1px solid var(--line-soft)",
+                paddingTop: 6,
+              }}
+            >
+              Comparable exposure means same asset class. Lower fee, not necessarily better fund.
+              Tax implications and switching costs apply.
+            </div>
+          </div>
         </div>
       )}
 

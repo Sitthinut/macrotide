@@ -33,6 +33,7 @@
 //   { message, page_size, next_cursor, items: [...] }
 // Default/max page_size = 100; empty next_cursor signals last page.
 
+import type { SecFundFeeItem } from "../fund-fees";
 import {
   type Provider,
   ProviderError,
@@ -101,38 +102,78 @@ function apiKey(): string {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+// Global rate gate. The SEC ceiling is 5 000 calls / 300 s (~16.7/s). A full
+// nightly catalog crawl fires ~10–15k calls across a concurrency pool, so a
+// per-page sleep alone won't keep us under the cap — concurrent callers would
+// burst past it. This serializes call *start times* to at least
+// MIN_INTERVAL_MS apart process-wide (~14/s), leaving headroom no matter the
+// concurrency. Cheap single-symbol lookups pay at most one interval.
+// Tunable throttle + retry knobs. Defaults are the production values; tests
+// override them via __setSecThailandRetry to avoid real backoff waits.
+const RETRY_DEFAULTS = {
+  minIntervalMs: 70, // ~14 calls/s, under the 16.7/s ceiling
+  maxRetries: 5,
+  baseDelayMs: 500,
+  maxBackoffMs: 30_000,
+};
+let retry = { ...RETRY_DEFAULTS };
+let nextSlot = 0;
+
+async function rateGate(): Promise<void> {
+  const now = Date.now();
+  const start = Math.max(now, nextSlot);
+  nextSlot = start + retry.minIntervalMs;
+  if (start > now) await sleep(start - now);
+}
+
 async function secFetch<T>(path: string, key: string): Promise<T | null> {
   const url = `${BASE_URL}${path}`;
-  const res = await fetch(url, {
-    headers: {
-      "Ocp-Apim-Subscription-Key": key,
-      Accept: "application/json",
-    },
-    cache: "no-store",
-  });
-  if (res.status === 204) return null;
-  if (res.status === 401 || res.status === 403) {
-    throw new ProviderError(
-      `Thai SEC API rejected the subscription key (${res.status})`,
-      "sec-thailand",
-      res.status,
-    );
+  for (let attempt = 0; ; attempt++) {
+    await rateGate();
+    const res = await fetch(url, {
+      headers: {
+        "Ocp-Apim-Subscription-Key": key,
+        Accept: "application/json",
+      },
+      cache: "no-store",
+    });
+    if (res.status === 204) return null;
+    if (res.status === 401 || res.status === 403) {
+      throw new ProviderError(
+        `Thai SEC API rejected the subscription key (${res.status})`,
+        "sec-thailand",
+        res.status,
+      );
+    }
+    // Retryable: rate-limit (421/429) and server errors (5xx). 401/403 above
+    // are auth errors and never retried.
+    if (res.status === 421 || res.status === 429 || res.status >= 500) {
+      if (attempt >= retry.maxRetries) {
+        throw new ProviderError(
+          `Thai SEC API still failing after ${retry.maxRetries} retries (${res.status}) for ${path}`,
+          "sec-thailand",
+          res.status,
+        );
+      }
+      // Honor Retry-After when present, else exponential backoff with jitter.
+      const retryAfterSec = Number(res.headers.get("retry-after"));
+      const backoff =
+        Number.isFinite(retryAfterSec) && retryAfterSec > 0
+          ? retryAfterSec * 1000
+          : Math.min(retry.maxBackoffMs, retry.baseDelayMs * 2 ** attempt) +
+            Math.floor(Math.random() * 250);
+      await sleep(backoff);
+      continue;
+    }
+    if (!res.ok) {
+      throw new ProviderError(
+        `Thai SEC API returned ${res.status} for ${path}`,
+        "sec-thailand",
+        res.status,
+      );
+    }
+    return (await res.json()) as T;
   }
-  if (res.status === 421 || res.status === 429) {
-    throw new ProviderError(
-      `Thai SEC API rate-limited (${res.status})`,
-      "sec-thailand",
-      res.status,
-    );
-  }
-  if (!res.ok) {
-    throw new ProviderError(
-      `Thai SEC API returned ${res.status} for ${path}`,
-      "sec-thailand",
-      res.status,
-    );
-  }
-  return (await res.json()) as T;
 }
 
 async function secFetchPaginated<T>(
@@ -332,7 +373,148 @@ export const secThailandProvider: Provider = {
   },
 };
 
+// ─── Fund catalog enumeration ────────────────────────────────────────────────
+
+/**
+ * Raw profile item returned by the /v2/fund/general-info/profiles endpoint
+ * when enumerating the full fund universe (no query filter).
+ *
+ * Field names verified against a live data-inventory spike (29 total fields).
+ * NOTE: the v2 endpoint does NOT return fund_type_en/fund_type_th — those
+ * fields do not exist. Asset class is derived from policy_desc (Thai label)
+ * via inferAssetClass in lib/market/fund-classify.ts.
+ */
+export interface SecFundProfile {
+  proj_id: string;
+  proj_abbr_name: string;
+  proj_name_th?: string | null;
+  proj_name_en?: string | null;
+  /** Asset management company name (e.g. "Kasikorn Asset Management"). */
+  amc_name?: string | null;
+  /** Raw SEC fund status: 'Registered' | 'IPO' | 'Liquidated' | 'Expired' | 'Canceled'. */
+  fund_status?: string | null;
+  /** Short Thai asset-type label (ตราสารหนี้ / ตราสารทุน / ผสม / ทรัพย์สินทางเลือก / ตลาดเงิน). */
+  policy_desc?: string | null;
+  /** Management style code: 'AM' active | 'PN' passive/index | 'SM' systematic | 'PM' passive multi-factor | 'BH' buy-and-hold. */
+  management_style?: string | null;
+  /** Thai label for tax-incentive wrapper (e.g. "กองทุนรวมเพื่อการออม" → SSF). */
+  fund_class_tax_incentive_type?: string | null;
+  /** Thai share-class detail (จ่ายเงินปันผล = dividend, สะสมมูลค่า = accumulating). */
+  fund_class_detail?: string | null;
+  /** Geographic mandate flag: '1' = foreign | '3' = mixed | '4' = domestic. */
+  invest_country_flag?: string | null;
+  /** Master fund name if this is a feeder fund; null/undefined otherwise. */
+  feederfund_master_fund?: string | null;
+  /** 'Y' if the fund has a fixed maturity date. */
+  proj_term_flag?: string | null;
+  /** Fund inception date (ISO date string). */
+  init_date?: string | null;
+  /** ISIN code (~30% coverage). */
+  fund_class_isin_code?: string | null;
+  /** Share-class name (e.g. 'A', 'B', 'main'). Used only for symbol resolution. */
+  fund_class_name?: string | null;
+}
+
+/**
+ * Enumerate every fund profile from the SEC. Follows cursor pagination until
+ * exhausted. De-dupes on proj_id, keeping the first occurrence (profiles
+ * endpoint may return multiple rows for parent + share classes — we want one
+ * catalog row per parent project).
+ *
+ * Limit is applied AFTER de-dup so the caller gets up to `limit` unique
+ * proj_ids (useful for spike/dev runs; omit or set 0 for full crawl).
+ */
+export async function enumerateFundProfiles(limit = 0): Promise<SecFundProfile[]> {
+  const key = apiKey();
+  const seen = new Set<string>();
+  const profiles: SecFundProfile[] = [];
+
+  let cursor = "";
+  for (let safety = 0; safety < 500; safety++) {
+    const params = new URLSearchParams({ page_size: String(PAGE_SIZE) });
+    if (cursor) params.set("next_cursor", cursor);
+    const env = await secFetch<PaginatedEnvelope<SecFundProfile>>(
+      `/v2/fund/general-info/profiles?${params.toString()}`,
+      key,
+    );
+    if (!env?.items?.length) break;
+
+    for (const item of env.items) {
+      if (!item.proj_id) continue;
+      if (seen.has(item.proj_id)) continue;
+      seen.add(item.proj_id);
+      profiles.push(item);
+      if (limit > 0 && profiles.length >= limit) break;
+    }
+
+    if (!env.next_cursor || (limit > 0 && profiles.length >= limit)) break;
+    cursor = env.next_cursor;
+    await sleep(REQUEST_DELAY_MS);
+  }
+
+  return profiles;
+}
+
+/**
+ * Fetch all fee rows for one fund (identified by its proj_id) from the SEC
+ * factsheet fees endpoint. Returns an empty array on 204 / no data.
+ */
+export async function fetchFundFees(projId: string): Promise<SecFundFeeItem[]> {
+  const key = apiKey();
+  return secFetchPaginated<SecFundFeeItem>("/v2/fund/factsheet/fees", { proj_id: projId }, key);
+}
+
+interface SecDailyNavRow {
+  proj_id: string;
+  nav_date: string;
+  net_asset?: number | null;
+  last_val?: number | null;
+}
+
+/**
+ * Fetch the most recent total net asset value (AUM) for one fund.
+ * Uses a 7-day window so we catch the latest published figure even over
+ * a long weekend. Returns { aum, aumDate } from the most recent row, or
+ * null if no data is available. Only call this for Registered (active) funds.
+ */
+export async function fetchFundAum(
+  projId: string,
+): Promise<{ aum: number; aumDate: string } | null> {
+  const key = apiKey();
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const start = new Date(today);
+  start.setUTCDate(start.getUTCDate() - 7);
+
+  const rows = await secFetchPaginated<SecDailyNavRow>(
+    "/v2/fund/daily-info/nav",
+    {
+      proj_id: projId,
+      start_nav_date: yyyyMmDd(start),
+      end_nav_date: yyyyMmDd(today),
+    },
+    key,
+  );
+
+  // Find the most recent row that has a net_asset value.
+  const sorted = rows
+    .filter((r) => r.net_asset != null && r.nav_date)
+    .sort((a, b) => (b.nav_date > a.nav_date ? 1 : b.nav_date < a.nav_date ? -1 : 0));
+
+  if (sorted.length === 0) return null;
+  const best = sorted[0];
+  // net_asset is guaranteed non-null due to the filter above.
+  return { aum: best.net_asset as number, aumDate: best.nav_date };
+}
+
 /** Test-only — reset the per-symbol cache. */
 export function __resetSecThailandCache(): void {
   symbolCache.clear();
+  retry = { ...RETRY_DEFAULTS };
+  nextSlot = 0;
+}
+
+/** Test-only: override throttle/retry timing so tests don't incur real waits. */
+export function __setSecThailandRetry(overrides: Partial<typeof RETRY_DEFAULTS>): void {
+  retry = { ...retry, ...overrides };
 }

@@ -13,6 +13,8 @@ import type { drizzle } from "drizzle-orm/better-sqlite3";
 import type * as schema from "../db/schema";
 import {
   buckets,
+  fundCatalog,
+  fundFees,
   fundQuotes,
   holdings,
   journalEntries,
@@ -20,6 +22,7 @@ import {
   navHistory,
   plans,
 } from "../db/schema";
+import { TER_FEE_TYPE } from "../market/fund-fees";
 import { INDICES } from "../market/indices";
 import { MODEL_PORTFOLIOS, PORTFOLIOS, USER_GOALS, USER_JOURNAL, USER_PLAN } from "./data";
 
@@ -352,6 +355,326 @@ export function seedDemoData(db: Db): void {
         target: fundQuotes.ticker,
         set: { nav: last?.nav ?? base, d1Pct, updatedAt: now },
       })
+      .run();
+  }
+
+  // ─── fund catalog demo seed ──────────────────────────────────────────────
+  // A representative sample of Thai-registered funds so the Select UI (FundSelect)
+  // shows real-looking data before the daily SEC refresh has populated the catalog.
+  // Covers the four asset classes and a range of TER levels to demonstrate the
+  // cheapest-first ranking. Enriched with managementStyle, taxIncentiveType,
+  // investRegion, isFeederFund, distributionPolicy so the new filters work.
+  const DEMO_FUNDS: Array<{
+    projId: string;
+    abbrName: string;
+    englishName: string;
+    thaiName: string;
+    amcName: string;
+    policyDesc: string;
+    assetClass: "equity" | "bond" | "alternative" | "cash";
+    ter: number; // actual TER %
+    managementStyle?: string;
+    taxIncentiveType?: string;
+    investRegion?: string;
+    isFeederFund?: boolean;
+    feederMasterFund?: string;
+    distributionPolicy?: string;
+  }> = [
+    // ── Equity — S&P 500 index feeders (passive / PN) ────────────────────────
+    {
+      projId: "DEMO_001",
+      abbrName: "SCBSP500",
+      englishName: "SCB S&P 500 Index Fund",
+      thaiName: "กองทุนเปิดไทยพาณิชย์ เอส แอนด์ พี 500",
+      amcName: "SCB Asset Management",
+      policyDesc: "Feeder fund investing in S&P 500 index tracking fund. Tracks the S&P 500 Index.",
+      assetClass: "equity",
+      ter: 0.5,
+      managementStyle: "PN",
+      investRegion: "foreign",
+      isFeederFund: true,
+      feederMasterFund: "iShares Core S&P 500 ETF",
+      distributionPolicy: "accumulating",
+    },
+    {
+      projId: "DEMO_002",
+      abbrName: "K-SP500-A(D)",
+      englishName: "K S&P 500 Index Fund Class A (Dividend)",
+      thaiName: "กองทุนเปิดกสิกรไทย เอส แอนด์ พี 500",
+      amcName: "Kasikorn Asset Management",
+      policyDesc: "Feeder fund investing in a fund tracking the S&P 500 Index.",
+      assetClass: "equity",
+      ter: 0.9,
+      managementStyle: "PN",
+      investRegion: "foreign",
+      isFeederFund: true,
+      feederMasterFund: "Vanguard S&P 500 ETF",
+      distributionPolicy: "dividend",
+    },
+    {
+      projId: "DEMO_003",
+      abbrName: "ONE-SP500-UH",
+      englishName: "One S&P 500 Equity Index Fund (Unhedged)",
+      thaiName: "กองทุนเปิด วัน เอส แอนด์ พี 500",
+      amcName: "One Asset Management",
+      policyDesc: "Invests in a master fund tracking the S&P 500 Index. Currency unhedged.",
+      assetClass: "equity",
+      ter: 0.45,
+      managementStyle: "PN",
+      investRegion: "foreign",
+      isFeederFund: true,
+      feederMasterFund: "SPDR S&P 500 ETF Trust",
+      distributionPolicy: "accumulating",
+    },
+    // ── Equity — global / MSCI World ─────────────────────────────────────────
+    {
+      projId: "DEMO_004",
+      abbrName: "TMBGQG",
+      englishName: "TMB Global Quality Growth Fund",
+      thaiName: "กองทุนเปิดทีเอ็มบี โกลบอล ควอลิตี้ โกรท",
+      amcName: "TMB Asset Management",
+      policyDesc: "Actively managed fund investing in global equities. MSCI World exposure.",
+      assetClass: "equity",
+      ter: 1.5,
+      managementStyle: "AM",
+      investRegion: "foreign",
+      isFeederFund: false,
+      distributionPolicy: "accumulating",
+    },
+    {
+      projId: "DEMO_005",
+      abbrName: "SCBWINA(A)",
+      englishName: "SCB World Index Fund",
+      thaiName: "กองทุนเปิดไทยพาณิชย์ เวิลด์ อินดิคัส",
+      amcName: "SCB Asset Management",
+      policyDesc:
+        "Feeder fund investing in a fund tracking the MSCI ACWI Index. Global equity exposure.",
+      assetClass: "equity",
+      ter: 0.75,
+      managementStyle: "PN",
+      investRegion: "foreign",
+      isFeederFund: true,
+      feederMasterFund: "iShares MSCI ACWI ETF",
+      distributionPolicy: "accumulating",
+    },
+    // ── Equity — Thai domestic ────────────────────────────────────────────────
+    {
+      projId: "DEMO_006",
+      abbrName: "KFSDIV",
+      englishName: "Krungsri SET Dividend Fund",
+      thaiName: "กองทุนเปิดกรุงศรี เซ็ท ดิวิเดนด์",
+      amcName: "Krungsri Asset Management",
+      policyDesc: "Invests in Thai equities with focus on high-dividend stocks from the SET Index.",
+      assetClass: "equity",
+      ter: 1.2,
+      managementStyle: "AM",
+      investRegion: "domestic",
+      isFeederFund: false,
+      distributionPolicy: "dividend",
+    },
+    // ── Equity — SSF (Super Savings Fund) — tax-deductible S&P 500 index ─────
+    {
+      projId: "DEMO_015",
+      abbrName: "SCBSP500SSF",
+      englishName: "SCB S&P 500 Index Fund SSF",
+      thaiName: "กองทุนเปิดไทยพาณิชย์ เอส แอนด์ พี 500 เพื่อการออม",
+      amcName: "SCB Asset Management",
+      policyDesc:
+        "Super Savings Fund. Feeder fund tracking the S&P 500 Index. Tax deductible up to 30% of income (max 200,000 THB).",
+      assetClass: "equity",
+      ter: 0.55,
+      managementStyle: "PN",
+      taxIncentiveType: "SSF",
+      investRegion: "foreign",
+      isFeederFund: true,
+      feederMasterFund: "iShares Core S&P 500 ETF",
+      distributionPolicy: "accumulating",
+    },
+    // ── Equity — ThaiESG — tax-deductible domestic index fund ────────────────
+    {
+      projId: "DEMO_016",
+      abbrName: "KFSETTHESGTF",
+      englishName: "Krungsri SET Thai ESG Fund",
+      thaiName: "กองทุนเปิดกรุงศรี เซ็ท ไทยเพื่อความยั่งยืน",
+      amcName: "Krungsri Asset Management",
+      policyDesc:
+        "Thai ESG Fund investing in SET-listed equities with ESG criteria. Tax deductible up to 30% of income (max 300,000 THB).",
+      assetClass: "equity",
+      ter: 0.5,
+      managementStyle: "PN",
+      taxIncentiveType: "ThaiESG",
+      investRegion: "domestic",
+      isFeederFund: false,
+      distributionPolicy: "accumulating",
+    },
+    // ── Bond — Thai fixed income ──────────────────────────────────────────────
+    {
+      projId: "DEMO_007",
+      abbrName: "K-FIXED-A",
+      englishName: "Kasikorn Fixed Income Fund Class A",
+      thaiName: "กองทุนเปิดกสิกรไทย ตราสารหนี้ เอ",
+      amcName: "Kasikorn Asset Management",
+      policyDesc:
+        "Invests primarily in Thai government bonds, corporate bonds, and money-market instruments.",
+      assetClass: "bond",
+      ter: 0.38,
+      managementStyle: "AM",
+      investRegion: "domestic",
+      isFeederFund: false,
+      distributionPolicy: "accumulating",
+    },
+    {
+      projId: "DEMO_008",
+      abbrName: "SCBFIXED",
+      englishName: "SCB Fixed Income Fund",
+      thaiName: "กองทุนเปิดไทยพาณิชย์ ตราสารหนี้",
+      amcName: "SCB Asset Management",
+      policyDesc:
+        "Invests in Thai government and state enterprise bonds. Low-risk, capital preservation.",
+      assetClass: "bond",
+      ter: 0.42,
+      managementStyle: "AM",
+      investRegion: "domestic",
+      isFeederFund: false,
+      distributionPolicy: "accumulating",
+    },
+    {
+      projId: "DEMO_009",
+      abbrName: "KTBGSB",
+      englishName: "KTB Government Savings Bond Fund",
+      thaiName: "กองทุนเปิดเคทีบี พันธบัตรออมทรัพย์",
+      amcName: "Krung Thai Asset Management",
+      policyDesc: "Invests in Thai government savings bonds. Capital preservation objective.",
+      assetClass: "bond",
+      ter: 0.3,
+      managementStyle: "AM",
+      investRegion: "domestic",
+      isFeederFund: false,
+      distributionPolicy: "dividend",
+    },
+    // ── Alternative — gold ────────────────────────────────────────────────────
+    {
+      projId: "DEMO_010",
+      abbrName: "TMBGOLDS",
+      englishName: "TMB Gold Savings Fund",
+      thaiName: "กองทุนเปิดทีเอ็มบี ทองคำ",
+      amcName: "TMB Asset Management",
+      policyDesc:
+        "Invests in gold bullion and gold-related instruments. Tracks the gold spot price.",
+      assetClass: "alternative",
+      ter: 0.55,
+      managementStyle: "PN",
+      investRegion: "mixed",
+      isFeederFund: false,
+      distributionPolicy: "accumulating",
+    },
+    // ── Alternative — property / REIT ─────────────────────────────────────────
+    {
+      projId: "DEMO_011",
+      abbrName: "KTBREALTY",
+      englishName: "KTB Real Estate and Infrastructure Fund",
+      thaiName: "กองทุนเปิดเคทีบี อสังหาริมทรัพย์",
+      amcName: "Krung Thai Asset Management",
+      policyDesc: "Invests in Thai real estate investment trusts (REITs) and infrastructure funds.",
+      assetClass: "alternative",
+      ter: 0.8,
+      managementStyle: "AM",
+      investRegion: "domestic",
+      isFeederFund: false,
+      distributionPolicy: "dividend",
+    },
+    // ── Equity — held funds that demonstrate fee-creep ───────────────────────
+    // These abbrNames match demo holdings tickers so computeFeeCreep() can pair
+    // them with catalog entries and surface cheaper same-class alternatives.
+    {
+      projId: "DEMO_013",
+      abbrName: "K-USA-A(A)",
+      englishName: "K USA Equity Fund (Class A Accumulation)",
+      thaiName: "กองทุนเปิดกสิกรไทย ยูเอสเอ ทุนซื้อคืน",
+      amcName: "Kasikorn Asset Management",
+      policyDesc:
+        "Actively managed fund investing in US equities. Higher management fee than passive alternatives.",
+      assetClass: "equity",
+      ter: 1.4, // demo holding has ter 1.4; ONE-SP500-UH (0.45) is cheaper
+      managementStyle: "AM",
+      investRegion: "foreign",
+      isFeederFund: false,
+      distributionPolicy: "accumulating",
+    },
+    {
+      projId: "DEMO_014",
+      abbrName: "KFGBRAND-A",
+      englishName: "Krungsri Global Brands Equity Fund (Class A)",
+      thaiName: "กองทุนเปิดกรุงศรี โกลบอลแบรนด์ ชนิดเอ",
+      amcName: "Krungsri Asset Management",
+      policyDesc:
+        "Actively managed global equity fund focusing on consumer brand companies. High active fee.",
+      assetClass: "equity",
+      ter: 1.85, // demo holding has ter 1.85; SCBWINA(A) (0.75) is cheaper
+      managementStyle: "AM",
+      investRegion: "foreign",
+      isFeederFund: false,
+      distributionPolicy: "accumulating",
+    },
+    // ── Cash / money-market ───────────────────────────────────────────────────
+    {
+      projId: "DEMO_012",
+      abbrName: "SCBMM",
+      englishName: "SCB Money Market Fund",
+      thaiName: "กองทุนเปิดไทยพาณิชย์ ตลาดเงิน",
+      amcName: "SCB Asset Management",
+      policyDesc:
+        "Invests in short-term money-market instruments, commercial paper, and bank deposits.",
+      assetClass: "cash",
+      ter: 0.15,
+      managementStyle: "AM",
+      investRegion: "domestic",
+      isFeederFund: false,
+      distributionPolicy: "accumulating",
+    },
+  ];
+
+  const periodStart = "2025-01-01";
+
+  for (const f of DEMO_FUNDS) {
+    db.insert(fundCatalog)
+      .values({
+        projId: f.projId,
+        abbrName: f.abbrName,
+        thaiName: f.thaiName,
+        englishName: f.englishName,
+        amcName: f.amcName,
+        policyDesc: f.policyDesc,
+        assetClass: f.assetClass,
+        managementStyle: f.managementStyle ?? null,
+        taxIncentiveType: f.taxIncentiveType ?? null,
+        investRegion: f.investRegion ?? null,
+        isFeederFund: f.isFeederFund ?? false,
+        feederMasterFund: f.feederMasterFund ?? null,
+        distributionPolicy: f.distributionPolicy ?? null,
+        isFixedTerm: false,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoNothing()
+      .run();
+
+    // Seed a current (open-ended) TER row so findFunds() has fee data to rank on.
+    db.insert(fundFees)
+      .values({
+        projId: f.projId,
+        fundClassName: "A",
+        feeType: TER_FEE_TYPE,
+        feeTypeRaw: "Total Fee and Expense (ค่าธรรมเนียมและค่าใช้จ่ายรวมทั้งหมด)",
+        rateCeilingPct: f.ter * 1.2, // typical SEC ceiling ≈ 20% above actual
+        actualRatePct: f.ter,
+        periodStart,
+        periodEnd: null, // null = currently active
+        prospectusType: "Monthly",
+        lastUpdDate: yyyyMmDd(REFERENCE_TODAY),
+      })
+      .onConflictDoNothing()
       .run();
   }
 

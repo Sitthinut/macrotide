@@ -132,3 +132,26 @@ export function useBenchmarkSeries(key: string | null, range: SeriesRange = "6mo
     : null;
   return useResource<BenchmarkSeriesResponse>(url);
 }
+
+// ─── Fee-creep ────────────────────────────────────────────────────────────────
+
+export interface FeeCreepAlternative {
+  projId: string;
+  abbrName: string;
+  englishName: string | null;
+  assetClass: string | null;
+  ter: number;
+}
+
+export interface FeeCreepFinding {
+  heldTicker: string;
+  heldName: string;
+  heldTer: number;
+  assetClass: string | null;
+  alternatives: FeeCreepAlternative[];
+  savingsPp: number;
+}
+
+export function useFeeCreep() {
+  return useResource<FeeCreepFinding[]>("/api/portfolio/fee-creep");
+}
