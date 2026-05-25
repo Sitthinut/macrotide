@@ -87,6 +87,13 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
 
   const user = session.data?.user;
   const passkeyList = passkeyState.data ?? [];
+  // Lockout guard: a user's only sign-in path is their passkey(s) unless they've
+  // linked an OAuth provider (the email/password record is a hidden bootstrap,
+  // not a usable login). So forbid revoking the last passkey in that case.
+  const hasLinkedOAuth = OAUTH_PROVIDERS.some(
+    (p) => linkedAccounts?.some((a) => a.providerId === p.id) ?? false,
+  );
+  const cannotRevokeLast = passkeyList.length <= 1 && !hasLinkedOAuth;
   const inputTokens = usageData?.inputTokens ?? 0;
   const outputTokens = usageData?.outputTokens ?? 0;
   const totalTokens = inputTokens + outputTokens;
@@ -111,6 +118,12 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
   }
 
   async function handleDeletePasskey(id: string, name: string | undefined) {
+    if (cannotRevokeLast) {
+      setActionError(
+        "This is your only way to sign in. Register another passkey before removing this one.",
+      );
+      return;
+    }
     const label = name ?? "this passkey";
     if (!window.confirm(`Remove "${label}"? You won't be able to use it to sign in.`)) return;
     setBusy(true);
@@ -263,150 +276,15 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
         </div>
       </div>
 
-      {/* ── Passkeys ── */}
+      {/* ── Sign in (methods + registered passkeys) ── */}
       <div className="section">
         <div className="section-header">
-          <h3>Passkeys</h3>
+          <h3>Sign in</h3>
         </div>
 
-        {passkeyState.isPending && (
-          <div className="card" style={{ fontSize: 12.5, color: "var(--muted)" }}>
-            Loading passkeys…
-          </div>
-        )}
-
-        {!passkeyState.isPending && passkeyList.length === 0 && (
-          <div className="card" style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
-            No passkeys registered yet.
-          </div>
-        )}
-
-        {!passkeyState.isPending && passkeyList.length > 0 && (
-          <div className="card" style={{ padding: 0 }}>
-            {passkeyList.map((pk, idx) => (
-              <div
-                key={pk.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "11px 14px",
-                  borderTop: idx === 0 ? "none" : "1px solid var(--line-soft)",
-                }}
-              >
-                {/* Key icon */}
-                <svg
-                  width="15"
-                  height="15"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="var(--muted)"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  style={{ flexShrink: 0 }}
-                >
-                  <circle cx="8" cy="15" r="4" />
-                  <path d="M12 15h8M19 15v2M16 15v2" />
-                </svg>
-
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 500,
-                      letterSpacing: "-0.01em",
-                      color: "var(--ink)",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {pk.name ?? "Unnamed passkey"}
-                  </div>
-                  <div
-                    style={{
-                      marginTop: 2,
-                      fontSize: 11,
-                      color: "var(--muted)",
-                      fontFamily: "var(--font-mono)",
-                    }}
-                  >
-                    {aaguidName(pk.aaguid) ??
-                      (pk.deviceType === "multiDevice" ? "Multi-device" : "Single-device")}{" "}
-                    Registered {fmtDate(pk.createdAt)}
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => handleDeletePasskey(pk.id, pk.name ?? undefined)}
-                  aria-label={`Remove passkey ${pk.name ?? ""}`}
-                  style={{
-                    background: "transparent",
-                    border: 0,
-                    color: "var(--muted)",
-                    cursor: busy ? "not-allowed" : "pointer",
-                    padding: "4px 8px",
-                    fontSize: 12.5,
-                    borderRadius: "var(--r-sm)",
-                    flexShrink: 0,
-                    opacity: busy ? 0.5 : 1,
-                    transition: "color 0.15s",
-                  }}
-                  title="Revoke"
-                >
-                  Revoke
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Add passkey button */}
-        <div style={{ marginTop: 8 }}>
-          <button
-            type="button"
-            className="btn ghost full sm"
-            onClick={handleAddPasskey}
-            disabled={busy}
-            style={{ opacity: busy ? 0.6 : 1 }}
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            Register passkey on this device
-          </button>
-        </div>
-        <div
-          style={{
-            fontSize: 11.5,
-            color: "var(--muted)",
-            padding: "8px 4px 0",
-            lineHeight: 1.5,
-          }}
-        >
-          Use this device's biometrics or PIN to sign in. Register on each device you use.
-        </div>
-      </div>
-
-      {/* ── Linked sign-in methods ── */}
-      <div className="section">
-        <div className="section-header">
-          <h3>Sign-in methods</h3>
-        </div>
+        {/* Methods linked to this account */}
         <div className="card" style={{ padding: 0 }}>
-          {/* Email/password (always present — used to bootstrap passkey sign-up) */}
+          {/* Passkey — the native method (bootstrapped at sign-up) */}
           <div
             style={{
               display: "flex",
@@ -425,11 +303,12 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
                 strokeWidth="1.5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
+                style={{ flexShrink: 0 }}
               >
-                <rect x="2" y="4" width="20" height="16" rx="2" />
-                <path d="M2 8l10 7 10-7" />
+                <circle cx="8" cy="15" r="4" />
+                <path d="M12 15h8M19 15v2M16 15v2" />
               </svg>
-              <span style={{ fontSize: 13, color: "var(--ink)" }}>Passkey + email</span>
+              <span style={{ fontSize: 13, color: "var(--ink)" }}>Passkeys</span>
             </div>
             <span className="tag green">active</span>
           </div>
@@ -473,6 +352,177 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
         >
           OAuth sign-in (Google / GitHub) can be enabled by the operator. Passkey is the primary
           method today.
+        </div>
+
+        {/* Your registered passkeys */}
+        <div
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: "var(--muted)",
+            letterSpacing: "0.02em",
+            padding: "18px 4px 6px",
+          }}
+        >
+          Your passkeys
+        </div>
+
+        {passkeyState.isPending && (
+          <div className="card" style={{ fontSize: 12.5, color: "var(--muted)" }}>
+            Loading passkeys…
+          </div>
+        )}
+
+        {!passkeyState.isPending && passkeyList.length === 0 && (
+          <div className="card" style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
+            No passkeys registered yet.
+          </div>
+        )}
+
+        {!passkeyState.isPending && passkeyList.length > 0 && (
+          <div className="card" style={{ padding: 0 }}>
+            {passkeyList.map((pk, idx) => {
+              // Primary label: prefer the resolved authenticator/provider name;
+              // otherwise fall back to a device-type-based label that still
+              // conveys whether the credential is synced across devices.
+              const resolvedName = aaguidName(pk.aaguid);
+              const label =
+                resolvedName ??
+                (pk.deviceType === "multiDevice" ? "Synced passkey" : "This device");
+              // Only show the "Synced" badge alongside a named authenticator —
+              // when we fell back to a device-type label it would be redundant.
+              const showSyncedBadge = resolvedName != null && pk.backedUp === true;
+              return (
+                <div
+                  key={pk.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "11px 14px",
+                    borderTop: idx === 0 ? "none" : "1px solid var(--line-soft)",
+                  }}
+                >
+                  {/* Key icon */}
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="var(--muted)"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{ flexShrink: 0 }}
+                  >
+                    <circle cx="8" cy="15" r="4" />
+                    <path d="M12 15h8M19 15v2M16 15v2" />
+                  </svg>
+
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        minWidth: 0,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 500,
+                          letterSpacing: "-0.01em",
+                          color: "var(--ink)",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {label}
+                      </span>
+                      {showSyncedBadge && (
+                        <span className="tag" style={{ flexShrink: 0 }}>
+                          Synced
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      style={{
+                        marginTop: 2,
+                        fontSize: 11,
+                        color: "var(--muted)",
+                        fontFamily: "var(--font-mono)",
+                      }}
+                    >
+                      Created on {fmtDate(pk.createdAt)}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={busy || cannotRevokeLast}
+                    onClick={() => handleDeletePasskey(pk.id, label)}
+                    aria-label={`Remove passkey ${label}`}
+                    style={{
+                      background: "transparent",
+                      border: 0,
+                      color: "var(--muted)",
+                      cursor: busy || cannotRevokeLast ? "not-allowed" : "pointer",
+                      padding: "4px 8px",
+                      fontSize: 12.5,
+                      borderRadius: "var(--r-sm)",
+                      flexShrink: 0,
+                      opacity: busy || cannotRevokeLast ? 0.5 : 1,
+                      transition: "color 0.15s",
+                    }}
+                    title={
+                      cannotRevokeLast
+                        ? "Register another passkey before removing your last sign-in method"
+                        : "Revoke"
+                    }
+                  >
+                    Revoke
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Add passkey button */}
+        <div style={{ marginTop: 8 }}>
+          <button
+            type="button"
+            className="btn ghost full sm"
+            onClick={handleAddPasskey}
+            disabled={busy}
+            style={{ opacity: busy ? 0.6 : 1 }}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            Register passkey on this device
+          </button>
+        </div>
+        <div
+          style={{
+            fontSize: 11.5,
+            color: "var(--muted)",
+            padding: "8px 4px 0",
+            lineHeight: 1.5,
+          }}
+        >
+          Use this device's biometrics or PIN to sign in. Register on each device you use.
         </div>
       </div>
 
