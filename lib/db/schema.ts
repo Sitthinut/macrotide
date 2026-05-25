@@ -1,5 +1,13 @@
 import { sql } from "drizzle-orm";
-import { index, integer, primaryKey, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 // Investment buckets — a "bucket" is a portfolio slice (Core, SSF, experiment, etc.).
 export const buckets = sqliteTable("buckets", {
@@ -82,15 +90,22 @@ export const navHistory = sqliteTable(
   ],
 );
 
-// Investment plan — single-row table in v1.
-export const plans = sqliteTable("plans", {
-  id: integer("id").primaryKey(),
-  // Owner. NULL pre-backfill / single-owner mode → visible to everyone.
-  userId: text("user_id").references(() => user.id),
-  markdown: text("markdown").notNull(),
-  selectedModelId: text("selected_model_id"),
-  updatedAt: text("updated_at").notNull(),
-});
+// Investment plan — one row per user. `id` autoincrements; a UNIQUE index on
+// `user_id` enforces a single plan per owner. SQLite treats multiple NULLs as
+// distinct in a UNIQUE index, which is fine: single-owner mode has exactly one
+// NULL-owned row.
+export const plans = sqliteTable(
+  "plans",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    // Owner. NULL pre-backfill / single-owner mode.
+    userId: text("user_id").references(() => user.id),
+    markdown: text("markdown").notNull(),
+    selectedModelId: text("selected_model_id"),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("idx_plans_user").on(table.userId)],
+);
 
 // Journal entries — notes, decisions, questions, reading.
 export const journalEntries = sqliteTable(
