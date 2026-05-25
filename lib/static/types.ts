@@ -243,5 +243,3 @@ export interface AIPersonality {
   blurb: string;
   promptStyle: string;
 }
-
-export type BenchmarkKey = "sp500" | "set" | "m60_40";

@@ -1,4 +1,4 @@
-import type { Analysis, BenchmarkKey, Breakdown, SeriesPoint } from "@/lib/static/types";
+import type { Analysis, Breakdown, SeriesPoint } from "@/lib/static/types";
 
 // Placeholder analytics surface. Real numbers will land when AI tool
 // calls (read_portfolio + computed concentration/drift/weighted TER) replace
@@ -93,33 +93,3 @@ export const CONTRIB_SERIES: SeriesPoint[] = [
   { d: "Apr 26", v: 0 },
   { d: "May 26", v: 25000 },
 ];
-
-export const BENCHMARKS: Record<BenchmarkKey, SeriesPoint[]> = {
-  sp500: [
-    { d: "Nov 25", v: 100 },
-    { d: "Dec 25", v: 101.2 },
-    { d: "Jan 26", v: 99.8 },
-    { d: "Feb 26", v: 102.4 },
-    { d: "Mar 26", v: 104.8 },
-    { d: "Apr 26", v: 108.1 },
-    { d: "May 26", v: 111.2 },
-  ],
-  set: [
-    { d: "Nov 25", v: 100 },
-    { d: "Dec 25", v: 100.8 },
-    { d: "Jan 26", v: 98.4 },
-    { d: "Feb 26", v: 96.2 },
-    { d: "Mar 26", v: 97.8 },
-    { d: "Apr 26", v: 99.4 },
-    { d: "May 26", v: 98.8 },
-  ],
-  m60_40: [
-    { d: "Nov 25", v: 100 },
-    { d: "Dec 25", v: 100.6 },
-    { d: "Jan 26", v: 99.8 },
-    { d: "Feb 26", v: 101.5 },
-    { d: "Mar 26", v: 103.2 },
-    { d: "Apr 26", v: 105.4 },
-    { d: "May 26", v: 107.6 },
-  ],
-};

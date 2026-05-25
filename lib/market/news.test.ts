@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { __resetNewsCache, getMarketNews, type NewsFeedDef, parseFeed } from "./news";
+import {
+  __resetNewsCache,
+  decodeEntities,
+  getMarketNews,
+  type NewsFeedDef,
+  parseFeed,
+} from "./news";
 
 // Synthetic fixtures only — no real fund codes, no real headlines.
 
@@ -59,6 +65,24 @@ const ATOM_FIXTURE = `<?xml version="1.0" encoding="UTF-8"?>
 
 const FEED_A: NewsFeedDef = { id: "feedA", name: "Feed A", url: "https://example.test/a" };
 const FEED_B: NewsFeedDef = { id: "feedB", name: "Feed B", url: "https://atom.test/b" };
+
+describe("decodeEntities", () => {
+  it("decodes single-encoded numeric and named entities", () => {
+    expect(decodeEntities("What I&#8217;ve Learned")).toBe("What I’ve Learned");
+    expect(decodeEntities("Risk &amp; Reward")).toBe("Risk & Reward");
+    expect(decodeEntities("&#x2019;")).toBe("’");
+  });
+
+  it("decodes double-encoded entities in one pass (&amp;#NNN;)", () => {
+    expect(decodeEntities("What I&amp;#8217;ve Learned")).toBe("What I’ve Learned");
+    expect(decodeEntities("Risk &amp;#038; Reward")).toBe("Risk & Reward");
+  });
+
+  it("leaves plain text and unknown entities untouched", () => {
+    expect(decodeEntities("Plain title, no entities")).toBe("Plain title, no entities");
+    expect(decodeEntities("a &bogus; b")).toBe("a &bogus; b");
+  });
+});
 
 describe("parseFeed (RSS 2.0)", () => {
   it("extracts title / url / publishedAt from <item> elements", () => {

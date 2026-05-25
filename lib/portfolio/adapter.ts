@@ -91,8 +91,9 @@ function inferPortfolioType(typeLabel: string | null): PortfolioType {
 }
 
 // Convert "YYYY-MM-DD" → "MMM DD" (e.g. "2026-05-22" → "May 22"). The chart's
-// x-axis uses the short label.
-function formatSeriesDate(iso: string): string {
+// x-axis uses the short label. Exported so the benchmark overlay can map onto
+// the same label space and align with the portfolio line.
+export function formatSeriesDate(iso: string): string {
   const d = new Date(`${iso}T00:00:00Z`);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 }

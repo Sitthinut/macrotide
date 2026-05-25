@@ -208,7 +208,7 @@ function rssItemToNews(raw: unknown, feed: NewsFeedDef): NewsItem | null {
   const publishedAt = normalizeDate(pub);
   return {
     id: `${feed.id}:${guid}`,
-    title: title.trim(),
+    title: decodeEntities(title.trim()),
     url,
     source: feed.name,
     publishedAt,
@@ -225,7 +225,7 @@ function atomEntryToNews(raw: unknown, feed: NewsFeedDef): NewsItem | null {
   const pub = textValue(entry.updated) || textValue(entry.published);
   return {
     id: `${feed.id}:${id}`,
-    title: title.trim(),
+    title: decodeEntities(title.trim()),
     url: link,
     source: feed.name,
     publishedAt: normalizeDate(pub),
@@ -250,6 +250,37 @@ function atomLinkHref(raw: unknown): string | null {
     if (typeof href === "string") return href;
   }
   return null;
+}
+
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+};
+
+function codePoint(n: number): string {
+  if (!Number.isFinite(n) || n <= 0 || n > 0x10ffff) return "";
+  try {
+    return String.fromCodePoint(n);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Decode the HTML entities that survive XML parsing in feed titles — including
+ * double-encoded ones like `&amp;#8217;` (RSS commonly ships `’` as `&#8217;`,
+ * then escapes the `&`). Named first, then numeric, so one pass resolves the
+ * common double-encoding.
+ */
+export function decodeEntities(s: string): string {
+  return s
+    .replace(/&(amp|lt|gt|quot|apos|nbsp);/g, (_m, n: string) => NAMED_ENTITIES[n] ?? _m)
+    .replace(/&#x([0-9a-fA-F]+);/g, (_m, h: string) => codePoint(Number.parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_m, d: string) => codePoint(Number.parseInt(d, 10)));
 }
 
 function textValue(raw: unknown): string {

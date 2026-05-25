@@ -16,12 +16,15 @@ import { createJournalEntry, type JournalKind, listJournalEntries } from "../db/
 import { getModelPortfolio } from "../db/queries/models";
 import { getPlan } from "../db/queries/plan";
 import { listFundQuotes } from "../db/queries/quotes";
+import { getPortfolioSeries } from "../db/queries/series";
+import { BENCHMARK_OPTIONS, getBenchmarkReturnPct } from "../market/benchmarks";
 import { QUOTE_SOURCES } from "../market/sources";
 import { adaptModelPortfolio, adaptPortfolios } from "../portfolio/adapter";
 import { computeHealth, summarizeHealth } from "../portfolio/health";
 import { parsePlan } from "../portfolio/plan-parser";
 
 const JOURNAL_KINDS = ["note", "decision", "question", "reading"] as const;
+const PERF_RANGES = ["1mo", "3mo", "6mo", "1y", "5y", "max"] as const;
 
 export interface AdvisorToolOptions {
   // Single owner: null. Multi-user threads the authenticated user id.
@@ -102,6 +105,71 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
         message: allHoldings.length
           ? `Read ${allHoldings.length} holding(s) across ${buckets.length} bucket(s); total ฿${round(totalValue).toLocaleString()}.`
           : "The user has no holdings yet — suggest adding some before analysis.",
+      };
+    },
+  });
+
+  const read_performance = tool({
+    description:
+      "Read how the user's portfolio has PERFORMED over a period: its value at " +
+      "the start and end of the range, the total return %, AND the same-period " +
+      "return of reference indices (SET, S&P 500) — so you can answer 'am I " +
+      "matching / beating my index?' with real numbers. Call this for any " +
+      "question about returns, performance, or keeping up with an index. " +
+      "Computed from the user's real NAV history; never invent performance " +
+      "figures. Benchmark returns are best-effort — if an index is temporarily " +
+      "unavailable its return comes back null; say so rather than guessing.",
+    inputSchema: z.object({
+      range: z.enum(PERF_RANGES).optional().describe("Look-back window; default 6mo."),
+    }),
+    execute: async ({ range }) => {
+      const r = range ?? "6mo";
+      const { aggregate, asOf } = getPortfolioSeries(r);
+      if (aggregate.length < 2) {
+        return {
+          ok: true as const,
+          hasData: false,
+          range: r,
+          message:
+            "Not enough NAV history to compute a return yet — needs at least two priced dates.",
+        };
+      }
+      const first = aggregate[0];
+      const last = aggregate[aggregate.length - 1];
+      const periodReturnPct = first.value
+        ? round(((last.value - first.value) / first.value) * 100)
+        : null;
+
+      // Compare against the SET (the core "match your index" reference) and the
+      // S&P 500, over the SAME window (aligned to the portfolio's first date).
+      const benchmarks = await Promise.all(
+        (["set", "sp500"] as const).map(async (key) => {
+          const ret = await getBenchmarkReturnPct(key, r, first.date);
+          const opt = BENCHMARK_OPTIONS.find((b) => b.key === key);
+          return {
+            key,
+            label: opt?.label ?? key,
+            returnPct: ret == null ? null : round(ret),
+            beating: ret == null || periodReturnPct == null ? null : periodReturnPct >= ret,
+          };
+        }),
+      );
+
+      const fmt = (n: number | null) => (n == null ? "n/a" : `${n >= 0 ? "+" : ""}${n}%`);
+      return {
+        ok: true as const,
+        hasData: true,
+        range: r,
+        startDate: first.date,
+        endDate: last.date,
+        startValue: round(first.value),
+        endValue: round(last.value),
+        periodReturnPct,
+        asOf,
+        benchmarks,
+        message:
+          `Portfolio ${fmt(periodReturnPct)} over ${r} (${first.date}→${last.date}). ` +
+          `Benchmarks: ${benchmarks.map((b) => `${b.label} ${fmt(b.returnPct)}`).join(", ")}.`,
       };
     },
   });
@@ -357,6 +425,7 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
 
   return {
     read_portfolio,
+    read_performance,
     read_plan,
     read_journal,
     write_journal,
