@@ -236,115 +236,128 @@ function FundRow({
   const amc = fund.amcName;
 
   return (
-    <button
-      type="button"
-      aria-label={`View details for ${abbr}`}
-      onClick={() => onSelect(fund.projId)}
+    <div
       style={{
         display: "flex",
         alignItems: "flex-start",
         gap: 10,
         padding: "11px 14px",
         borderBottom: "1px solid var(--line-soft)",
-        cursor: "pointer",
-        width: "100%",
-        background: "none",
-        border: "none",
-        textAlign: "left",
-        font: "inherit",
       }}
     >
-      {/* Rank badge — emphasises the cheapest-first ordering */}
-      <div
+      {/* Main click target — opens the fund detail sheet. A button so it is
+          keyboard-focusable; styled to be visually invisible (the row itself
+          carries the visual chrome). Sibling of the advisor button — never
+          nested, so the markup stays valid. */}
+      <button
+        type="button"
+        aria-label={`View details for ${abbr}`}
+        onClick={() => onSelect(fund.projId)}
         style={{
-          minWidth: 22,
-          height: 22,
-          borderRadius: 11,
-          background: rank === 1 ? "var(--accent)" : "var(--surface)",
-          color: rank === 1 ? "var(--accent-fg, #fff)" : "var(--muted)",
           display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 10,
-          fontFamily: "var(--font-mono)",
-          fontWeight: 600,
-          marginTop: 1,
-          flexShrink: 0,
+          alignItems: "flex-start",
+          gap: 10,
+          flex: 1,
+          minWidth: 0,
+          background: "none",
+          border: "none",
+          padding: 0,
+          margin: 0,
+          textAlign: "left",
+          font: "inherit",
+          color: "inherit",
+          cursor: "pointer",
         }}
       >
-        {rank}
-      </div>
-
-      {/* Fund identity */}
-      <div style={{ flex: 1, minWidth: 0 }}>
+        {/* Rank badge — emphasises the cheapest-first ordering */}
         <div
           style={{
+            minWidth: 22,
+            height: 22,
+            borderRadius: 11,
+            background: rank === 1 ? "var(--accent)" : "var(--surface)",
+            color: rank === 1 ? "var(--accent-fg, #fff)" : "var(--muted)",
             display: "flex",
-            alignItems: "baseline",
-            gap: 7,
-            flexWrap: "wrap",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 10,
+            fontFamily: "var(--font-mono)",
+            fontWeight: 600,
+            marginTop: 1,
+            flexShrink: 0,
           }}
         >
-          <span
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 12,
-              fontWeight: 600,
-              letterSpacing: "0.02em",
-              color: "var(--ink)",
-            }}
-          >
-            {abbr}
-          </span>
-          {/* TER is the headline — placed right next to the ticker */}
-          <TerBadge ter={fund.ter} />
+          {rank}
         </div>
-        <div
-          style={{
-            fontSize: 12.5,
-            color: "var(--muted)",
-            marginTop: 2,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-          title={name}
-        >
-          {name}
-        </div>
-        {amc && (
+
+        {/* Fund identity */}
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
-              fontSize: 11,
-              color: "var(--muted)",
-              fontFamily: "var(--font-mono)",
-              letterSpacing: "0.02em",
-              marginTop: 1,
-              opacity: 0.7,
+              display: "flex",
+              alignItems: "baseline",
+              gap: 7,
+              flexWrap: "wrap",
             }}
           >
-            {amc}
+            <span
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 12,
+                fontWeight: 600,
+                letterSpacing: "0.02em",
+                color: "var(--ink)",
+              }}
+            >
+              {abbr}
+            </span>
+            {/* TER is the headline — placed right next to the ticker */}
+            <TerBadge ter={fund.ter} />
           </div>
-        )}
-        {/* Compact property badges: index, tax wrapper, feeder */}
-        <FundBadges fund={fund} />
-      </div>
+          <div
+            style={{
+              fontSize: 12.5,
+              color: "var(--muted)",
+              marginTop: 2,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+            title={name}
+          >
+            {name}
+          </div>
+          {amc && (
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--muted)",
+                fontFamily: "var(--font-mono)",
+                letterSpacing: "0.02em",
+                marginTop: 1,
+                opacity: 0.7,
+              }}
+            >
+              {amc}
+            </div>
+          )}
+          {/* Compact property badges: index, tax wrapper, feeder */}
+          <FundBadges fund={fund} />
+        </div>
+      </button>
 
-      {/* Ask advisor shortcut */}
+      {/* Ask advisor shortcut — sibling of the main button, not nested. */}
       <button
         type="button"
         className="icon-btn"
         title={`Ask advisor about ${abbr}`}
         aria-label={`Ask advisor about ${abbr}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          onAskAdvisor(abbr);
-        }}
+        onClick={() => onAskAdvisor(abbr)}
         style={{ marginTop: 2, flexShrink: 0 }}
       >
         <Icon name="chat" size={13} />
       </button>
-    </button>
+    </div>
   );
 }
 
