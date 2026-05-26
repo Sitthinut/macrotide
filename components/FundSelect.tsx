@@ -12,6 +12,7 @@
 // in demo mode before the daily SEC refresh has run.
 
 import { useEffect, useState } from "react";
+import { FundDetailSheet } from "@/components/FundDetailSheet";
 import { Icon } from "@/components/Icon";
 import type { FundWithTer } from "@/lib/db/queries/funds";
 import { useResource } from "@/lib/fetchers/swr";
@@ -223,23 +224,34 @@ function FundRow({
   fund,
   rank,
   onAskAdvisor,
+  onSelect,
 }: {
   fund: FundWithTer;
   rank: number;
   onAskAdvisor: (abbr: string) => void;
+  onSelect: (projId: string) => void;
 }) {
   const abbr = fund.abbrName ?? fund.projId;
   const name = fund.englishName ?? fund.thaiName ?? abbr;
   const amc = fund.amcName;
 
   return (
-    <div
+    <button
+      type="button"
+      aria-label={`View details for ${abbr}`}
+      onClick={() => onSelect(fund.projId)}
       style={{
         display: "flex",
         alignItems: "flex-start",
         gap: 10,
         padding: "11px 14px",
         borderBottom: "1px solid var(--line-soft)",
+        cursor: "pointer",
+        width: "100%",
+        background: "none",
+        border: "none",
+        textAlign: "left",
+        font: "inherit",
       }}
     >
       {/* Rank badge — emphasises the cheapest-first ordering */}
@@ -324,12 +336,15 @@ function FundRow({
         className="icon-btn"
         title={`Ask advisor about ${abbr}`}
         aria-label={`Ask advisor about ${abbr}`}
-        onClick={() => onAskAdvisor(abbr)}
+        onClick={(e) => {
+          e.stopPropagation();
+          onAskAdvisor(abbr);
+        }}
         style={{ marginTop: 2, flexShrink: 0 }}
       >
         <Icon name="chat" size={13} />
       </button>
-    </div>
+    </button>
   );
 }
 
@@ -477,6 +492,8 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
   const [queryInput, setQueryInput] = useState("");
   // Debounce the search query so we don't fire on every keystroke.
   const [query, setQuery] = useState("");
+  // Selected fund for the detail sheet.
+  const [detailProjId, setDetailProjId] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setQuery(queryInput), 280);
@@ -498,166 +515,178 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
   const hasResults = list.length > 0;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* Filters */}
-      <div style={{ padding: "10px 14px 8px", borderBottom: "1px solid var(--line-soft)" }}>
-        {/* Free-text search */}
-        <div style={{ position: "relative", marginBottom: 8 }}>
-          <span
+    <>
+      <FundDetailSheet projId={detailProjId} onClose={() => setDetailProjId(null)} />
+      <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+        {/* Filters */}
+        <div style={{ padding: "10px 14px 8px", borderBottom: "1px solid var(--line-soft)" }}>
+          {/* Free-text search */}
+          <div style={{ position: "relative", marginBottom: 8 }}>
+            <span
+              style={{
+                position: "absolute",
+                left: 10,
+                top: "50%",
+                transform: "translateY(-50%)",
+                color: "var(--muted)",
+                pointerEvents: "none",
+                display: "flex",
+                alignItems: "center",
+              }}
+            >
+              <Icon name="magnifying-glass" size={13} />
+            </span>
+            <input
+              className="sheet-input"
+              type="search"
+              placeholder="Search by name, index, theme… (e.g. S&P 500, gold)"
+              value={queryInput}
+              onChange={(e) => setQueryInput(e.target.value)}
+              style={{ paddingLeft: 30, width: "100%", boxSizing: "border-box" }}
+            />
+          </div>
+
+          {/* Asset class chips */}
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 6 }}>
+            {ASSET_CLASS_OPTIONS.map((opt) => (
+              <ChipButton
+                key={opt.value}
+                label={opt.label}
+                active={assetClass === opt.value}
+                onClick={() => setAssetClass(opt.value)}
+              />
+            ))}
+          </div>
+
+          {/* Index-only toggle + region chips on one row */}
+          <div
             style={{
-              position: "absolute",
-              left: 10,
-              top: "50%",
-              transform: "translateY(-50%)",
-              color: "var(--muted)",
-              pointerEvents: "none",
               display: "flex",
+              gap: 5,
+              flexWrap: "wrap",
+              marginBottom: 6,
               alignItems: "center",
             }}
           >
-            <Icon name="magnifying-glass" size={13} />
-          </span>
-          <input
-            className="sheet-input"
-            type="search"
-            placeholder="Search by name, index, theme… (e.g. S&P 500, gold)"
-            value={queryInput}
-            onChange={(e) => setQueryInput(e.target.value)}
-            style={{ paddingLeft: 30, width: "100%", boxSizing: "border-box" }}
-          />
-        </div>
-
-        {/* Asset class chips */}
-        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 6 }}>
-          {ASSET_CLASS_OPTIONS.map((opt) => (
+            {/* Index-only toggle — the star filter for passive investors */}
             <ChipButton
-              key={opt.value}
-              label={opt.label}
-              active={assetClass === opt.value}
-              onClick={() => setAssetClass(opt.value)}
-            />
-          ))}
-        </div>
-
-        {/* Index-only toggle + region chips on one row */}
-        <div
-          style={{
-            display: "flex",
-            gap: 5,
-            flexWrap: "wrap",
-            marginBottom: 6,
-            alignItems: "center",
-          }}
-        >
-          {/* Index-only toggle — the star filter for passive investors */}
-          <ChipButton
-            label="Index funds only"
-            active={indexOnly}
-            onClick={() => setIndexOnly((v) => !v)}
-            title="Restrict to passive/index-tracking funds (management style PN or PM)"
-            size="xs"
-          />
-          <span
-            style={{
-              width: 1,
-              height: 14,
-              background: "var(--line-soft)",
-              margin: "0 2px",
-              display: "inline-block",
-              alignSelf: "center",
-            }}
-          />
-          {REGION_OPTIONS.map((opt) => (
-            <ChipButton
-              key={opt.value}
-              label={opt.label}
-              active={region === opt.value}
-              onClick={() => setRegion((v) => (v === opt.value ? "" : opt.value))}
+              label="Index funds only"
+              active={indexOnly}
+              onClick={() => setIndexOnly((v) => !v)}
+              title="Restrict to passive/index-tracking funds (management style PN or PM)"
               size="xs"
             />
-          ))}
+            <span
+              style={{
+                width: 1,
+                height: 14,
+                background: "var(--line-soft)",
+                margin: "0 2px",
+                display: "inline-block",
+                alignSelf: "center",
+              }}
+            />
+            {REGION_OPTIONS.map((opt) => (
+              <ChipButton
+                key={opt.value}
+                label={opt.label}
+                active={region === opt.value}
+                onClick={() => setRegion((v) => (v === opt.value ? "" : opt.value))}
+                size="xs"
+              />
+            ))}
+          </div>
+
+          {/* Tax wrapper chips */}
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+            <span
+              style={{
+                fontSize: 10,
+                color: "var(--muted)",
+                fontFamily: "var(--font-mono)",
+                letterSpacing: "0.04em",
+                marginRight: 2,
+              }}
+            >
+              Tax
+            </span>
+            {TAX_INCENTIVE_OPTIONS.map((opt) => (
+              <ChipButton
+                key={opt.value}
+                label={opt.label}
+                active={taxIncentive === opt.value}
+                onClick={() => setTaxIncentive((v) => (v === opt.value ? "" : opt.value))}
+                title={opt.title}
+                size="xs"
+              />
+            ))}
+          </div>
         </div>
 
-        {/* Tax wrapper chips */}
-        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
-          <span
+        {/* Legend bar */}
+        <FeeLegend />
+
+        {/* Results count */}
+        {hasResults && (
+          <div
             style={{
-              fontSize: 10,
+              padding: "6px 14px",
+              fontSize: 11,
               color: "var(--muted)",
               fontFamily: "var(--font-mono)",
               letterSpacing: "0.04em",
-              marginRight: 2,
+              borderBottom: "1px solid var(--line-soft)",
             }}
           >
-            Tax
-          </span>
-          {TAX_INCENTIVE_OPTIONS.map((opt) => (
-            <ChipButton
-              key={opt.value}
-              label={opt.label}
-              active={taxIncentive === opt.value}
-              onClick={() => setTaxIncentive((v) => (v === opt.value ? "" : opt.value))}
-              title={opt.title}
-              size="xs"
-            />
-          ))}
-        </div>
-      </div>
+            {list.length} fund{list.length === 1 ? "" : "s"} ·{" "}
+            {list.filter((f) => f.ter != null).length} with TER data
+            {list.filter((f) => f.managementStyle === "PN" || f.managementStyle === "PM").length >
+              0 && (
+              <>
+                {" "}
+                ·{" "}
+                {
+                  list.filter((f) => f.managementStyle === "PN" || f.managementStyle === "PM")
+                    .length
+                }{" "}
+                index
+              </>
+            )}
+          </div>
+        )}
 
-      {/* Legend bar */}
-      <FeeLegend />
-
-      {/* Results count */}
-      {hasResults && (
-        <div
-          style={{
-            padding: "6px 14px",
-            fontSize: 11,
-            color: "var(--muted)",
-            fontFamily: "var(--font-mono)",
-            letterSpacing: "0.04em",
-            borderBottom: "1px solid var(--line-soft)",
-          }}
-        >
-          {list.length} fund{list.length === 1 ? "" : "s"} ·{" "}
-          {list.filter((f) => f.ter != null).length} with TER data
-          {list.filter((f) => f.managementStyle === "PN" || f.managementStyle === "PM").length >
-            0 && (
-            <>
-              {" "}
-              ·{" "}
-              {list.filter((f) => f.managementStyle === "PN" || f.managementStyle === "PM").length}{" "}
-              index
-            </>
+        {/* Fund list */}
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          {!hasResults ? (
+            <EmptyState query={query} isLoading={isLoading} />
+          ) : (
+            list.map((fund, i) => (
+              <FundRow
+                key={fund.projId}
+                fund={fund}
+                rank={i + 1}
+                onAskAdvisor={handleAskAdvisor}
+                onSelect={setDetailProjId}
+              />
+            ))
           )}
         </div>
-      )}
 
-      {/* Fund list */}
-      <div style={{ flex: 1, overflowY: "auto" }}>
-        {!hasResults ? (
-          <EmptyState query={query} isLoading={isLoading} />
-        ) : (
-          list.map((fund, i) => (
-            <FundRow key={fund.projId} fund={fund} rank={i + 1} onAskAdvisor={handleAskAdvisor} />
-          ))
-        )}
+        {/* Footer hint */}
+        <div
+          style={{
+            padding: "8px 14px",
+            fontSize: 11,
+            color: "var(--muted)",
+            lineHeight: 1.45,
+            borderTop: "1px solid var(--line-soft)",
+          }}
+        >
+          TER (Total Expense Ratio) is the all-in annual fee published by the SEC. Lower is better —
+          it compounds against you every year.
+        </div>
       </div>
-
-      {/* Footer hint */}
-      <div
-        style={{
-          padding: "8px 14px",
-          fontSize: 11,
-          color: "var(--muted)",
-          lineHeight: 1.45,
-          borderTop: "1px solid var(--line-soft)",
-        }}
-      >
-        TER (Total Expense Ratio) is the all-in annual fee published by the SEC. Lower is better —
-        it compounds against you every year.
-      </div>
-    </div>
+    </>
   );
 }
 
