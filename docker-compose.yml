@@ -42,4 +42,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1024M
+          # The Next.js server alone can spike past 1 GiB (observed a 2.1 GiB
+          # next-server OOM-kill under load); the nightly catalog crawl runs as a
+          # second process in this same cgroup. 3 GiB gives both headroom while
+          # still capping a runaway well below the host's 24 GiB.
+          memory: 3072M
