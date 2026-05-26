@@ -20,11 +20,15 @@ multi-user foundation have all shipped. What remains is finishing the
 public-launch hardening and a short list of forward work, framed below as
 **Now / Next / Later** and tagged by the product pillar each item serves.
 
-**Where the loop stands today.** *Analyze* is mostly shipped (honest portfolio
-view + performance-vs-index). *Research* is a flat RSS feed with richer AI
-planned. *Learn* is stub content. **Select — "which low-fee funds do I actually
-buy?" — is the biggest gap**, because the advisor has no fund universe with
-fees; closing it is the flagship post-launch bet.
+**Where the loop stands today.** The app is **live in production**
+(soft-public). *Analyze* is mostly shipped (honest portfolio view +
+performance-vs-index). *Research* is a flat RSS feed with richer AI planned.
+*Learn* is stub content. **Select's foundation shipped** — a SEC-sourced fund
+catalog with fees and a `find_funds` advisor tool, so the advisor can now name
+lower-fee funds. The frontier has moved from *"is there a fund universe?"* to
+**fund-data depth**: per-fund performance/returns vs benchmark, asset
+allocation, and actual holdings (incl. bond ISINs and feeder master funds), plus
+the external enrichment that depth unlocks.
 
 ## Out of scope (until a real need appears)
 
@@ -86,18 +90,15 @@ are the source material a design pass reads from; keep them current so the page
 stays truthful. The page must not overpromise — anything not yet shipped is
 described as planned, not present.
 
-**Deploy to prod + post-deploy process** *(pillar: front door)*. The
-single-owner self-host runbook is complete in
-[deploy.md](./docs/how-to/deploy.md) (VM + Caddy + systemd + backups + owner
-promotion + hardening checklist). The launch step is to **execute it for the
-public link** and then establish the ongoing process: how a change goes from
-`main` → built → restarted on the VM (the `git pull && npm ci && npm run build &&
-systemctl restart` loop, migrations auto-applying), how to roll back (restore
-from `data/backups/`), and the release cadence (cut the first dated
-[CHANGELOG](./CHANGELOG.md) heading at launch — see its preamble). Confirm the
-SEC Open API access is on the **current Developer Portal keys** (the portal
-migrated Jan 2026; the old one is discontinued mid-2026) before relying on fund
-data in production.
+**Deploy to prod — ✅ done** *(pillar: front door)*. Live in production via
+**Docker Compose + Cloudflare Tunnel** (outbound-only, no inbound ports, origin
+hidden), with off-site restic→B2 backups and a nightly
+SEC catalog crawl; the runbook is in [deploy.md](./docs/how-to/deploy.md).
+Update loop: on the box `git pull && docker compose up -d --build` (migrations
+auto-apply); roll back by restoring the restic snapshot. SEC Open API confirmed
+on the **current Developer Portal v2 keys**. Remaining launch nicety: cut the
+first dated [CHANGELOG](./CHANGELOG.md) heading and set the legal-page env vars
+before wider sharing.
 
 **Locked invariants for launch** (keep them tested):
 
@@ -133,25 +134,49 @@ authed internal route, or external cron — weigh against the single-VM deploy i
 - **`closeStaleSessions` safety sweep** (`npm run jobs:close-stale`) — its
   primary close path is real-time, so this is just a backstop.
 
-### Select — fee-aware fund finder + fund catalog *(flagship)*
+### Select — fund-data depth on the shipped catalog *(flagship)*
 
-The biggest gap in the loop. Today fees live per-holding (user-supplied), so the
-advisor can analyze *your* fees but can't recommend a *cheaper fund* — it has no
-fund universe. Build it:
+The catalog + fee-aware finder **shipped**: a SEC-sourced fund table keyed by
+`proj_id` with FundFactsheet fees, a `find_funds` advisor tool that returns the
+lowest-fee funds for a target exposure (incl. feeder funds for S&P 500 / global),
+and a Select surface. The frontier moved from *"is there a universe?"* to
+**how deep is each fund's data** — enrich every fund, all from SEC v2 on the
+current key (exact endpoints/schemas catalogued in
+[sec-open-data-api-spec](https://github.com/Sitthinut/sec-open-data-api-spec)):
 
-- **Fund catalog** — a table populated by the daily job from the SEC Open API:
-  the fund list plus the **FundFactsheet fee / expense-ratio fields**, keyed by
-  `proj_id` (which [sec-thailand.ts](./lib/market/providers/sec-thailand.ts)
-  already resolves). Thai SEC-registered funds only — that's the universe a Thai
-  investor actually buys (including feeder funds for S&P 500 / global exposure).
-- **`find_funds` advisor tool + a Select surface** — given a target exposure
-  ("S&P 500", "Thai equity", "global bonds"), return the **lowest-fee** funds
-  that deliver it, with fee, category, and a clone-into-plan / propose-holding
-  action. This is what lets the advisor answer *"buy more S&P 500 → here's the
-  cheapest feeder available to you"* and *"which funds for the portfolio I want →
-  the lowest total fee."*
+- **Performance & risk** — per-fund + benchmark volatility and returns
+  (3m–since-inception) from `factsheet/performance` (already fetched; only
+  volatility was being read), plus the benchmark name from
+  `factsheet/benchmarks`. Lets the finder rank on risk-adjusted terms, not fee
+  alone.
+- **Composition** — `factsheet/asset-allocation` buckets,
+  `factsheet/top5-holdings`, and the full quarterly portfolio
+  (`outstanding/portfolio`, with `isin_code` / issuer / %NAV). Surfaces what a
+  fund actually holds; for feeder funds it names the master fund.
 - **Fee-creep flag in Analyze** — surface when a held fund has a materially
-  cheaper equivalent for the same exposure.
+  cheaper equivalent for the same exposure (rides the catalog).
+
+Schema + ingestion for the depth data is **in progress**, gated behind
+default-off env flags so the nightly crawl opts in deliberately (the full
+portfolio roughly doubles crawl API calls → favour a weekly cadence).
+
+### Select / Analyze — external enrichment *(free sources only)*
+
+Depth SEC doesn't cover, achievable on **free / free-signup** sources (no paid
+APIs):
+
+- **Feeder look-through** *(feasible-free)* — given the master fund SEC names
+  (e.g. iShares MSCI ACWI), pull its underlying holdings from the issuer's free
+  public holdings CSV (iShares/Vanguard, via browser headers).
+- **Tracking error vs benchmark** *(mostly feasible)* — fund-vs-benchmark
+  return/vol come from SEC; a true tracking error needs the benchmark *index*
+  series: SET TRI from SET's free XLS export (monitor freshness), global via the
+  tracking ETF's adjusted close as a proxy.
+- **Thai bond analytics** *(free-but-limited)* — enrich each bond holding's ISIN
+  (from `outstanding/portfolio`) with maturity / credit rating / the gov yield
+  curve from ThaiBMA's free public pages (HTML scrape — fragile; no free REST).
+  Best value/effort: the free yield curve + per-ISIN rating/maturity; skip
+  computed duration/YTM unless the scraping upkeep earns its keep.
 
 ### Select — sample & model-portfolio explorer
 
@@ -193,7 +218,9 @@ Chat is the advisor's first surface, not its limit:
   5-step tool-calling task yields frequent empty / early-stop turns (a tool read
   with no follow-up prose or `propose_*` call → the "I didn't have a reply" UI
   fallback). Use a stronger small model for tool-calling chat, and/or persist and
-  surface tool-only steps instead of dropping them.
+  surface tool-only steps instead of dropping them. (Model logging now shipped —
+  each assistant message records the model OpenRouter actually routed to — so
+  this can be diagnosed against real data before picking a fix.)
 
 ### Analyze — benchmarks that are the user's own
 
@@ -300,6 +327,9 @@ This doc is intent only. The neighbors that hold the rest:
   settled-decisions log / ADRs).
 - **How to run it** → [docs/how-to/deploy.md](./docs/how-to/deploy.md)
   (localhost + single-owner self-host runbook).
+- **SEC Open Data API spec** (machine-readable mirror of every endpoint, param,
+  and response schema) →
+  [github.com/Sitthinut/sec-open-data-api-spec](https://github.com/Sitthinut/sec-open-data-api-spec).
 - **Conventions for touching code** → [AGENTS.md](./AGENTS.md).
 - **Feature designs** → `docs/` (Diátaxis: `tutorials/`, `how-to/`,
   `reference/`, `explanation/`), one file per feature.
