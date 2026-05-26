@@ -110,11 +110,25 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 // concurrency. Cheap single-symbol lookups pay at most one interval.
 // Tunable throttle + retry knobs. Defaults are the production values; tests
 // override them via __setSecThailandRetry to avoid real backoff waits.
+//
+// All four are overridable via env so an operator can tune a live crawl without
+// a code change. The documented quota is 5 000/300 s (over-limit → HTTP 421),
+// but the APIM gateway also enforces a tighter per-second BURST cap that returns
+// 429 — and a shared key means other consumers eat into both. If a bulk crawl
+// sees sustained 429s, raise SEC_MIN_INTERVAL_MS (e.g. 150 ≈ 6.7/s) to back off
+// below that burst cap. Read once at module load; change + restart to apply.
+function numEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
 const RETRY_DEFAULTS = {
-  minIntervalMs: 70, // ~14 calls/s, under the 16.7/s ceiling
-  maxRetries: 5,
-  baseDelayMs: 500,
-  maxBackoffMs: 30_000,
+  minIntervalMs: numEnv("SEC_MIN_INTERVAL_MS", 70), // ~14 calls/s default
+  maxRetries: numEnv("SEC_MAX_RETRIES", 5),
+  baseDelayMs: numEnv("SEC_BASE_DELAY_MS", 500),
+  maxBackoffMs: numEnv("SEC_MAX_BACKOFF_MS", 30_000),
 };
 let retry = { ...RETRY_DEFAULTS };
 let nextSlot = 0;

@@ -104,7 +104,9 @@ function LoginInner() {
     setError(null);
     try {
       const addPk = await authClient.passkey.addPasskey({
-        name: `${session?.user?.name ?? "Passkey"} · ${new Date().toLocaleDateString()}`,
+        // WebAuthn user.name — the account identifier password managers display.
+        // Convention is the email (stable, recognizable across devices).
+        name: session?.user?.email ?? session?.user?.name ?? "Passkey",
       });
       if (addPk?.error) throw new Error(addPk.error.message ?? "passkey registration failed");
       await continueToApp();
@@ -163,7 +165,9 @@ function LoginInner() {
       // Step 2: prompt the browser to create a passkey now that we have a
       // session cookie.
       const addPk = await authClient.passkey.addPasskey({
-        name: `${name} · ${new Date().toLocaleDateString()}`,
+        // WebAuthn user.name — the account identifier password managers display.
+        // Convention is the email (stable, recognizable across devices).
+        name: email,
       });
       if (addPk?.error) throw new Error(addPk.error.message ?? "passkey registration failed");
 
