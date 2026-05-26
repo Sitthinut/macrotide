@@ -38,3 +38,6 @@ next-env.d.ts.bak
 
 # browser-automation screenshots (agent-browser / playwright-cli) — throwaway
 /.playwright-cli/
+
+# next.js auto-generated, regenerated on every build
+next-env.d.ts
