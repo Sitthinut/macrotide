@@ -1,2 +1,0 @@
-CREATE INDEX `idx_fund_portfolio_proj_period` ON `fund_portfolio` (`proj_id`,`period`);--> statement-breakpoint
-CREATE INDEX `idx_fund_portfolio_asset_type_proj_period` ON `fund_portfolio_asset_type` (`proj_id`,`period`);

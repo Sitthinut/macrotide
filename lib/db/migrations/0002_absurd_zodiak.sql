@@ -1,1 +1,0 @@
-ALTER TABLE `holdings` ADD `quote_source` text DEFAULT 'yahoo' NOT NULL;

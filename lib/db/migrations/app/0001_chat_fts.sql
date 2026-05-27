@@ -6,6 +6,9 @@
 -- with INSERT / UPDATE / DELETE on chat_messages (the canonical FTS5 external-
 -- content pattern). Thread titles are short, so title search is handled with a
 -- plain LIKE in the query layer rather than a second virtual table.
+--
+-- FTS5 is not expressible in the drizzle schema, so this rides as a custom
+-- migration on top of the generated app baseline.
 CREATE VIRTUAL TABLE `chat_messages_fts` USING fts5(
   content,
   content='chat_messages',

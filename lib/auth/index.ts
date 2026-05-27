@@ -2,7 +2,7 @@ import "server-only";
 import { passkey } from "@better-auth/passkey";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { ownerDb, ownerSqlite } from "@/lib/db/client";
+import { appDb, appSqlite, marketDb, marketSqlite } from "@/lib/db/client";
 import { runWithDbContext } from "@/lib/db/context";
 import { socialProvidersConfig, trustedLinkProviders } from "./providers";
 import { provisionNewUser } from "./provision";
@@ -45,7 +45,8 @@ function authSecret(): string {
 
 /**
  * better-auth singleton. Routes are exposed at `/api/auth/[...all]` via the
- * `auth.handler` re-export. Sessions live in the same SQLite as app data.
+ * `auth.handler` re-export. The auth tables (user/session/account/…) live in
+ * app.db, so the drizzle adapter points at the app handle.
  *
  * Auth is required by default. Set `AUTH_DISABLED=1` to opt out (single-user
  * dev only — see [SECURITY.md](../../SECURITY.md)).
@@ -53,7 +54,7 @@ function authSecret(): string {
 export const auth = betterAuth({
   appName: rpName(),
   baseURL: baseURL(),
-  database: drizzleAdapter(ownerDb, { provider: "sqlite" }),
+  database: drizzleAdapter(appDb, { provider: "sqlite" }),
   secret: authSecret(),
   trustedOrigins: origins(),
   // Email/password is enabled ONLY to bootstrap passkey signup.
@@ -87,8 +88,10 @@ export const auth = betterAuth({
         after: async (newUser: { id: string }) => {
           await runWithDbContext(
             {
-              db: ownerDb,
-              sqlite: ownerSqlite,
+              appDb,
+              appSqlite,
+              marketDb,
+              marketSqlite,
               isDemo: false,
               sessionId: "owner",
               userId: newUser.id,
