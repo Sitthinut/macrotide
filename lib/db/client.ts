@@ -10,6 +10,14 @@ import * as schema from "./schema";
 const DB_PATH = resolve(process.env.DB_PATH ?? "data/app.db");
 const MIGRATIONS_DIR = resolve("lib/db/migrations");
 
+// `next build` collects page data for routes in parallel worker processes, each
+// of which imports this module and would run `migrate()` against the same fresh
+// data/app.db — racing on CREATE TABLE ("table `buckets` already exists"). The
+// globalThis pin only dedupes within one process, not across build workers. At
+// build time routes are imported for static analysis only (never served), so we
+// skip migrations + the backup entirely; they run normally at server startup.
+const BUILD_PHASE = process.env.NEXT_PHASE === "phase-production-build";
+
 // Next.js hot-reload reimports server modules — pin the connection on globalThis
 // so we don't leak SQLite file handles across reloads in dev.
 const globalForDb = globalThis as unknown as {
@@ -28,13 +36,15 @@ function init() {
 
   const db = drizzle(sqlite, { schema });
 
-  if (existsSync(MIGRATIONS_DIR)) {
+  if (existsSync(MIGRATIONS_DIR) && !BUILD_PHASE) {
     migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   }
 
-  backupIfStale(sqlite).catch((err) => {
-    console.error("[macrotide] backup failed:", err);
-  });
+  if (!BUILD_PHASE) {
+    backupIfStale(sqlite).catch((err) => {
+      console.error("[macrotide] backup failed:", err);
+    });
+  }
 
   return { sqlite, db };
 }
