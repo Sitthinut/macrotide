@@ -815,7 +815,6 @@ function Footer() {
         </div>
         <div className="mt-footer-bottom">
           <span>© {new Date().getFullYear()} Macrotide · personal-use experiment</span>
-          <span>Fund data from the Thai SEC Open API</span>
         </div>
       </div>
     </footer>
