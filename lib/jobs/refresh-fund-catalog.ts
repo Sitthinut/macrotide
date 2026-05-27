@@ -17,10 +17,10 @@
 //                             WARNING: Full portfolio ingestion roughly doubles
 //                             crawl API calls (many funds have 100+ holdings).
 //                             Recommend running on a weekly cadence, not nightly.
-// EXTERNAL_INGEST_FEEDER_HOLDINGS=1 — fetch master-fund holdings CSVs from
-//                             iShares public URLs for feeder funds whose master
-//                             ISIN is in the built-in registry. Free, no auth.
-//                             One HTTP request per matched feeder fund.
+// EXTERNAL_INGEST_FEEDER_HOLDINGS=1 — for feeder funds whose master is a
+//                             US-registered fund in the EDGAR_FUNDS registry,
+//                             fetch its latest SEC NPORT-P holdings (official,
+//                             free). A couple of HTTP requests per matched fund.
 //
 // Merging this branch does NOT change prod behavior until at least one flag is set.
 //
