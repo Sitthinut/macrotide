@@ -7,6 +7,9 @@ export default defineConfig({
     exclude: ["**/node_modules/**", "**/*.local.test.ts"],
     environment: "node",
     globals: false,
+    // Isolate each worker's DB_PATH before any module (esp. lib/db/client.ts,
+    // which migrates at import time) loads — see tests/setup-db.ts.
+    setupFiles: ["tests/setup-db.ts"],
   },
   resolve: {
     alias: {
