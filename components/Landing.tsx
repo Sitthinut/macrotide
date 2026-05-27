@@ -178,8 +178,8 @@ function Hero({ onSignIn, onDemo, demoBusy }: HeroProps) {
         </h1>
 
         <p className="mt-lede">
-          Macrotide reads your Thai mutual-fund holdings and shows you what your index is really
-          doing, and what your fees really cost. Proposes, never trades.
+          Macrotide reads your holdings, Thai funds, stocks, and more, and shows you what your index
+          is really doing, and what your fees really cost. Proposes, never trades.
         </p>
 
         <div className="mt-cta-row">
@@ -423,7 +423,7 @@ function ProposalMock() {
 function PhoneTabs({ active }: { active: "Portfolio" | "Chat" }) {
   return (
     <div className="mt-tabbar">
-      {(["Portfolio", "Markets", "Funds", "Chat"] as const).map((t) => (
+      {(["Portfolio", "Markets", "Models", "Chat"] as const).map((t) => (
         <span className={`mt-tab${t === active ? " mt-tab-on" : ""}`} key={t}>
           <span className="mt-tab-dot" />
           {t}
@@ -658,14 +658,14 @@ const PILLARS: Array<{
     name: "Research",
     body: "Today: an RSS feed. Planned: a clustered brief and a digest grounded in your holdings.",
     tag: "planned",
-    tagLabel: "Partly shipped · synthesis planned",
+    tagLabel: "Synthesis planned",
   },
   {
     num: "04",
     name: "Select",
-    body: "A fee-aware fund finder that names the lowest-fee fund for the exposure you want.",
+    body: "A fee-aware fund finder already names the lowest-fee fund for the exposure you want. Planned: per-fund depth (holdings, risk, feeder look-through) and a fee-creep flag.",
     tag: "planned",
-    tagLabel: "Flagship next bet",
+    tagLabel: "Depth planned",
   },
 ];
 
