@@ -156,18 +156,25 @@ current key (exact endpoints/schemas catalogued in
 - **Fee-creep flag in Analyze** — surface when a held fund has a materially
   cheaper equivalent for the same exposure (rides the catalog).
 
-Schema + ingestion for the depth data is **in progress**, gated behind
-default-off env flags so the nightly crawl opts in deliberately (the full
-portfolio roughly doubles crawl API calls → favour a weekly cadence).
+Schema + ingestion for the depth data **shipped and live in prod** —
+performance, asset allocation, top-5 holdings, and the full quarterly portfolio
+all ingest behind default-off env flags so the nightly crawl opts in
+deliberately (the full portfolio roughly doubles crawl API calls → favour a
+weekly cadence). Surfaced in the fund detail sheet.
 
 ### Select / Analyze — external enrichment *(free sources only)*
 
 Depth SEC doesn't cover, achievable on **free / free-signup** sources (no paid
 APIs):
 
-- **Feeder look-through** *(feasible-free)* — given the master fund SEC names
-  (e.g. iShares MSCI ACWI), pull its underlying holdings from the issuer's free
-  public holdings CSV (iShares/Vanguard, via browser headers).
+- **Feeder look-through** *(shipped — SEC EDGAR N-PORT)* — for feeder funds
+  whose master is a US-registered fund (IVV / ACWI / QQQ / QQQM), the master's
+  underlying holdings come from its latest SEC EDGAR **Form NPORT-P** filing
+  (official, free, server-fetchable; ~quarterly, ~60-day lag). The issuer-CSV
+  route was abandoned — iShares/Vanguard CSVs are Akamai bot-gated (a datacenter
+  fetch gets an HTML challenge, not CSV). Masters with no free programmatic
+  source — GLD (gold trust), HK/Japan-listed ETFs, UCITS mutual funds (PIMCO
+  GIS) — stay uncovered; adding more US ETFs is one registry line.
 - **Tracking error vs benchmark** *(mostly feasible)* — fund-vs-benchmark
   return/vol come from SEC; a true tracking error needs the benchmark *index*
   series: SET TRI from SET's free XLS export (monitor freshness), global via the
