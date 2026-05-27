@@ -5,11 +5,13 @@ import { ProviderError } from "./types";
 // All symbols/data here are synthetic shapes — no live API is hit.
 
 describe("toTwelveDataSymbol", () => {
-  it("maps known Yahoo index symbols to Twelve Data notation", () => {
-    expect(toTwelveDataSymbol("^GSPC")).toBe("GSPC");
-    expect(toTwelveDataSymbol("^IXIC")).toBe("IXIC");
-    expect(toTwelveDataSymbol("^N225")).toBe("N225");
-    expect(toTwelveDataSymbol("^SET.BK")).toBe("SET");
+  it("maps real-index Yahoo symbols to free-tier ETF proxies", () => {
+    // Twelve Data's free tier carries the tracking ETF, not the raw index, so
+    // these resolve to ETF proxies (the real-index level comes from FMP/EODHD).
+    expect(toTwelveDataSymbol("^GSPC")).toBe("SPY");
+    expect(toTwelveDataSymbol("^NDX")).toBe("QQQ");
+    expect(toTwelveDataSymbol("^N225")).toBe("EWJ");
+    expect(toTwelveDataSymbol("^SET.BK")).toBe("THD");
   });
 
   it("converts Yahoo FX pairs (XXX=X) to USD/XXX slash notation", () => {
@@ -81,9 +83,9 @@ describe("twelveDataProvider", () => {
     expect(quote.previousClose).toBe(100);
     expect(quote.currency).toBe("USD");
 
-    // request carried symbol + key + ascending order
+    // request carried symbol (ETF proxy) + key + ascending order
     const url = new URL((fetchSpy.mock.calls[0][0] as URL).toString());
-    expect(url.searchParams.get("symbol")).toBe("GSPC");
+    expect(url.searchParams.get("symbol")).toBe("SPY");
     expect(url.searchParams.get("apikey")).toBe(KEY);
     expect(url.searchParams.get("order")).toBe("asc");
   });

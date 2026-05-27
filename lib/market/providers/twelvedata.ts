@@ -31,16 +31,22 @@ function apiKey(): string | undefined {
 // Yahoo-style symbols (as stored on holdings / in the indicator catalog) →
 // Twelve Data symbols. Anything not mapped falls through to a best-effort
 // transform below.
+//
+// Twelve Data's FREE tier does NOT serve raw index levels (GSPC/NDX/SET are
+// Grow/Pro-only), but it DOES serve the US-listed tracking ETFs. So for the
+// real-index canonical symbols we map to the ETF proxy here: Twelve Data is the
+// ETF-proxy fallback layer in the chain, used only when the keyed real-index
+// providers (FMP/EODHD) are absent or fail. The daily % move — what the Markets
+// screen shows — tracks the index even though the absolute level is the ETF's.
 const SYMBOL_MAP: Record<string, string> = {
-  // Indices
-  "^GSPC": "GSPC",
-  "^NDX": "NDX",
-  "^IXIC": "IXIC",
-  "^DJI": "DJI",
-  "^RUT": "RUT",
-  "^N225": "N225",
-  "^SET.BK": "SET",
-  "^TNX": "TNX",
+  // Indices → free-tier ETF proxies (real levels need FMP/EODHD upstream).
+  "^GSPC": "SPY", // S&P 500
+  "^NDX": "QQQ", // Nasdaq-100
+  "^IXIC": "ONEQ", // Nasdaq Composite
+  "^DJI": "DIA", // Dow Jones
+  "^RUT": "IWM", // Russell 2000
+  "^N225": "EWJ", // Nikkei / Japan
+  "^SET.BK": "THD", // Thailand (MSCI Thailand ETF)
   // Commodities (Twelve Data quotes metals/energy as FX-style pairs)
   "GC=F": "XAU/USD",
   "SI=F": "XAG/USD",

@@ -130,15 +130,34 @@ that the market registry uses to dispatch NAV / price fetches:
 | `quote_source` | Provider chain (in order) | Ticker shape |
 | --- | --- | --- |
 | `"thai_mutual_fund"` | Thai SEC Open API | bare proj_abbr_name or share-class (`K-FIXED-A`, `HIDIV-D`) |
-| `"yahoo"` | Twelve Data (keyed) → Frankfurter (keyless, FX only) → Yahoo (keyless) | bare/dotted/caret symbols (`^SET.BK`, `AAPL`, `PTT.BK`, `THB=X`) |
+| `"yahoo"` | FMP → EODHD → Twelve Data → Frankfurter (FX) → Yahoo | bare/dotted/caret symbols (`^GSPC`, `^SET.BK`, `AAPL`, `PTT.BK`, `THB=X`) |
 
 For `"yahoo"`, `lib/market/cache.ts` walks the chain (`resolveProviderChain`)
-and uses the first provider that returns data — keyed source first, keyless
-fallbacks next. Yahoo now 429s datacenter IPs, so equity indicators need
-`TWELVE_DATA_API_KEY`. The Markets catalog (lib/market/indicators.ts) fetches
-free-tier **ETF proxies** (SPY, QQQ, ACWI, THD for Thailand, …) because raw
-index symbols aren't on Twelve Data's free plan; FX (`THB=X`) falls back to
-keyless ECB-backed Frankfurter.
+and uses the first provider that returns data — preferred source first, keyless
+fallbacks last. The full precedence for a real-index symbol:
+
+- **FMP** (`FMP_API_KEY`, free ≈ 250/day) — REAL US index levels for `^GSPC` /
+  `^NDX` / `^DJI`. First because it has the most generous quota.
+- **EODHD** (`EODHD_API_KEY`, free ≈ 20/day) — REAL global index levels via the
+  `{CODE}.INDX` notation, including markets FMP's free tier lacks: Nikkei
+  (`^N225`→`N225.INDX`) and the Thai **SET** index (`^SET.BK`→`SET.INDX`). Also
+  `GSPC.INDX` / `NDX.INDX` / `IXIC.INDX` / `DJI.INDX`.
+- **Twelve Data** (`TWELVE_DATA_API_KEY`, free ≈ 800/day) — the **ETF-proxy**
+  layer: raw index symbols aren't on its free plan, so it maps each index symbol
+  to its tracking ETF (`^GSPC`→SPY, `^NDX`→QQQ, `^DJI`→DIA, `^SET.BK`→THD, …).
+- **Frankfurter** (keyless, ECB) — FX pairs (`THB=X`) only.
+- **Yahoo** (keyless) — last resort; 429s datacenter IPs.
+
+Each provider only matches the symbols it actually serves, and the keyed ones
+drop out when their env var is unset. **Graceful degradation:** with the FMP/
+EODHD keys UNSET, those providers' `matches()` return false and the chain is
+exactly the prior behaviour — Twelve Data ETF proxy → Frankfurter → Yahoo — so
+nothing breaks before those keys exist. The catalog (`lib/market/indicators.ts`)
+uses REAL index canonical symbols (`^GSPC`, `^NDX`, `^DJI`, `^N225`, `^SET.BK`)
+where a real source exists. **MSCI ACWI has no free real index anywhere and
+stays an ETF proxy (`ACWI`); Gold stays the XAU/USD spot commodity (`GC=F`).**
+The daily Markets cron fetches each indicator once/day — well inside every free
+quota (FMP 250/day, EODHD 20/day, Twelve Data 800/day, Frankfurter unmetered).
 
 **The value names the asset class, not the provider.** `"thai_mutual_fund"`
 means "Thai mutual fund regardless of which API serves it." If we ever swap
@@ -275,7 +294,9 @@ owner chain. Tier is stored in `account_tier`; promote via SQL
 | Var | Default | Read by | Notes |
 | --- | --- | --- | --- |
 | `SEC_API_KEY` | — (Thai funds render as "—" without it) | [lib/market/providers/sec-thailand.ts](./lib/market/providers/sec-thailand.ts) | Thai SEC Open API subscription key (Primary or Secondary — both valid). Header: `Ocp-Apim-Subscription-Key`. Covers all 6 product groups under one subscription. |
-| `TWELVE_DATA_API_KEY` | — (falls back to keyless Yahoo, which 429s from datacenter IPs) | [lib/market/providers/twelvedata.ts](./lib/market/providers/twelvedata.ts) | Keyed primary for `yahoo`-sourced series (Markets indicators, FX, stocks). When set, the cache tries Twelve Data first and falls back to Yahoo per-symbol on error/unsupported. Free tier ≈ 800 req/day, 8 req/min. Raw index symbols aren't on the free plan, so the catalog uses ETF proxies (SPY/QQQ/ACWI/THD/…), all verified to return on free. |
+| `FMP_API_KEY` | — (chain falls through to EODHD → ETF proxy → Yahoo) | [lib/market/providers/fmp.ts](./lib/market/providers/fmp.ts) | Financial Modeling Prep. REAL US index levels for `^GSPC`/`^NDX`/`^DJI` via `/api/v3/historical-price-full`. Free tier ≈ 250 req/day — first in the `yahoo` chain for the US indices it covers. Matches only those symbols + only when set. |
+| `EODHD_API_KEY` | — (chain falls through to ETF proxy → Yahoo) | [lib/market/providers/eodhd.ts](./lib/market/providers/eodhd.ts) | EOD Historical Data. REAL global index levels via `{CODE}.INDX` (e.g. `GSPC.INDX`, `NDX.INDX`, `N225.INDX`, **`SET.INDX`** for Thailand). Free tier ≈ 20 req/day — second in the chain; covers Nikkei + SET that FMP's free tier lacks. Matches only mapped index symbols + only when set. |
+| `TWELVE_DATA_API_KEY` | — (falls back to keyless Yahoo, which 429s from datacenter IPs) | [lib/market/providers/twelvedata.ts](./lib/market/providers/twelvedata.ts) | ETF-proxy layer for `yahoo`-sourced series (Markets indicators, FX, stocks). When set, used after FMP/EODHD; maps index symbols to tracking ETFs (SPY/QQQ/DIA/THD/…) since raw index symbols aren't on the free plan. Free tier ≈ 800 req/day, 8 req/min. ACWI stays an ETF; Gold stays XAU/USD. |
 
 ### Dev-only
 

@@ -73,7 +73,7 @@ describe("seedDemoData synthetic NAV history", () => {
     const { sqlite, db } = freshDb();
     seedDemoData(db);
 
-    for (const symbol of ["SPY", "QQQ", "ACWI", "GC=F", "THB=X", "THD"]) {
+    for (const symbol of ["^GSPC", "^NDX", "ACWI", "GC=F", "THB=X", "^SET.BK"]) {
       const key = `yahoo:${symbol}`;
       const quote = sqlite
         .prepare("SELECT nav, updated_at FROM fund_quotes WHERE ticker = ?")

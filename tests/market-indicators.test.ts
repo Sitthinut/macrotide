@@ -51,24 +51,24 @@ describe("user market indicators", () => {
   it("persists the chosen list and preserves order", () => {
     const db = freshDb();
     as(db, null, () => {
-      setUserIndicatorSymbols(["THB=X", "SPY", "GC=F"]);
-      expect(getUserIndicatorSymbols()).toEqual(["THB=X", "SPY", "GC=F"]);
+      setUserIndicatorSymbols(["THB=X", "^GSPC", "GC=F"]);
+      expect(getUserIndicatorSymbols()).toEqual(["THB=X", "^GSPC", "GC=F"]);
     });
   });
 
   it("drops unknown symbols and de-dupes, keeping first position", () => {
     const db = freshDb();
     as(db, null, () => {
-      const saved = setUserIndicatorSymbols(["SPY", "NOT_A_THING", "SPY", "GC=F"]);
-      expect(saved).toEqual(["SPY", "GC=F"]);
-      expect(getUserIndicatorSymbols()).toEqual(["SPY", "GC=F"]);
+      const saved = setUserIndicatorSymbols(["^GSPC", "NOT_A_THING", "^GSPC", "GC=F"]);
+      expect(saved).toEqual(["^GSPC", "GC=F"]);
+      expect(getUserIndicatorSymbols()).toEqual(["^GSPC", "GC=F"]);
     });
   });
 
   it("resets to defaults when set to an empty list", () => {
     const db = freshDb();
     as(db, null, () => {
-      setUserIndicatorSymbols(["SPY"]);
+      setUserIndicatorSymbols(["^GSPC"]);
       setUserIndicatorSymbols([]);
       expect(getUserIndicatorSymbols()).toEqual(DEFAULT_INDICATOR_SYMBOLS);
     });
@@ -76,10 +76,10 @@ describe("user market indicators", () => {
 
   it("scopes lists per user — one user's list never leaks to another", () => {
     const db = freshDb();
-    as(db, "user-a", () => setUserIndicatorSymbols(["SPY", "GC=F"]));
+    as(db, "user-a", () => setUserIndicatorSymbols(["^GSPC", "GC=F"]));
     as(db, "user-b", () => setUserIndicatorSymbols(["THB=X"]));
 
-    as(db, "user-a", () => expect(getUserIndicatorSymbols()).toEqual(["SPY", "GC=F"]));
+    as(db, "user-a", () => expect(getUserIndicatorSymbols()).toEqual(["^GSPC", "GC=F"]));
     as(db, "user-b", () => expect(getUserIndicatorSymbols()).toEqual(["THB=X"]));
     // A different/null owner sees neither — falls back to defaults.
     as(db, null, () => expect(getUserIndicatorSymbols()).toEqual(DEFAULT_INDICATOR_SYMBOLS));

@@ -6,19 +6,20 @@
 // Thai gauge as one (non-headline) row. Users can edit their own list (add /
 // remove / reorder) from this catalog; see lib/db/queries/market-indicators.ts.
 //
-// IMPORTANT — why most equities are ETF proxies, not index symbols: on the
-// Twelve Data FREE tier the raw index symbols (S&P 500, Nasdaq-100, SET, …) are
-// not available (Grow/Pro plan only), but their US-listed tracking ETFs ARE.
-// So we fetch the ETF (SPY for the S&P 500, QQQ for the Nasdaq-100, THD for
-// Thailand, …). The daily % move — what this screen is about — matches the
-// index; the absolute value shown is the ETF's price. `name` notes the proxy.
+// REAL index levels vs ETF proxies — `symbol` is the canonical Yahoo-style
+// ticker the provider chain resolves (quote_source "yahoo"). Where a free
+// real-index source exists we use the index symbol (^GSPC, ^NDX, ^DJI, ^N225,
+// ^SET.BK) and the chain serves the actual level from FMP (US) or EODHD
+// (global + SET); when those keys are absent it transparently falls back to the
+// tracking ETF via Twelve Data. Two rows have NO free real index and stay
+// proxies on purpose: MSCI ACWI (ETF "ACWI") and the optional regional/sector
+// ETFs. Gold is the XAU/USD spot commodity (GC=F), not an index. The daily %
+// move — what this screen is about — tracks the index in every case.
 //
-// `symbol` is the canonical ticker the provider chain resolves (quote_source
-// "yahoo" → Twelve Data → Frankfurter → Yahoo). `tier` is a data-reliability /
-// cost hint surfaced in the manage UI so users understand why a row may be empty:
-//   - "keyless"  — no key needed, reliable (Frankfurter ECB FX)
-//   - "free-key" — needs TWELVE_DATA_API_KEY (free tier; verified to return data)
-//   - "paid"     — needs a paid Twelve Data plan
+// `tier` is retained in the data model for callers that key off it, but is no
+// longer surfaced in the UI: the daily cron fetches each indicator once/day,
+// comfortably inside every free-tier quota, so the distinction is noise to the
+// user.
 
 export type IndicatorTier = "keyless" | "free-key" | "paid";
 
@@ -32,6 +33,7 @@ export interface IndicatorDef {
   /** Secondary descriptor (notes the ETF proxy where applicable). */
   name: string;
   group: IndicatorGroup;
+  /** Data-reliability/cost hint. Retained for callers; not rendered in the UI. */
   tier: IndicatorTier;
   /** Rendered as a percent (yields / FX shown without thousands styling). */
   isYield?: boolean;
@@ -41,21 +43,20 @@ export interface IndicatorDef {
 
 // One entry per addable indicator. `defaultOrder` marks the six shown before a
 // user edits their list; everything else is opt-in from the "add" picker.
-// Equity rows use free-tier ETF proxies (verified to return on the free plan).
 export const INDICATOR_CATALOG: IndicatorDef[] = [
   // ─ Default set: global-first + USD/THB + a Thai gauge ─
   {
-    symbol: "SPY",
+    symbol: "^GSPC",
     label: "S&P 500",
-    name: "US large-cap · SPY",
+    name: "US large-cap index",
     group: "Global equity",
     tier: "free-key",
     defaultOrder: 1,
   },
   {
-    symbol: "QQQ",
+    symbol: "^NDX",
     label: "Nasdaq-100",
-    name: "US tech · QQQ",
+    name: "US tech index",
     group: "Global equity",
     tier: "free-key",
     defaultOrder: 2,
@@ -63,7 +64,7 @@ export const INDICATOR_CATALOG: IndicatorDef[] = [
   {
     symbol: "ACWI",
     label: "MSCI ACWI",
-    name: "Global equity · ACWI",
+    name: "Global equity · ACWI ETF",
     group: "Global equity",
     tier: "free-key",
     defaultOrder: 3,
@@ -86,47 +87,47 @@ export const INDICATOR_CATALOG: IndicatorDef[] = [
     defaultOrder: 5,
   },
   {
-    symbol: "THD",
+    symbol: "^SET.BK",
     label: "Thailand",
-    name: "MSCI Thailand · THD",
+    name: "SET Index",
     group: "Thai",
     tier: "free-key",
     defaultOrder: 6,
   },
 
-  // ─ Optional adds: global equity (all free-tier ETF proxies) ─
+  // ─ Optional adds: global equity ─
   {
-    symbol: "DIA",
+    symbol: "^DJI",
     label: "Dow Jones",
-    name: "US blue-chip · DIA",
+    name: "US blue-chip index",
+    group: "Global equity",
+    tier: "free-key",
+  },
+  {
+    symbol: "^N225",
+    label: "Nikkei 225",
+    name: "Japan index",
     group: "Global equity",
     tier: "free-key",
   },
   {
     symbol: "IWM",
     label: "Russell 2000",
-    name: "US small-cap · IWM",
+    name: "US small-cap · IWM ETF",
     group: "Global equity",
     tier: "free-key",
   },
   {
     symbol: "EFA",
     label: "MSCI EAFE",
-    name: "Developed ex-US · EFA",
-    group: "Global equity",
-    tier: "free-key",
-  },
-  {
-    symbol: "EWJ",
-    label: "Japan",
-    name: "MSCI Japan · EWJ",
+    name: "Developed ex-US · EFA ETF",
     group: "Global equity",
     tier: "free-key",
   },
   {
     symbol: "MCHI",
     label: "China",
-    name: "MSCI China · MCHI",
+    name: "MSCI China · MCHI ETF",
     group: "Global equity",
     tier: "free-key",
   },
@@ -183,6 +184,11 @@ export function indicatorBySymbol(symbol: string): IndicatorDef | undefined {
 /** True when `symbol` is a known, addable indicator. */
 export function isKnownIndicator(symbol: string): boolean {
   return BY_SYMBOL.has(symbol);
+}
+
+/** True when an indicator should render as a percent rather than a level. */
+export function isYield(symbol: string): boolean {
+  return BY_SYMBOL.get(symbol)?.isYield === true;
 }
 
 /** Default indicator symbols, in display order, shown before a user edits. */

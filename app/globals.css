@@ -2434,6 +2434,15 @@ textarea.sheet-input {
   border: 1px solid var(--line-soft);
   border-radius: 12px;
   background: var(--card-soft);
+  touch-action: none;
+}
+.mi-drag-handle {
+  cursor: grab;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.mi-drag-handle:active {
+  cursor: grabbing;
 }
 .icon-btn:disabled {
   opacity: 0.35;

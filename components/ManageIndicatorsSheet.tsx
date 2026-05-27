@@ -1,28 +1,32 @@
 "use client";
 
+import {
+  closestCenter,
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { useMarketIndicatorPrefs } from "@/lib/fetchers/portfolio";
 import { invalidate } from "@/lib/fetchers/swr";
-import type { IndicatorDef, IndicatorGroup, IndicatorTier } from "@/lib/market/indicators";
+import type { IndicatorDef, IndicatorGroup } from "@/lib/market/indicators";
 
 export interface ManageIndicatorsSheetProps {
   open: boolean;
   onClose: () => void;
 }
-
-const TIER_LABEL: Record<IndicatorTier, string> = {
-  keyless: "no key",
-  "free-key": "free key",
-  paid: "paid plan",
-};
-
-// Tier → badge color. Keyless is the reliable one; paid is the caveat.
-const TIER_STYLE: Record<IndicatorTier, { bg: string; fg: string }> = {
-  keyless: { bg: "var(--up-soft, rgba(16,160,90,0.14))", fg: "var(--up, #109a5a)" },
-  "free-key": { bg: "var(--chip-bg)", fg: "var(--muted)" },
-  paid: { bg: "var(--warn-soft, rgba(200,140,0,0.16))", fg: "var(--warn, #b8860b)" },
-};
 
 const GROUP_ORDER: IndicatorGroup[] = [
   "Global equity",
@@ -33,23 +37,44 @@ const GROUP_ORDER: IndicatorGroup[] = [
   "Thai",
 ];
 
-function TierBadge({ tier }: { tier: IndicatorTier }) {
-  const s = TIER_STYLE[tier];
+// A single draggable, keyboard-operable row in the current selection.
+function SortableRow({
+  sym,
+  def,
+  onRemove,
+}: {
+  sym: string;
+  def: IndicatorDef | undefined;
+  onRemove: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: sym,
+  });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+    zIndex: isDragging ? 1 : undefined,
+  };
   return (
-    <span
-      style={{
-        fontSize: 9.5,
-        fontFamily: "var(--font-mono)",
-        letterSpacing: "0.02em",
-        padding: "2px 6px",
-        borderRadius: 6,
-        background: s.bg,
-        color: s.fg,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {TIER_LABEL[tier]}
-    </span>
+    <div ref={setNodeRef} style={style} className="mi-row">
+      <button
+        type="button"
+        className="icon-btn mi-drag-handle"
+        aria-label={`Reorder ${def?.label ?? sym}`}
+        {...attributes}
+        {...listeners}
+      >
+        <Icon name="grip-vertical" size={14} />
+      </button>
+      <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
+        <span style={{ fontSize: 13, fontWeight: 500 }}>{def?.label ?? sym}</span>
+        {def?.name && <span style={{ fontSize: 11, color: "var(--muted)" }}>{def.name}</span>}
+      </div>
+      <button type="button" className="icon-btn" aria-label="Remove" onClick={onRemove}>
+        <Icon name="close" size={14} />
+      </button>
+    </div>
   );
 }
 
@@ -57,6 +82,11 @@ export function ManageIndicatorsSheet({ open, onClose }: ManageIndicatorsSheetPr
   const { data } = useMarketIndicatorPrefs();
   const [working, setWorking] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   // (Re)seed the working list from the server selection each time we open.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-seed only on open
@@ -94,12 +124,15 @@ export function ManageIndicatorsSheet({ open, onClose }: ManageIndicatorsSheetPr
 
   if (!open) return null;
 
-  const move = (i: number, dir: -1 | 1) => {
-    const j = i + dir;
-    if (j < 0 || j >= working.length) return;
-    const next = [...working];
-    [next[i], next[j]] = [next[j], next[i]];
-    setWorking(next);
+  const onDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    setWorking((w) => {
+      const from = w.indexOf(active.id as string);
+      const to = w.indexOf(over.id as string);
+      if (from < 0 || to < 0) return w;
+      return arrayMove(w, from, to);
+    });
   };
   const remove = (sym: string) => setWorking((w) => w.filter((s) => s !== sym));
   const add = (sym: string) => setWorking((w) => (w.includes(sym) ? w : [...w, sym]));
@@ -126,60 +159,28 @@ export function ManageIndicatorsSheet({ open, onClose }: ManageIndicatorsSheetPr
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-title">Manage indicators</div>
         <div className="sheet-subtitle">
-          Choose which markets show on this screen, and their order.
+          Choose which markets show on this screen. Drag the handle to reorder.
         </div>
 
-        {/* Current selection */}
+        {/* Current selection — drag-and-drop reorder */}
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {working.length === 0 && (
             <div style={{ fontSize: 12.5, color: "var(--muted)", padding: "4px 0" }}>
               No indicators selected — you&apos;ll see the default set.
             </div>
           )}
-          {working.map((sym, i) => {
-            const def = bySymbol.get(sym);
-            return (
-              <div key={sym} className="mi-row">
-                <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                    <span style={{ fontSize: 13, fontWeight: 500 }}>{def?.label ?? sym}</span>
-                    {def && <TierBadge tier={def.tier} />}
-                  </div>
-                  {def?.name && (
-                    <span style={{ fontSize: 11, color: "var(--muted)" }}>{def.name}</span>
-                  )}
-                </div>
-                <div style={{ display: "flex", gap: 2 }}>
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    aria-label="Move up"
-                    disabled={i === 0}
-                    onClick={() => move(i, -1)}
-                  >
-                    <Icon name="arrowUp" size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    aria-label="Move down"
-                    disabled={i === working.length - 1}
-                    onClick={() => move(i, 1)}
-                  >
-                    <Icon name="arrowDown" size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    aria-label="Remove"
-                    onClick={() => remove(sym)}
-                  >
-                    <Icon name="close" size={14} />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+            <SortableContext items={working} strategy={verticalListSortingStrategy}>
+              {working.map((sym) => (
+                <SortableRow
+                  key={sym}
+                  sym={sym}
+                  def={bySymbol.get(sym)}
+                  onRemove={() => remove(sym)}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
         </div>
 
         {/* Add picker */}
@@ -212,7 +213,6 @@ export function ManageIndicatorsSheet({ open, onClose }: ManageIndicatorsSheetPr
                   >
                     <Icon name="plus" size={12} />
                     {d.label}
-                    <TierBadge tier={d.tier} />
                   </button>
                 ))}
               </div>

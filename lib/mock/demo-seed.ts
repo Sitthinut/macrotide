@@ -32,14 +32,15 @@ const REFERENCE_TODAY = new Date("2026-05-21T00:00:00Z");
 // map 1:1 to these Yahoo symbols). The synthetic series ends at these values.
 // Keyed by the default indicator symbols (lib/market/indicators.ts) so the demo
 // Markets screen shows the same global-first set the live app defaults to.
-// Equities are ETF proxies (SPY/QQQ/ACWI/THD), matching the live catalog.
+// Equities use the real-index canonical symbols (^GSPC/^NDX/^SET.BK) the live
+// catalog now resolves; ACWI stays an ETF proxy and Gold is XAU/USD spot.
 const DEMO_INDEX_VALUES: Record<string, number> = {
-  SPY: 750.59,
-  QQQ: 730.28,
+  "^GSPC": 5920.6,
+  "^NDX": 21380.4,
   ACWI: 157.84,
   "GC=F": 2648.3,
   "THB=X": 36.5,
-  THD: 72.78,
+  "^SET.BK": 1198.3,
 };
 
 // All demo seed holdings are Thai mutual funds, per the existing seed.
