@@ -231,7 +231,7 @@ function AssetAllocationSection({ rows }: { rows: FundAssetAllocationRow[] }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         {rows.map((row) => {
           const pct = row.assetRatio ?? 0;
-          const barWidth = total > 0 ? Math.min(100, (pct / total) * 100) : 0;
+          const barWidth = total > 0 ? Math.max(0, Math.min(100, (pct / total) * 100)) : 0;
           return (
             <div key={row.assetSeq}>
               <div
@@ -616,7 +616,7 @@ function PortfolioAssetTypeSection({ rows }: { rows: FundPortfolioAssetTypeRow[]
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         {rows.map((row) => {
           const pct = row.percentNav ?? 0;
-          const barWidth = total > 0 ? Math.min(100, (pct / total) * 100) : 0;
+          const barWidth = total > 0 ? Math.max(0, Math.min(100, (pct / total) * 100)) : 0;
           return (
             <div key={row.assetliabCode}>
               <div

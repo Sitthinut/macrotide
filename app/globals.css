@@ -1545,6 +1545,22 @@ textarea.sheet-input {
 
 /* ========= Multi-portfolio + charts (added) ========= */
 
+/* Charts are visual, not text: suppress the text-selection highlight and the
+   focus outline recharts puts on its (tabbable) surface, so clicking/dragging
+   a chart never draws a selection box or border around it. */
+.recharts-wrapper,
+.recharts-surface,
+.chart-row .chart-card > svg {
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+}
+.recharts-wrapper :focus,
+.recharts-surface:focus,
+.recharts-wrapper :focus-visible {
+  outline: none;
+}
+
 /* Chart axis + grid */
 .chart-axis {
   font-family: var(--font-mono);

@@ -547,7 +547,7 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
                 alignItems: "center",
               }}
             >
-              <Icon name="magnifying-glass" size={13} />
+              <Icon name="search" size={13} />
             </span>
             <input
               className="sheet-input"
