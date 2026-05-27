@@ -572,7 +572,13 @@
   grid-template-columns: repeat(3, 1fr);
   gap: 16px;
 }
+/* Keep 3-up on tablet (smaller cards), only stack on phones. */
 @media (max-width: 880px) {
+  .mt-feature-grid {
+    gap: 12px;
+  }
+}
+@media (max-width: 600px) {
   .mt-feature-grid {
     grid-template-columns: 1fr;
   }
