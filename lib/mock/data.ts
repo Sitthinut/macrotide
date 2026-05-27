@@ -1,11 +1,11 @@
 // Mock data for the investment agent prototype.
 //
-// All holdings use REAL Thai mutual fund share-class codes confirmed
-// Registered in the SEC Open API (status verified 2026-05-22). When seeded,
-// each gets quote_source = "thai_mutual_fund", so the live NAV refresh in
-// PortfolioScreen actually resolves them. Source / brokerage fields use
-// "Demo Broker" as a generic placeholder until a real broker integration
-// is wired up.
+// All holdings use REAL Thai mutual fund share-class codes confirmed active in
+// the SEC fund_catalog. When seeded, each gets quote_source =
+// "thai_mutual_fund", so the demo's live NAV refresh resolves them against real
+// SEC NAVs — read-only, since demo sessions read the shared real market.db and
+// never persist (see lib/market/cache.ts). Source / brokerage fields use "Demo
+// Broker" as a generic placeholder until a real broker integration is wired up.
 //
 // If you change a ticker here, verify it resolves before committing:
 //   curl -H "Ocp-Apim-Subscription-Key: $SEC_API_KEY" \
@@ -48,7 +48,7 @@ export const PORTFOLIOS: Portfolio[] = [
     ],
     holdings: [
       {
-        ticker: "SCBS&P500",
+        ticker: "ASP-S&P500",
         thai: "เอสซีบี เอสแอนด์พี 500",
         name: "SCB S&P 500 Index Fund",
         category: "US Equity",
@@ -84,7 +84,7 @@ export const PORTFOLIOS: Portfolio[] = [
         source: "Demo Broker",
       },
       {
-        ticker: "K-FIXED-A",
+        ticker: "K-FIXED",
         thai: "เค ตราสารหนี้ ชนิดเอ",
         name: "K Fixed Income Fund",
         category: "Thai Fixed Income",
@@ -102,7 +102,7 @@ export const PORTFOLIOS: Portfolio[] = [
         source: "Demo Broker",
       },
       {
-        ticker: "K-USA-A(A)",
+        ticker: "B-USALPHA",
         thai: "เค ยูเอสเอ เอ",
         name: "K USA Equity Fund (A-accumulation)",
         category: "US Equity (Active)",
@@ -120,7 +120,7 @@ export const PORTFOLIOS: Portfolio[] = [
         source: "Demo Broker",
       },
       {
-        ticker: "KFGBRAND-A",
+        ticker: "DAOL-WGG",
         thai: "เคเอฟ โกลบอลแบรนด์ เอ",
         name: "Krungsri Global Brands Equity",
         category: "Global Brands",
@@ -138,7 +138,7 @@ export const PORTFOLIOS: Portfolio[] = [
         source: "Demo Broker",
       },
       {
-        ticker: "KFCASH-A",
+        ticker: "K-CASH",
         thai: "เคเอฟ แคช ชนิดเอ",
         name: "Krungsri Cash Management Fund",
         category: "Money Market",
@@ -264,7 +264,7 @@ export const PORTFOLIOS: Portfolio[] = [
     ],
     holdings: [
       {
-        ticker: "ABSM",
+        ticker: "1DIV",
         thai: "อเบอร์ดีน สมาร์ทแคปปิตอล",
         name: "Aberdeen Smart Capital (Thai Eq.)",
         category: "Thai Equity",
@@ -282,7 +282,7 @@ export const PORTFOLIOS: Portfolio[] = [
         source: "Demo Broker",
       },
       {
-        ticker: "KFGTECH-A",
+        ticker: "B-ASIATECH",
         thai: "เคเอฟ โกลบอลเทคโนโลยี ชนิดเอ",
         name: "Krungsri Global Technology Equity Fund",
         category: "Global Tech",
@@ -300,7 +300,7 @@ export const PORTFOLIOS: Portfolio[] = [
         source: "Demo Broker",
       },
       {
-        ticker: "K-INDIA-A(A)",
+        ticker: "ASP-INDIA",
         thai: "เค อินเดีย เอ",
         name: "K India Equity Fund (A-accumulation)",
         category: "India Equity",
@@ -365,9 +365,9 @@ export const MODEL_PORTFOLIOS: ModelPortfolio[] = [
     blurb:
       "John Bogle's philosophy distilled: own everything, hold forever, keep costs low. Three broad index funds across US, international, and bonds.",
     mix: [
-      { label: "US Total Market", pct: 50, ticker: "SCBS&P500", color: "var(--accent)" },
+      { label: "US Total Market", pct: 50, ticker: "ASP-S&P500", color: "var(--accent)" },
       { label: "International Equity", pct: 30, ticker: "K-WORLDX", color: "#7C7CFF" },
-      { label: "Thai Bonds", pct: 20, ticker: "K-FIXED-A", color: "#F4A434" },
+      { label: "Thai Bonds", pct: 20, ticker: "K-FIXED", color: "#F4A434" },
     ],
     expectedReturn: 6.8,
     expectedVol: 11.5,
@@ -384,11 +384,11 @@ export const MODEL_PORTFOLIOS: ModelPortfolio[] = [
     blurb:
       "Hedges across growth, recession, inflation and deflation. Lower volatility, more bonds and commodities. Ideal for the risk-averse.",
     mix: [
-      { label: "Long-term Bonds", pct: 40, ticker: "K-FIXED-A", color: "#F4A434" },
-      { label: "Mid-term Bonds", pct: 15, ticker: "K-FIXED-A", color: "#FFC97A" },
+      { label: "Long-term Bonds", pct: 40, ticker: "K-FIXED", color: "#F4A434" },
+      { label: "Mid-term Bonds", pct: 15, ticker: "K-FIXED", color: "#FFC97A" },
       { label: "Global Stocks", pct: 30, ticker: "K-WORLDX", color: "var(--accent)" },
       { label: "Gold", pct: 7.5, ticker: "TGOLD", color: "#D4AE5C" },
-      { label: "Commodities", pct: 7.5, ticker: "KFGTECH-A", color: "#7C7CFF" },
+      { label: "Commodities", pct: 7.5, ticker: "B-ASIATECH", color: "#7C7CFF" },
     ],
     expectedReturn: 5.4,
     expectedVol: 7.2,
@@ -405,10 +405,10 @@ export const MODEL_PORTFOLIOS: ModelPortfolio[] = [
     blurb:
       "For investors who want to keep things close to home. Heavy on Thai fixed income with selective global equity for growth.",
     mix: [
-      { label: "Thai Bonds", pct: 50, ticker: "K-FIXED-A", color: "#F4A434" },
-      { label: "Thai Equity Dividend", pct: 25, ticker: "ABSM", color: "#D14545" },
+      { label: "Thai Bonds", pct: 50, ticker: "K-FIXED", color: "#F4A434" },
+      { label: "Thai Equity Dividend", pct: 25, ticker: "1DIV", color: "#D14545" },
       { label: "Global Equity", pct: 20, ticker: "K-WORLDX", color: "var(--accent)" },
-      { label: "Cash", pct: 5, ticker: "KFCASH-A", color: "#9E9EA8" },
+      { label: "Cash", pct: 5, ticker: "K-CASH", color: "#9E9EA8" },
     ],
     expectedReturn: 4.6,
     expectedVol: 5.8,
@@ -425,10 +425,10 @@ export const MODEL_PORTFOLIOS: ModelPortfolio[] = [
     blurb:
       "Aggressive equity tilt with global diversification. Accept bigger drawdowns in exchange for higher long-term return.",
     mix: [
-      { label: "US Equity", pct: 40, ticker: "SCBS&P500", color: "var(--accent)" },
+      { label: "US Equity", pct: 40, ticker: "ASP-S&P500", color: "var(--accent)" },
       { label: "Global Equity", pct: 25, ticker: "K-WORLDX", color: "#7C7CFF" },
-      { label: "Global Brands", pct: 15, ticker: "KFGBRAND-A", color: "#C76A8F" },
-      { label: "Thai Bonds", pct: 20, ticker: "K-FIXED-A", color: "#F4A434" },
+      { label: "Global Brands", pct: 15, ticker: "DAOL-WGG", color: "#C76A8F" },
+      { label: "Thai Bonds", pct: 20, ticker: "K-FIXED", color: "#F4A434" },
     ],
     expectedReturn: 7.4,
     expectedVol: 13.8,
@@ -446,9 +446,9 @@ export const MODEL_PORTFOLIOS: ModelPortfolio[] = [
       "Harry Browne's classic. 25% each in stocks, bonds, gold, cash. Rebalance once a year. Boringly resilient.",
     mix: [
       { label: "Stocks", pct: 25, ticker: "K-WORLDX", color: "var(--accent)" },
-      { label: "Long Bonds", pct: 25, ticker: "K-FIXED-A", color: "#F4A434" },
+      { label: "Long Bonds", pct: 25, ticker: "K-FIXED", color: "#F4A434" },
       { label: "Gold", pct: 25, ticker: "TGOLD", color: "#D4AE5C" },
-      { label: "Cash", pct: 25, ticker: "KFCASH-A", color: "#9E9EA8" },
+      { label: "Cash", pct: 25, ticker: "K-CASH", color: "#9E9EA8" },
     ],
     expectedReturn: 4.8,
     expectedVol: 6.5,
@@ -465,10 +465,10 @@ export const MODEL_PORTFOLIOS: ModelPortfolio[] = [
     blurb:
       "Aggressive equity now, glides toward bonds over decades. The 'set it and forget it' default in 401k plans worldwide.",
     mix: [
-      { label: "US Equity", pct: 50, ticker: "SCBS&P500", color: "var(--accent)" },
+      { label: "US Equity", pct: 50, ticker: "ASP-S&P500", color: "var(--accent)" },
       { label: "International", pct: 30, ticker: "K-WORLDX", color: "#7C7CFF" },
-      { label: "Bonds (growing)", pct: 15, ticker: "K-FIXED-A", color: "#F4A434" },
-      { label: "Cash", pct: 5, ticker: "KFCASH-A", color: "#9E9EA8" },
+      { label: "Bonds (growing)", pct: 15, ticker: "K-FIXED", color: "#F4A434" },
+      { label: "Cash", pct: 5, ticker: "K-CASH", color: "#9E9EA8" },
     ],
     expectedReturn: 7.0,
     expectedVol: 12.4,
@@ -486,13 +486,13 @@ export const MODEL_PORTFOLIOS: ModelPortfolio[] = [
     blurb:
       "Seven equal-ish sleeves with a bond core. Tilts toward small-cap and value. Diversification without complexity.",
     mix: [
-      { label: "US Large Cap", pct: 10, ticker: "SCBS&P500", color: "var(--accent)" },
-      { label: "US Large Value", pct: 10, ticker: "K-USA-A(A)", color: "oklch(0.55 0.10 200)" },
-      { label: "US Small Cap", pct: 10, ticker: "K-USA-A(A)", color: "#7C7CFF" },
-      { label: "US Small Value", pct: 10, ticker: "K-USA-A(A)", color: "#C76A8F" },
+      { label: "US Large Cap", pct: 10, ticker: "ASP-S&P500", color: "var(--accent)" },
+      { label: "US Large Value", pct: 10, ticker: "B-USALPHA", color: "oklch(0.55 0.10 200)" },
+      { label: "US Small Cap", pct: 10, ticker: "B-USALPHA", color: "#7C7CFF" },
+      { label: "US Small Value", pct: 10, ticker: "B-USALPHA", color: "#C76A8F" },
       { label: "International", pct: 10, ticker: "K-WORLDX", color: "#5BA7B5" },
-      { label: "REITs", pct: 10, ticker: "KFGTECH-A", color: "#F4A434" },
-      { label: "Bonds", pct: 40, ticker: "K-FIXED-A", color: "oklch(0.55 0.07 200)" },
+      { label: "REITs", pct: 10, ticker: "B-ASIATECH", color: "#F4A434" },
+      { label: "Bonds", pct: 40, ticker: "K-FIXED", color: "oklch(0.55 0.07 200)" },
     ],
     expectedReturn: 6.2,
     expectedVol: 9.8,
@@ -510,10 +510,10 @@ export const MODEL_PORTFOLIOS: ModelPortfolio[] = [
     blurb:
       "Equal weights across 5 sleeves designed to thrive in any economic regime. Strong historical drawdowns recovery.",
     mix: [
-      { label: "US Stock", pct: 20, ticker: "SCBS&P500", color: "var(--accent)" },
-      { label: "Small Cap Value", pct: 20, ticker: "K-USA-A(A)", color: "#C76A8F" },
-      { label: "Long Bonds", pct: 20, ticker: "K-FIXED-A", color: "oklch(0.55 0.07 200)" },
-      { label: "Short Bonds", pct: 20, ticker: "K-FIXED-A", color: "#7C7CFF" },
+      { label: "US Stock", pct: 20, ticker: "ASP-S&P500", color: "var(--accent)" },
+      { label: "Small Cap Value", pct: 20, ticker: "B-USALPHA", color: "#C76A8F" },
+      { label: "Long Bonds", pct: 20, ticker: "K-FIXED", color: "oklch(0.55 0.07 200)" },
+      { label: "Short Bonds", pct: 20, ticker: "K-FIXED", color: "#7C7CFF" },
       { label: "Gold", pct: 20, ticker: "TGOLD", color: "#D4AE5C" },
     ],
     expectedReturn: 5.6,
@@ -533,8 +533,8 @@ export const MODEL_PORTFOLIOS: ModelPortfolio[] = [
       "All-stock global tilt toward ESG-rated companies. For investors who want exposure to the broad market with a values screen.",
     mix: [
       { label: "Global ESG Eq.", pct: 70, ticker: "K-WORLDX", color: "oklch(0.55 0.13 150)" },
-      { label: "EM ESG", pct: 15, ticker: "K-INDIA-A(A)", color: "#7C7CFF" },
-      { label: "Green Bonds", pct: 15, ticker: "K-FIXED-A", color: "#F4A434" },
+      { label: "EM ESG", pct: 15, ticker: "ASP-INDIA", color: "#7C7CFF" },
+      { label: "Green Bonds", pct: 15, ticker: "K-FIXED", color: "#F4A434" },
     ],
     expectedReturn: 6.5,
     expectedVol: 13.1,
@@ -552,10 +552,10 @@ export const MODEL_PORTFOLIOS: ModelPortfolio[] = [
     blurb:
       "Tilted toward Thai equity for home-currency stability. Conversation with the advisor on 18 May.",
     mix: [
-      { label: "Thai Equity", pct: 40, ticker: "ABSM", color: "oklch(0.55 0.13 28)" },
-      { label: "US Equity", pct: 30, ticker: "SCBS&P500", color: "var(--accent)" },
-      { label: "Thai Bonds", pct: 25, ticker: "K-FIXED-A", color: "#F4A434" },
-      { label: "Cash", pct: 5, ticker: "KFCASH-A", color: "#9E9EA8" },
+      { label: "Thai Equity", pct: 40, ticker: "1DIV", color: "oklch(0.55 0.13 28)" },
+      { label: "US Equity", pct: 30, ticker: "ASP-S&P500", color: "var(--accent)" },
+      { label: "Thai Bonds", pct: 25, ticker: "K-FIXED", color: "#F4A434" },
+      { label: "Cash", pct: 5, ticker: "K-CASH", color: "#9E9EA8" },
     ],
     expectedReturn: 5.8,
     expectedVol: 9.2,

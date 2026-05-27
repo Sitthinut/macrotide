@@ -1,3 +1,14 @@
+// Contract for the demo seed AFTER the database split.
+//
+// A demo session's in-memory database is an app.db only: it carries the
+// persona's buckets / holdings / plan / journal / models. Market data is NOT
+// seeded here — demo sessions read the shared real market.db (see
+// lib/api/with-db.ts, lib/market/cache.ts). So this seed must:
+//   1. populate buckets + holdings (one per data.ts holding),
+//   2. seed the plan, journal entries, and built-in model portfolios,
+//   3. point holdings at the real Thai-fund tickers from data.ts so the live
+//      NAV path can price them against real SEC NAVs.
+
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
@@ -10,7 +21,8 @@ import { seedDemoData } from "./demo-seed";
 function freshDb() {
   const sqlite = new Database(":memory:");
   sqlite.pragma("foreign_keys = ON");
-  const migrationsDir = resolve("lib/db/migrations");
+  // App baseline only — the demo session DB has no market tables.
+  const migrationsDir = resolve("lib/db/migrations/app");
   const files = readdirSync(migrationsDir)
     .filter((f) => f.endsWith(".sql"))
     .sort();
@@ -23,148 +35,52 @@ function freshDb() {
   return { sqlite, db };
 }
 
-describe("seedDemoData synthetic NAV history", () => {
-  it("inserts >100 nav_history rows per seeded holding ticker", () => {
+describe("seedDemoData (app-only demo DB)", () => {
+  it("seeds buckets and one holding row per data.ts holding", () => {
     const { sqlite, db } = freshDb();
     seedDemoData(db);
 
-    const uniqueTickers = Array.from(
-      new Set(PORTFOLIOS.flatMap((p) => p.holdings.map((h) => h.ticker))),
-    );
+    const bucketCount = (sqlite.prepare("SELECT COUNT(*) AS n FROM buckets").get() as { n: number })
+      .n;
+    expect(bucketCount).toBe(PORTFOLIOS.length);
 
-    const counts = sqlite
-      .prepare(
-        "SELECT ticker, COUNT(*) AS n FROM nav_history WHERE ticker LIKE 'thai_mutual_fund:%' GROUP BY ticker",
-      )
-      .all() as Array<{ ticker: string; n: number }>;
-
-    expect(counts.length).toBe(uniqueTickers.length);
-    for (const row of counts) {
-      // ~180 calendar days, weekends excluded → ~128 business days.
-      // Allow some headroom for edge weekdays.
-      expect(row.n).toBeGreaterThan(100);
-      expect(row.n).toBeLessThanOrEqual(180);
-    }
+    const expectedHoldings = PORTFOLIOS.reduce((sum, p) => sum + p.holdings.length, 0);
+    const holdingCount = (
+      sqlite.prepare("SELECT COUNT(*) AS n FROM holdings").get() as { n: number }
+    ).n;
+    expect(holdingCount).toBe(expectedHoldings);
   });
 
-  it("uses combined source:ticker form for all cache keys", () => {
+  it("seeds every holding with the thai_mutual_fund quote source and a real ticker", () => {
     const { sqlite, db } = freshDb();
     seedDemoData(db);
 
-    const navKeys = sqlite.prepare("SELECT DISTINCT ticker FROM nav_history").all() as Array<{
+    const rows = sqlite.prepare("SELECT ticker, quote_source FROM holdings").all() as Array<{
       ticker: string;
+      quote_source: string;
     }>;
-    const quoteKeys = sqlite.prepare("SELECT ticker FROM fund_quotes").all() as Array<{
-      ticker: string;
-    }>;
-
-    for (const { ticker } of [...navKeys, ...quoteKeys]) {
-      // Holdings seed under thai_mutual_fund:; the index cache warms under yahoo:.
-      expect(ticker).toMatch(/^(thai_mutual_fund|yahoo):.+/);
-    }
-
-    // Sanity: a known holding's combined key is present in both tables.
-    const expectedKey = "thai_mutual_fund:K-FIXED-A";
-    expect(navKeys.some((r) => r.ticker === expectedKey)).toBe(true);
-    expect(quoteKeys.some((r) => r.ticker === expectedKey)).toBe(true);
-  });
-
-  it("warms the Yahoo index cache so demo Markets shows real data, not the unavailable banner", () => {
-    const { sqlite, db } = freshDb();
-    seedDemoData(db);
-
-    for (const symbol of ["^GSPC", "^NDX", "ACWI", "GC=F", "THB=X", "^SET.BK"]) {
-      const key = `yahoo:${symbol}`;
-      const quote = sqlite
-        .prepare("SELECT nav, updated_at FROM fund_quotes WHERE ticker = ?")
-        .get(key) as { nav: number; updated_at: string } | undefined;
-      expect(quote, `${key} should have a cached quote`).toBeDefined();
-      expect(quote?.nav).toBeGreaterThan(0);
-
-      const navCount = (
-        sqlite.prepare("SELECT COUNT(*) AS n FROM nav_history WHERE ticker = ?").get(key) as {
-          n: number;
-        }
-      ).n;
-      expect(navCount, `${key} should have a NAV series`).toBeGreaterThan(100);
-    }
-  });
-
-  it("produces only finite, positive NAVs with no >50% daily jumps", () => {
-    const { sqlite, db } = freshDb();
-    seedDemoData(db);
-
-    const rows = sqlite
-      .prepare("SELECT ticker, date, nav FROM nav_history ORDER BY ticker, date")
-      .all() as Array<{ ticker: string; date: string; nav: number }>;
-
     expect(rows.length).toBeGreaterThan(0);
-
-    let prev: { ticker: string; nav: number } | null = null;
     for (const r of rows) {
-      expect(Number.isFinite(r.nav)).toBe(true);
-      expect(r.nav).toBeGreaterThan(0);
-      expect(Number.isNaN(r.nav)).toBe(false);
-
-      if (prev && prev.ticker === r.ticker) {
-        const pct = Math.abs((r.nav - prev.nav) / prev.nav);
-        expect(pct).toBeLessThan(0.5);
-      }
-      prev = { ticker: r.ticker, nav: r.nav };
+      expect(r.quote_source).toBe("thai_mutual_fund");
+      expect(r.ticker).toBeTruthy();
     }
   });
 
-  it("makes fund_quotes.nav match the last nav_history row per ticker", () => {
+  it("seeds the plan, journal entries, and built-in model portfolios", () => {
     const { sqlite, db } = freshDb();
     seedDemoData(db);
 
-    const quotes = sqlite.prepare("SELECT ticker, nav FROM fund_quotes").all() as Array<{
-      ticker: string;
-      nav: number;
-    }>;
+    const plans = (sqlite.prepare("SELECT COUNT(*) AS n FROM plans").get() as { n: number }).n;
+    expect(plans).toBe(1);
 
-    for (const q of quotes) {
-      const latest = sqlite
-        .prepare("SELECT nav FROM nav_history WHERE ticker = ? ORDER BY date DESC LIMIT 1")
-        .get(q.ticker) as { nav: number } | undefined;
-      expect(latest).toBeDefined();
-      // Stored to 6 decimal places — exact match expected.
-      expect(latest?.nav).toBeCloseTo(q.nav, 5);
-    }
-  });
+    const journal = (
+      sqlite.prepare("SELECT COUNT(*) AS n FROM journal_entries").get() as { n: number }
+    ).n;
+    expect(journal).toBeGreaterThan(0);
 
-  it("is deterministic across re-seeds (same ticker → same series)", () => {
-    const a = freshDb();
-    seedDemoData(a.db);
-    const b = freshDb();
-    seedDemoData(b.db);
-
-    const fromA = a.sqlite
-      .prepare(
-        "SELECT date, nav FROM nav_history WHERE ticker = 'thai_mutual_fund:K-FIXED-A' ORDER BY date",
-      )
-      .all();
-    const fromB = b.sqlite
-      .prepare(
-        "SELECT date, nav FROM nav_history WHERE ticker = 'thai_mutual_fund:K-FIXED-A' ORDER BY date",
-      )
-      .all();
-
-    expect(fromA).toEqual(fromB);
-  });
-
-  it("skips weekends in the generated series", () => {
-    const { sqlite, db } = freshDb();
-    seedDemoData(db);
-
-    const dates = sqlite
-      .prepare("SELECT DISTINCT date FROM nav_history WHERE ticker = 'thai_mutual_fund:K-FIXED-A'")
-      .all() as Array<{ date: string }>;
-
-    for (const { date } of dates) {
-      const day = new Date(`${date}T00:00:00Z`).getUTCDay();
-      expect(day).not.toBe(0); // Sunday
-      expect(day).not.toBe(6); // Saturday
-    }
+    const models = (
+      sqlite.prepare("SELECT COUNT(*) AS n FROM model_portfolios").get() as { n: number }
+    ).n;
+    expect(models).toBeGreaterThan(0);
   });
 });

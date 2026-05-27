@@ -39,7 +39,8 @@ import {
 } from "../lib/db/schema";
 
 const DB_PATH = resolve(process.env.DB_PATH ?? "data/app.db");
-const MIGRATIONS_DIR = resolve("lib/db/migrations");
+// Owner-backfill only touches app.db tables (user, buckets, plans, …).
+const MIGRATIONS_DIR = resolve("lib/db/migrations/app");
 
 function randomId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `owner-${Date.now()}`;

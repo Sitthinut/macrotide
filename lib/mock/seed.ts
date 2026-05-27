@@ -7,18 +7,14 @@ import { dirname, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import {
-  buckets,
-  fundQuotes,
-  holdings,
-  journalEntries,
-  modelPortfolios,
-  plans,
-} from "../db/schema";
+import { buckets, holdings, journalEntries, modelPortfolios, plans } from "../db/schema";
 import { MODEL_PORTFOLIOS, PORTFOLIOS, USER_GOALS, USER_JOURNAL, USER_PLAN } from "./data";
 
+// Seeds app.db only — the system of record. Market data (fund catalog, the
+// NAV/quote cache) lives in the separate, regenerable market.db and is
+// populated by the market refresh path, not this seed.
 const DB_PATH = resolve(process.env.DB_PATH ?? "data/app.db");
-const MIGRATIONS_DIR = resolve("lib/db/migrations");
+const MIGRATIONS_DIR = resolve("lib/db/migrations/app");
 const REFERENCE_TODAY = new Date("2026-05-21T00:00:00Z");
 
 function parseRelativeDate(text: string, today = REFERENCE_TODAY): string {
@@ -51,6 +47,7 @@ async function main() {
   migrate(db, { migrationsFolder: MIGRATIONS_DIR });
 
   // Wipe in FK-safe order. SQLite without DEFERRABLE FKs can be fussy here.
+  // app.db tables only — the market cache lives in market.db.
   sqlite.exec(`
     DELETE FROM chat_messages;
     DELETE FROM chat_threads;
@@ -59,8 +56,6 @@ async function main() {
     DELETE FROM holdings;
     DELETE FROM buckets;
     DELETE FROM model_portfolios;
-    DELETE FROM fund_quotes;
-    DELETE FROM nav_history;
     DELETE FROM settings;
   `);
 
@@ -88,8 +83,7 @@ async function main() {
       .run();
   }
 
-  // Buckets + holdings + fund quote cache
-  const seenTickers = new Set<string>();
+  // Buckets + holdings
   for (const p of PORTFOLIOS) {
     db.insert(buckets)
       .values({
@@ -133,20 +127,6 @@ async function main() {
           updatedAt: now,
         })
         .run();
-
-      if (!seenTickers.has(h.ticker)) {
-        seenTickers.add(h.ticker);
-        db.insert(fundQuotes)
-          .values({
-            ticker: h.ticker,
-            nav: h.nav,
-            d1Pct: h.d1,
-            ytdPct: h.ytd,
-            y1Pct: h.y1,
-            updatedAt: now,
-          })
-          .run();
-      }
     }
   }
 
@@ -196,7 +176,6 @@ async function main() {
   const counts = {
     buckets: sqlite.prepare("SELECT COUNT(*) AS n FROM buckets").get() as { n: number },
     holdings: sqlite.prepare("SELECT COUNT(*) AS n FROM holdings").get() as { n: number },
-    fund_quotes: sqlite.prepare("SELECT COUNT(*) AS n FROM fund_quotes").get() as { n: number },
     model_portfolios: sqlite.prepare("SELECT COUNT(*) AS n FROM model_portfolios").get() as {
       n: number;
     },

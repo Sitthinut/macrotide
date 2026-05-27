@@ -3,16 +3,20 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import * as schema from "./schema";
+import * as appSchema from "./schema/app";
 
-const MIGRATIONS_DIR = resolve("lib/db/migrations");
+// A demo session is its own in-memory app.db (system of record), seeded with
+// the persona's buckets/holdings/plans/journal. Market data is NOT seeded here:
+// the demo reads the shared real market.db (see lib/api/with-db.ts), so we only
+// replay the APP baseline into the session DB.
+const APP_MIGRATIONS_DIR = resolve("lib/db/migrations/app");
 const IDLE_TTL_MS = 60 * 60 * 1000; // 1h
 const SWEEP_INTERVAL_MS = 5 * 60 * 1000; // 5m
 const MAX_SESSIONS = 200; // hard cap; oldest evicted on overflow
 
 type DemoSession = {
   sqlite: Database.Database;
-  db: ReturnType<typeof drizzle<typeof schema>>;
+  db: ReturnType<typeof drizzle<typeof appSchema>>;
   createdAt: number;
   lastUsed: number;
   chatTurnsUsed: number;
@@ -36,15 +40,15 @@ function sessions(): Map<string, DemoSession> {
 let cachedMigrationSql: string | null = null;
 function migrationSql(): string {
   if (cachedMigrationSql !== null) return cachedMigrationSql;
-  if (!existsSync(MIGRATIONS_DIR)) {
+  if (!existsSync(APP_MIGRATIONS_DIR)) {
     cachedMigrationSql = "";
     return "";
   }
-  const files = readdirSync(MIGRATIONS_DIR)
+  const files = readdirSync(APP_MIGRATIONS_DIR)
     .filter((f) => f.endsWith(".sql"))
     .sort();
   cachedMigrationSql = files
-    .map((f) => readFileSync(join(MIGRATIONS_DIR, f), "utf8"))
+    .map((f) => readFileSync(join(APP_MIGRATIONS_DIR, f), "utf8"))
     // drizzle generates statement-breakpoint comments; turn them into a single
     // semicolon-terminated stream so better-sqlite3's exec() can run them.
     .join("\n")
@@ -116,7 +120,7 @@ export function getOrCreateDemoSession(sessionId: string): DemoSession {
   const sql = migrationSql();
   if (sql) sqlite.exec(sql);
 
-  const db = drizzle(sqlite, { schema });
+  const db = drizzle(sqlite, { schema: appSchema });
 
   // Seed mock data so the demo has something to explore.
   // Imported lazily to avoid loading the static fixtures on every cold start.
