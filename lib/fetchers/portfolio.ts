@@ -6,6 +6,7 @@ import type { JournalEntry } from "@/lib/db/queries/journal";
 import type { ModelPortfolio as DbModelPortfolio } from "@/lib/db/queries/models";
 import type { Plan } from "@/lib/db/queries/plan";
 import type { FundQuote } from "@/lib/db/queries/quotes";
+import type { IndicatorDef } from "@/lib/market/indicators";
 import { useResource } from "./swr";
 
 export type { Bucket, DbHolding, DbModelPortfolio, FundQuote, JournalEntry, Plan };
@@ -95,6 +96,17 @@ export interface MarketIndexResponse {
 
 export function useMarketIndices() {
   return useResource<MarketIndexResponse[]>("/api/market/indices");
+}
+
+export interface MarketIndicatorPrefs {
+  /** The user's selected indicator symbols, in display order. */
+  selected: string[];
+  /** The full addable catalog (label/group/tier metadata). */
+  catalog: IndicatorDef[];
+}
+
+export function useMarketIndicatorPrefs() {
+  return useResource<MarketIndicatorPrefs>("/api/market/indicators");
 }
 
 export interface MarketNewsItem {

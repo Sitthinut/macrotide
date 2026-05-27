@@ -1,5 +1,6 @@
-// Internal admin endpoint: refreshes cached market data for INDICES + every
-// ticker present in `holdings`. Designed to be called from a cron job:
+// Internal admin endpoint: refreshes cached market data for every indicator in
+// the catalog + every ticker present in `holdings`. Designed to be called from
+// a cron job:
 //
 //   0 7 * * *  curl -s -X POST http://localhost:3000/api/admin/refresh-market
 //
@@ -10,11 +11,12 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db/client";
 import { holdings } from "@/lib/db/schema";
 import { refreshSymbols } from "@/lib/market/cache";
-import { INDICES } from "@/lib/market/indices";
+import { INDICATOR_CATALOG } from "@/lib/market/indicators";
 
 export async function POST() {
-  // Indices always route through Yahoo.
-  const indexRefs = INDICES.map((i) => ({ source: "yahoo", ticker: i.symbol }));
+  // Warm every catalog indicator (so any user's selection is cached) — all
+  // route through the "yahoo" provider chain.
+  const indexRefs = INDICATOR_CATALOG.map((i) => ({ source: "yahoo", ticker: i.symbol }));
   // Every held position is refreshed via its own provider — holdings now
   // carry quote_source explicitly so we don't need to guess by ticker shape.
   const heldRows = db
@@ -46,7 +48,7 @@ export async function POST() {
 
 export async function GET() {
   return NextResponse.json({
-    hint: "POST this endpoint to refresh market data (Yahoo Finance cache).",
-    indices: INDICES.map((i) => i.symbol),
+    hint: "POST this endpoint to refresh market data (provider-chain cache).",
+    indices: INDICATOR_CATALOG.map((i) => i.symbol),
   });
 }

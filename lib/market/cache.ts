@@ -3,7 +3,7 @@ import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db/context";
 import { fundQuotes, navHistory } from "@/lib/db/schema";
 import type { SeriesInterval, SeriesRange } from "./providers/types";
-import { resolveProvider } from "./registry";
+import { resolveProviderChain } from "./registry";
 
 const QUOTE_TTL_MS = 5 * 60_000; // 5 min for live quote
 const HISTORY_TTL_MS = 24 * 60 * 60_000; // 24 h for daily series
@@ -72,17 +72,31 @@ export async function getCachedSeries(
   const backingOff = lastFail !== undefined && Date.now() - lastFail < FAIL_BACKOFF_MS;
 
   if (!backingOff) {
-    const provider = resolveProvider(source, ticker);
-    try {
-      const fresh = await provider.fetchSeries(ticker, range, interval);
-      recentFailures.delete(key);
-      return persistFresh(db, key, ticker, fresh);
-    } catch (err) {
-      recentFailures.set(key, Date.now());
-      // Fall back to the last good values rather than blanking the symbol on a
-      // transient upstream error (e.g. Yahoo 429). Only rethrow on a cold cache.
-      if (!cachedQuote) throw err;
+    // Try each matching provider in preference order — keyed source first,
+    // keyless fallback next — so one upstream's outage (e.g. Yahoo 429) doesn't
+    // blank the symbol when another source can serve it.
+    const chain = resolveProviderChain(source, ticker);
+    if (chain.length === 0) {
+      throw new Error(`No provider matches source="${source}", ticker="${ticker}"`);
     }
+    let lastErr: unknown;
+    for (const provider of chain) {
+      try {
+        const fresh = await provider.fetchSeries(ticker, range, interval);
+        if (fresh.series.length === 0) {
+          lastErr = new Error(`${provider.id} returned no data for ${ticker}`);
+          continue; // empty result — try the next provider
+        }
+        recentFailures.delete(key);
+        return persistFresh(db, key, ticker, fresh);
+      } catch (err) {
+        lastErr = err; // upstream failed — fall through to the next provider
+      }
+    }
+    // Every provider failed. Back off this key, then serve the last good values
+    // rather than blanking the symbol; only surface the error on a cold cache.
+    recentFailures.set(key, Date.now());
+    if (!cachedQuote) throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
   }
 
   if (cachedQuote) return readCached(db, key, ticker, range, cachedQuote);

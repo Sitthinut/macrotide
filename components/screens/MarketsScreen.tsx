@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Icon } from "@/components/Icon";
+import { ManageIndicatorsSheet } from "@/components/ManageIndicatorsSheet";
 import {
   type MarketIndexResponse,
   type MarketNewsItem,
@@ -9,6 +10,7 @@ import {
   useMarketNews,
 } from "@/lib/fetchers/portfolio";
 import { fmtRelativeDate } from "@/lib/format";
+import { indicatorBySymbol } from "@/lib/market/indicators";
 import { LEARN_CONTENT } from "@/lib/static/learn";
 import type { LearnArticle, MarketIndex } from "@/lib/static/types";
 
@@ -67,7 +69,7 @@ function adaptIndices(rows: MarketIndexResponse[]): {
       name: r.name,
       val: r.price,
       d: r.d1Pct ?? 0,
-      isYield: r.symbol === "THB=X",
+      isYield: indicatorBySymbol(r.symbol)?.isYield ?? false,
     });
   }
   return { indices, failures, asOf };
@@ -76,23 +78,36 @@ function adaptIndices(rows: MarketIndexResponse[]): {
 function MarketsToday() {
   const { data: liveRows, isLoading } = useMarketIndices();
   const live = useMemo(() => (liveRows ? adaptIndices(liveRows) : null), [liveRows]);
+  const [manageOpen, setManageOpen] = useState(false);
 
   // Only ever show real, fetched index values — never fabricated mock numbers.
   // When nothing loads we render an honest unavailable state instead.
   const indices = live?.indices ?? [];
   const asOf = indices.length > 0 ? (live?.asOf ?? null) : null;
 
-  return <MarketsTodayInner indices={indices} asOf={asOf} loading={isLoading && !liveRows} />;
+  return (
+    <>
+      <MarketsTodayInner
+        indices={indices}
+        asOf={asOf}
+        loading={isLoading && !liveRows}
+        onManage={() => setManageOpen(true)}
+      />
+      <ManageIndicatorsSheet open={manageOpen} onClose={() => setManageOpen(false)} />
+    </>
+  );
 }
 
 function MarketsTodayInner({
   indices,
   asOf,
   loading,
+  onManage,
 }: {
   indices: MarketIndex[];
   asOf: string | null;
   loading: boolean;
+  onManage: () => void;
 }) {
   return (
     <div>
@@ -102,11 +117,21 @@ function MarketsTodayInner({
       <div className="section" style={{ marginTop: 0 }}>
         <div className="section-header">
           <h3>Indices</h3>
-          {asOf && (
-            <span className="link" style={{ color: "var(--muted)" }}>
-              as of {fmtRelativeDate(asOf)}
-            </span>
-          )}
+          <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {asOf && (
+              <span className="link" style={{ color: "var(--muted)" }}>
+                as of {fmtRelativeDate(asOf)}
+              </span>
+            )}
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Manage indicators"
+              onClick={onManage}
+            >
+              <Icon name="settings" size={14} />
+            </button>
+          </span>
         </div>
         {indices.length > 0 ? (
           <div className="card" style={{ padding: 0 }}>

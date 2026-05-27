@@ -2424,3 +2424,43 @@ textarea.sheet-input {
     display: none;
   }
 }
+
+/* ========= Manage indicators sheet ========= */
+.mi-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: var(--card-soft);
+}
+.icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.icon-btn:disabled:hover {
+  background: var(--paper);
+  color: var(--ink-soft);
+}
+.mi-add-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    border-color 0.12s;
+}
+.mi-add-chip:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}

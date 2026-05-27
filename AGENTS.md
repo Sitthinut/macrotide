@@ -127,10 +127,18 @@ that takes a write.
 Every holding has a `quote_source` column (NOT NULL, default `"yahoo"`)
 that the market registry uses to dispatch NAV / price fetches:
 
-| `quote_source` | Provider | Ticker shape |
+| `quote_source` | Provider chain (in order) | Ticker shape |
 | --- | --- | --- |
 | `"thai_mutual_fund"` | Thai SEC Open API | bare proj_abbr_name or share-class (`K-FIXED-A`, `HIDIV-D`) |
-| `"yahoo"` | Yahoo Finance | bare/dotted/caret symbols (`^SET.BK`, `AAPL`, `PTT.BK`, `THB=X`) |
+| `"yahoo"` | Twelve Data (keyed) → Frankfurter (keyless, FX only) → Yahoo (keyless) | bare/dotted/caret symbols (`^SET.BK`, `AAPL`, `PTT.BK`, `THB=X`) |
+
+For `"yahoo"`, `lib/market/cache.ts` walks the chain (`resolveProviderChain`)
+and uses the first provider that returns data — keyed source first, keyless
+fallbacks next. Yahoo now 429s datacenter IPs, so equity indicators need
+`TWELVE_DATA_API_KEY`. The Markets catalog (lib/market/indicators.ts) fetches
+free-tier **ETF proxies** (SPY, QQQ, ACWI, THD for Thailand, …) because raw
+index symbols aren't on Twelve Data's free plan; FX (`THB=X`) falls back to
+keyless ECB-backed Frankfurter.
 
 **The value names the asset class, not the provider.** `"thai_mutual_fund"`
 means "Thai mutual fund regardless of which API serves it." If we ever swap
@@ -267,6 +275,7 @@ owner chain. Tier is stored in `account_tier`; promote via SQL
 | Var | Default | Read by | Notes |
 | --- | --- | --- | --- |
 | `SEC_API_KEY` | — (Thai funds render as "—" without it) | [lib/market/providers/sec-thailand.ts](./lib/market/providers/sec-thailand.ts) | Thai SEC Open API subscription key (Primary or Secondary — both valid). Header: `Ocp-Apim-Subscription-Key`. Covers all 6 product groups under one subscription. |
+| `TWELVE_DATA_API_KEY` | — (falls back to keyless Yahoo, which 429s from datacenter IPs) | [lib/market/providers/twelvedata.ts](./lib/market/providers/twelvedata.ts) | Keyed primary for `yahoo`-sourced series (Markets indicators, FX, stocks). When set, the cache tries Twelve Data first and falls back to Yahoo per-symbol on error/unsupported. Free tier ≈ 800 req/day, 8 req/min. Raw index symbols aren't on the free plan, so the catalog uses ETF proxies (SPY/QQQ/ACWI/THD/…), all verified to return on free. |
 
 ### Dev-only
 

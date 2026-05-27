@@ -522,6 +522,27 @@ export const chatMessages = sqliteTable(
   (table) => [index("idx_chat_messages_thread").on(table.threadId, table.createdAt)],
 );
 
+// Per-user Markets-screen indicator list — which indicators a user shows and in
+// what order. No rows for a user → the app falls back to the curated default
+// set (DEFAULT_INDICATOR_SYMBOLS in lib/market/indicators.ts). Writes replace a
+// user's whole list, so order is authoritative.
+export const userMarketIndicators = sqliteTable(
+  "user_market_indicators",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    // Owner. NULL in single-owner / AUTH_DISABLED mode (matches other tables).
+    userId: text("user_id").references(() => user.id),
+    // Canonical ticker from the indicator catalog (lib/market/indicators.ts).
+    symbol: text("symbol").notNull(),
+    // Display order, ascending.
+    position: integer("position").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_user_market_indicator").on(table.userId, table.symbol),
+    index("idx_user_market_indicator_order").on(table.userId, table.position),
+  ],
+);
+
 // Generic key-value settings.
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),

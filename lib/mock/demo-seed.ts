@@ -23,7 +23,6 @@ import {
   plans,
 } from "../db/schema";
 import { TER_FEE_TYPE } from "../market/fund-fees";
-import { INDICES } from "../market/indices";
 import { MODEL_PORTFOLIOS, PORTFOLIOS, USER_GOALS, USER_JOURNAL, USER_PLAN } from "./data";
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
@@ -31,12 +30,16 @@ const REFERENCE_TODAY = new Date("2026-05-21T00:00:00Z");
 
 // Plausible base levels for the demo index cache (the mock MARKETS list doesn't
 // map 1:1 to these Yahoo symbols). The synthetic series ends at these values.
+// Keyed by the default indicator symbols (lib/market/indicators.ts) so the demo
+// Markets screen shows the same global-first set the live app defaults to.
+// Equities are ETF proxies (SPY/QQQ/ACWI/THD), matching the live catalog.
 const DEMO_INDEX_VALUES: Record<string, number> = {
-  "^SET.BK": 1428.42,
-  "^GSPC": 5821.1,
-  "^IXIC": 18942.8,
-  "^N225": 38500,
+  SPY: 750.59,
+  QQQ: 730.28,
+  ACWI: 157.84,
+  "GC=F": 2648.3,
   "THB=X": 36.5,
+  THD: 72.78,
 };
 
 // All demo seed holdings are Thai mutual funds, per the existing seed.
@@ -328,11 +331,11 @@ export function seedDemoData(db: Db): void {
   // back to the mock list and surfacing a "sources unavailable" banner (the
   // demo DB never hits Yahoo). updatedAt:now keeps these "fresh" so the live
   // path serves them without a network call.
-  for (const def of INDICES) {
-    const base = DEMO_INDEX_VALUES[def.symbol];
+  for (const symbol of Object.keys(DEMO_INDEX_VALUES)) {
+    const base = DEMO_INDEX_VALUES[symbol];
     if (base == null) continue;
-    const cacheKey = `yahoo:${def.symbol}`;
-    const series = generateSeries(def.symbol, base, null, REFERENCE_TODAY);
+    const cacheKey = `yahoo:${symbol}`;
+    const series = generateSeries(symbol, base, null, REFERENCE_TODAY);
     for (const row of series) {
       db.insert(navHistory)
         .values({ ticker: cacheKey, date: row.date, nav: row.nav })
