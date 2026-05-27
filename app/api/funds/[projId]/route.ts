@@ -18,7 +18,7 @@
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
-import { getDb } from "@/lib/db/context";
+import { getMarketDb } from "@/lib/db/context";
 import { getFeederEnrichment } from "@/lib/db/queries/feeder-enrichment";
 import { getFundEnrichment } from "@/lib/db/queries/fund-enrichment";
 import { fundCatalog } from "@/lib/db/schema";
@@ -33,7 +33,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ projId:
   }
 
   return withDb(() => {
-    const fund = getDb().select().from(fundCatalog).where(eq(fundCatalog.projId, projId)).get();
+    const fund = getMarketDb()
+      .select()
+      .from(fundCatalog)
+      .where(eq(fundCatalog.projId, projId))
+      .get();
 
     if (!fund) {
       return NextResponse.json({ error: "Fund not found" }, { status: 404 });
