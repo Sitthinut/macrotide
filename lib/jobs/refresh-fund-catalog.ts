@@ -63,11 +63,7 @@ import {
   statusFromSec,
 } from "../market/fund-classify";
 import { normalizeFeeType } from "../market/fund-fees";
-import {
-  fetchISharesHoldingsByIsin,
-  type ISharesHoldingRow,
-  matchISharesMaster,
-} from "../market/providers/ishares";
+import { EDGAR_FUNDS, fetchNportHoldings, matchEdgarFund } from "../market/providers/edgar-nport";
 import {
   enumerateFundProfiles,
   fetchFundAssetAllocation,
@@ -111,8 +107,8 @@ export interface RefreshFundCatalogOptions {
   _fetchPortfolio?: typeof fetchFundPortfolio;
   /** Injectable portfolio-asset-type-fetcher (replaces the real API call in tests). */
   _fetchPortfolioAssetType?: typeof fetchFundPortfolioAssetType;
-  /** Injectable feeder look-through fetcher (replaces the real iShares HTTP call in tests). */
-  _fetchFeederHoldings?: typeof fetchISharesHoldingsByIsin;
+  /** Injectable feeder look-through fetcher (replaces the real EDGAR HTTP call in tests). */
+  _fetchFeederHoldings?: typeof fetchNportHoldings;
 }
 
 export interface RefreshFundCatalogResult {
@@ -211,7 +207,7 @@ export async function refreshFundCatalog(
   const getTop5Holdings = opts._fetchTop5Holdings ?? fetchFundTop5Holdings;
   const getPortfolio = opts._fetchPortfolio ?? fetchFundPortfolio;
   const getPortfolioAssetType = opts._fetchPortfolioAssetType ?? fetchFundPortfolioAssetType;
-  const getFeederHoldings = opts._fetchFeederHoldings ?? fetchISharesHoldingsByIsin;
+  const getFeederHoldings = opts._fetchFeederHoldings ?? fetchNportHoldings;
 
   // Read enrichment flags once per run (not per fund).
   const doPerformance = envFlag("SEC_INGEST_PERFORMANCE");
@@ -348,46 +344,51 @@ export async function refreshFundCatalog(
           }
         }
 
-        // Feeder fund look-through: resolve the master fund's ISIN, then fetch
-        // the master's published holdings. Resolution order:
+        // Feeder fund look-through: resolve the master fund, then fetch its
+        // latest SEC NPORT-P holdings. Resolution order:
         //   1. An explicit feeder_master_map entry (operator-curated) — always
         //      wins, and is never overwritten by an automatic guess.
-        //   2. A conservative name match against the iShares registry — used
-        //      only when it is unambiguous (see matchISharesMaster), so a wrong
-        //      ISIN is never silently assigned. Anything ambiguous is skipped
-        //      and left for a manual feeder_master_map entry.
+        //   2. A conservative name match against the EDGAR_FUNDS registry — used
+        //      only when unambiguous (see matchEdgarFund), so a wrong fund is
+        //      never silently assigned. Anything ambiguous is skipped and left
+        //      for a manual feeder_master_map entry.
         // The SEC `feederfund_master_fund` field is a master-fund NAME string,
-        // not an ISIN, which is why name resolution is needed.
+        // so name resolution maps it to a registry fund (keyed by ISIN). A
+        // master we don't have a US-registered NPORT-P filer for is skipped.
         if (doFeederLookThrough && p.feederfund_master_fund) {
           const masterName = p.feederfund_master_fund;
           const explicit = getFeederMasterMap(projId);
-          const masterIsin = explicit?.masterIsin ?? matchISharesMaster(masterName);
-          if (masterIsin) {
-            const holdingItems: ISharesHoldingRow[] = await getFeederHoldings(masterIsin);
-            if (holdingItems.length > 0) {
+          const masterIsin = explicit?.masterIsin ?? matchEdgarFund(masterName);
+          const ref = masterIsin ? EDGAR_FUNDS[masterIsin] : undefined;
+          if (ref) {
+            const { asOfDate, holdings } = await getFeederHoldings(ref);
+            if (holdings.length > 0) {
               // Only record an auto-derived map; never clobber an operator's
               // explicit mapping with the SEC-sourced name.
               if (!explicit) {
-                upsertFeederMasterMap({ projId, masterIsin, masterName, provider: "ishares" });
+                upsertFeederMasterMap({
+                  projId,
+                  masterIsin: ref.isin,
+                  masterName,
+                  provider: "sec-nport",
+                });
               }
 
-              // Store the top holdings (cap at 50 to keep the DB slim).
-              const top = holdingItems.slice(0, 50);
-              const lookThroughRows: FeederLookThroughHoldingInsert[] = top.map((h, i) => ({
+              const lookThroughRows: FeederLookThroughHoldingInsert[] = holdings.map((h, i) => ({
                 projId,
                 rank: i + 1,
                 name: h.name,
-                ticker: h.ticker || null,
-                assetClass: h.assetClass || null,
-                isin: h.isin || null,
+                ticker: h.ticker,
+                assetClass: h.assetClass,
+                isin: h.isin,
                 weightPct: h.weightPct,
-                asOfDate: h.asOfDate,
+                asOfDate,
               }));
               upsertFeederLookThroughHoldings(projId, lookThroughRows);
               fundsWithFeederLookThrough++;
             }
           }
-          // No resolvable master ISIN — silently skip (not an error).
+          // No resolvable / non-US-registered master — silently skip.
         }
       }
 
