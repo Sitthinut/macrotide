@@ -60,6 +60,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 - **Navigation labels** — the **Funds** tab is now **Explore** (it's catalog
   discovery, not a holdings list) and the **Chat** tab is now **Advisor** (it's
   the AI investment advisor). Screen ids are unchanged, so routing is untouched.
+- **Login screen** — the sign-in screen now matches the landing aesthetic: the
+  brand mark + wordmark (clickable home), pill buttons, and clearer copy (drops
+  the "real DB" jargon; uses the **Advisor** / **Explore** names). A signed-in
+  user hitting `/login` is now redirected server-side instead of via a
+  client-side bounce, so there's no flash of the login UI; the post-OAuth
+  passkey prompt and the demo sign-in path are unaffected.
 - **UI state stores** *(internal)* — the Portfolios panel↔screen and Chat
   window-event buses were replaced by typed `useSyncExternalStore` stores
   (`lib/stores/portfolio-ui.ts`, `lib/stores/chat-ui.ts`).
