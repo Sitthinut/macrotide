@@ -716,19 +716,7 @@ export function FundSelectScreen({ onOpenSettings, showMenu = true }: FundSelect
     <div className="screen" style={{ display: "flex", flexDirection: "column" }}>
       <div className="topbar">
         <div className="brand" style={{ flex: 1 }}>
-          <span>Select</span>
-          <span
-            style={{
-              marginLeft: 8,
-              fontSize: 10,
-              fontFamily: "var(--font-mono)",
-              color: "var(--muted)",
-              letterSpacing: "0.06em",
-              verticalAlign: "middle",
-            }}
-          >
-            fund finder
-          </span>
+          <span>Explore</span>
         </div>
         {showMenu && onOpenSettings && (
           <button className="icon-btn" aria-label="More" onClick={onOpenSettings}>

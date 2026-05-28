@@ -49,7 +49,7 @@ Browser ──HTTPS──▶ Reverse proxy (Caddy) ──▶ Next.js (App Router
 
 | Layer | Lives in | Responsibility |
 |---|---|---|
-| **UI** | [components/](../../components) | Screens (Portfolio, Markets, Chat, Journal, Models, Connect, Settings, Account) and shared components. Client-rendered; never imports server-only code or mock data directly. |
+| **UI** | [components/](../../components) | Screens (Portfolio, Markets, Explore, Advisor, Journal, Models, Connect, Settings, Account) and shared components. Client-rendered; never imports server-only code or mock data directly. |
 | **Client data** | [lib/fetchers/](../../lib/fetchers) | SWR fetchers — the only way components reach the API. |
 | **API** | [app/api/](../../app/api) | Route handlers. Validate, run inside `withDb`, call queries. See [api reference](../reference/api.md). |
 | **Domain logic** | [lib/portfolio/](../../lib/portfolio), [lib/market/](../../lib/market), [lib/memory/](../../lib/memory), [lib/advisor/](../../lib/advisor), [lib/ai/](../../lib/ai) | Pure-ish helpers and integrations: analytics, market providers, memory, Advisor tools, model provider. |
@@ -135,7 +135,7 @@ Thai mutual-fund NAVs come from the Thai SEC Open API.
 
 ## Fund search
 
-The fund finder typeahead is served by an **in-memory MiniSearch index**
+The **Explore** tab's fund-finder typeahead is served by an **in-memory MiniSearch index**
 ([lib/search/fund-index.ts](../../lib/search/fund-index.ts)) over the bounded,
 read-only fund catalog — not a `LIKE` scan or a search server. It gives fuzzy +
 prefix matching with field boosting and curated index-nickname synonyms, and

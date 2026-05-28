@@ -38,13 +38,14 @@ On `/login`, click **Try the demo**. This spins up a private, in-memory SQLite
 seeded with realistic mock data — its own isolated world that vanishes when the
 session ends. Nothing you do in the demo touches real data.
 
-Take a moment to click through the seven screens in the navigation:
+Take a moment to click through the screens in the navigation:
 
 | Screen | What it shows |
 |---|---|
 | **Portfolio** | Your holdings, allocation, fees, and a health score |
 | **Markets** | SET and global index movements, market news |
-| **Chat** | The Advisor — chat with structured access to your portfolio |
+| **Explore** | The fund finder — search the SEC catalog by name, index, theme, or fee |
+| **Advisor** | Chat with structured access to your portfolio, plan, and journal |
 | **Journal** | Notes, decisions, and reading you've logged |
 | **Models** | Built-in model portfolios you can compare against |
 | **Connect** | Importing holdings (CSV / image / manual) |
@@ -92,7 +93,7 @@ recompute from your real numbers.
 
 ## 5. Chat with the Advisor
 
-Open **Chat** and ask something like *"How concentrated is my portfolio?"* The
+Open **Advisor** and ask something like *"How concentrated is my portfolio?"* The
 Advisor can read your portfolio, plan, and journal, propose plan edits as cards
 you accept or reject, and remember durable facts you tell it across chats.
 

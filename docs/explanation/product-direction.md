@@ -76,7 +76,8 @@ keeps the product honest. Today: a flat RSS feed; the synthesis is planned.
 
 ### 4. Select — *which funds you actually buy*
 
-The pillar that closes the loop and the **biggest current gap**. Given a target
+Surfaced in the **Explore** tab (the fund finder). The pillar that closes the
+loop and the **biggest current gap**. Given a target
 allocation, which *specific, low-fee* Thai-registered funds deliver it? This
 needs a **fee-aware fund catalog** the app doesn't have yet (today, fees are
 stored per-holding and user-supplied, not per-fund). Once the catalog exists,

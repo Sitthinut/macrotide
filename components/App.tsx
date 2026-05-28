@@ -50,11 +50,14 @@ type Screen =
   | "account"
   | "admin";
 
+// Screen ids stay stable ("funds"/"chat") — only the visible labels changed:
+// Funds → Explore (it's the catalog discovery tool, not a holdings list),
+// Chat → Advisor (it's the AI investment advisor, not a generic chat).
 const MOBILE_NAV: { id: Screen; icon: string; label: string }[] = [
   { id: "portfolio", icon: "home", label: "Portfolio" },
   { id: "markets", icon: "pulse", label: "Markets" },
-  { id: "funds", icon: "search", label: "Funds" },
-  { id: "chat", icon: "chat", label: "Chat" },
+  { id: "funds", icon: "search", label: "Explore" },
+  { id: "chat", icon: "chat", label: "Advisor" },
   { id: "journal", icon: "book", label: "Journal" },
 ];
 
@@ -62,12 +65,12 @@ const MOBILE_NAV: { id: Screen; icon: string; label: string }[] = [
 const WIDE_NAV: { id: Screen; icon: string; label: string }[] = [
   { id: "portfolio", icon: "home", label: "Portfolio" },
   { id: "markets", icon: "pulse", label: "Markets" },
-  { id: "funds", icon: "search", label: "Funds" },
+  { id: "funds", icon: "search", label: "Explore" },
   { id: "journal", icon: "book", label: "Journal" },
 ];
 
 const APPS_RAIL: { id: AppId; icon: string; label: string }[] = [
-  { id: "chat", icon: "chat", label: "Chat" },
+  { id: "chat", icon: "chat", label: "Advisor" },
   { id: "portfolios", icon: "chart", label: "Portfolios" },
   { id: "plan", icon: "insight", label: "Plan" },
   { id: "notes", icon: "book", label: "Notes" },

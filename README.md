@@ -8,7 +8,7 @@
 ## Status
 
 **Experimental — don't rely on it for real investment decisions.** The
-7-screen UI (Portfolio, Markets, Chat, Journal, Models, Connect, Settings) is
+8-screen UI (Portfolio, Markets, Explore, Advisor, Journal, Models, Connect, Settings) is
 responsive across mobile / tablet / desktop with light/dark/system themes.
 
 | Capability | Status |
@@ -93,8 +93,8 @@ macrotide/
 │   │                        market, demo, auth/[...all], admin
 │   ├── layout.tsx, page.tsx, error.tsx, globals.css
 ├── components/
-│   ├── screens/             Portfolio, Markets, Chat, Journal, Models,
-│   │                        Connect, Settings
+│   ├── screens/             Portfolio, Markets, Advisor (chat), Journal,
+│   │                        Models, Connect, Settings (Explore lives in FundSelect.tsx)
 │   ├── App.tsx, ClientApp.tsx, AppPanels.tsx, charts.tsx, *Sheet.tsx, …
 ├── lib/
 │   ├── ai/                  OpenRouter provider + chat plumbing

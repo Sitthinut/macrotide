@@ -6,10 +6,11 @@
 // isolated in-memory app.db.
 //
 // Market data is NOT seeded here. After the database split, a demo session
-// reads the SHARED real market.db (fund catalog/fees + the NAV/quote cache)
-// read-only — see lib/api/with-db.ts and lib/market/cache.ts. The persona's
-// holdings point at REAL Thai-fund tickers (lib/mock/data.ts), so the live NAV
-// path prices them against real SEC NAVs without writing the shared file.
+// uses the SHARED real market.db (fund catalog/fees + the NAV/quote cache)
+// read-write, like a real user — it reads from and warms the same cache (see
+// lib/api/with-db.ts and lib/market/cache.ts). The persona's holdings point at
+// REAL Thai-fund tickers (lib/mock/data.ts), so the live NAV path prices them
+// against real SEC NAVs and write-throughs any cache misses into the shared file.
 
 import type { drizzle } from "drizzle-orm/better-sqlite3";
 import { buckets, holdings, journalEntries, modelPortfolios, plans } from "../db/schema";

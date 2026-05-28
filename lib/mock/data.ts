@@ -3,8 +3,9 @@
 // All holdings use REAL Thai mutual fund share-class codes confirmed active in
 // the SEC fund_catalog. When seeded, each gets quote_source =
 // "thai_mutual_fund", so the demo's live NAV refresh resolves them against real
-// SEC NAVs — read-only, since demo sessions read the shared real market.db and
-// never persist (see lib/market/cache.ts). Source / brokerage fields use "Demo
+// SEC NAVs from the shared real market.db, which demo uses read-write like a
+// real user — reading and warming the same cache (see lib/market/cache.ts).
+// Source / brokerage fields use "Demo
 // Broker" as a generic placeholder until a real broker integration is wired up.
 //
 // If you change a ticker here, verify it resolves before committing:

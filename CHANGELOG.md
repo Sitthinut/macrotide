@@ -40,8 +40,9 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   portfolio/feeder + the NAV/quote cache). A two-handle `DbContext` routes queries
   by domain; no join crosses the boundary. better-auth uses app.db; backups cover
   app.db only (market.db is regenerable and excluded from restic). Demo sessions
-  get an isolated in-memory app.db but share the real market.db (opened read-only;
-  mutations suppressed) for the same warm cache as real users. New env var
+  get an isolated in-memory app.db but share the real market.db read-write, like a
+  real user — demo reads from and warms the same NAV/quote cache (market data is
+  global, so demo cache fills just cut redundant upstream fetches). New env var
   `MARKET_DB_PATH` (default `data/market.db`, same `data/` volume); a one-time
   `scripts/split-db.ts` migrates an existing combined DB. Rationale: blast-radius
   isolation (the nightly SEC refresh can't endanger accounts), lean backups,
@@ -56,6 +57,9 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   removed.
 - **Portfolios sidebar reorder** — drag-to-reorder the portfolio list, persisted
   via a new `buckets.position` column and `PATCH /api/portfolios/reorder`.
+- **Navigation labels** — the **Funds** tab is now **Explore** (it's catalog
+  discovery, not a holdings list) and the **Chat** tab is now **Advisor** (it's
+  the AI investment advisor). Screen ids are unchanged, so routing is untouched.
 - **UI state stores** *(internal)* — the Portfolios panel↔screen and Chat
   window-event buses were replaced by typed `useSyncExternalStore` stores
   (`lib/stores/portfolio-ui.ts`, `lib/stores/chat-ui.ts`).
@@ -69,6 +73,10 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   positive/green.
 - **Build reliability** — DB migrations are skipped during `next build` (parallel
   build workers were racing `CREATE TABLE`); they run normally at server startup.
+- **Mobile bottom nav overflow** — the floating tab bar's buttons were rigid
+  (`flex: 0 0 76px`) and spilled past the right edge on phones narrower than
+  ~392px. The bar now uses a deterministic width with equal-flex buttons
+  (`flex: 1 1 0`), so the five tabs divide it evenly down to 320px.
 
 - **Persistence layer** — SQLite + Drizzle (15 tables), daily rotating backups,
   full CRUD APIs, SWR fetchers; all seven screens read from the DB.
