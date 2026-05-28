@@ -40,8 +40,8 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   get an isolated in-memory app.db but share the real market.db read-write, like a
   real user — demo reads from and warms the same NAV/quote cache (market data is
   global, so demo cache fills just cut redundant upstream fetches). New env var
-  `MARKET_DB_PATH` (default `data/market.db`, same `data/` volume); a one-time
-  `scripts/split-db.ts` migrates an existing combined DB. Rationale: blast-radius
+  `MARKET_DB_PATH` (default `data/market.db`, same `data/` volume); the existing
+  combined DB was migrated once into the split layout at rollout. Rationale: blast-radius
   isolation (the nightly SEC refresh can't endanger accounts), lean backups,
   credential-free dev clones, demo-with-real-data.
 - **Denormalized `fund_catalog.current_ter`** — the finder sorts and annotates

@@ -36,8 +36,7 @@ and can never endanger an account), **lean backups** (only app.db is precious,
 so the backup is small and market.db is excluded), **credential-free dev clones**
 (market.db re-crawls from public sources), and **demo-with-real-data** (a demo
 session gets an isolated in-memory app.db but shares the real market.db
-read-only, so it sees the same warm cache as real users). A one-time
-`scripts/split-db.ts` migrates an existing combined DB.
+read-only, so it sees the same warm cache as real users).
 
 ```text
 Browser ──HTTPS──▶ Reverse proxy (Caddy) ──▶ Next.js (App Router) ──▶ app.db + market.db (SQLite)

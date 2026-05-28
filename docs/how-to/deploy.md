@@ -17,11 +17,10 @@ auto-created under the same `data/` volume:
   restored.
 
 Both default under `data/`, so the bind-mount + `chown 1000:1000 data` steps
-below cover both with no extra config. An existing **combined** DB (a pre-split
-deploy) is migrated **once** by `scripts/split-db.ts`, which copies the market
-tables into a fresh market.db; run it once before the first post-split boot.
-Ordinary nullable schema additions (e.g. the `buckets.position` column) are
-applied automatically by the startup migrations — no manual step.
+below cover both with no extra config. A fresh deploy creates both files from
+their baselines on first boot; ordinary schema additions (e.g. the
+`buckets.position` column) are applied automatically by the startup migrations —
+no manual step.
 
 If you just want to share the app with people on the public internet, follow the "Single VM" path. If you'd rather keep it on your laptop and tunnel via Tailscale, jump to "Tailnet only".
 

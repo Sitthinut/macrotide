@@ -21,9 +21,8 @@ automatically on boot.
 No FK or SQL join crosses the boundary. `holdings` links to market data only via
 the soft `quote_source` + `ticker` cache key, resolved in app code (never a
 join); a query module touching both reads each handle and joins app-side. Both
-files sit under the same `data/` volume. A one-time `scripts/split-db.ts`
-migrates an existing combined DB; demo sessions get an isolated in-memory app.db
-but share the real market.db read-write (same warm cache as real users).
+files sit under the same `data/` volume. Demo sessions get an isolated in-memory
+app.db but share the real market.db read-write (same warm cache as real users).
 
 ## Tables at a glance
 
