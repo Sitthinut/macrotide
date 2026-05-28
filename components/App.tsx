@@ -20,6 +20,7 @@ import { MarketsScreen } from "@/components/screens/MarketsScreen";
 import { ModelPortfoliosScreen } from "@/components/screens/ModelPortfoliosScreen";
 import { PortfolioScreen } from "@/components/screens/PortfolioScreen";
 import { SettingsScreen, type Theme } from "@/components/screens/SettingsScreen";
+import { clearDemoSession } from "@/lib/auth/clear-demo";
 import { authClient } from "@/lib/auth/client";
 import { usePortfolioView, useSelectedModelId } from "@/lib/fetchers/legacy";
 import { usePlan } from "@/lib/fetchers/portfolio";
@@ -261,6 +262,10 @@ export function App() {
   };
   const signOut = async () => {
     setAccountMenuOpen(false);
+    // Clear the demo cookie too: `authClient.signOut()` only revokes the
+    // better-auth session, so a demo user signing out would otherwise land
+    // on /login with `macrotide_demo` intact and slide right back in.
+    await clearDemoSession();
     await authClient.signOut();
     window.location.href = "/login";
   };

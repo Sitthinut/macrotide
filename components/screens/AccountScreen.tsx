@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { aaguidName } from "@/lib/auth/aaguid";
+import { clearDemoSession } from "@/lib/auth/clear-demo";
 import { authClient } from "@/lib/auth/client";
 import { useResource } from "@/lib/fetchers/swr";
 
@@ -147,6 +148,9 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
     setBusy(true);
     setActionError(null);
     try {
+      // Clear the demo cookie alongside the real session — see comment in
+      // App.tsx::signOut.
+      await clearDemoSession();
       // Use $fetch directly to ensure POST method; the dynamic proxy infers GET
       // from an empty body, but /revoke-sessions is a POST-only endpoint.
       const res = await authClient.$fetch("/revoke-sessions", { method: "POST" });

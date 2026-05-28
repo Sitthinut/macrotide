@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { BrandMark } from "@/components/BrandMark";
+import { clearDemoSession } from "@/lib/auth/clear-demo";
 import { authClient, signIn, useSession } from "@/lib/auth/client";
 import { Turnstile } from "./Turnstile";
 
@@ -105,7 +106,7 @@ function LoginInner() {
     if (session?.user && !passkeyPrompt && !pendingPasskey && !busy) {
       // Drop any stale demo session before bouncing into the dashboard so a
       // returning demo-then-login user doesn't carry the cookie. Best-effort.
-      fetch("/api/demo", { method: "DELETE" }).catch(() => {});
+      clearDemoSession();
       router.replace("/");
     }
   }, [session, router, passkeyPrompt, pendingPasskey, busy]);
@@ -114,18 +115,6 @@ function LoginInner() {
   // gate can verify it. Empty when Turnstile isn't configured (dev bypass).
   function turnstileHeaders(): Record<string, string> {
     return turnstileToken ? { "x-turnstile-token": turnstileToken } : {};
-  }
-
-  // Clear any stale demo session before entering a real account. DELETE
-  // /api/demo drops the in-memory demo DB and clears the macrotide_demo cookie
-  // so a returning demo-then-login user doesn't carry it into the dashboard.
-  // Best-effort: never block login if it fails.
-  async function clearDemoSession() {
-    try {
-      await fetch("/api/demo", { method: "DELETE" });
-    } catch {
-      // ignore — demo cookie is harmless once a real session takes precedence.
-    }
   }
 
   async function continueToApp() {

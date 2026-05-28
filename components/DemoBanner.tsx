@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { clearDemoSession } from "@/lib/auth/clear-demo";
 
 export function DemoBanner() {
   const [exiting, setExiting] = useState(false);
@@ -27,11 +28,7 @@ export function DemoBanner() {
 
   async function exit() {
     setExiting(true);
-    try {
-      await fetch("/api/demo", { method: "DELETE" });
-    } catch {
-      // ignore — we still want to redirect
-    }
+    await clearDemoSession();
     window.location.href = "/login";
   }
 
