@@ -5,17 +5,12 @@
 /.next/
 /out/
 
-# production
-/build
-
 # misc
 .DS_Store
 *.pem
 
 # debug
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
 
 # local env files
 .env*.local
@@ -23,13 +18,12 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts.bak
-
-# vercel
-.vercel
 
 # data — SQLite db, WAL/SHM sidecars, backups; all runtime-only
 /data/
+
+# scratch — working checklists, notes, throwaway files (not shared)
+/tmp/
 
 # local-only experiments — files ending in .local.ts / .local.test.ts stay
 # out of git. Useful for AI provider variants, scratch scripts, etc.
