@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
 import { invalidate, useResource } from "@/lib/fetchers/swr";
 
@@ -113,6 +114,9 @@ export function ChatThreadList({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState<string>("");
   const renameInputRef = useRef<HTMLInputElement>(null);
+  // Thread pending permanent deletion (confirm dialog target).
+  const [purgeTarget, setPurgeTarget] = useState<{ id: string; title: string } | null>(null);
+  const [purging, setPurging] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -201,17 +205,19 @@ export function ChatThreadList({
     await invalidate(/^\/api\/chat\/threads/);
   };
 
-  const purge = async (id: string, title: string) => {
-    // Confirm IS appropriate for the irreversible action.
-    const ok = window.confirm(`Delete "${title}" forever? This can't be undone.`);
-    if (!ok) return;
-    const res = await fetch(`/api/chat/threads/${encodeURIComponent(id)}?purge=true`, {
+  // Confirm IS appropriate for this irreversible action — gated by ConfirmDialog.
+  const confirmPurge = async () => {
+    if (!purgeTarget) return;
+    setPurging(true);
+    const res = await fetch(`/api/chat/threads/${encodeURIComponent(purgeTarget.id)}?purge=true`, {
       method: "DELETE",
     });
+    setPurging(false);
     if (!res.ok) {
       window.alert(`Couldn't delete forever (${res.status})`);
       return;
     }
+    setPurgeTarget(null);
     await invalidate(/^\/api\/chat\/threads/);
   };
 
@@ -554,7 +560,7 @@ export function ChatThreadList({
                   </button>
                   <button
                     type="button"
-                    onClick={() => purge(t.id, title)}
+                    onClick={() => setPurgeTarget({ id: t.id, title })}
                     aria-label={`Delete ${title} forever`}
                     title="Delete forever"
                     style={{
@@ -600,6 +606,19 @@ export function ChatThreadList({
         />
       </div>
       {searchActive ? searchResults : normalList}
+      <ConfirmDialog
+        open={purgeTarget !== null}
+        title="Delete chat forever?"
+        message={
+          purgeTarget
+            ? `"${purgeTarget.title}" will be permanently deleted. This can't be undone.`
+            : undefined
+        }
+        confirmLabel="Delete forever"
+        busy={purging}
+        onConfirm={confirmPurge}
+        onCancel={() => setPurgeTarget(null)}
+      />
     </>
   );
 

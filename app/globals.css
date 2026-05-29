@@ -625,6 +625,35 @@ body[data-topbar-hidden="true"] .portfolio-switch {
   margin-bottom: 16px;
 }
 
+/* Confirm dialog — stacks above sheets (z 100) so it can be invoked from
+   within an open sheet, and stays compact + centered rather than full-bleed. */
+.confirm-overlay {
+  z-index: 200;
+  align-items: center;
+}
+.confirm-sheet {
+  max-width: 400px;
+}
+/* A confirm dialog is just a title + one consequence sentence + actions — give
+   the body a touch more room under the title than the form sheets. (The action
+   divider is dropped globally on `.sheet-actions`, so no confirm-only override
+   is needed for that.) */
+.confirm-sheet .sheet-title {
+  margin-bottom: 10px;
+}
+@media (max-width: 599px) {
+  .confirm-overlay {
+    padding: 24px;
+  }
+  .confirm-sheet {
+    max-width: 100%;
+    max-height: none;
+    border-radius: 28px;
+    padding: 24px;
+    animation: dialogIn 0.25s cubic-bezier(0.2, 0, 0, 1);
+  }
+}
+
 /* Import method tabs */
 .method-tabs {
   display: flex;
@@ -1020,6 +1049,13 @@ textarea.sheet-input {
 .btn.accent {
   background: var(--accent);
   color: white;
+}
+.btn.danger {
+  background: var(--loss);
+  color: white;
+}
+.btn.danger:hover {
+  filter: brightness(1.08);
 }
 .btn.full {
   width: 100%;
