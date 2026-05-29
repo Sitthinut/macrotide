@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ModelDonut } from "@/components/charts";
 import { Icon } from "@/components/Icon";
@@ -796,7 +797,11 @@ function AddCustomModelSheet({
   };
 
   if (extracted) {
-    return (
+    // Portal to <body>: the sheet is `position:fixed` but rendered inside
+    // `.ra-main`, whose OverlayScrollbars wrapper establishes a z-index:0
+    // stacking context — that traps the overlay below the docked panel/rail.
+    // Escaping to <body> puts it in the root stacking context (matches Modal).
+    return createPortal(
       <div className="sheet-overlay" onClick={onClose}>
         <div className="sheet" onClick={(e) => e.stopPropagation()}>
           <div className="sheet-handle"></div>
@@ -893,11 +898,12 @@ function AddCustomModelSheet({
             </button>
           </div>
         </div>
-      </div>
+      </div>,
+      document.body,
     );
   }
 
-  return (
+  return createPortal(
     <div className="sheet-overlay" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-handle"></div>
@@ -1134,6 +1140,7 @@ function AddCustomModelSheet({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
