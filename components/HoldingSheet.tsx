@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
 import { mergeSourceSuggestions } from "@/lib/data/sources";
 import { useHoldings } from "@/lib/fetchers/portfolio";
@@ -63,6 +64,7 @@ export function HoldingSheet({
   const isEdit = holdingId !== undefined;
   const [values, setValues] = useState<HoldingFormValues>(initial);
   const [submitting, setSubmitting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Free-text source label, with suggestions from the user's existing sources.
   const { data: allHoldings } = useHoldings();
@@ -112,15 +114,15 @@ export function HoldingSheet({
 
   const handleDelete = async () => {
     if (!onDelete) return;
-    const ok = window.confirm(`Delete ${values.ticker} from this portfolio?`);
-    if (!ok) return;
     setSubmitting(true);
     try {
       await onDelete();
+      setConfirmDelete(false);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete");
       setSubmitting(false);
+      setConfirmDelete(false);
     }
   };
 
@@ -310,7 +312,7 @@ export function HoldingSheet({
             <button
               type="button"
               className="btn ghost"
-              onClick={handleDelete}
+              onClick={() => setConfirmDelete(true)}
               disabled={submitting}
               style={{ color: "var(--loss)" }}
             >
@@ -331,6 +333,16 @@ export function HoldingSheet({
           </button>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Delete holding?"
+        message={`Remove ${values.ticker || "this holding"} from this portfolio. This can't be undone.`}
+        confirmLabel="Delete holding"
+        busy={submitting}
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmDelete(false)}
+      />
     </div>
   );
 }

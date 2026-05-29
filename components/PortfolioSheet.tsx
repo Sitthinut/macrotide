@@ -2,6 +2,7 @@
 
 import { iconNames } from "lucide-react/dynamic";
 import { useEffect, useMemo, useState } from "react";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
 
 export interface PortfolioFormValues {
@@ -60,6 +61,7 @@ export function PortfolioSheet({ open, initial, onClose, onSave, onDelete }: Por
   const isEdit = !!initial;
   const [values, setValues] = useState<PortfolioFormValues>(initial ?? DEFAULT_VALUES);
   const [submitting, setSubmitting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [iconQuery, setIconQuery] = useState("");
 
@@ -104,17 +106,15 @@ export function PortfolioSheet({ open, initial, onClose, onSave, onDelete }: Por
 
   const handleDelete = async () => {
     if (!onDelete) return;
-    const ok = window.confirm(
-      `Delete portfolio "${values.name}"? This permanently removes the portfolio and all its holdings.`,
-    );
-    if (!ok) return;
     setSubmitting(true);
     try {
       await onDelete();
+      setConfirmDelete(false);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete");
       setSubmitting(false);
+      setConfirmDelete(false);
     }
   };
 
@@ -202,7 +202,7 @@ export function PortfolioSheet({ open, initial, onClose, onSave, onDelete }: Por
             <button
               type="button"
               className="btn ghost"
-              onClick={handleDelete}
+              onClick={() => setConfirmDelete(true)}
               disabled={submitting}
               style={{ color: "var(--loss)" }}
             >
@@ -223,6 +223,16 @@ export function PortfolioSheet({ open, initial, onClose, onSave, onDelete }: Por
           </button>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Delete portfolio?"
+        message={`Permanently delete "${values.name}" and all of its holdings. This can't be undone.`}
+        confirmLabel="Delete portfolio"
+        busy={submitting}
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmDelete(false)}
+      />
     </div>
   );
 }

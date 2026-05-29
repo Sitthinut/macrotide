@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ModelDonut } from "@/components/charts";
 import { Icon } from "@/components/Icon";
 import { useModelPortfoliosView } from "@/lib/fetchers/legacy";
@@ -371,6 +372,7 @@ function ModelDetail({
   // Built-ins are a shared, read-only library — you fork them to customize.
   // User-owned ("custom") models are editable/deletable in place.
   const isCustom = model.isCustom === true;
+  const [confirmDelete, setConfirmDelete] = useState(false);
   return (
     <div className="screen">
       <div className="topbar">
@@ -606,7 +608,7 @@ function ModelDetail({
           <button
             className="btn ghost full"
             style={{ marginTop: 8, color: "var(--loss)" }}
-            onClick={onDelete}
+            onClick={() => setConfirmDelete(true)}
           >
             <Icon name="trash" size={13} /> Delete this template
           </button>
@@ -626,6 +628,18 @@ function ModelDetail({
           <Icon name="chat" size={13} /> Ask the advisor about this
         </button>
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Delete template?"
+        message={`Permanently delete "${model.name}". This can't be undone.`}
+        confirmLabel="Delete template"
+        onConfirm={() => {
+          setConfirmDelete(false);
+          onDelete();
+        }}
+        onCancel={() => setConfirmDelete(false)}
+      />
     </div>
   );
 }

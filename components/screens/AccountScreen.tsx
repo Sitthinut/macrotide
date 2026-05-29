@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { aaguidName } from "@/lib/auth/aaguid";
 import { clearDemoSession } from "@/lib/auth/clear-demo";
 import { authClient } from "@/lib/auth/client";
@@ -65,6 +66,13 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
   // Action state
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Pending destructive action awaiting confirmation.
+  const [confirm, setConfirm] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    run: () => Promise<void>;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,7 +126,7 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
     }
   }
 
-  async function handleDeletePasskey(id: string, name: string | undefined) {
+  function handleDeletePasskey(id: string, name: string | undefined) {
     if (cannotRevokeLast) {
       setActionError(
         "This is your only way to sign in. Register another passkey before removing this one.",
@@ -126,44 +134,55 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
       return;
     }
     const label = name ?? "this passkey";
-    if (!window.confirm(`Remove "${label}"? You won't be able to use it to sign in.`)) return;
-    setBusy(true);
-    setActionError(null);
-    try {
-      // Dynamic proxy routes this to POST /api/auth/passkey/delete-passkey
-      const res = await authClient.passkey.deletePasskey({ id });
-      if (res?.error) {
-        throw new Error(res.error.message ?? "Delete failed");
-      }
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : "Delete failed");
-    } finally {
-      setBusy(false);
-    }
+    setConfirm({
+      title: "Remove passkey?",
+      message: `"${label}" will be removed and can no longer be used to sign in.`,
+      confirmLabel: "Remove passkey",
+      run: async () => {
+        setBusy(true);
+        setActionError(null);
+        try {
+          // Dynamic proxy routes this to POST /api/auth/passkey/delete-passkey
+          const res = await authClient.passkey.deletePasskey({ id });
+          if (res?.error) {
+            throw new Error(res.error.message ?? "Delete failed");
+          }
+        } catch (e) {
+          setActionError(e instanceof Error ? e.message : "Delete failed");
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
   }
 
-  async function handleSignOutEverywhere() {
-    if (!window.confirm("Sign out of all devices? You'll need to authenticate again on each one."))
-      return;
-    setBusy(true);
-    setActionError(null);
-    try {
-      // Clear the demo cookie alongside the real session — see comment in
-      // App.tsx::signOut.
-      await clearDemoSession();
-      // Use $fetch directly to ensure POST method; the dynamic proxy infers GET
-      // from an empty body, but /revoke-sessions is a POST-only endpoint.
-      const res = await authClient.$fetch("/revoke-sessions", { method: "POST" });
-      if ((res as { error?: { message?: string } })?.error) {
-        throw new Error(
-          (res as { error?: { message?: string } }).error?.message ?? "Sign-out failed",
-        );
-      }
-      window.location.href = "/login";
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : "Sign-out failed");
-      setBusy(false);
-    }
+  function handleSignOutEverywhere() {
+    setConfirm({
+      title: "Sign out everywhere?",
+      message: "You'll be signed out of all devices and need to authenticate again on each one.",
+      confirmLabel: "Sign out everywhere",
+      run: async () => {
+        setBusy(true);
+        setActionError(null);
+        try {
+          // Clear the demo cookie alongside the real session — see comment in
+          // App.tsx::signOut.
+          await clearDemoSession();
+          // Use $fetch directly to ensure POST method; the dynamic proxy infers GET
+          // from an empty body, but /revoke-sessions is a POST-only endpoint.
+          const res = await authClient.$fetch("/revoke-sessions", { method: "POST" });
+          if ((res as { error?: { message?: string } })?.error) {
+            throw new Error(
+              (res as { error?: { message?: string } }).error?.message ?? "Sign-out failed",
+            );
+          }
+          window.location.href = "/login";
+        } catch (e) {
+          setActionError(e instanceof Error ? e.message : "Sign-out failed");
+          setBusy(false);
+        }
+      },
+    });
   }
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -661,6 +680,20 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
           Revokes all active sessions across all devices. You'll be redirected to sign in.
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirm !== null}
+        title={confirm?.title ?? ""}
+        message={confirm?.message}
+        confirmLabel={confirm?.confirmLabel ?? "Confirm"}
+        busy={busy}
+        onConfirm={async () => {
+          const action = confirm;
+          setConfirm(null);
+          await action?.run();
+        }}
+        onCancel={() => setConfirm(null)}
+      />
     </div>
   );
 }
