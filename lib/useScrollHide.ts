@@ -12,9 +12,15 @@ import { useEffect } from "react";
  * topbar and sub-tabs both pinned, same across every screen.
  *
  * Scroll context varies by viewport: mobile scrolls `window`, tablet/desktop
- * scrolls `.ra-main` (which has its own overflow-y). Scroll events don't
- * bubble, but capture-phase delegation on `document` catches both.
+ * scrolls the OverlayScrollbars viewport inside `.ra-main`. OverlayScrollbars
+ * takes over `.ra-main`'s overflow and moves the actual scrolling to a
+ * generated child element carrying `[data-overlayscrollbars-viewport]`, so
+ * `.ra-main.scrollTop` stays 0 — we must read the viewport's scrollTop
+ * instead. Scroll events don't bubble, but capture-phase delegation on
+ * `document` catches both the window and the viewport scroll.
  */
+
+const VIEWPORT_SELECTOR = ".ra-main [data-overlayscrollbars-viewport]";
 
 const HIDE_AFTER_PX = 60; // ignore tiny scrolls at the top
 const NOISE_PX = 4; // delta below this is treated as no movement
@@ -28,8 +34,11 @@ export function useScrollHide(): void {
 
     const update = () => {
       rafId = 0;
-      const main = document.querySelector<HTMLElement>(".ra-main");
-      const y = main ? main.scrollTop : window.scrollY;
+      // Desktop/tablet: read the OverlayScrollbars viewport (the element that
+      // actually scrolls). Mobile has no `.ra-main`, so this is null and we
+      // fall back to the window scroll position.
+      const viewport = document.querySelector<HTMLElement>(VIEWPORT_SELECTOR);
+      const y = viewport ? viewport.scrollTop : window.scrollY;
       const delta = y - lastY;
       if (Math.abs(delta) < NOISE_PX) return;
       if (delta > 0 && y > HIDE_AFTER_PX) {

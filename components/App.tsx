@@ -1,5 +1,7 @@
 "use client";
 
+import "overlayscrollbars/overlayscrollbars.css";
+import { useOverlayScrollbars } from "overlayscrollbars-react";
 import { useEffect, useRef, useState } from "react";
 import { type AddedHolding, AddHoldingsSheet } from "@/components/AddHoldingsSheet";
 import {
@@ -84,6 +86,36 @@ export function App() {
   const isWide = viewport !== "mobile";
   const isDesktop = viewport === "desktop";
   useScrollHide();
+
+  // OverlayScrollbars on the desktop/tablet content column. We initialize the
+  // hook against the EXISTING <main className="ra-main"> element (no wrapper
+  // DOM, so the CSS grid shell is untouched); OverlayScrollbars generates its
+  // own scroll viewport child. This replaces the native scrollbar with a thin
+  // overlay thumb that floats over the content and carves no layout space, so
+  // the sticky tab bars stay flush to the docked chat panel. `.ra-main` only
+  // exists in the wide shell, so we defer init until it is mounted. The mobile
+  // shell keeps native window scrolling (see useScrollHide).
+  const raMainRef = useRef<HTMLElement | null>(null);
+  const [initOverlayScrollbars] = useOverlayScrollbars({
+    defer: true,
+    options: {
+      scrollbars: {
+        // Mimic the prior macOS-overlay feel: invisible at rest, dim thumb that
+        // appears on hover and while scrolling, fading out once the pointer
+        // leaves the content column.
+        autoHide: "leave",
+        autoHideDelay: 600,
+        theme: "os-theme-ra-main",
+      },
+    },
+  });
+  useEffect(() => {
+    if (isWide && raMainRef.current) {
+      initOverlayScrollbars(raMainRef.current);
+    }
+    // useOverlayScrollbars cleans up its own instance on unmount; re-running on
+    // isWide handles the wide↔mobile shell swap.
+  }, [isWide, initOverlayScrollbars]);
 
   // Rail identity. A signed-in owner shows their real name/email; demo and
   // AUTH_DISABLED sessions have no better-auth user, so we fall back to the
@@ -486,7 +518,7 @@ export function App() {
         </aside>
 
         {/* ===== Main content ===== */}
-        <main className="ra-main">
+        <main className="ra-main" ref={raMainRef}>
           <div className="ra-main-inner" data-screen-label={screen}>
             {renderScreen()}
           </div>

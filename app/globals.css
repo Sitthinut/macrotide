@@ -162,6 +162,13 @@ html {
    runtime and writes the actual rendered px to this variable on body. */
 :root {
   --demo-banner-h: 0px;
+  /* Sticky topbar height. The sub-tab / portfolio-switch bars stick directly
+     below the topbar, so their `top` is derived from this value (minus a 2px
+     overlap that the topbar's higher z-index hides). Keeping both in one
+     variable means the two sticky bars can never drift apart and open a
+     see-through gap. Base = mobile/app-frame; .ra-main overrides for the
+     taller desktop topbar (extra padding-top). */
+  --topbar-h: 50px;
 }
 .app-root {
   min-height: calc(100vh - var(--demo-banner-h));
@@ -190,10 +197,14 @@ html {
   justify-content: space-between;
   gap: 12px;
   padding: 14px 16px 8px;
-  /* Pin the height so sub-tabs `top: 50px` lines up exactly. Content fits
-     within (14+23ish+8 = ~45–50px), but rounding varies by viewport so
-     a min-height guarantees a consistent stack offset. */
-  min-height: 50px;
+  /* Pin the height to --topbar-h so the sub-tab / portfolio-switch bars
+     (which stick at `--topbar-h - 2px`) line up exactly under it. Content
+     fits within (14+23ish+8 = ~45–50px), but rounding varies by viewport so
+     a fixed height guarantees a consistent stack offset with no gap. Use
+     `height` (not just min-height) so a tall brand line can't push the bar
+     past --topbar-h and reopen the gap the sub-tabs were measured against. */
+  min-height: var(--topbar-h);
+  height: var(--topbar-h);
   /* Solid background so content scrolling under the sticky bar is fully
      hidden. Previously this used a linear-gradient that faded to transparent
      in the bottom 20%, which showed scrolling content through the bar. */
@@ -219,14 +230,10 @@ body[data-topbar-hidden="true"] .topbar {
 }
 body[data-topbar-hidden="true"] .sub-tabs,
 body[data-topbar-hidden="true"] .portfolio-switch {
-  /* Move up by the topbar's own height (50px mobile / 54px desktop below)
-     so the bar slides up flush with the banner bottom and stays touching
-     the rising topbar. */
-  transform: translateY(-50px);
-}
-body[data-topbar-hidden="true"] .ra-main .sub-tabs,
-body[data-topbar-hidden="true"] .ra-main .portfolio-switch {
-  transform: translateY(-54px);
+  /* Move up by the topbar's own height (--topbar-h: 50px mobile / 54px
+     desktop) so the bar slides up flush with the banner bottom and stays
+     touching the rising topbar. */
+  transform: translateY(calc(-1 * var(--topbar-h)));
 }
 @media (prefers-reduced-motion: reduce) {
   .topbar,
@@ -447,9 +454,10 @@ body[data-topbar-hidden="true"] .ra-main .portfolio-switch {
   overflow-x: auto;
   scrollbar-width: none;
   position: sticky;
-  /* `48px` (= topbar 50 - 2) creates a 2px overlap with the topbar's bottom
-     edge. Topbar has higher z-index so the overlap is hidden at rest. */
-  top: calc(48px + var(--demo-banner-h, 0px));
+  /* `--topbar-h - 2px` creates a 2px overlap with the topbar's bottom edge.
+     Topbar has higher z-index so the overlap is hidden at rest, and deriving
+     from the shared var means the two bars can never drift apart. */
+  top: calc(var(--topbar-h) - 2px + var(--demo-banner-h, 0px));
   z-index: 20;
   background: var(--bg);
 }
@@ -1595,7 +1603,7 @@ textarea.sheet-input {
   overflow-x: auto;
   scrollbar-width: none;
   position: sticky;
-  top: calc(48px + var(--demo-banner-h, 0px));
+  top: calc(var(--topbar-h) - 2px + var(--demo-banner-h, 0px));
   z-index: 20;
   background: var(--bg);
 }
@@ -2084,52 +2092,58 @@ textarea.sheet-input {
 .ra-main {
   min-width: 0;
   background: var(--bg);
+  /* OverlayScrollbars owns the scroll + scrollbar here (see App.tsx). It hides
+     the native scrollbar and floats a thin overlay thumb that carves NO layout
+     space, so the sticky tab bars stay flush to the docked chat panel in every
+     OS scrollbar regime (classic or overlay). No `scrollbar-gutter` needed —
+     there is no native scrollbar lane to reserve. Note: OverlayScrollbars moves
+     the actual scrolling to a generated `[data-overlayscrollbars-viewport]`
+     child; useScrollHide reads that child's scrollTop, not `.ra-main`'s. */
   overflow-y: auto;
   height: calc(100vh - var(--demo-banner-h));
   /* `none` (vs `contain`) also disables the elastic bounce *within* the
      scroller itself, not just the chain to the parent. With a fixed overlay
      panel, the bounce moved the page while the panel stayed still. */
   overscroll-behavior: none;
-  /* Scrollbar: thin + transparent at rest, dim thumb on hover. Mimics the
-     overlay-scrollbar feel on macOS for platforms (Linux, Windows) that
-     would otherwise render a permanent chunky bar. */
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
 }
-.ra-main:hover {
-  scrollbar-color: var(--muted-2) transparent;
-}
-.ra-main::-webkit-scrollbar {
-  width: 8px;
-}
-.ra-main::-webkit-scrollbar-track {
-  background: transparent;
-}
-.ra-main::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 4px;
-  transition: background 0.2s;
-}
-.ra-main:hover::-webkit-scrollbar-thumb {
-  background: var(--muted-2);
-}
-.ra-main::-webkit-scrollbar-thumb:hover {
-  background: var(--muted);
+/* OverlayScrollbars theme scoped to the .ra-main instance only (applied via the
+   `theme: "os-theme-ra-main"` option). Native-macOS / Spotify feel: a chunky
+   ~7px rounded thumb in an 11px track region, translucent (~55% of var(--muted-2)) at
+   rest, growing more opaque (var(--muted) 80/90%) on hover/active, empty track, auto-hiding when
+   idle. Scoped so future OverlayScrollbars usages keep their own theming. The
+   compound `.os-scrollbar.os-theme-ra-main` selector (specificity 0,2,0) is
+   required to beat overlayscrollbars.css's own `.os-scrollbar` defaults (0,1,0),
+   which the JS bundle injects AFTER globals.css. */
+.os-scrollbar.os-theme-ra-main {
+  --os-size: 11px;
+  --os-padding-perpendicular: 2px;
+  --os-padding-axis: 2px;
+  --os-track-bg: transparent;
+  --os-track-bg-hover: transparent;
+  --os-track-bg-active: transparent;
+  --os-track-border-radius: 6px;
+  --os-handle-border-radius: 4px;
+  --os-handle-bg: color-mix(in srgb, var(--muted-2) 55%, transparent);
+  --os-handle-bg-hover: color-mix(in srgb, var(--muted) 80%, transparent);
+  --os-handle-bg-active: color-mix(in srgb, var(--muted) 90%, transparent);
+  --os-handle-min-size: 33px;
 }
 /* Banner sits outside .ra-main, so sticky descendants don't need the
-   banner offset on their `top` (they'd double-offset otherwise).
-   sub-tabs `top: 54px` matches the desktop topbar height (50 base + 4px
-   added by `.ra-main .topbar { padding-top: 18px }` below). Without this
-   match, sub-tabs would sticky-jump 4px up when scroll engages. */
+   banner offset on their `top` (they'd double-offset otherwise). The desktop
+   topbar is taller (18px padding-top vs 14px), so bump --topbar-h to 54px
+   here; both the topbar height and the sub-tab `top` read from it, so they
+   stay flush with the same 2px overlap as mobile. */
+.ra-main {
+  --topbar-h: 54px;
+}
 .ra-main .topbar {
   top: 0;
 }
 .ra-main .sub-tabs,
 .ra-main .portfolio-switch {
-  /* `52px` (= desktop topbar 54 - 2) — same 2px overlap as mobile,
-     adjusted for the taller desktop topbar (18px padding-top vs 14px). */
-  top: 52px;
+  top: calc(var(--topbar-h) - 2px);
 }
+
 .ra-main-inner {
   max-width: 760px;
   margin: 0 auto;
