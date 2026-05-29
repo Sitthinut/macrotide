@@ -14,6 +14,7 @@
 // the rendered page uses project-local screenshots and generated hero art.
 
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type CSSProperties, type ReactNode, useEffect, useState } from "react";
 
@@ -883,6 +884,11 @@ function Footer() {
               <a href="https://github.com/Sitthinut/macrotide">GitHub</a>
               <a href="https://github.com/Sitthinut/macrotide/blob/main/LICENSE">MIT License</a>
               <a href="https://github.com/Sitthinut/macrotide/blob/main/SECURITY.md">Security</a>
+            </div>
+            <div className="mt-footer-col">
+              <span className="mt-footer-col-h">Legal</span>
+              <Link href="/legal/terms">Terms of Service</Link>
+              <Link href="/legal/privacy">Privacy Policy</Link>
             </div>
           </nav>
         </div>
