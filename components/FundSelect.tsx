@@ -145,11 +145,13 @@ function MiniTag({
   title,
   color = "var(--accent)",
   bg = "var(--accent-soft)",
+  clamp = false,
 }: {
   label: string;
   title?: string;
   color?: string;
   bg?: string;
+  clamp?: boolean;
 }) {
   return (
     <span
@@ -164,6 +166,11 @@ function MiniTag({
         padding: "1px 5px",
         letterSpacing: "0.04em",
         whiteSpace: "nowrap",
+        // A long feeder master-fund name would otherwise overflow the card and
+        // trigger a horizontal scrollbar. Clamp it with an ellipsis (the full
+        // name stays in the title tooltip); minWidth:0 lets it shrink as a flex
+        // item, and it wraps to its own line when it can't fit alongside others.
+        ...(clamp ? { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" } : null),
       }}
     >
       {label}
@@ -179,7 +186,7 @@ function FundBadges({ fund }: { fund: FundWithTer }) {
   if (!isIndex && !tax && !isFeeder) return null;
 
   return (
-    <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap", marginTop: 3 }}>
+    <span style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 3, minWidth: 0 }}>
       {isIndex && (
         <MiniTag
           label="INDEX"
@@ -212,6 +219,7 @@ function FundBadges({ fund }: { fund: FundWithTer }) {
           }
           color="var(--muted)"
           bg="var(--surface)"
+          clamp
         />
       )}
     </span>
