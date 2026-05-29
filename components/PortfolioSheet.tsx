@@ -4,6 +4,7 @@ import { iconNames } from "lucide-react/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
+import { Modal } from "@/components/Modal";
 
 export interface PortfolioFormValues {
   id: string;
@@ -83,8 +84,6 @@ export function PortfolioSheet({ open, initial, onClose, onSave, onDelete }: Por
     return iconNames.filter((n) => n.includes(q)).slice(0, MAX_SEARCH_RESULTS);
   }, [iconQuery]);
 
-  if (!open) return null;
-
   const update = (patch: Partial<PortfolioFormValues>) => setValues((v) => ({ ...v, ...patch }));
 
   const submit = async () => {
@@ -119,16 +118,18 @@ export function PortfolioSheet({ open, initial, onClose, onSave, onDelete }: Por
   };
 
   return (
-    <div className="sheet-overlay" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="sheet-title">{isEdit ? "Edit portfolio" : "New portfolio"}</div>
-        <div className="sheet-subtitle">
-          {isEdit
-            ? "Update portfolio details. Changes apply immediately."
-            : "A portfolio holds a set of fund positions — e.g. Core, Tax-saving, Experiment."}
-        </div>
-
-        <div className="sheet-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+    <>
+      <Modal open={open} onClose={onClose} variant="form" labelledBy="ps-title">
+        <Modal.Header
+          title={isEdit ? "Edit portfolio" : "New portfolio"}
+          subtitle={
+            isEdit
+              ? "Update portfolio details. Changes apply immediately."
+              : "A portfolio holds a set of fund positions — e.g. Core, Tax-saving, Experiment."
+          }
+          id="ps-title"
+        />
+        <Modal.Body gap={14}>
           <FormRow label="Name">
             <input
               className="sheet-input"
@@ -195,34 +196,33 @@ export function PortfolioSheet({ open, initial, onClose, onSave, onDelete }: Por
               {error}
             </div>
           )}
-        </div>
-
-        <div className="sheet-actions" style={{ display: "flex", gap: 8 }}>
-          {isEdit && onDelete && (
-            <button
-              type="button"
-              className="btn ghost"
-              onClick={() => setConfirmDelete(true)}
-              disabled={submitting}
-              style={{ color: "var(--loss)" }}
-            >
-              <Icon name="close" size={12} /> Delete
-            </button>
-          )}
+        </Modal.Body>
+        <Modal.Footer
+          start={
+            isEdit && onDelete ? (
+              <button
+                type="button"
+                className="icon-btn btn-delete"
+                onClick={() => setConfirmDelete(true)}
+                disabled={submitting}
+                aria-label="Delete portfolio"
+                title="Delete portfolio"
+                style={{ color: "var(--loss)" }}
+              >
+                <Icon name="trash-2" size={16} />
+                <span className="btn-delete-label">Delete</span>
+              </button>
+            ) : undefined
+          }
+        >
           <button type="button" className="btn ghost" onClick={onClose} disabled={submitting}>
             Cancel
           </button>
-          <button
-            type="button"
-            className="btn primary"
-            onClick={submit}
-            disabled={submitting}
-            style={{ flex: 1 }}
-          >
+          <button type="button" className="btn primary" onClick={submit} disabled={submitting}>
             {submitting ? "Saving…" : isEdit ? "Save changes" : "Create portfolio"}
           </button>
-        </div>
-      </div>
+        </Modal.Footer>
+      </Modal>
 
       <ConfirmDialog
         open={confirmDelete}
@@ -233,7 +233,7 @@ export function PortfolioSheet({ open, initial, onClose, onSave, onDelete }: Por
         onConfirm={handleDelete}
         onCancel={() => setConfirmDelete(false)}
       />
-    </div>
+    </>
   );
 }
 

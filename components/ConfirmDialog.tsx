@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { Modal } from "@/components/Modal";
 
 export interface ConfirmDialogProps {
   open: boolean;
@@ -18,9 +18,10 @@ export interface ConfirmDialogProps {
 }
 
 /**
- * Reusable "Are you sure?" dialog for destructive actions. Matches the app's
- * sheet overlay pattern (backdrop click + Escape cancel) but renders above
- * sheets so it can be invoked from within an open sheet.
+ * Reusable "Are you sure?" dialog for destructive actions. A thin preset over
+ * <Modal variant="confirm">: it renders above form/detail modals (z 200) so it
+ * can be invoked from within an open sheet, traps focus on the confirm button,
+ * and cancels on Escape / backdrop click — all handled by the primitive.
  */
 export function ConfirmDialog({
   open,
@@ -33,53 +34,28 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
-  const confirmRef = useRef<HTMLButtonElement>(null);
-
-  // Move focus to the confirm button when opening, and close on Escape.
-  useEffect(() => {
-    if (!open) return;
-    confirmRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onCancel();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onCancel]);
-
-  if (!open) return null;
-
   return (
-    <div
-      className="sheet-overlay confirm-overlay"
-      onClick={onCancel}
-      role="alertdialog"
-      aria-modal="true"
-      aria-labelledby="confirm-dialog-title"
-    >
-      <div className="sheet confirm-sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="sheet-title" id="confirm-dialog-title">
-          {title}
-        </div>
-        {message && <div className="sheet-subtitle">{message}</div>}
-        <div className="sheet-actions" style={{ display: "flex", gap: 8 }}>
-          <div style={{ flex: 1 }} />
-          <button type="button" className="btn ghost" onClick={onCancel} disabled={busy}>
-            {cancelLabel}
-          </button>
-          <button
-            ref={confirmRef}
-            type="button"
-            className={destructive ? "btn danger" : "btn primary"}
-            onClick={onConfirm}
-            disabled={busy}
-          >
-            {busy ? "Working…" : confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
+    <Modal open={open} onClose={onCancel} variant="confirm" labelledBy="confirm-dialog-title">
+      <Modal.Header title={title} id="confirm-dialog-title" />
+      {message && (
+        <Modal.Body>
+          <div className="modal-confirm-message">{message}</div>
+        </Modal.Body>
+      )}
+      <Modal.Footer>
+        <button type="button" className="btn ghost" onClick={onCancel} disabled={busy}>
+          {cancelLabel}
+        </button>
+        <button
+          type="button"
+          className={destructive ? "btn danger" : "btn primary"}
+          onClick={onConfirm}
+          disabled={busy}
+          data-autofocus
+        >
+          {busy ? "Working…" : confirmLabel}
+        </button>
+      </Modal.Footer>
+    </Modal>
   );
 }

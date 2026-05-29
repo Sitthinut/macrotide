@@ -105,7 +105,7 @@ export function App() {
         // leaves the content column.
         autoHide: "leave",
         autoHideDelay: 600,
-        theme: "os-theme-ra-main",
+        theme: "os-theme-macrotide",
       },
     },
   });
