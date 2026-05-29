@@ -8,7 +8,7 @@
 // so the sheet looks clean in dev before the SEC ingest job has run.
 
 import { useState } from "react";
-import { Icon } from "@/components/Icon";
+import { Modal } from "@/components/Modal";
 import type {
   FeederLookThroughHoldingRow,
   FeederMasterMapRow,
@@ -1087,52 +1087,10 @@ export interface FundDetailSheetProps {
 }
 
 export function FundDetailSheet({ projId, onClose }: FundDetailSheetProps) {
-  if (!projId) return null;
-
   return (
-    <div
-      className="sheet-overlay"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onClose();
-      }}
-    >
-      <div className="sheet" style={{ maxWidth: 640 }}>
-        {/* Sheet header */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: 16,
-          }}
-        >
-          <span
-            style={{
-              fontSize: 11,
-              fontFamily: "var(--font-mono)",
-              fontWeight: 600,
-              color: "var(--muted)",
-              letterSpacing: "0.06em",
-              textTransform: "uppercase",
-            }}
-          >
-            Fund Detail
-          </span>
-          <button
-            type="button"
-            className="icon-btn"
-            onClick={onClose}
-            aria-label="Close fund detail"
-          >
-            <Icon name="close" size={14} />
-          </button>
-        </div>
-
-        <FundDetailBody projId={projId} />
-      </div>
-    </div>
+    <Modal open={projId != null} onClose={onClose} variant="detail" labelledBy="fund-detail-title">
+      <Modal.Header title="Fund detail" id="fund-detail-title" />
+      <Modal.Body>{projId != null && <FundDetailBody projId={projId} />}</Modal.Body>
+    </Modal>
   );
 }

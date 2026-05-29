@@ -5,6 +5,7 @@ import { DragDropProvider } from "@dnd-kit/react";
 import { useSortable } from "@dnd-kit/react/sortable";
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/components/Icon";
+import { Modal } from "@/components/Modal";
 import { useMarketIndicatorPrefs } from "@/lib/fetchers/portfolio";
 import { invalidate } from "@/lib/fetchers/swr";
 import type { IndicatorDef, IndicatorGroup } from "@/lib/market/indicators";
@@ -96,8 +97,6 @@ export function ManageIndicatorsSheet({ open, onClose }: ManageIndicatorsSheetPr
     return groups;
   }, [data, working]);
 
-  if (!open) return null;
-
   const remove = (sym: string) => setWorking((w) => w.filter((s) => s !== sym));
   const add = (sym: string) => setWorking((w) => (w.includes(sym) ? w : [...w, sym]));
 
@@ -119,13 +118,13 @@ export function ManageIndicatorsSheet({ open, onClose }: ManageIndicatorsSheetPr
   };
 
   return (
-    <div className="sheet-overlay" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="sheet-title">Manage indicators</div>
-        <div className="sheet-subtitle">
-          Choose which markets show on this screen. Drag the handle to reorder.
-        </div>
-
+    <Modal open={open} onClose={onClose} variant="form" labelledBy="mi-title">
+      <Modal.Header
+        title="Manage indicators"
+        subtitle="Choose which markets show on this screen. Drag the handle to reorder."
+        id="mi-title"
+      />
+      <Modal.Body>
         {/* Current selection — drag-and-drop reorder */}
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {working.length === 0 && (
@@ -182,26 +181,26 @@ export function ManageIndicatorsSheet({ open, onClose }: ManageIndicatorsSheetPr
             </div>
           );
         })}
-
-        {/* Footer */}
-        <div style={{ display: "flex", gap: 8, marginTop: 18, alignItems: "center" }}>
+      </Modal.Body>
+      <Modal.Footer
+        start={
           <button
             type="button"
-            className="btn ghost sm"
+            className="btn ghost"
             onClick={() => setWorking(defaults)}
             disabled={saving}
           >
             Reset to default
           </button>
-          <div style={{ flex: 1 }} />
-          <button type="button" className="btn ghost" onClick={onClose} disabled={saving}>
-            Cancel
-          </button>
-          <button type="button" className="btn primary" onClick={save} disabled={saving}>
-            {saving ? "Saving…" : "Save"}
-          </button>
-        </div>
-      </div>
-    </div>
+        }
+      >
+        <button type="button" className="btn ghost" onClick={onClose} disabled={saving}>
+          Cancel
+        </button>
+        <button type="button" className="btn primary" onClick={save} disabled={saving}>
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </Modal.Footer>
+    </Modal>
   );
 }

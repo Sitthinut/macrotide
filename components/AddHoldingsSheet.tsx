@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
+import { Modal } from "@/components/Modal";
 import {
   filterKnownTickers,
   mergeWithHoldings,
@@ -117,8 +118,6 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
     () => (openSuggestRow === null ? [] : filterKnownTickers(suggestionPool, debouncedTicker)),
     [openSuggestRow, suggestionPool, debouncedTicker],
   );
-
-  if (!open) return null;
 
   const parsePaste = (): Row[] => {
     const lines = pasteText.split("\n").filter((l) => l.trim());
@@ -340,14 +339,13 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
         : rows.filter((r) => r.ticker && (r.units || r.value)).length;
 
   return (
-    <div className="sheet-overlay" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="sheet-handle"></div>
-        <div className="sheet-title">Add holdings</div>
-        <div className="sheet-subtitle">
-          Combine holdings from any Thai brokerage. Read-only — we never trade for you.
-        </div>
-
+    <Modal open={open} onClose={onClose} variant="form" labelledBy="ah-title">
+      <Modal.Header
+        title="Add holdings"
+        subtitle="Combine holdings from any Thai brokerage. Read-only — we never trade for you."
+        id="ah-title"
+      />
+      <Modal.Body>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
           <div>
             <label
@@ -904,26 +902,25 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
             {submitError}
           </div>
         )}
-
-        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-          <button className="btn ghost" style={{ flex: 1 }} onClick={onClose} disabled={submitting}>
-            Cancel
-          </button>
-          <button
-            className="btn primary"
-            style={{ flex: 2 }}
-            onClick={submit}
-            disabled={previewCount === 0 || submitting || !bucketId}
-          >
-            {submitting
-              ? "Adding…"
-              : previewCount > 0
-                ? `Add ${previewCount} holding${previewCount > 1 ? "s" : ""}`
-                : "Add holdings"}
-            <Icon name="check" size={13} />
-          </button>
-        </div>
-      </div>
-    </div>
+      </Modal.Body>
+      <Modal.Footer>
+        <button type="button" className="btn ghost" onClick={onClose} disabled={submitting}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="btn primary"
+          onClick={submit}
+          disabled={previewCount === 0 || submitting || !bucketId}
+        >
+          {submitting
+            ? "Adding…"
+            : previewCount > 0
+              ? `Add ${previewCount} holding${previewCount > 1 ? "s" : ""}`
+              : "Add holdings"}
+          <Icon name="check" size={13} />
+        </button>
+      </Modal.Footer>
+    </Modal>
   );
 }

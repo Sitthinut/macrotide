@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
+import { Modal } from "@/components/Modal";
 import { mergeSourceSuggestions } from "@/lib/data/sources";
 import { useHoldings } from "@/lib/fetchers/portfolio";
 import {
@@ -79,8 +80,6 @@ export function HoldingSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  if (!open) return null;
-
   const update = (patch: Partial<HoldingFormValues>) => setValues((v) => ({ ...v, ...patch }));
 
   const submit = async () => {
@@ -127,17 +126,18 @@ export function HoldingSheet({
   };
 
   return (
-    <div className="sheet-overlay" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="sheet-handle"></div>
-        <div className="sheet-title">{isEdit ? "Edit holding" : "Add holding"}</div>
-        <div className="sheet-subtitle">
-          {isEdit
-            ? "Update units, cost basis, or move to another portfolio."
-            : "Add a single holding. Use the import sheet for multiple at once."}
-        </div>
-
-        <div className="sheet-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+    <>
+      <Modal open={open} onClose={onClose} variant="form" labelledBy="hs-title">
+        <Modal.Header
+          title={isEdit ? "Edit holding" : "Add holding"}
+          subtitle={
+            isEdit
+              ? "Update units, cost basis, or move to another portfolio."
+              : "Add a single holding. Use the import sheet for multiple at once."
+          }
+          id="hs-title"
+        />
+        <Modal.Body gap={14}>
           <FormRow label="Type" hint="Determines where we fetch this holding's price">
             <select
               className="sheet-input"
@@ -305,34 +305,33 @@ export function HoldingSheet({
               {error}
             </div>
           )}
-        </div>
-
-        <div className="sheet-actions" style={{ display: "flex", gap: 8 }}>
-          {isEdit && onDelete && (
-            <button
-              type="button"
-              className="btn ghost"
-              onClick={() => setConfirmDelete(true)}
-              disabled={submitting}
-              style={{ color: "var(--loss)" }}
-            >
-              <Icon name="close" size={12} /> Delete
-            </button>
-          )}
+        </Modal.Body>
+        <Modal.Footer
+          start={
+            isEdit && onDelete ? (
+              <button
+                type="button"
+                className="icon-btn btn-delete"
+                onClick={() => setConfirmDelete(true)}
+                disabled={submitting}
+                aria-label="Delete holding"
+                title="Delete holding"
+                style={{ color: "var(--loss)" }}
+              >
+                <Icon name="trash-2" size={16} />
+                <span className="btn-delete-label">Delete</span>
+              </button>
+            ) : undefined
+          }
+        >
           <button type="button" className="btn ghost" onClick={onClose} disabled={submitting}>
             Cancel
           </button>
-          <button
-            type="button"
-            className="btn primary"
-            onClick={submit}
-            disabled={submitting}
-            style={{ flex: 1 }}
-          >
+          <button type="button" className="btn primary" onClick={submit} disabled={submitting}>
             {submitting ? "Saving…" : isEdit ? "Save changes" : "Add holding"}
           </button>
-        </div>
-      </div>
+        </Modal.Footer>
+      </Modal>
 
       <ConfirmDialog
         open={confirmDelete}
@@ -343,7 +342,7 @@ export function HoldingSheet({
         onConfirm={handleDelete}
         onCancel={() => setConfirmDelete(false)}
       />
-    </div>
+    </>
   );
 }
 
