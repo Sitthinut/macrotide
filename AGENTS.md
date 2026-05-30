@@ -240,8 +240,8 @@ table in sync when adding/renaming vars and also update
 | `DEMO_OPENROUTER_API_KEY` | falls back to `OPENROUTER_API_KEY` | [lib/ai/provider.ts](./lib/ai/provider.ts) | Separate key for demo traffic so demo can't burn owner quota. |
 | `DEMO_AI_MODELS` | `openrouter/free` | [lib/ai/provider.ts](./lib/ai/provider.ts) | Demo-chat model chain. Free-only by default. |
 | `TITLE_MODEL` | `openrouter/free` | [lib/ai/provider.ts](./lib/ai/provider.ts) | Cheap model for auto-titling a chat after its first turn pair (`POST /api/chat/threads/[id]/title`). **Never pin a Claude or GPT model here** — titling is a 3–5-word task and any non-mainstream free model (DeepSeek V3, Qwen3 small, etc.) is more than enough. Comma-separated chain accepted; first model is primary. |
-| `OCR_MODEL` | `baidu/qianfan-ocr-fast:free` | [lib/portfolio/ocr.ts](./lib/portfolio/ocr.ts) | Image OCR primary. Free tier; 27.2M tokens/week quota. Operator-verified no-train (re-verify before public deploy). |
-| `OCR_FALLBACK_MODEL` | `baidu/qianfan-ocr-fast` (only when `OCR_MODEL` is unset) | [lib/portfolio/ocr.ts](./lib/portfolio/ocr.ts) | Auto-retry on quota / rate-limit. Pinning `OCR_MODEL` disables the default fallback unless this is set explicitly. |
+| `OCR_MODEL` | `google/gemini-2.5-flash` | [lib/portfolio/ocr.ts](./lib/portfolio/ocr.ts) | Add-holdings image extraction (vision). NOT tier-gated — same model for all users (bounded, rate-limited one-shot). Must be vision-capable. (Prior `baidu/qianfan-ocr-fast` was removed upstream.) |
+| `OCR_FALLBACK_MODEL` | `google/gemini-2.0-flash-001` (only when `OCR_MODEL` is unset) | [lib/portfolio/ocr.ts](./lib/portfolio/ocr.ts) | Auto-retry on provider error / rate-limit. Pinning `OCR_MODEL` disables the default fallback unless this is set explicitly. |
 
 ### Auth (better-auth)
 

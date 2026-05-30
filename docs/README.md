@@ -42,7 +42,7 @@ Feature deep dives and the prior-art research behind them live under
 | Doc | Use when |
 |---|---|
 | [local-development.md](./how-to/local-development.md) | Setting up a dev loop: env, scripts, seeding, tests, hooks |
-| [import-a-portfolio.md](./how-to/import-a-portfolio.md) | Getting holdings in via CSV, image OCR, or manual entry |
+| [import-a-portfolio.md](./how-to/import-a-portfolio.md) | Getting holdings in via Paste/CSV, image OCR, and editable table entry |
 | [deploy.md](./how-to/deploy.md) | Putting it on a VM (Caddy + systemd) or a tailnet |
 
 ### Reference — look it up

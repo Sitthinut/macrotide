@@ -15,6 +15,18 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Add holdings from a screenshot — structured import.** The Add-holdings
+  **Image** tab now reads one or more broker screenshots into an **editable
+  review table** shared with Paste/CSV and manual table entry, instead of
+  dumping raw transcription text. Most Thai broker apps show market value +
+  allocation %, not units — so where a fund's NAV is on file the importer
+  derives units (`value ÷ NAV`) and average cost, marks them estimated, and
+  highlights rows that still need quantity (open the fund's detail view for
+  exact figures). Upload several images and the rows merge. Powered by a vision
+  model (`OCR_MODEL`, default `google/gemini-2.5-flash`), validated on real Thai
+  statements for faithful ฿/decimal reading; the screenshot is read once and
+  never stored.
+
 - **Confirm-before-delete on destructive actions** — deleting a holding,
   portfolio, or custom model template, purging a chat thread, removing a passkey,
   or signing out everywhere now routes through a consistent confirmation dialog
@@ -107,11 +119,11 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 - **RSS news aggregator** — curated long-horizon editorial feeds on the markets
   screen (parallel fetch, dedupe, 30-min cache, partial-failure resilience);
   HTML entities in titles are decoded, including double-encoded ones.
-- **Portfolio import** — CSV upload, manual-entry ticker autocomplete (seed of
-  known Thai funds + global indices, merged with the user's holdings), and
-  **image OCR** (statement screenshot → raw transcription via an OpenRouter
-  vision model, free → paid fallback). The Image tab can hand the transcription
-  to the advisor, which proposes reviewable holding rows you accept or dismiss.
+- **Portfolio import** — Paste/CSV upload, editable table entry with symbol
+  autocomplete (seed of known Thai funds + global indices, merged with the
+  user's holdings), and **image OCR** (statement screenshot → structured rows via
+  an OpenRouter vision model). The Add-holdings sheet validates rows before
+  saving; quantity is required and average cost is optional.
 - **Holding sources** — tag where each holding is held with a free-text source
   (suggestions from your past sources + common Thai fund platforms); rename a
   source across all your holdings from Settings → Sources.

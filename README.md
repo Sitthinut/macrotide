@@ -25,7 +25,7 @@ responsive across mobile / tablet / desktop with light/dark/system themes.
 | Passkey auth + isolated per-session demo mode | ✅ Shipped |
 | Market data — real index levels (EODHD/FMP, with ETF-proxy + Yahoo fallback) + FX, Thai fund NAVs + history (Thai SEC), RSS news | ✅ Shipped |
 | Instant fund finder — fuzzy + feeder-aware search, fee-annotated | ✅ Shipped |
-| Portfolio import — CSV, manual autocomplete, image OCR with advisor handoff | ✅ Shipped |
+| Portfolio import — Paste/CSV, editable table entry with autocomplete, image OCR review | ✅ Shipped |
 | Long-term memory + chat archival — recall, FTS, session lifecycle | ✅ Shipped |
 | Multi-user — per-user isolation, tiers/quotas, owner admin | 🟡 Code shipped; launch prep open |
 | Benchmark comparison — "match or beat your index" (SET / S&P / Nasdaq / Nikkei) | ✅ Shipped; custom/goal-based benchmarks planned |
