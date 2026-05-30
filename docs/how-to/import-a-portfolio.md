@@ -1,41 +1,57 @@
 # Import a portfolio
 
-Three ways to get holdings into Macrotide, from quickest to most hands-on. All
-live under the **Connect** screen.
+Use the **Add holdings** sheet on the **Connect** screen. Paste/CSV and Image
+are import helpers; everything lands in one editable review table, where you
+can also type rows directly before saving.
 
-## Manual entry (with autocomplete)
+## Editable review table
 
-Add holdings one at a time. As you type a ticker, the field autocompletes
-against a seed list of known funds ([lib/data/known-funds.ts](../../lib/data/known-funds.ts)),
-filling in names and asset class where it can. Duplicate tickers are de-duped
-into the existing holding rather than creating a second row.
+Every import path feeds the same table. Type directly into a blank row, or edit
+rows created by paste/CSV/image extraction. As you type a symbol, the field
+autocompletes against a seed list of known funds
+([lib/data/known-funds.ts](../../lib/data/known-funds.ts)), filling in names and
+asset class where it can. Duplicate symbols are de-duped into the existing row
+for review rather than creating a second row.
 
-Best for: a handful of positions, or correcting an import.
+The table stores the canonical holding fields: symbol, quantity, and average
+cost. Quantity is required to save a row; average cost is optional.
 
-## CSV import
+Best for: a handful of positions, or correcting an import before saving.
 
-Upload a CSV of your holdings. Columns map to ticker, units, average cost, and
-the fields the Portfolio screen needs. Rows are validated before they're saved.
+## Paste / CSV import
+
+Paste rows or upload a CSV/text file of your holdings. Columns map to symbol,
+quantity, average cost, and the fields the Portfolio screen needs. Rows are
+validated in the review table before they're saved.
 
 Best for: exporting from a spreadsheet or brokerage statement you already have
 in tabular form.
 
 ## Image OCR
 
-Upload a screenshot or photo of a holdings statement. The image is sent to a
+Upload one or more screenshots/photos of your holdings. Each image is sent to a
 vision model via OpenRouter ([POST /api/import/image](../reference/api.md)),
-which **transcribes the raw text** — it does not yet parse structured rows for
-you; you review and confirm what it read.
+which returns **structured rows** shown as an **editable confirmation table** —
+you review and edit before anything saves.
+
+Most Thai broker apps show market value + allocation %, not units. Where a
+fund's NAV is on file, the importer derives units (`value ÷ NAV`) and average
+cost and marks them estimated (dashed field); rows it can't derive are
+highlighted for you to fill in — open the fund's detail view for exact units +
+average cost. Upload several screenshots and the rows merge (a later detail-view
+shot backfills exact figures over an earlier summary).
 
 Requirements and behavior:
 
 - Needs `OPENROUTER_API_KEY`. Without it the endpoint returns **503** with a
   message pointing you at the key. See [auth-and-providers.md](../reference/auth-and-providers.md).
-- Uses a free OCR model by default (`OCR_MODEL`, `baidu/qianfan-ocr-fast:free`)
-  with an automatic paid fallback on quota/rate-limit. Both are configurable —
-  see the [env-var table](../../AGENTS.md#ai--model-selection).
+- Uses a vision model by default (`OCR_MODEL`, `google/gemini-2.5-flash`) with an
+  automatic fallback on provider/rate-limit errors. Not tier-gated — the same
+  model serves every user. Both are configurable — see the
+  [env-var table](../../AGENTS.md#ai--model-selection).
+- The screenshot is read once and never stored.
 
-Best for: a statement you only have as an image or PDF screenshot.
+Best for: a statement you only have as an image or screenshot.
 
 > **A note on data hygiene.** This is a personal investing app. When testing or
 > contributing, use placeholder fund codes (`EXAMPLE-FUND-A`), never real ones —

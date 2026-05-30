@@ -6,7 +6,7 @@ Each guide is a sequence of steps toward one real-world goal.
 | Guide | Use when you want to… |
 |---|---|
 | [Local development](./local-development.md) | Set up a productive dev loop — env, scripts, seeding, tests, the pre-commit hook |
-| [Import a portfolio](./import-a-portfolio.md) | Get holdings into the app via CSV, an image, or manual entry |
+| [Import a portfolio](./import-a-portfolio.md) | Get holdings into the app via Paste/CSV, an image, or editable table entry |
 | [Deploy](./deploy.md) | Put Macrotide on a VM (Caddy + systemd) or share it over a tailnet |
 
 New to the project? Do the [Getting started tutorial](../tutorials/getting-started.md)
