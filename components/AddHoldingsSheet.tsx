@@ -11,7 +11,22 @@ import {
 import { mergeSourceSuggestions } from "@/lib/data/sources";
 import { useBuckets, useHoldings } from "@/lib/fetchers/portfolio";
 import { invalidate } from "@/lib/fetchers/swr";
-import { QUOTE_SOURCE_LABELS, QUOTE_SOURCES, type QuoteSource } from "@/lib/market/sources";
+import { inferQuoteSource } from "@/lib/market/infer-quote-source";
+import type { QuoteSource } from "@/lib/market/sources";
+
+// Compact 2–3 char codes for the in-input price-source badge.
+const TYPE_BADGE_CODES: Record<QuoteSource, string> = {
+  thai_mutual_fund: "TH",
+  yahoo: "ETF",
+};
+
+// "Set all" segmented toggle: Thai-first order for a Thai-market app, with
+// short labels (the full QUOTE_SOURCE_LABELS are too long for two segments).
+const SOURCE_SEG_ORDER: readonly QuoteSource[] = ["thai_mutual_fund", "yahoo"];
+const SOURCE_SEG_LABELS: Record<QuoteSource, string> = {
+  thai_mutual_fund: "Thai fund",
+  yahoo: "Stock / ETF",
+};
 
 interface Row {
   ticker: string;
@@ -21,6 +36,11 @@ interface Row {
   // Optional remembered English name when picked from autocomplete — used as
   // the saved `englishName` so the user doesn't have to retype it.
   englishName?: string;
+  // Per-row price source. When unset, the effective value is inferred live from
+  // the ticker (inferQuoteSource); `quoteSourceLocked` marks an explicit user
+  // choice so editing the ticker won't re-infer over it.
+  quoteSource?: QuoteSource;
+  quoteSourceLocked?: boolean;
   // Set on rows pre-filled from an image extract: `estimated` means a number
   // was derived (units/avgCost from NAV) not read off the screen; `needsUnits`
   // means we couldn't derive units and the user should type them.
@@ -80,6 +100,9 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
   // Autocomplete state: which row's symbol input has the dropdown open, plus
   // a debounced copy of the query so typing doesn't re-render on every key.
   const [openSuggestRow, setOpenSuggestRow] = useState<number | null>(null);
+  // Which row is currently being edited (any field focused) — used to hold back
+  // the "needs quantity" amber until the user actually leaves an incomplete row.
+  const [activeRow, setActiveRow] = useState<number | null>(null);
   const [debouncedTicker, setDebouncedTicker] = useState("");
   const [pasteText, setPasteText] = useState("");
   const [pasteParseCount, setPasteParseCount] = useState<number | null>(null);
@@ -95,7 +118,6 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
     { ticker: "", units: "", avgCost: "" },
   ]);
   const [source, setSource] = useState("");
-  const [quoteSource, setQuoteSource] = useState<QuoteSource>("thai_mutual_fund");
   const [bucketId, setBucketId] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -201,6 +223,14 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
             ? "image"
             : (existing?.provenance ?? r.provenance ?? incomingProvenance),
         englishName: r.englishName ?? existing?.englishName,
+        // An explicit (locked) per-row choice wins; otherwise carry whichever
+        // side has one so the type pill stays correct across merges.
+        quoteSource: r.quoteSourceLocked
+          ? r.quoteSource
+          : existing?.quoteSourceLocked
+            ? existing.quoteSource
+            : (r.quoteSource ?? existing?.quoteSource),
+        quoteSourceLocked: r.quoteSourceLocked || existing?.quoteSourceLocked,
         // A freshly-supplied units clears the needs-units flag.
         estimated: r.estimated ?? existing?.estimated,
         needsUnits: r.units || existing?.units ? false : (r.needsUnits ?? existing?.needsUnits),
@@ -293,13 +323,16 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
           const ticker = ir.ticker.trim();
           if (!ticker) continue;
           anyRow = true;
-          if (ir.quoteSource) setQuoteSource(ir.quoteSource);
           extracted.push({
             ticker,
             units: fmtNum(ir.units),
             avgCost: fmtNum(ir.avgCost),
             provenance: "image",
             englishName: ir.englishName,
+            // Keep the server-derived source per row (it ran inferQuoteSource);
+            // fall back to a local inference if absent. Not locked — editing the
+            // ticker re-infers, but the per-row pill can still override.
+            quoteSource: ir.quoteSource ?? inferQuoteSource(ticker),
             estimated: ir.estimated,
             needsUnits: ir.needsUnits,
           });
@@ -362,7 +395,8 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
             ter: 0,
             color: "var(--accent)",
             source: source.trim() || null,
-            quoteSource,
+            // Per-row source (explicit pill choice, import, or live inference).
+            quoteSource: row.quoteSource ?? inferQuoteSource(row.ticker),
           }),
         });
         if (!res.ok) throw new Error(`Add ${ticker} failed (${res.status})`);
@@ -414,18 +448,28 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
     const copy = [...rows];
     copy[i] = { ...copy[i], [field]: val };
     // If the user edits the ticker by typing, clear any remembered englishName
-    // — it no longer matches what they have in the field.
-    if (field === "ticker") copy[i].englishName = undefined;
+    // — it no longer matches what they have in the field — and let the type
+    // pill re-infer (unless the user pinned the source explicitly).
+    if (field === "ticker") {
+      copy[i].englishName = undefined;
+      if (!copy[i].quoteSourceLocked) copy[i].quoteSource = undefined;
+    }
     // Supplying quantity clears the "needs quantity" flag on an image-derived row.
     if (field === "units" && val.trim()) copy[i].needsUnits = false;
     setRows(copy);
   };
 
+  const setRowQuoteSource = (i: number, next: QuoteSource) => {
+    const copy = [...rows];
+    copy[i] = { ...copy[i], quoteSource: next, quoteSourceLocked: true };
+    setRows(copy);
+  };
+
   const pickSuggestion = (i: number, s: TickerSuggestion) => {
     const copy = [...rows];
-    copy[i] = { ...copy[i], ticker: s.ticker, englishName: s.name };
+    // The catalog entry carries an authoritative source — adopt it for the row.
+    copy[i] = { ...copy[i], ticker: s.ticker, englishName: s.name, quoteSource: s.quote_source };
     setRows(copy);
-    setQuoteSource(s.quote_source);
     setOpenSuggestRow(null);
   };
 
@@ -523,53 +567,6 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
                 <option key={s} value={s} />
               ))}
             </datalist>
-          </div>
-        </div>
-
-        <div style={{ marginBottom: 14 }}>
-          <label
-            style={{
-              fontSize: 11,
-              fontFamily: "var(--font-mono)",
-              color: "var(--muted)",
-              letterSpacing: "0.04em",
-              marginBottom: 4,
-              display: "block",
-            }}
-          >
-            TYPE
-          </label>
-          <select
-            value={quoteSource}
-            onChange={(e) => setQuoteSource(e.target.value as QuoteSource)}
-            className="twk-field"
-            style={{
-              width: "100%",
-              padding: "8px 10px",
-              background: "var(--card-soft)",
-              border: "1px solid var(--line-soft)",
-              borderRadius: 8,
-              fontFamily: "var(--font-sans)",
-              fontSize: 13,
-              color: "var(--ink)",
-            }}
-          >
-            {QUOTE_SOURCES.map((s) => (
-              <option key={s} value={s}>
-                {QUOTE_SOURCE_LABELS[s]}
-              </option>
-            ))}
-          </select>
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--muted)",
-              marginTop: 4,
-              lineHeight: 1.4,
-            }}
-          >
-            Determines where we fetch prices. Pick "Thai mutual fund" for SEC-registered funds,
-            "Stock / ETF / Index" for everything else.
           </div>
         </div>
 
@@ -863,25 +860,40 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
                 paddingBottom: 4,
               }}
             >
-              <span style={{ padding: "0 4px" }}>Symbol</span>
-              <span style={{ padding: "0 4px" }}>Quantity</span>
-              <span style={{ padding: "0 4px" }}>Avg cost</span>
+              <span style={{ padding: "0 10px" }}>Symbol</span>
+              <span style={{ padding: "0 10px" }}>Quantity</span>
+              <span style={{ padding: "0 10px" }}>Avg cost</span>
               <span></span>
             </div>
           )}
           {rows.map((r, i) => {
             const hasTicker = Boolean(r.ticker.trim());
             const rowNeedsUnits = hasTicker && !r.units.trim();
+            // Hold back the empty-quantity amber while the user is editing any
+            // field in this row — only flag it once they leave it incomplete.
+            const showNeedsUnits = rowNeedsUnits && activeRow !== i;
             const unknownTicker =
               hasTicker &&
               openSuggestRow !== i &&
               !knownTickerSet.has(r.ticker.trim().toUpperCase());
             const openSuggestionsUp = i >= Math.max(0, rows.length - 2);
+            const rowSource: QuoteSource = r.quoteSource ?? inferQuoteSource(r.ticker);
             return (
-              <div key={i} className="manual-row">
+              <div
+                key={i}
+                className="manual-row"
+                // Track row-level focus (focusin/focusout bubble) so the
+                // needs-quantity amber waits until focus leaves the whole row.
+                onFocus={() => setActiveRow(i)}
+                onBlur={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                    setActiveRow((cur) => (cur === i ? null : cur));
+                  }
+                }}
+              >
                 <div style={{ position: "relative" }}>
                   <input
-                    placeholder="Search symbol"
+                    placeholder="Symbol"
                     value={r.ticker}
                     onChange={(e) => updateRow(i, "ticker", e.target.value)}
                     onFocus={() => setOpenSuggestRow(i)}
@@ -894,13 +906,41 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
                     aria-expanded={openSuggestRow === i && suggestions.length > 0}
                     aria-controls={`ticker-suggest-${i}`}
                     autoComplete="off"
-                    title={unknownTicker ? "Unknown symbol" : undefined}
-                    style={
-                      unknownTicker
-                        ? { borderColor: "var(--amber)", background: "var(--card-soft)" }
+                    // Full ticker on hover — the input clips long codes (fade cue below).
+                    title={
+                      hasTicker
+                        ? unknownTicker
+                          ? `${r.ticker} — not in catalog`
+                          : r.ticker
                         : undefined
                     }
+                    style={{
+                      // Reserve room for the in-input price-source badge.
+                      ...(hasTicker ? { paddingRight: 42 } : null),
+                      ...(unknownTicker
+                        ? { borderColor: "var(--amber)", background: "var(--card-soft)" }
+                        : null),
+                    }}
                   />
+                  {/* Right-edge fade: cues "more text" when a long symbol clips
+                      before the badge. Only visible when text reaches the zone. */}
+                  {hasTicker && <span className="symbol-fade" aria-hidden="true" />}
+                  {hasTicker && (
+                    <button
+                      type="button"
+                      className="type-badge"
+                      data-overridden={Boolean(r.quoteSourceLocked)}
+                      title="Price source — tap to switch (Thai fund ⇄ Stock / ETF)"
+                      onClick={() =>
+                        setRowQuoteSource(
+                          i,
+                          rowSource === "thai_mutual_fund" ? "yahoo" : "thai_mutual_fund",
+                        )
+                      }
+                    >
+                      {TYPE_BADGE_CODES[rowSource]}
+                    </button>
+                  )}
                   {openSuggestRow === i && suggestions.length > 0 && (
                     <div
                       id={`ticker-suggest-${i}`}
@@ -975,10 +1015,10 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
                   )}
                 </div>
                 <input
-                  placeholder={rowNeedsUnits ? "Add quantity" : "Quantity"}
+                  placeholder="Quantity"
                   value={r.units}
                   onChange={(e) => updateRow(i, "units", e.target.value)}
-                  aria-invalid={rowNeedsUnits}
+                  aria-invalid={showNeedsUnits}
                   title={
                     rowNeedsUnits
                       ? "No quantity on the screenshot — open the fund in your broker app (or its detail screen) for exact units + avg cost, then type them here."
@@ -987,7 +1027,7 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
                         : undefined
                   }
                   style={
-                    rowNeedsUnits
+                    showNeedsUnits
                       ? {
                           borderColor: "var(--amber)",
                           background: "color-mix(in oklab, var(--amber) 10%, transparent)",
@@ -999,6 +1039,7 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
                 />
                 <input
                   placeholder="Optional"
+                  title="Avg cost per unit (optional)"
                   value={r.avgCost}
                   onChange={(e) => updateRow(i, "avgCost", e.target.value)}
                 />
@@ -1017,21 +1058,10 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
               </div>
             );
           })}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              marginTop: 6,
-              flexWrap: "wrap",
-            }}
-          >
+          <div style={{ marginTop: 6 }}>
             <button className="btn ghost sm" onClick={addRow}>
               <Icon name="plus" size={12} /> Add row
             </button>
-            <span style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.4 }}>
-              You can also type directly in the table.
-            </span>
           </div>
           {(needsUnitsCount > 0 || unknownSymbolCount > 0) && (
             <div
@@ -1043,10 +1073,44 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
               }}
             >
               {needsUnitsCount > 0 && unknownSymbolCount > 0
-                ? `ⓘ ${needsUnitsCount} row${needsUnitsCount > 1 ? "s show" : " shows"} only a value — add the quantity (exact units + avg cost are on the fund's detail screen). ${unknownSymbolCount} symbol${unknownSymbolCount > 1 ? "s are" : " is"} not in the catalog yet, but you can still save ${unknownSymbolCount > 1 ? "them" : "it"} if correct.`
+                ? `ⓘ ${needsUnitsCount} ${needsUnitsCount > 1 ? "rows need" : "row needs"} a quantity · ${unknownSymbolCount} ${unknownSymbolCount > 1 ? "symbols" : "symbol"} not in catalog (you can still save).`
                 : needsUnitsCount > 0
-                  ? `ⓘ ${needsUnitsCount} row${needsUnitsCount > 1 ? "s show" : " shows"} only a value — add the quantity (exact units + avg cost are on the fund's detail screen) before saving.`
-                  : `ⓘ ${unknownSymbolCount} symbol${unknownSymbolCount > 1 ? "s are" : " is"} not in the catalog yet. You can still save ${unknownSymbolCount > 1 ? "them" : "it"} if correct.`}
+                  ? `ⓘ ${needsUnitsCount} ${needsUnitsCount > 1 ? "rows need" : "row needs"} a quantity.`
+                  : `ⓘ ${unknownSymbolCount} ${unknownSymbolCount > 1 ? "symbols" : "symbol"} not in catalog (you can still save).`}
+            </div>
+          )}
+          {rows.some((r) => r.ticker.trim()) && (
+            <div
+              style={{
+                marginTop: 10,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                flexWrap: "wrap",
+                fontSize: 11.5,
+                color: "var(--muted)",
+                lineHeight: 1.4,
+              }}
+            >
+              <span>Set all to:</span>
+              <div className="source-seg">
+                {SOURCE_SEG_ORDER.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    title={`Set every row's price source to ${SOURCE_SEG_LABELS[s]}`}
+                    onClick={() =>
+                      setRows((prev) =>
+                        prev.map((r) =>
+                          r.ticker.trim() ? { ...r, quoteSource: s, quoteSourceLocked: true } : r,
+                        ),
+                      )
+                    }
+                  >
+                    {SOURCE_SEG_LABELS[s]}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>

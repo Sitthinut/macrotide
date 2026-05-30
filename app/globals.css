@@ -788,9 +788,12 @@ textarea.sheet-input {
 /* Add-holding row (manual) */
 .manual-row {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 28px;
+  /* minmax(0, …) on the symbol track stops the long ticker value from forcing
+     it to min-content width and starving the numeric columns. */
+  grid-template-columns: minmax(0, 2fr) 1fr 1fr 28px;
   gap: 6px;
   margin-bottom: 6px;
+  align-items: center;
 }
 .manual-row input {
   background: var(--card-soft);
@@ -802,6 +805,10 @@ textarea.sheet-input {
   color: var(--ink);
   outline: none;
   min-width: 0;
+  /* The symbol input is nested in a relative wrapper (for the badge + dropdown),
+     so it isn't a grid item that auto-stretches — without this it renders at its
+     intrinsic ~20ch width and overflows the cell into the quantity column. */
+  width: 100%;
 }
 .manual-row input:focus {
   border-color: var(--accent);
@@ -812,6 +819,74 @@ textarea.sheet-input {
   color: var(--muted);
   cursor: pointer;
   border-radius: 6px;
+}
+/* In-input price-source badge, pinned to the symbol input's right edge. Higher
+   specificity than `.manual-row button` so it keeps its chip styling. Appears
+   once a symbol is entered; the symbol input reserves right padding for it. */
+.manual-row .type-badge {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  transform: translateY(-50%);
+  padding: 1px 5px;
+  font-family: var(--font-sans);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
+  color: var(--muted);
+  background: var(--paper);
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.manual-row .type-badge[data-overridden="true"] {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+/* "Set all to:" — two bulk-action buttons (NOT a stateful toggle: the per-row
+   badges hold the state; these just apply a value to every row, and re-applying
+   the same value is valid, so neither button shows a "selected" state). */
+.source-seg {
+  display: inline-flex;
+  gap: 6px;
+}
+.source-seg button {
+  background: var(--card-soft);
+  border: 1px solid var(--line-soft);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.source-seg button:hover {
+  border-color: var(--accent);
+}
+/* Right-edge fade over the symbol input: a long ticker fades into the input's
+   own background as it nears the clip, cueing "there's more" (full value is in
+   the input's title tooltip). Sits just left of the badge; invisible over the
+   empty bg, so short tickers show nothing. Painted after the input but before
+   the badge in DOM, so the badge stays crisp. */
+.manual-row .symbol-fade {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  right: 42px;
+  width: 16px;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, var(--card-soft));
+}
+/* Narrow phones: shrink the symbol column and floor the numeric columns so
+   "Quantity" / "Optional" always fit without clipping. */
+@media (max-width: 560px) {
+  .manual-row {
+    grid-template-columns: minmax(0, 1.4fr) minmax(66px, 1fr) minmax(66px, 1fr) 22px;
+    gap: 5px;
+  }
 }
 
 /* ─── Modal primitive ─────────────────────────────────────────────────────────
