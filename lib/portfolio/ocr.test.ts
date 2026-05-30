@@ -33,10 +33,12 @@ vi.mock("@ai-sdk/openai-compatible", () => ({
 }));
 
 import {
+  deriveRow,
   extractHoldingsFromImage,
   inferQuoteSource,
   isAllowedMimeType,
   OcrProviderUnavailableError,
+  parseExtractedRows,
 } from "./ocr";
 
 const FAKE_KEY = "sk-or-test";
@@ -195,5 +197,84 @@ describe("extractHoldingsFromImage — primary/fallback chain", () => {
       }),
     });
     await expect(extractHoldingsFromImage(fakeImage)).rejects.toThrow(/Insufficient credits/);
+  });
+});
+
+describe("parseExtractedRows", () => {
+  it("parses a clean JSON array", () => {
+    const rows = parseExtractedRows(
+      '[{"ticker":"SCBSP500-A","units":1250.5,"nav":18.4521,"avgCost":16.203}]',
+    );
+    expect(rows).toEqual([{ ticker: "SCBSP500-A", units: 1250.5, nav: 18.4521, avgCost: 16.203 }]);
+  });
+
+  it("strips markdown fences and leading prose", () => {
+    const rows = parseExtractedRows(
+      'Here you go:\n```json\n[{"ticker":"K-USA-A(A)","value":14465}]\n```',
+    );
+    expect(rows).toEqual([{ ticker: "K-USA-A(A)", value: 14465 }]);
+  });
+
+  it("cleans ฿, commas, %, and + signs left in numeric strings", () => {
+    const rows = parseExtractedRows(
+      '[{"ticker":"TLFVMR-ASIAX","value":"฿719,193.85","pl":"+150,470.57"}]',
+    );
+    expect(rows[0]).toEqual({ ticker: "TLFVMR-ASIAX", value: 719193.85, pl: 150470.57 });
+  });
+
+  it("keeps negative P/L", () => {
+    const rows = parseExtractedRows('[{"ticker":"KF-LATAM","pl":"-5,998.74"}]');
+    expect(rows[0].pl).toBe(-5998.74);
+  });
+
+  it("omits fields the model could not read (no guessed zeros)", () => {
+    const rows = parseExtractedRows('[{"ticker":"KT-BOND","value":101235.19}]');
+    expect(rows[0]).toEqual({ ticker: "KT-BOND", value: 101235.19 });
+    expect(rows[0].units).toBeUndefined();
+  });
+
+  it("drops rows without a ticker and returns [] for junk", () => {
+    expect(parseExtractedRows('[{"units":100},{"ticker":""}]')).toEqual([]);
+    expect(parseExtractedRows("not json at all")).toEqual([]);
+    expect(parseExtractedRows("")).toEqual([]);
+  });
+});
+
+describe("deriveRow", () => {
+  it("derives units from value and market NAV, flagging estimated", () => {
+    const row = deriveRow({ ticker: "K-GOLD-A(A)", value: 646151.62, pl: 137993.6 }, 100);
+    expect(row.units).toBeCloseTo(6461.5162, 3);
+    expect(row.estimated).toBe(true);
+    expect(row.needsUnits).toBe(false);
+    expect(row.avgCost).toBeCloseTo((646151.62 - 137993.6) / 6461.5162, 3);
+  });
+
+  it("prefers the NAV printed on the image over market NAV", () => {
+    const row = deriveRow({ ticker: "X-A", value: 1000, nav: 20 }, 999);
+    expect(row.nav).toBe(20);
+    expect(row.units).toBe(50);
+  });
+
+  it("does not overwrite values the image already showed", () => {
+    const row = deriveRow(
+      { ticker: "Y-A", units: 500, nav: 28.93, avgCost: 30.12, value: 14465 },
+      28.93,
+    );
+    expect(row.estimated).toBe(false);
+    expect(row.units).toBe(500);
+    expect(row.avgCost).toBe(30.12);
+  });
+
+  it("flags needsUnits when no NAV is available", () => {
+    const row = deriveRow({ ticker: "Z-A", value: 5000 }, undefined);
+    expect(row.units).toBeUndefined();
+    expect(row.needsUnits).toBe(true);
+  });
+
+  it("routes the quoteSource from the ticker shape", () => {
+    expect(deriveRow({ ticker: "K-FIXED-A", units: 1 }, undefined).quoteSource).toBe(
+      "thai_mutual_fund",
+    );
+    expect(deriveRow({ ticker: "AAPL", units: 1 }, undefined).quoteSource).toBe("yahoo");
   });
 });

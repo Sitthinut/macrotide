@@ -6,12 +6,7 @@ import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import { mergeSourceSuggestions } from "@/lib/data/sources";
 import { useHoldings } from "@/lib/fetchers/portfolio";
-import {
-  DEFAULT_QUOTE_SOURCE,
-  QUOTE_SOURCE_LABELS,
-  QUOTE_SOURCES,
-  type QuoteSource,
-} from "@/lib/market/sources";
+import { QUOTE_SOURCE_LABELS, QUOTE_SOURCES, type QuoteSource } from "@/lib/market/sources";
 import type { AssetClass } from "@/lib/static/types";
 
 export interface HoldingFormValues {
@@ -84,7 +79,7 @@ export function HoldingSheet({
 
   const submit = async () => {
     if (!values.ticker.trim()) {
-      setError("Ticker is required");
+      setError("Symbol is required");
       return;
     }
     if (!values.englishName.trim()) {
@@ -96,7 +91,7 @@ export function HoldingSheet({
       return;
     }
     if (!Number.isFinite(values.units) || values.units <= 0) {
-      setError("Units must be a positive number");
+      setError("Quantity must be a positive number");
       return;
     }
     setSubmitting(true);
@@ -132,7 +127,7 @@ export function HoldingSheet({
           title={isEdit ? "Edit holding" : "Add holding"}
           subtitle={
             isEdit
-              ? "Update units, cost basis, or move to another portfolio."
+              ? "Update quantity, cost basis, or move to another portfolio."
               : "Add a single holding. Use the import sheet for multiple at once."
           }
           id="hs-title"
@@ -153,13 +148,13 @@ export function HoldingSheet({
             </select>
           </FormRow>
 
-          <FormRow label="Ticker">
+          <FormRow label="Symbol">
             <input
               className="sheet-input"
               value={values.ticker}
               onChange={(e) => update({ ticker: e.target.value.toUpperCase() })}
               disabled={lockTicker}
-              placeholder={values.quoteSource === "thai_mutual_fund" ? "K-FIXED-A" : "AAPL"}
+              placeholder="Symbol"
               style={{ textTransform: "uppercase" }}
             />
           </FormRow>
@@ -199,7 +194,7 @@ export function HoldingSheet({
           )}
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <FormRow label="Units">
+            <FormRow label="Quantity">
               <input
                 className="sheet-input"
                 type="number"
@@ -209,7 +204,7 @@ export function HoldingSheet({
                 placeholder="0"
               />
             </FormRow>
-            <FormRow label="Avg cost (per unit)" hint="THB">
+            <FormRow label="Avg cost" hint="THB per unit/share">
               <input
                 className="sheet-input"
                 type="number"

@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { clientIp, type RateLimitConfig, rateLimit } from "@/lib/api/rate-limit";
 import { withDb } from "@/lib/api/with-db";
+import { listFundQuotes } from "@/lib/db/queries/quotes";
 import {
-  extractHoldingsFromImage,
+  type DerivedRow,
+  deriveRow,
+  extractStructuredHoldings,
   isAllowedMimeType,
   OcrProviderUnavailableError,
 } from "@/lib/portfolio/ocr";
@@ -83,16 +86,29 @@ export async function POST(req: Request) {
 
   const buffer = Buffer.from(await file.arrayBuffer());
 
-  // Pure transcription endpoint: returns { text } only. Turning text into
-  // structured holdings rows is deferred to the user (paste into Manual tab)
-  // or to the future advisor-assist flow (see ROADMAP).
-  //
-  // Wrapped in withDb for consistency with sibling routes even though this
-  // endpoint does NOT touch the DB.
+  // Structured-extraction endpoint: returns { rows } the UI renders as an
+  // editable confirmation table. The vision model reads whatever the broker
+  // screen shows (often market value + % but no units); we derive units /
+  // avgCost from the latest NAV (fund_quotes) where we can, and flag the rest
+  // for the user to fill in. The image is never persisted.
   return withDb(async () => {
     try {
-      const { text } = await extractHoldingsFromImage({ data: buffer, mimeType });
-      return NextResponse.json({ text }, { status: 200 });
+      const extracted = await extractStructuredHoldings({ data: buffer, mimeType });
+
+      // One NAV lookup for all tickers, then derive per row.
+      const tickers = extracted.map((r) => r.ticker.trim().toUpperCase());
+      const navByTicker = new Map<string, number>();
+      if (tickers.length) {
+        for (const q of listFundQuotes(tickers)) {
+          if (q.nav > 0) navByTicker.set(q.ticker.toUpperCase(), q.nav);
+        }
+      }
+
+      const rows: DerivedRow[] = extracted.map((r) =>
+        deriveRow(r, navByTicker.get(r.ticker.trim().toUpperCase())),
+      );
+
+      return NextResponse.json({ rows }, { status: 200 });
     } catch (err) {
       if (err instanceof OcrProviderUnavailableError) {
         return NextResponse.json(

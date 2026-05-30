@@ -15,7 +15,7 @@ import type { QuoteSource } from "@/lib/market/sources";
  * asked the model to return a Zod-validated `{ rows: ProposedRow[] }`. Free
  * and OCR-specialized vision models routinely failed at the structured-output
  * contract:
- *   - `qianfan-ocr-fast` doesn't support OpenRouter's structured-output flag.
+ *   - Some OCR-specialized vision models don't support OpenRouter's structured-output flag.
  *   - Smaller Gemma / Llama free models return "Invalid JSON response".
  *   - Even capable models silently returned empty rows when their schema-
  *     following confidence was low (no signal back to the user about WHY).
@@ -25,9 +25,8 @@ import type { QuoteSource } from "@/lib/market/sources";
  * value?) is deferred to either the user (read the transcription, fill rows
  * manually) or a future advisor flow.
  *
- * Defaults to `openrouter/free`. Override with `OCR_MODEL` — see
- * `.env.example` for verified-working alternatives and the production
- * no-train guidance.
+ * Defaults to `google/gemini-2.0-flash-001`. Override with `OCR_MODEL` — see
+ * `.env.example`. Must be a vision-capable OpenRouter model.
  */
 
 export interface OcrInput {
@@ -46,11 +45,44 @@ export interface OcrResult {
 }
 
 /**
- * Shape of a holding row proposed to the user, kept here as the contract for
- * the future advisor-assist flow that will turn `text` into rows via chat
- * tool calls. Not produced by the OCR endpoint today — the route returns
- * `text` only.
+ * A single holding the vision model read off a broker screenshot, BEFORE any
+ * NAV-derivation. Thai broker apps vary in what they show on the summary
+ * screen — some list units + NAV + avg cost (the fund DETAIL view), most list
+ * only market value + allocation % + gain/loss (the portfolio summary view).
+ * So every numeric field is optional: the extractor reports only what it
+ * actually saw, and the route fills the gaps (see `deriveRow`).
  */
+export interface ExtractedRow {
+  /** Fund code / ticker exactly as printed (e.g. "K-USA-A(A)", "SCBSP500-A"). */
+  ticker: string;
+  /** English fund name if shown (often a small subtitle under the code). */
+  englishName?: string;
+  /** Units held, if the screen shows them. */
+  units?: number;
+  /** NAV / price per unit, if shown. */
+  nav?: number;
+  /** Average cost per unit, if shown (the DETAIL view has this directly). */
+  avgCost?: number;
+  /** Market value of the position, if shown (most summary views lead with this). */
+  value?: number;
+  /** Unrealised profit/loss in THB, if shown (negative for a loss). */
+  pl?: number;
+}
+
+/**
+ * A holding row after NAV-derivation, ready for the editable confirmation
+ * table. Carries provenance so the UI can mark estimated fields and prompt
+ * the user to make them exact.
+ */
+export interface DerivedRow extends ExtractedRow {
+  quoteSource: QuoteSource;
+  /** True when `units`/`avgCost` were computed (value÷NAV), not read from the image. */
+  estimated: boolean;
+  /** True when we couldn't derive units (no NAV on file) — UI asks the user to type them. */
+  needsUnits: boolean;
+}
+
+/** @deprecated use {@link ExtractedRow} — kept until callers migrate. */
 export interface ProposedRow {
   ticker: string;
   englishName?: string;
@@ -59,25 +91,53 @@ export interface ProposedRow {
   quoteSource: QuoteSource;
 }
 
-// Default model chain: free tier first (zero cost when it works), paid
-// version as the automatic fallback when the free endpoint rate-limits or
-// quota-caps. Both are `baidu/qianfan-ocr-fast` variants — same model,
-// same transcription quality, just different metering.
+// Default model chain: a primary vision model, with a cheaper one as the
+// automatic fallback when the primary rate-limits or errors. Both are Google
+// Gemini Flash variants on OpenRouter — strong at reading text from
+// document/table screenshots and inexpensive (~$0.0001–0.001 per image).
 //
-// Operator-verified: per Sid (2026-05-23), the `:free` variant of qianfan
-// is no-train despite living behind OpenRouter's "Free endpoints that may
-// train on request data" toggle. Re-verify this before any public deploy.
+// History: the previous default `baidu/qianfan-ocr-fast(:free)` was removed
+// from OpenRouter ("No endpoints found", observed 2026-05) which silently
+// broke this endpoint; both the free and paid variants 404'd. The
+// replacement is a maintained, no-train-by-default provider. This OCR utility
+// is intentionally NOT tier-gated — it's a bounded, rate-limited one-shot
+// (unlike the open-ended chat advisor, which the free-tier invariant guards),
+// so it uses the same model for every user for identical UX.
 //
-// 27.2M tokens/week free quota — generous for personal use. When that's
-// exhausted (HTTP 429 / "rate-limited upstream"), the route catches
+// On primary failure (HTTP 429 / provider error) the route catches
 // OcrProviderUnavailableError, retries once against OCR_FALLBACK_MODEL,
 // and only surfaces the error if both fail.
-const DEFAULT_OCR_MODEL = "baidu/qianfan-ocr-fast:free";
-const DEFAULT_OCR_FALLBACK_MODEL = "baidu/qianfan-ocr-fast";
+const DEFAULT_OCR_MODEL = "google/gemini-2.5-flash";
+const DEFAULT_OCR_FALLBACK_MODEL = "google/gemini-2.0-flash-001";
 
 const SYSTEM_PROMPT = `You are an OCR transcription engine. Read the image and return EVERY line of visible text, in reading order. Preserve numbers, currency symbols, percent signs, and column structure exactly as they appear. Use newlines between rows of a table. Do not summarize, interpret, or add commentary — just transcribe.
 
 If the image contains no readable text at all, return an empty string.`;
+
+// Structured-extraction prompt. The hard-won detail (validated against real
+// Thai broker screenshots) is the digit/glyph fidelity instruction: general
+// vision models otherwise merge the ฿ glyph into the adjacent number
+// ("฿18.45" → "818.45") and strip/garble decimals — fatal for holdings.
+// We ask for prompt-driven JSON (NOT OpenRouter's structured-output flag,
+// which several capable models silently fail — see the note above).
+const EXTRACT_PROMPT = `You are reading a screenshot of a Thai mutual-fund / brokerage portfolio. Extract EVERY fund holding as a JSON array — output ONLY the array, no prose, no markdown code fences.
+
+Each element has these keys (include a key ONLY if that value is actually visible for that row; omit keys you cannot read — never guess):
+- "ticker": the fund code exactly as printed (e.g. "K-USA-A(A)", "SCBSP500-A", "TLFVMR-ASIAX")
+- "englishName": the English fund name if shown as a subtitle
+- "units": number of units held
+- "nav": price or NAV per unit
+- "avgCost": average cost per unit
+- "value": market value of the position (the large baht amount)
+- "pl": unrealised profit/loss in baht (negative if it is red or has a minus sign)
+
+CRITICAL number rules — read every digit and decimal EXACTLY as printed:
+- The ฿ symbol is a CURRENCY MARKER, never a digit. "฿18.4521" is 18.4521, NOT 818.4521. Strip it.
+- Remove thousands-separator commas: "719,193.85" → 719193.85.
+- Never round, pad, or normalise. Output plain JSON numbers (no quotes, no ฿, no commas, no % sign).
+- Do NOT include portfolio totals, headers, "cash", or summary rows as holdings.
+
+If the image shows no portfolio at all, return [].`;
 
 const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
 type AllowedMimeType = (typeof ALLOWED_MIME_TYPES)[number];
@@ -188,6 +248,178 @@ async function transcribe(apiKey: string, modelId: string, input: OcrInput): Pro
     }
     return { text: "" };
   }
+}
+
+/**
+ * Read a broker screenshot into structured holding rows.
+ *
+ * Same provider + fallback policy as {@link extractHoldingsFromImage}: tries
+ * `OCR_MODEL` (default gemini-2.5-flash), retries once on `OCR_FALLBACK_MODEL`
+ * for provider-unavailable errors. Returns `[]` (not an error) when a model
+ * runs but reads no holdings, so the route can show a friendly empty state.
+ *
+ * Returns raw extracted rows — NAV-derivation (units/avgCost from market data)
+ * happens in the route, which has DB access.
+ */
+export async function extractStructuredHoldings(input: OcrInput): Promise<ExtractedRow[]> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENROUTER_API_KEY is not set");
+  }
+
+  const primary = process.env.OCR_MODEL?.trim() || DEFAULT_OCR_MODEL;
+  const fallbackEnv = process.env.OCR_FALLBACK_MODEL?.trim();
+  const fallback = fallbackEnv ?? (process.env.OCR_MODEL ? null : DEFAULT_OCR_FALLBACK_MODEL);
+
+  try {
+    return await extractWith(apiKey, primary, input);
+  } catch (err) {
+    if (err instanceof OcrProviderUnavailableError && fallback && fallback !== primary) {
+      return await extractWith(apiKey, fallback, input);
+    }
+    throw err;
+  }
+}
+
+async function extractWith(
+  apiKey: string,
+  modelId: string,
+  input: OcrInput,
+): Promise<ExtractedRow[]> {
+  const model = openrouterVisionModel(apiKey, modelId);
+  try {
+    const result = await generateText({
+      model,
+      temperature: 0,
+      maxOutputTokens: 4096,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: EXTRACT_PROMPT },
+            { type: "image", image: input.data, mediaType: input.mimeType },
+          ],
+        },
+      ],
+    });
+    return parseExtractedRows(result.text ?? "");
+  } catch (err) {
+    if (isProviderError(err)) {
+      throw new OcrProviderUnavailableError(extractProviderMessage(err));
+    }
+    // A non-provider error here is almost always a malformed/blocked response;
+    // treat as "nothing read" rather than a hard 502.
+    return [];
+  }
+}
+
+/**
+ * Tolerant parser for the model's JSON-array reply. Handles markdown fences,
+ * leading prose, and stray ฿/comma residue the prompt should have removed but
+ * a weaker model might leave in. Drops rows without a usable ticker.
+ */
+export function parseExtractedRows(text: string): ExtractedRow[] {
+  if (!text) return [];
+  let s = text.trim();
+  // Strip ```json … ``` fences if present.
+  s = s
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```$/, "")
+    .trim();
+  // Narrow to the outermost array.
+  const a = s.indexOf("[");
+  const b = s.lastIndexOf("]");
+  if (a < 0 || b <= a) return [];
+  s = s.slice(a, b + 1);
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(s);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(raw)) return [];
+
+  const rows: ExtractedRow[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const ticker = typeof o.ticker === "string" ? o.ticker.trim() : "";
+    if (!ticker) continue;
+    const row: ExtractedRow = { ticker };
+    if (typeof o.englishName === "string" && o.englishName.trim()) {
+      row.englishName = o.englishName.trim();
+    }
+    const units = coerceNumber(o.units);
+    const nav = coerceNumber(o.nav);
+    const avgCost = coerceNumber(o.avgCost);
+    const value = coerceNumber(o.value);
+    const pl = coerceNumber(o.pl);
+    if (units !== null) row.units = units;
+    if (nav !== null) row.nav = nav;
+    if (avgCost !== null) row.avgCost = avgCost;
+    if (value !== null) row.value = value;
+    if (pl !== null) row.pl = pl;
+    rows.push(row);
+  }
+  return rows;
+}
+
+/**
+ * Fill in `units`/`avgCost` for a row that only had market value, using a NAV
+ * from market data. Pure + synchronous so it's unit-testable; the route looks
+ * up `nav` (via `listFundQuotes`) and passes it in.
+ *
+ * Precedence: trust what the image showed. Only derive a missing field.
+ *  - units   = value ÷ nav           (when units absent but value + nav present)
+ *  - avgCost = (value − pl) ÷ units   (cost basis = current value minus gain)
+ *
+ * `estimated` flags any derived field so the UI can mark it and invite the
+ * user to make it exact. `needsUnits` means we still have no units (no NAV on
+ * file and none on the image) — the confirmation table asks the user to type
+ * them, ideally from the fund's detail screen.
+ */
+export function deriveRow(row: ExtractedRow, nav: number | undefined): DerivedRow {
+  const quoteSource = inferQuoteSource(row.ticker);
+  const out: DerivedRow = { ...row, quoteSource, estimated: false, needsUnits: false };
+
+  // Prefer the NAV printed on the image; fall back to market-data NAV.
+  const effNav = out.nav ?? (nav && nav > 0 ? nav : undefined);
+  if (out.nav === undefined && effNav !== undefined) {
+    out.nav = effNav;
+    out.estimated = true;
+  }
+
+  if (out.units === undefined && out.value !== undefined && effNav) {
+    out.units = out.value / effNav;
+    out.estimated = true;
+  }
+
+  if (
+    out.avgCost === undefined &&
+    out.units !== undefined &&
+    out.units > 0 &&
+    out.value !== undefined
+  ) {
+    const costBasis = out.value - (out.pl ?? 0);
+    if (costBasis > 0) {
+      out.avgCost = costBasis / out.units;
+      out.estimated = true;
+    }
+  }
+
+  out.needsUnits = out.units === undefined || out.units <= 0;
+  return out;
+}
+
+/** Parse a model-emitted number that may still carry ฿, commas, %, or a +/- sign. */
+function coerceNumber(v: unknown): number | null {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v !== "string") return null;
+  const cleaned = v.replace(/[฿$,%\s]/g, "").replace(/^\+/, "");
+  if (cleaned === "" || cleaned === "-") return null;
+  const n = Number.parseFloat(cleaned);
+  return Number.isFinite(n) ? n : null;
 }
 
 export class OcrProviderUnavailableError extends Error {
