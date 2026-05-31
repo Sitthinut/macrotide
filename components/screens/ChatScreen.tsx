@@ -4,7 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatThreadList } from "@/components/ChatThreadList";
 import { FeedbackRow } from "@/components/FeedbackRow";
 import { Icon } from "@/components/Icon";
+import {
+  useModelPortfoliosView,
+  usePortfolioView,
+  useSelectedModelId,
+} from "@/lib/fetchers/legacy";
 import { invalidate } from "@/lib/fetchers/swr";
+import { type AdvisorScreenContext, buildChatSuggestions } from "@/lib/portfolio/chat-suggestions";
+import { computeHealth } from "@/lib/portfolio/health";
 import { AI_PERSONALITIES } from "@/lib/static/personalities";
 import { consumeLoadTarget, setActiveThreadId, useChatUi } from "@/lib/stores/chat-ui";
 
@@ -79,6 +86,15 @@ export interface ChatScreenProps {
   onPromptConsumed?: () => void;
   /** Opens the account menu from the topbar (mobile only; hidden in the dock). */
   onOpenMenu?: () => void;
+  /**
+   * The screen the composer is being shown against, so its starter suggestions
+   * can reflect where the user is. Optional — omitted (or `null`) just drops the
+   * screen-flavored chips and falls back to portfolio + evergreen prompts. This
+   * is the existing app-shell `screen` state threaded down by callers, NOT a new
+   * context abstraction (a sibling effort owns the formal Advisor context model;
+   * see NOTES-22.md).
+   */
+  activeScreen?: AdvisorScreenContext | null;
 }
 
 function PlanProposalCard({
@@ -238,6 +254,7 @@ export function ChatScreen({
   seedPrompt,
   onPromptConsumed,
   onOpenMenu,
+  activeScreen,
 }: ChatScreenProps) {
   void persona; // single advisor persona for MVP
 
@@ -685,14 +702,36 @@ export function ChatScreen({
     void askLive(last.text, withoutFailed.slice(0, -1));
   };
 
-  const suggestions = [
-    "How am I doing vs my target?",
-    "Add a rule: no individual stocks",
-    "Update my risk to 25% drawdown",
-    "When should I rebalance?",
-    "What's a 3-fund portfolio?",
-    "Why index over active?",
-  ];
+  // Context the UI already has, fed to the thin suggestion layer. These are the
+  // SAME fetchers + health computation the Plan panel already uses (AppPanels'
+  // PlanPanel) — we're consuming existing context, not building a new data path.
+  // The `aggregate` book + selected target model drive portfolio-specific chips;
+  // `activeScreen` biases the screen-flavored ones. When a sibling effort lands a
+  // formal Advisor context model, swap these inputs for it without touching copy.
+  const { aggregate } = usePortfolioView();
+  const { models } = useModelPortfoliosView();
+  const selectedModelId = useSelectedModelId();
+  const targetModel = useMemo(
+    () => models?.find((m) => m.id === selectedModelId) ?? null,
+    [models, selectedModelId],
+  );
+  const suggestions = useMemo(() => {
+    const health =
+      aggregate && aggregate.holdings.length > 0
+        ? computeHealth(
+            aggregate.holdings,
+            aggregate.totalValue,
+            targetModel?.mix ?? null,
+            targetModel?.ter ?? null,
+          )
+        : null;
+    return buildChatSuggestions({
+      screen: activeScreen,
+      health,
+      targetName: targetModel?.name ?? null,
+      hasHoldings: !!aggregate && aggregate.holdings.length > 0,
+    });
+  }, [aggregate, targetModel, activeScreen]);
 
   useEffect(() => {
     if (seedPrompt) {

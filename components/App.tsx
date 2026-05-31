@@ -28,6 +28,7 @@ import { authClient } from "@/lib/auth/client";
 import { usePortfolioView, useSelectedModelId } from "@/lib/fetchers/legacy";
 import { usePlan } from "@/lib/fetchers/portfolio";
 import { invalidate, useResource } from "@/lib/fetchers/swr";
+import type { AdvisorScreenContext } from "@/lib/portfolio/chat-suggestions";
 import type { Portfolio } from "@/lib/static/types";
 import { setActiveId, usePortfolioUi } from "@/lib/stores/portfolio-ui";
 import { useScrollHide } from "@/lib/useScrollHide";
@@ -53,6 +54,30 @@ type Screen =
   | "settings"
   | "account"
   | "admin";
+
+// Map the app shell's `screen` onto the small vocabulary the Advisor suggestion
+// layer understands, so dock chat chips reflect the screen behind them. Screens
+// the suggestion layer has nothing tailored for (settings/account/admin) map to
+// null — it falls back to portfolio + evergreen prompts. "funds" is the Explore
+// catalog; "chat" maps to itself (mobile, where chat is the screen).
+function toAdvisorScreen(screen: Screen): AdvisorScreenContext | null {
+  switch (screen) {
+    case "portfolio":
+      return "portfolio";
+    case "markets":
+      return "markets";
+    case "funds":
+      return "explore";
+    case "journal":
+      return "journal";
+    case "models":
+      return "models";
+    case "chat":
+      return "chat";
+    default:
+      return null;
+  }
+}
 
 // Screen ids stay stable ("funds"/"chat") — only the visible labels changed:
 // Funds → Explore (it's the catalog discovery tool, not a holdings list),
@@ -414,6 +439,7 @@ export function App() {
           seedPrompt={pendingPrompt}
           onPromptConsumed={() => setPendingPrompt(null)}
           onOpenMenu={() => setAccountMenuOpen(true)}
+          activeScreen="chat"
         />
       );
     }
@@ -611,6 +637,7 @@ export function App() {
                   seedPrompt={pendingPrompt}
                   onPromptConsumed={() => setPendingPrompt(null)}
                   onClose={() => setActiveApp(null)}
+                  activeScreen={toAdvisorScreen(screen)}
                 />
               )}
               {activeApp === "portfolios" && <PortfoliosPanel onClose={() => setActiveApp(null)} />}

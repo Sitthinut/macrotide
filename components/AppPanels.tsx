@@ -14,6 +14,7 @@ import {
   useSelectedModelId,
 } from "@/lib/fetchers/legacy";
 import { invalidate } from "@/lib/fetchers/swr";
+import type { AdvisorScreenContext } from "@/lib/portfolio/chat-suggestions";
 import { computeHealth, summarizeHealth } from "@/lib/portfolio/health";
 import type { Portfolio } from "@/lib/static/types";
 import { useChatUi } from "@/lib/stores/chat-ui";
@@ -76,10 +77,13 @@ export function ChatPanel({
   seedPrompt,
   onPromptConsumed,
   onClose,
+  activeScreen,
 }: {
   seedPrompt: SeedPrompt | null;
   onPromptConsumed: () => void;
   onClose: () => void;
+  /** The screen behind the dock, so chat suggestions reflect it. Forwarded to ChatScreen. */
+  activeScreen?: AdvisorScreenContext | null;
 }) {
   // In-panel view swap (Option B): the chat body and the thread list share one
   // panel. "All chats" swaps to the list; the back arrow returns to chat.
@@ -162,7 +166,12 @@ export function ChatPanel({
         className="ra-panel-body ra-chat-body"
         style={view === "chat" ? undefined : { display: "none" }}
       >
-        <ChatScreen persona="advisor" seedPrompt={seedPrompt} onPromptConsumed={onPromptConsumed} />
+        <ChatScreen
+          persona="advisor"
+          seedPrompt={seedPrompt}
+          onPromptConsumed={onPromptConsumed}
+          activeScreen={activeScreen}
+        />
       </div>
       {view === "threads" && (
         <ChatThreadList

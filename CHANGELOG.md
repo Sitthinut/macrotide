@@ -15,6 +15,14 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Context-aware Advisor starter prompts.** The chat composer's suggestion
+  chips now reflect the user's actual portfolio and the screen they're on
+  instead of a fixed list — surfacing prompts about a concentrated top holding,
+  a cash drag, drift from the selected target model, or a high blended fee, and
+  biasing toward the active screen (Markets, Explore, Models, Journal,
+  Portfolio). A fresh or empty portfolio gracefully falls back to evergreen
+  learning prompts.
+
 - **Add holdings from a screenshot — structured import.** The Add-holdings
   **Image** tab now reads one or more broker screenshots into an **editable
   review table** shared with Paste/CSV and manual table entry, instead of
