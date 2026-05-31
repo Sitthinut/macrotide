@@ -61,8 +61,11 @@ Feature deep dives and the prior-art research behind them live under
 | [design-principles.md](./explanation/design-principles.md) | Secure-by-default, the "Advisor" voice, single-owner → multi-user |
 | [memory.md](./explanation/memory.md) | The long-term memory + chat-session design |
 | [advisor-context.md](./explanation/advisor-context.md) | What the Advisor knows per turn — context channels, entry-point contract, empty-turn recovery |
+| [inference-strategy.md](./explanation/inference-strategy.md) | How the Advisor stays smart/fast/token-efficient — model routing, caching, reasoning, context loading, tool-result shaping |
 | [research/memory-systems.md](./explanation/research/memory-systems.md) | Prior-art survey behind the memory design |
 | [research/context-engineering.md](./explanation/research/context-engineering.md) | Prior-art survey on context engineering for tool-using agents |
+| [research/llm-platform-primitives.md](./explanation/research/llm-platform-primitives.md) | Prior-art survey: tool calling, system prompts, reasoning tokens, structured output across providers |
+| [research/context-and-caching.md](./explanation/research/context-and-caching.md) | Prior-art survey: prompt caching + context-window management / progressive loading |
 
 ### Project status & process (repo root)
 | Doc | Role |

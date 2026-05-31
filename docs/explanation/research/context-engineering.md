@@ -104,17 +104,16 @@ Four characteristic failure modes, each with a production countermeasure:
    `tool_choice` to constrain the follow-up.
 
 2. **Loops tools forever** — the model keeps calling tools and never converges.
-   The countermeasure is a **hard step limit**. The AI SDK defaults `stopWhen`
-   to `stepCountIs(20)` precisely *"as a safety mechanism against runaway loops"*;
-   LangGraph ships a `recursion_limit` (default 25) that raises a
-   `GraphRecursionError` when exceeded
-   ([AI SDK — Loop control](https://ai-sdk.dev/docs/agents/loop-control),
-   [LangGraph error handling](https://machinelearningplus.com/gen-ai/langgraph-error-handling-retries-fallback-strategies/)).
-   Community guidance is to **cap iterations to the task**: 2–3 for simple Q&A,
-   15–20 for a read-edit-test coding agent
-   ([Inngest — Agent tool loops](https://www.inngest.com/docs/ai-patterns/agent-tool-loops)).
-   For a chat advisor, a low cap is right — most turns are one tool read then an
-   answer.
+   The countermeasure is a **hard step limit**, and the verified, cross-vendor
+   fact is that the cap lives in the harness, not the model API: the AI SDK
+   defaults `stopWhen` to `stepCountIs(20)` *"as a safety mechanism against
+   runaway loops"*
+   ([AI SDK — Loop control](https://ai-sdk.dev/docs/agents/loop-control)). The
+   specific community numbers (2–3 for simple Q&A, 15–20 for a read-edit-test
+   coding agent — [Inngest](https://www.inngest.com/docs/ai-patterns/agent-tool-loops))
+   are secondary and a tuning choice, not an authority. For a chat advisor a low
+   cap is right — most turns are one tool read then an answer; **Macrotide uses
+   `stepCountIs(5)`**.
 
 3. **Malformed / invalid tool calls** — *"Language models sometimes fail to
    generate valid tool calls, especially when the input schema is complex or the
@@ -143,13 +142,13 @@ Four characteristic failure modes, each with a production countermeasure:
    multi-step scenarios"* — the model sees the error text and can retry or route
    around it
    ([AI SDK — Tool calling](https://ai-sdk.dev/docs/ai-sdk-core/tools-and-tool-calling)).
-   LangGraph's `ToolNode.handle_tool_errors` does the same: it "catches tool
-   crashes and feeds the error text back to the LLM." For *provider* failure
-   (a 429, a dead endpoint), the pattern is a **fallback model**: LangGraph
-   chains models with `.with_fallbacks()`; the AI SDK's `prepareStep` can "switch
-   models dynamically based on execution history"
-   ([AI SDK — Loop control](https://ai-sdk.dev/docs/agents/loop-control),
-   [LangGraph error handling](https://machinelearningplus.com/gen-ai/langgraph-error-handling-retries-fallback-strategies/)).
+   (LangGraph's `ToolNode.handle_tool_errors` is described as doing the same, and
+   chaining models with `.with_fallbacks()` — illustrative only; not re-verified
+   against LangGraph's primary docs and not in Macrotide's stack.) For *provider*
+   failure (a 429, a dead endpoint), the verified pattern is a **fallback model**:
+   the AI SDK's `prepareStep` can "switch models dynamically based on execution
+   history"
+   ([AI SDK — Loop control](https://ai-sdk.dev/docs/agents/loop-control)).
    Macrotide already has a provider *chain* for market data and a tiered model
    resolver; the same fallback instinct applies to the chat model.
 
@@ -516,18 +515,39 @@ sources, oriented toward Macrotide's free-tier, small-model Advisor.
 
 - The Hermes loop internals (exact tool-call schema, system-prompt structure,
   step limits) are **not in the `hermes-agent` README** — only the higher-level
-  description and the user-facing recovery commands are confirmed there.
+  description and the user-facing recovery commands (`/stop` `/retry` `/undo`
+  `/compress`) are confirmed there. The harness's documented internals are a
+  **"system_and_3" four-breakpoint cache scheme** (stable system prompt + 3
+  most-recent messages) with a **5-minute default TTL** (1h opt-in), and
+  compression firing at a 50% threshold (85% safety net) with a summary budget of
+  `content_tokens × 0.20` (max 12,000). Note: `stepCountIs(20)` and
+  `experimental_repairToolCall` are **Vercel AI SDK** primitives, not Hermes
+  features — don't conflate them.
 - Anthropic's reported metrics (the 37% token reduction; the 72%→90% and
   25.6%→28.5% accuracy figures; the "85%" tool-search overhead reduction) are
   Anthropic's own published numbers for *their* models on *their* benchmarks;
   they are not independently reproduced and may not transfer to a free-tier
-  OpenRouter model.
-- The iteration-cap heuristics (2–3 for Q&A, 15–20 for coding) and the
+  OpenRouter model. A separately-verified Anthropic example shows the
+  **direction** holds: a concise vs. detailed tool-result `ResponseFormat` cut a
+  Slack tool's output from ~206 to ~72 tokens (~66%)
+  ([Anthropic — Writing tools for agents](https://www.anthropic.com/engineering/writing-tools-for-agents)).
+  Treat the magnitudes as directional and the **pattern** (shape results; small
+  unambiguous tool surface; defer only past ~20 tools) as the load-bearing,
+  cross-vendor-confirmed claim.
+- The exact iteration-cap *numbers* (2–3 for Q&A, 15–20 for coding) and the
   "don't throw out of the loop" framing are community/secondary
   ([Inngest](https://www.inngest.com/docs/ai-patterns/agent-tool-loops)), not
-  vendor docs — directionally consistent with the primary sources but not
-  authoritative.
+  vendor docs. **What is primary-verified:** no provider auto-stops the agentic
+  loop — you own the cap in the harness; the AI SDK default is `stepCountIs(20)`
+  (Macrotide uses `stepCountIs(5)`); and returning execution errors as legible
+  tool results (`is_error`/`tool-error`) rather than throwing is the documented
+  Anthropic + MCP + AI SDK convention. The numeric caps are directional; the
+  "own-the-cap, feed-errors-back" pattern is authoritative.
 - LangGraph specifics (`recursion_limit` default 25, `handle_tool_errors`,
-  `.with_fallbacks()`) are from a secondary tutorial
+  `.with_fallbacks()`) are from a single secondary tutorial
   ([machinelearningplus](https://machinelearningplus.com/gen-ai/langgraph-error-handling-retries-fallback-strategies/)),
-  not the LangGraph reference docs; verify before relying on exact defaults.
+  **were not re-confirmed against LangGraph's primary docs** in the verification
+  pass, and are not part of Macrotide's stack (Vercel AI SDK). Treat as
+  illustrative only. The portable, verified equivalents are the AI SDK's
+  `stopWhen`/`stepCountIs`, `tool-error` content parts, and `prepareStep`
+  model-switching.

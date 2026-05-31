@@ -15,6 +15,22 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Inference-strategy docs — how the Advisor stays smart/fast/token-efficient.**
+  A new design doc ([inference-strategy.md](./docs/explanation/inference-strategy.md))
+  records the cost/latency/quality decisions for the Advisor — model routing &
+  tiers, prompt-cache strategy, reasoning-token policy (with a "when should the
+  Advisor reason?" decision table), context loading, and tool-result shaping —
+  the principle behind each lever. It's backed by two new fact-checked prior-art
+  surveys:
+  [llm-platform-primitives.md](./docs/explanation/research/llm-platform-primitives.md)
+  (how Anthropic/OpenAI/Gemini/OpenRouter expose tool calling, system prompts,
+  reasoning tokens, citations & structured output) and
+  [context-and-caching.md](./docs/explanation/research/context-and-caching.md)
+  (prompt-caching cost/latency math + context-window management / progressive
+  loading). The existing context-engineering survey had its flagged-unverified
+  claims (Anthropic metrics, Hermes internals, iteration caps, LangGraph
+  specifics) re-checked against primary sources and reworded.
+
 - **Context-aware Ask-Advisor handoff — fewer tool round-trips.** The
   Ask-Advisor buttons now hand the Advisor a small structured **context
   envelope** (the screen, the intent, the subject in focus, and the figures the
