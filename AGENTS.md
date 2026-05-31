@@ -12,15 +12,17 @@ Project-specific rules for AI agents working on this repo.
 ## Source of truth for "what's done"
 
 [README.md](./README.md#status) holds the capability/status board (what works
-today); [CHANGELOG.md](./CHANGELOG.md) holds shipped detail by capability;
-[ROADMAP.md](./ROADMAP.md) is forward-looking only (Now / Next / Later). When
-you ship or change anything user-visible:
+today); [CHANGELOG.md](./CHANGELOG.md) holds shipped detail by capability; the
+[GitHub Project board](https://github.com/users/Sitthinut/projects/2) tracks
+forward-looking work (issues grouped by Priority). When you ship or change
+anything user-visible:
 
 1. Add a one-line entry under `## [Unreleased]` in [CHANGELOG.md](./CHANGELOG.md),
    described by capability — not "yesterday", not a phase number.
 2. Flip the matching row in the [README.md](./README.md#status) status board if
-   its status changed, and move the item out of [ROADMAP.md](./ROADMAP.md) if it
-   was listed as planned.
+   its status changed, and close the matching
+   [board](https://github.com/users/Sitthinut/projects/2) issue if it was listed
+   as planned.
 3. If you change env vars, update [deploy.md](./docs/how-to/deploy.md),
    [auth-and-providers.md](./docs/reference/auth-and-providers.md), and `.env.example` together. Never one without the
    others.
@@ -32,6 +34,39 @@ you ship or change anything user-visible:
 
 Stale docs are the #1 failure mode here. After implementing, do a docs pass
 before committing — treat docs as part of the change, not a follow-up.
+
+| When you change… | Update… |
+| --- | --- |
+| Shipped a behavior change | [CHANGELOG.md](./CHANGELOG.md) `## [Unreleased]` (by capability) |
+| A capability's shipped status | [README.md](./README.md#status) status board |
+| Planned, unbuilt work | the [GitHub Project board](https://github.com/users/Sitthinut/projects/2) (an issue, labelled + prioritized) |
+| A settled technical decision | [docs/explanation/decisions/](./docs/explanation/decisions/) |
+| Env vars | [.env.example](.env.example) + [auth-and-providers.md](./docs/reference/auth-and-providers.md) + [deploy.md](./docs/how-to/deploy.md) + the env table below |
+| Auth or security posture | [SECURITY.md](./SECURITY.md) + [auth-and-providers.md](./docs/reference/auth-and-providers.md) |
+| Deployment topology | [deploy.md](./docs/how-to/deploy.md) |
+| Conventions an agent must know | this file |
+| External data source (provider, API) | feature doc under `docs/` + [SECURITY.md](./SECURITY.md) if it touches auth |
+| Product intent / scope | [product-direction.md](./docs/explanation/product-direction.md) |
+
+### Project board conventions
+
+The [board](https://github.com/users/Sitthinut/projects/2) holds the data; these
+are the conventions for using it (don't duplicate the issue list, colors, or IDs
+here — they live on the board and would go stale).
+
+- **Priority** = tier. **P0** = now (launch + small/high-trust changes or a
+  visible-fix); **P1** = next; **P2** = later. Stay within P0 unless told
+  otherwise.
+- **Status** = workflow state: `Backlog` (not queued) → `Todo` (next up) →
+  `In Progress` → `Done`. File new planned work as an issue in **Backlog**.
+- **Labels** = one `area:*` (which pillar/domain the work serves) + one type
+  (`bug` / `enhancement` / `documentation`); `parked` marks work to revisit only
+  on a real need.
+- **Lifecycle:** when you ship an issue, close it, flip the README status row, and
+  add the CHANGELOG line (same commit) — see the table above.
+
+A doc reference to a function, env var, or file path is a contract: when you
+rename/move/delete it, `grep -rn "thing" *.md docs/` and fix the references.
 
 ## Personal data — never commit
 
@@ -412,6 +447,8 @@ default from the browser; let the user override on the Settings page).
 ## When in doubt
 
 - For "where do I put X?" — check the table above.
-- For "is this in scope?" — check [ROADMAP.md](./ROADMAP.md). Stay within the
-  current "Now" work; don't expand into "Next"/"Later". Record anything you
-  notice in the relevant section or the "Out of scope" notes.
+- For "is this in scope?" — check the
+  [GitHub Project board](https://github.com/users/Sitthinut/projects/2)
+  (Priority **P0** = now). Stay within P0 work; don't expand into P1/P2. File
+  anything you notice as a new issue, or check the
+  [Non-goals](./docs/explanation/product-direction.md#non-goals).

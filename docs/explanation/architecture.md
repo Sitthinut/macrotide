@@ -177,5 +177,6 @@ lib/static/                Editorial content + placeholder analytics
 lib/mock/                  Seed data (db:seed) + demo seed (never imported by UI)
 ```
 
-For the full status of what's built vs. planned, the authoritative source is
-[ROADMAP.md](../../ROADMAP.md).
+For the full status of what's built vs. planned, the authoritative sources are
+the [README status board](../../README.md#status) (built) and the
+[GitHub Project board](https://github.com/users/Sitthinut/projects/2) (planned).

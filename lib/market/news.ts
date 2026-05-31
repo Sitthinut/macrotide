@@ -40,8 +40,7 @@ export interface NewsAggregateResult {
 // v2 added Fed Monetary Policy for rate-decision / market-context coverage.
 // Considered and dropped across both rounds: Bogleheads, Morningstar,
 // MarketWatch (top + marketpulse + realtime), Bloomberg markets, Reuters,
-// Yahoo Finance, CNBC, Bank of Thailand (no public RSS). See ROADMAP
-// for the source-selection rationale.
+// Yahoo Finance, CNBC, Bank of Thailand (no public RSS).
 export const NEWS_FEEDS: readonly NewsFeedDef[] = [
   {
     id: "ofdollarsanddata",

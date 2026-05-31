@@ -1,9 +1,9 @@
 # Decisions
 
 Settled technical decisions for Macrotide, kept so re-cloners and future-you
-don't re-litigate them. This is the rationale log; forward-looking plans live in
-[ROADMAP.md](../../../ROADMAP.md), shipped history in
-[CHANGELOG.md](../../../CHANGELOG.md).
+don't re-litigate them. This is the rationale log; forward-looking plans live on
+the [GitHub Project board](https://github.com/users/Sitthinut/projects/2), shipped
+history in [CHANGELOG.md](../../../CHANGELOG.md).
 
 Lightweight by design — a table for the one-line picks, prose for the rules that
 outlive any single decision. A genuinely contentious decision can graduate to

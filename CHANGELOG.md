@@ -3,7 +3,7 @@
 All notable changes to Macrotide are recorded here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Entries describe
 shipped **capability** (not phase numbers — those go stale). Forward-looking
-plans live in [ROADMAP.md](./ROADMAP.md).
+plans live on the [GitHub Project board](https://github.com/users/Sitthinut/projects/2).
 
 Macrotide has not cut a release yet, so everything to date sits under
 `[Unreleased]` as **Added** — there's no prior released version to mark things
@@ -48,7 +48,7 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   proxy/Yahoo behaviour when keys are unset. MSCI ACWI stays an ETF proxy (no
   free real index) and gold stays XAU/USD. New env vars `EODHD_API_KEY` and
   `FMP_API_KEY` (both free-tier). This is the "reliable index/FX source (Yahoo
-  429 fix)" the README/ROADMAP listed as planned — Yahoo hard-429s datacenter
+  429 fix)" the README listed as planned — Yahoo hard-429s datacenter
   IPs and the keyed providers resolve it.
 - **Database split into app.db + market.db** — the single SQLite is split along a
   lifecycle boundary: **app.db** is the system of record (accounts, buckets,

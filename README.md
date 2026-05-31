@@ -30,13 +30,11 @@ responsive across mobile / tablet / desktop with light/dark/system themes.
 | Multi-user — per-user isolation, tiers/quotas, owner admin | 🟡 Code shipped; launch prep open |
 | Benchmark comparison — "match or beat your index" (SET / S&P / Nasdaq / Nikkei) | ✅ Shipped; custom/goal-based benchmarks planned |
 | Reliable index/FX source (Yahoo 429 fix) | ✅ Shipped |
-| Richer AI — daily digest, AI-curated news brief, proactive review | ⬜ Planned |
-| Data freshness — auto-refresh cadence per surface | ⬜ Planned |
-| Scheduled NAV refresh | ⬜ Planned |
+| What's next — richer AI, custom benchmarks, fund-data depth, scheduled jobs | ⬜ Planned — see the [project board](https://github.com/users/Sitthinut/projects/2) |
 
-For what's next see [ROADMAP.md](./ROADMAP.md); for shipped detail see
-[CHANGELOG.md](./CHANGELOG.md) and the **[docs/](./docs)** user + developer
-guide.
+For what's next see the **[project board](https://github.com/users/Sitthinut/projects/2)**;
+for shipped detail see [CHANGELOG.md](./CHANGELOG.md) and the **[docs/](./docs)**
+user + developer guide.
 
 ## What it does
 
@@ -60,7 +58,7 @@ guide.
 - [Vercel AI SDK](https://sdk.vercel.ai/) via [OpenRouter](https://openrouter.ai/)
   for chat (one key, every major model)
 - [better-auth](https://www.better-auth.com/) + passkeys for sign-in — see
-  [auth-and-providers.md](./docs/reference/auth-and-providers.md), [SECURITY.md](./SECURITY.md), [deploy.md](./docs/how-to/deploy.md), [ROADMAP.md](./ROADMAP.md), [AGENTS.md](./AGENTS.md)
+  [auth-and-providers.md](./docs/reference/auth-and-providers.md), [SECURITY.md](./SECURITY.md), [deploy.md](./docs/how-to/deploy.md), [AGENTS.md](./AGENTS.md)
 
 ## Quick start
 
@@ -110,7 +108,7 @@ macrotide/
 │   ├── db/                  Drizzle client, schema, migrations, queries,
 │   │                        per-session demo SQLite, daily backup
 │   ├── fetchers/            SWR fetchers (client-side data layer)
-│   ├── market/              Yahoo client + cache + indices
+│   ├── market/              Provider registry + cache + indices
 │   ├── mock/                Seed data + demo seed (used by db:seed)
 │   ├── portfolio/           Allocation/concentration analytics, plan parser,
 │   │                        plan-edit helper
@@ -125,11 +123,11 @@ macrotide/
 │   ├── reference/           Lookup (configuration, auth-and-providers, api, data-model)
 │   └── explanation/         Why (architecture, design-principles, memory + research/)
 ├── llms.txt                 Machine-readable docs map for AI agents
-├── README.md, AGENTS.md, SECURITY.md, ROADMAP.md, LICENSE
+├── README.md, AGENTS.md, SECURITY.md, LICENSE
 ```
 
 Only convention-mandated files stay at the repo root (README, AGENTS, SECURITY,
-ROADMAP, LICENSE); everything else navigable lives under `docs/`.
+LICENSE); everything else navigable lives under `docs/`.
 
 ## Documentation
 
@@ -147,7 +145,8 @@ Full docs live in **[docs/](./docs)**, organized with the
 
 This is an experimental personal project. PRs and issues are welcome but
 expect slow / opinionated responses. If you're picking up something from the
-roadmap, open an issue first so we don't duplicate work.
+[project board](https://github.com/users/Sitthinut/projects/2), comment on the
+issue first so we don't duplicate work.
 
 ## License
 

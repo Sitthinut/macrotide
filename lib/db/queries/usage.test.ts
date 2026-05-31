@@ -1,7 +1,7 @@
 // Quotas + tier gating. Locks in the invariants the chat route
 // depends on:
 //   - tier defaults to 'free' when there's no account_tier row;
-//   - the daily cap reads env budgets with the ROADMAP defaults;
+//   - the daily cap reads env budgets with the documented defaults;
 //   - usage upserts then atomically increments today's (UTC) row;
 //   - the cap check flips at the budget boundary (>=).
 import { readdirSync, readFileSync } from "node:fs";
@@ -73,7 +73,7 @@ describe("dailyTokenBudget", () => {
     process.env = { ...orig };
   });
 
-  it("uses ROADMAP defaults when env is unset", () => {
+  it("uses documented defaults when env is unset", () => {
     process.env.DAILY_TOKEN_BUDGET_FREE = undefined;
     process.env.DAILY_TOKEN_BUDGET_TRUSTED = undefined;
     expect(dailyTokenBudget("free")).toBe(20_000);

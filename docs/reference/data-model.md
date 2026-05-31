@@ -86,8 +86,7 @@ These timestamps are stored as integer epoch-ms (app tables use ISO-8601 text).
 Most app tables carry a nullable `user_id` referencing `user.id`. Today, in
 single-owner mode, it is `NULL` and rows are visible to the owner; multi-user
 mode scopes every query by `user_id`. The evolution is described in
-[design principles § single-owner → multi-user](../explanation/design-principles.md#from-single-owner-to-multi-user)
-and the migration/backfill steps live in [ROADMAP.md](../../ROADMAP.md).
+[design principles § single-owner → multi-user](../explanation/design-principles.md#from-single-owner-to-multi-user).
 
 ## Relationships (sketch)
 

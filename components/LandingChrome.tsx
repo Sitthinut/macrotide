@@ -94,7 +94,7 @@ export function LandingFooter() {
             <div className="mt-footer-col">
               <span className="mt-footer-col-h">Docs</span>
               <a href="https://github.com/Sitthinut/macrotide/blob/main/README.md">README</a>
-              <a href="https://github.com/Sitthinut/macrotide/blob/main/ROADMAP.md">Roadmap</a>
+              <a href="https://github.com/users/Sitthinut/projects/2">Roadmap</a>
               <a href="https://github.com/Sitthinut/macrotide/tree/main/docs">Guides</a>
             </div>
             <div className="mt-footer-col">

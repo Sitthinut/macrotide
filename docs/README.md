@@ -65,7 +65,7 @@ Feature deep dives and the prior-art research behind them live under
 ### Project status & process (repo root)
 | Doc | Role |
 |---|---|
-| [ROADMAP.md](../ROADMAP.md) | **The** source of truth for what's done / in progress / planned |
+| [Project board](https://github.com/users/Sitthinut/projects/2) | Forward-looking work — issues grouped by Priority |
 | [AGENTS.md](../AGENTS.md) | Rules + canonical env-var table for AI agents touching the code |
 
 ## Keeping these docs honest
@@ -74,7 +74,9 @@ Staleness is the #1 documentation failure mode. The conventions that fight it:
 
 - **Single source of truth.** Each fact lives in exactly one place; everything
   else links to it. The env-var table lives in [AGENTS.md](../AGENTS.md); deploy
-  steps in [deploy.md](./how-to/deploy.md); feature status in [ROADMAP.md](../ROADMAP.md).
+  steps in [deploy.md](./how-to/deploy.md); feature status in the
+  [README status board](../README.md#status) (built) + the
+  [project board](https://github.com/users/Sitthinut/projects/2) (planned).
   Docs here **link**, they don't copy.
 - **Docs travel with code.** Update the doc in the same commit as the change.
 - **Docs link to code paths** (`see lib/db/schema.ts`) so a moved file is an

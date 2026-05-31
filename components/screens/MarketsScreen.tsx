@@ -112,8 +112,8 @@ function MarketsTodayInner({
   return (
     <div>
       {/* The AI-written "Today, in your words" digest is intentionally absent
-          until it's generated from real data — see ROADMAP. We don't ship a
-          static digest with fabricated portfolio figures. */}
+          until it's generated from real data. We don't ship a static digest
+          with fabricated portfolio figures. */}
       <div className="section" style={{ marginTop: 0 }}>
         <div className="section-header">
           <h3>Indices</h3>

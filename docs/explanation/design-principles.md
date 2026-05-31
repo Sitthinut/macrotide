@@ -48,7 +48,7 @@ list is in [AGENTS.md § Personal data](../../AGENTS.md#personal-data--never-com
 Duplicated prose is the main cause of doc drift, so each fact has exactly one
 home and everything else links to it:
 
-- **Feature status** → [ROADMAP.md](../../ROADMAP.md)
+- **Feature status** → [README status board](../../README.md#status) (built) + [project board](https://github.com/users/Sitthinut/projects/2) (planned)
 - **Environment variables** → [AGENTS.md](../../AGENTS.md#environment-variables)
 - **Deploy steps** → [deploy.md](../how-to/deploy.md)
 - **Schema** → [lib/db/schema/](../../lib/db/schema)
@@ -68,8 +68,7 @@ Google/GitHub), quotas, and tier gating are all **env-gated** — set nothing an
 the app runs exactly as the single-owner version did.
 
 This lets each capability ship and be tested behind a default-off switch rather
-than in a risky big-bang cutover. The phase-by-phase status and the operator
-backfill steps are in [ROADMAP.md](../../ROADMAP.md); the data shape is in
+than in a risky big-bang cutover. The data shape is in
 [data-model.md](../reference/data-model.md).
 
 ## Demo mode is fully isolated

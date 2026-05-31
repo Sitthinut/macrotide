@@ -1,12 +1,13 @@
 # Product direction
 
-*Last updated: 2026-05-25*
+*Last updated: 2026-05-30*
 
 Why Macrotide exists, who it's for, and how the pieces fit into one product.
-This is the durable **why**; the forward build order lives in
-[ROADMAP.md](../../ROADMAP.md) (Now / Next / Later) and what already works is the
+This is the durable **why**; the forward build order lives on the
+[GitHub Project board](https://github.com/users/Sitthinut/projects/2) (issues
+grouped by Priority) and what already works is the
 [README status board](../../README.md#status). When intent and this page
-disagree, this page is the product intent and the roadmap is how we get there.
+disagree, this page is the product intent and the board is how we get there.
 
 ## North star
 
@@ -197,8 +198,25 @@ metrics:
 
 ## Non-goals
 
-Carries the [ROADMAP out-of-scope list](../../ROADMAP.md#out-of-scope-until-a-real-need-appears),
-plus these product-level lines:
+The cheapest way to keep this project focused — what it deliberately does *not*
+do.
+
+**Infrastructure / platform** (revisited only on a real need):
+
+- **Open SaaS / billing / self-serve upgrade / admin web UI beyond tier
+  toggling** — public sign-up defaults to free-tier; tier promotion is
+  owner-driven.
+- **Horizontal scaling / multi-region** — single VM, single SQLite writer; the
+  trigger to change is migrating to Turso/Postgres, not layering on SQLite.
+- **Enterprise SSO (SAML/OIDC), org/team accounts, magic-link email,
+  billing/paywall, Apple OAuth** — add any only if a real user needs it.
+- **Realtime collaborative editing** — index investing is single-owner,
+  low-frequency; a sharing/roles model (owner/editor/viewer) is the ceiling, and
+  only if a concrete shared workflow appears.
+- **Mobile-native app / PWA** — desktop / mobile web only.
+- **Aesthetic overhaul** — handled inline, not as a stage of its own.
+
+**Product**:
 
 - **No trade execution / brokerage sync** — Macrotide reads holdings you add; it
   never places orders.
@@ -211,7 +229,7 @@ plus these product-level lines:
 
 ## References
 
-- **Forward build order** → [ROADMAP.md](../../ROADMAP.md) (Now / Next / Later)
+- **Forward build order** → [GitHub Project board](https://github.com/users/Sitthinut/projects/2) (issues by Priority)
 - **What works today** → [README status board](../../README.md#status)
 - **What shipped** → [CHANGELOG.md](../../CHANGELOG.md)
 - **Why we picked what we picked** → [decisions/](./decisions/)

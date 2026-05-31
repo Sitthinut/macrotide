@@ -29,7 +29,7 @@ export function utcDate(d: Date = new Date()): string {
 
 /**
  * Daily token budget (input+output) for a tier. Reads
- * `DAILY_TOKEN_BUDGET_FREE` / `DAILY_TOKEN_BUDGET_TRUSTED` with the ROADMAP
+ * `DAILY_TOKEN_BUDGET_FREE` / `DAILY_TOKEN_BUDGET_TRUSTED` with documented
  * defaults (20k / 200k). A malformed/negative env value falls back to the
  * default rather than disabling the cap.
  */

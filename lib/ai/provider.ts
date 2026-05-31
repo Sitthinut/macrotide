@@ -104,10 +104,10 @@ export function resolveOwnerProvider(): ResolvedProvider {
 }
 
 // The free tier is pinned to OpenRouter's free meta-router — DELIBERATELY not
-// derived from `AI_MODELS`. This is the most cost/security-critical invariant
-// in 6d: a free-tier user can never resolve to a paid model regardless of how
-// the operator configures the owner chain (see ROADMAP § Risk · Per-tier model
-// gating). It's a constant, not an env var, so a config slip can't widen it.
+// derived from `AI_MODELS`. This is a cost/security-critical invariant: a
+// free-tier user can never resolve to a paid model regardless of how the
+// operator configures the owner chain. It's a constant, not an env var, so a
+// config slip can't widen it.
 const FREE_TIER_MODELS = ["openrouter/free"];
 
 /**

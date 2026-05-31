@@ -35,8 +35,8 @@ Two supported modes, both first-class:
   (automatic HTTPS), systemd to keep Node alive, SQLite on disk with daily
   backups mirrored off-VM (e.g. Cloudflare R2 via `rclone`). Owner signs in with
   a passkey; visitors can try the demo. To invite family/friends with their own
-  accounts, finish the public-launch hardening tracked in
-  [ROADMAP.md](../../ROADMAP.md).
+  accounts, finish the public-launch hardening tracked on the
+  [GitHub Project board](https://github.com/users/Sitthinut/projects/2).
 
 The rest of this doc is the full runbook for Mode B. Pick **one** front-door:
 

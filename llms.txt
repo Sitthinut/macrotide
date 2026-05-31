@@ -38,6 +38,6 @@ root so they resolve when browsing the source.
 
 ## Optional
 
-- [Roadmap](./ROADMAP.md): Forward-looking Now / Next / Later plan and out-of-scope notes. For what's *done*, see the README Status board and the changelog.
+- [Roadmap (GitHub Project)](https://github.com/users/Sitthinut/projects/2): Forward-looking work as issues grouped by Priority. Product intent + out-of-scope notes live in [product-direction.md](./docs/explanation/product-direction.md). For what's *done*, see the README Status board and the changelog.
 - [Changelog](./CHANGELOG.md): Notable changes per release, Keep a Changelog format.
 - [Memory-systems research](./docs/explanation/research/memory-systems.md): Prior-art survey behind the memory design.
