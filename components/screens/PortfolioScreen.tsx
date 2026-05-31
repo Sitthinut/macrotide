@@ -900,7 +900,15 @@ export function PortfolioScreen({
               <button
                 className="btn sm primary"
                 onClick={() => {
-                  window.dispatchEvent(new CustomEvent("ai-prompt", { detail: headline.prompt }));
+                  window.dispatchEvent(
+                    new CustomEvent("ai-prompt", {
+                      detail: {
+                        display: headline.prompt,
+                        send: headline.prompt,
+                        context: { screen: "portfolio", intent: "score_review" },
+                      },
+                    }),
+                  );
                 }}
               >
                 <Icon name="chat" size={12} /> Discuss
@@ -955,9 +963,21 @@ export function PortfolioScreen({
                   className="btn sm primary"
                   style={{ flex: 1 }}
                   onClick={() => {
+                    const prompt = `My portfolio has drifted ${health.trackingGapPp.toFixed(1)}pp from my ${targetModel.name} target. Give me a step-by-step rebalance plan with specific amounts.`;
                     window.dispatchEvent(
                       new CustomEvent("ai-prompt", {
-                        detail: `My portfolio has drifted ${health.trackingGapPp.toFixed(1)}pp from my ${targetModel.name} target. Give me a step-by-step rebalance plan with specific amounts.`,
+                        // Carry the gap + target the screen already computed so the
+                        // Advisor can plan without re-deriving them via read_portfolio.
+                        detail: {
+                          display: prompt,
+                          send: prompt,
+                          context: {
+                            screen: "portfolio",
+                            intent: "rebalance",
+                            subject: targetModel.name,
+                            signals: { trackingGapPp: Number(health.trackingGapPp.toFixed(1)) },
+                          },
+                        },
                       }),
                     );
                   }}
@@ -1104,9 +1124,26 @@ export function PortfolioScreen({
                 onClick={() => {
                   const top = feeCreepFindings[0];
                   const alt = top.alternatives[0];
+                  const prompt = `I hold ${top.heldTicker} at a ${top.heldTer.toFixed(2)}% TER. ${alt.abbrName} offers comparable ${top.assetClass ?? "same-class"} exposure at ${(alt.ter ?? 0).toFixed(2)}%. Walk me through what it would take to switch, and whether the saving justifies the move.`;
                   window.dispatchEvent(
                     new CustomEvent("ai-prompt", {
-                      detail: `I hold ${top.heldTicker} at a ${top.heldTer.toFixed(2)}% TER. ${alt.abbrName} offers comparable ${top.assetClass ?? "same-class"} exposure at ${(alt.ter ?? 0).toFixed(2)}%. Walk me through what it would take to switch, and whether the saving justifies the move.`,
+                      // The fee comparison is already on screen — pass it so the
+                      // Advisor reasons about the switch without re-reading holdings.
+                      detail: {
+                        display: prompt,
+                        send: prompt,
+                        context: {
+                          screen: "portfolio",
+                          intent: "fee_switch",
+                          subject: top.heldTicker,
+                          signals: {
+                            heldTer: Number(top.heldTer.toFixed(2)),
+                            alternative: alt.abbrName,
+                            altTer: Number((alt.ter ?? 0).toFixed(2)),
+                            assetClass: top.assetClass ?? "same-class",
+                          },
+                        },
+                      },
                     }),
                   );
                 }}

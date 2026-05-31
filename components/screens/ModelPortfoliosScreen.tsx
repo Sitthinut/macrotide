@@ -619,9 +619,14 @@ function ModelDetail({
           style={{ marginTop: 8 }}
           onClick={() => {
             window.dispatchEvent(new CustomEvent("nav", { detail: "chat" }));
+            const prompt = `Tell me more about the ${model.name} strategy — when does it work best and when does it struggle?`;
             window.dispatchEvent(
               new CustomEvent("ai-prompt", {
-                detail: `Tell me more about the ${model.name} strategy — when does it work best and when does it struggle?`,
+                detail: {
+                  display: prompt,
+                  send: prompt,
+                  context: { screen: "models", intent: "strategy_explain", subject: model.name },
+                },
               }),
             );
           }}

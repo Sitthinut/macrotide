@@ -15,6 +15,20 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Context-aware Ask-Advisor handoff — fewer tool round-trips.** The
+  Ask-Advisor buttons now hand the Advisor a small structured **context
+  envelope** (the screen, the intent, the subject in focus, and the figures the
+  screen already computed) alongside the visible prompt, instead of burying it
+  all in a sentence. The two high-value dashboard findings — *Plan the rebalance*
+  (carries the tracking gap + target) and the fee-creep *Ask advisor* (carries
+  the held fund, its TER, the cheaper alternative + its TER) — let the Advisor
+  answer from those facts without re-deriving them via `read_portfolio`; the fund
+  and model-strategy buttons tag the subject. The envelope is injected as a
+  per-turn message **after** the cached system/memory prefix (never into it), so
+  it can't invalidate prompt caching, and it's defensively parsed server-side.
+  Plain typed turns and open-ended prompts are unchanged (the field is additive).
+  The envelope reserves an `image` slot as the future home for in-chat vision.
+
 - **Free tier can run a cheap paid model, bounded by a daily cost cap.** The
   free-tier chat model is now its own operator knob (`FREE_TIER_MODEL`, default
   the zero-cost `openrouter/free`) — set it to a cheap paid model (e.g.

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatThreadList } from "@/components/ChatThreadList";
 import { FeedbackRow } from "@/components/FeedbackRow";
 import { Icon } from "@/components/Icon";
+import type { EntryContext } from "@/lib/advisor/entry-context";
 import {
   useModelPortfoliosView,
   usePortfolioView,
@@ -78,7 +79,10 @@ interface MsgFeedback {
 // split { display, send } pair: `display` is the short visible bubble, `send`
 // is the larger payload actually sent to the model. The OCR handoff uses the
 // split form so the raw transcription stays out of the visible message body.
-export type SeedPrompt = string | { display: string; send: string };
+// The split form may also carry a structured `context` envelope (the screen +
+// intent + a few pre-computed facts) so the server can answer without a tool
+// round-trip — never shown in the bubble. See lib/advisor/entry-context.ts.
+export type SeedPrompt = string | { display: string; send: string; context?: EntryContext };
 
 export interface ChatScreenProps {
   persona?: string;
@@ -483,7 +487,7 @@ export function ChatScreen({
     }
   }, [messages.length, lastText]);
 
-  const askLive = async (prompt: string, history: Message[]) => {
+  const askLive = async (prompt: string, history: Message[], context?: EntryContext) => {
     setLoading(true);
     // New user turn → this session now has content worth extracting when it
     // closes (gates the close beacon; see closeOutgoing).
@@ -508,7 +512,14 @@ export function ChatScreen({
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: model, threadId: threadId ?? undefined }),
+        body: JSON.stringify({
+          messages: model,
+          threadId: threadId ?? undefined,
+          // Structured entry context (screen/intent/signals) from an Ask-Advisor
+          // button, when present — lets the server skip a tool round-trip. Omitted
+          // for ordinary typed turns, so the body is byte-identical to before.
+          entryContext: context,
+        }),
       });
       if (!res.ok || !res.body) {
         throw new Error(`chat failed (${res.status})`);
@@ -676,7 +687,7 @@ export function ChatScreen({
   // `display` is the visible user bubble; `send` is what's actually sent to the
   // model. They differ only for the OCR handoff, where the raw transcription
   // rides along in `send` but stays out of the visible body. Default: identical.
-  const ask = (display: string, send: string = display) => {
+  const ask = (display: string, send: string = display, context?: EntryContext) => {
     if (!display.trim() || loading) return;
     const newUserMsg: Message = { role: "user", text: display, ts: Date.now(), id: makeId() };
     const nextHistory = [...messages, newUserMsg];
@@ -686,8 +697,9 @@ export function ChatScreen({
     // Plan edits now flow through the advisor's propose_plan_edit tool, and
     // holding extraction through propose_holding: the model emits proposals in
     // the chat stream, which askLive picks up and renders as cards. No
-    // client-side heuristic / fake preview.
-    void askLive(send, messages);
+    // client-side heuristic / fake preview. `context`, when an Ask-Advisor button
+    // supplied it, rides along to the server (never into the visible bubble).
+    void askLive(send, messages, context);
   };
 
   // Re-send the user message that produced a failed/empty assistant turn.
@@ -736,7 +748,7 @@ export function ChatScreen({
   useEffect(() => {
     if (seedPrompt) {
       if (typeof seedPrompt === "string") ask(seedPrompt);
-      else ask(seedPrompt.display, seedPrompt.send);
+      else ask(seedPrompt.display, seedPrompt.send, seedPrompt.context);
       onPromptConsumed?.();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
