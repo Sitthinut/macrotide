@@ -14,7 +14,9 @@ behind it. Read these to build a mental model, not to complete a task.
 | Doc | Role |
 |---|---|
 | [memory.md](./memory.md) | The long-term memory + chat-session lifecycle: storage, tools, injection, extraction |
+| [advisor-context.md](./advisor-context.md) | What the Advisor knows on a turn — the three context channels, the per-entry-point contract, and the empty-turn recovery |
 | [research/memory-systems.md](./research/memory-systems.md) | The prior-art survey (Letta, Mem0, OpenViking, …) behind the memory design |
+| [research/context-engineering.md](./research/context-engineering.md) | Prior-art survey on context engineering for tool-using agents — the Advisor loop, failure modes, recovery |
 
 A feature's deep dive lives here as a single doc; the research that informed it
 sits beneath it in [research/](./research). Both are understanding-oriented, so

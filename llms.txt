@@ -25,6 +25,7 @@ root so they resolve when browsing the source.
 - [Architecture](./docs/explanation/architecture.md): System shape, request lifecycle, demo/owner DB routing, where everything lives.
 - [Design principles](./docs/explanation/design-principles.md): Secure-by-default, the "Advisor" voice, single-owner → multi-user.
 - [Memory feature](./docs/explanation/memory.md): Long-term memory + chat-session lifecycle design.
+- [Advisor context model](./docs/explanation/advisor-context.md): What the Advisor knows per turn — the three context channels, the entry-point contract, and the empty-turn recovery (#21).
 - [Decisions log](./docs/explanation/decisions/README.md): Locked decisions and the durable rules behind them (ADR-style).
 
 ## Reference
@@ -41,3 +42,4 @@ root so they resolve when browsing the source.
 - [Roadmap (GitHub Project)](https://github.com/users/Sitthinut/projects/2): Forward-looking work as issues grouped by Priority. Product intent + out-of-scope notes live in [product-direction.md](./docs/explanation/product-direction.md). For what's *done*, see the README Status board and the changelog.
 - [Changelog](./CHANGELOG.md): Notable changes per release, Keep a Changelog format.
 - [Memory-systems research](./docs/explanation/research/memory-systems.md): Prior-art survey behind the memory design.
+- [Context-engineering research](./docs/explanation/research/context-engineering.md): Prior-art survey on context engineering for tool-using agents — the Advisor loop, failure modes, and recovery.

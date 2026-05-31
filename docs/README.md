@@ -60,7 +60,9 @@ Feature deep dives and the prior-art research behind them live under
 | [architecture.md](./explanation/architecture.md) | The system shape, request lifecycle, and where everything lives |
 | [design-principles.md](./explanation/design-principles.md) | Secure-by-default, the "Advisor" voice, single-owner → multi-user |
 | [memory.md](./explanation/memory.md) | The long-term memory + chat-session design |
+| [advisor-context.md](./explanation/advisor-context.md) | What the Advisor knows per turn — context channels, entry-point contract, empty-turn recovery |
 | [research/memory-systems.md](./explanation/research/memory-systems.md) | Prior-art survey behind the memory design |
+| [research/context-engineering.md](./explanation/research/context-engineering.md) | Prior-art survey on context engineering for tool-using agents |
 
 ### Project status & process (repo root)
 | Doc | Role |

@@ -15,6 +15,14 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Reliable Advisor replies — no more "I didn't have a reply."** Free-tier chat
+  turns that read a tool but stopped before writing an answer — or that hit an
+  upstream provider error mid-turn — now recover automatically: the Advisor
+  re-runs the final answer step with the data it already gathered, or retries
+  once on an error, so a tool-using question lands a real reply instead of a
+  dead-end. The recovery is model-agnostic (it doesn't depend on any single free
+  model behaving), and applies across demo, free, and owner chat.
+
 - **Context-aware Advisor starter prompts.** The chat composer's suggestion
   chips now reflect the user's actual portfolio and the screen they're on
   instead of a fixed list — surfacing prompts about a concentrated top holding,
