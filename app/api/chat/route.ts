@@ -1,8 +1,12 @@
 import {
   convertToModelMessages,
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+  type LanguageModel,
   type ModelMessage,
   stepCountIs,
   streamText,
+  type ToolSet,
   type UIMessage,
 } from "ai";
 import { cookies } from "next/headers";
@@ -12,7 +16,7 @@ import { resolveDemoProvider, resolveOwnerProvider, resolveTierProvider } from "
 import { compressContext, estimateTokens } from "@/lib/ai/summarize";
 import { CHAT_RATE_LIMIT, clientIp, rateLimit } from "@/lib/api/rate-limit";
 import { DEMO_COOKIE, withDb } from "@/lib/api/with-db";
-import { getUserId, runWithDbContext } from "@/lib/db/context";
+import { type DbContext, getUserId, runWithDbContext } from "@/lib/db/context";
 import { DEMO_CHAT_TURN_CAP, getDemoSession, incrementChatTurn } from "@/lib/db/demo";
 import {
   appendMessage,
@@ -153,6 +157,131 @@ function logEmptyTurn(
   );
 }
 
+// One forced follow-up answer when a turn reads a tool but stops before writing
+// prose (issue #21). Free-tier models frequently end a turn on a tool call with
+// no closing text — the "I didn't have a reply" dead-end. The data is already
+// gathered; this directive just makes the model speak. Tools are omitted from
+// the follow-up call so it physically cannot stall on another tool call.
+const RECOVER_DIRECTIVE =
+  "You looked up the data above but didn't reply. Using ONLY those tool results, " +
+  "answer my previous question now, in plain language. Do not call any tools.";
+
+interface AdvisorStreamOptions {
+  ctx: DbContext;
+  path: "demo" | "tiered" | "owner";
+  model: LanguageModel;
+  system: string;
+  messages: ModelMessage[];
+  tools: ToolSet;
+  maxOutputTokens: number;
+  threadId: string;
+  setContextHeader: (res: Response) => void;
+  /** Persist the final assistant text. Runs inside the captured DB context. */
+  persist: (text: string, modelId: string | null) => void;
+  /** Record token usage even on an empty turn (free tier). Runs inside ctx. */
+  recordUsageFor?: (usage: { inputTokens: number; outputTokens: number }) => void;
+}
+
+// Stream an advisor turn with a recover-on-empty safety net. When the first
+// generation produces no prose but a tool DID run, issue one more generation
+// seeded with the gathered tool results and NO tools, and append it to the same
+// response stream. Model-agnostic: it doesn't depend on any free model behaving.
+// See docs/explanation/advisor-context.md.
+function streamAdvisorResponse(opts: AdvisorStreamOptions): Response {
+  const stream = createUIMessageStream({
+    execute: async ({ writer }) => {
+      // Run one generation, merge it into the response stream, and collect its
+      // outputs. A provider error (free tier) rejects the await chain — we catch
+      // it here so the turn can be retried instead of dead-ending. `useTools`
+      // is off for the recover-on-empty follow-up so it can't stall again.
+      const run = async (messages: ModelMessage[], useTools: boolean) => {
+        const gen = streamText({
+          model: opts.model,
+          system: opts.system,
+          messages,
+          tools: useTools ? opts.tools : undefined,
+          // Multi-step so the model can call a read tool then answer using the
+          // result (or explain a proposal after propose_plan_edit).
+          stopWhen: stepCountIs(5),
+          maxOutputTokens: opts.maxOutputTokens,
+        });
+        writer.merge(gen.toUIMessageStream());
+        try {
+          const [text, steps, finishReason, response, usage] = await Promise.all([
+            gen.text,
+            gen.steps,
+            gen.finishReason,
+            gen.response,
+            gen.totalUsage,
+          ]);
+          return { ok: true as const, text, steps, finishReason, response, usage };
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.warn(`[advisor] generation error (${opts.path}): ${msg}`);
+          return { ok: false as const };
+        }
+      };
+
+      // First attempt, with tools.
+      let a = await run(opts.messages, true);
+      // Retry-on-error (#21): a free-tier provider error gathered nothing to
+      // recover from — re-roll the turn once (the router picks a fresh model).
+      if (!a.ok) {
+        console.warn(`[advisor] retrying turn after error (${opts.path})`);
+        a = await run(opts.messages, true);
+      }
+
+      let text = "";
+      let modelId: string | null = null;
+      let inputTokens = 0;
+      let outputTokens = 0;
+
+      if (a.ok) {
+        text = a.text;
+        modelId = a.response.modelId ?? null;
+        inputTokens = a.usage.inputTokens ?? 0;
+        outputTokens = a.usage.outputTokens ?? 0;
+        logEmptyTurn(opts.path, text, modelId, a.finishReason, a.steps);
+
+        // Recover-on-empty (#21): a read tool ran but no prose came back. Re-ask
+        // with the gathered tool results and NO tools so the model can only
+        // write the answer.
+        const ranTool = a.steps.some((s) => s.toolCalls.length > 0);
+        if (!text.trim() && ranTool) {
+          const followUp = [
+            ...opts.messages,
+            ...a.response.messages,
+            { role: "user" as const, content: RECOVER_DIRECTIVE },
+          ];
+          const rec = await run(followUp, false);
+          if (rec.ok && rec.text.trim()) {
+            text = rec.text;
+            modelId = rec.response.modelId ?? modelId;
+            inputTokens += rec.usage.inputTokens ?? 0;
+            outputTokens += rec.usage.outputTokens ?? 0;
+            console.warn(`[advisor] recovered empty turn (${opts.path}) via follow-up`);
+          }
+        }
+      }
+
+      runWithDbContext(opts.ctx, () => {
+        if (text.trim()) opts.persist(text, modelId);
+        opts.recordUsageFor?.({ inputTokens, outputTokens });
+      });
+    },
+    onError: (err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[advisor] stream error (${opts.path}): ${msg}`);
+      return "Something interrupted that reply — your dashboard and notes are unaffected. Please try again.";
+    },
+  });
+
+  const response = createUIMessageStreamResponse({ stream });
+  response.headers.set("x-thread-id", opts.threadId);
+  opts.setContextHeader(response);
+  return response;
+}
+
 export async function POST(req: Request) {
   // IP-keyed rate limit — separate from the per-session demo turn cap; this
   // catches noisy clients regardless of whether they're owner or demo.
@@ -261,34 +390,24 @@ export async function POST(req: Request) {
       incrementChatTurn(demoId);
       const finalThreadId = threadId;
       const tools = { ...createMemoryTools({ userId }), ...createAdvisorTools({ userId }) };
-      const result = streamText({
+      return streamAdvisorResponse({
+        ctx,
+        path: "demo",
         model: provider.model,
         system,
         messages: compression.messages,
         tools,
-        // Multi-step so the model can call a read tool (read_portfolio /
-        // read_plan / read_journal) and then answer using the result, or
-        // explain a proposal after propose_plan_edit. Token usage aggregates
-        // across steps in onFinish, so 6d's per-user budget is unaffected.
-        stopWhen: stepCountIs(5),
         maxOutputTokens: 1024,
-        onFinish: ({ text, finishReason, steps, response: aiResponse }) => {
-          logEmptyTurn("demo", text, aiResponse.modelId, finishReason, steps);
-          if (!text) return;
-          runWithDbContext(ctx, () => {
-            appendMessage({
-              threadId: finalThreadId,
-              role: "assistant",
-              content: text,
-              model: aiResponse.modelId ?? null,
-            });
-          });
-        },
+        threadId: finalThreadId,
+        setContextHeader,
+        persist: (text, modelId) =>
+          appendMessage({
+            threadId: finalThreadId,
+            role: "assistant",
+            content: text,
+            model: modelId,
+          }),
       });
-      const response = result.toUIMessageStreamResponse();
-      response.headers.set("x-thread-id", finalThreadId);
-      setContextHeader(response);
-      return response;
     }
 
     const finalThreadId = threadId;
@@ -325,34 +444,28 @@ export async function POST(req: Request) {
       }
 
       const tools = { ...createMemoryTools({ userId }), ...createAdvisorTools({ userId }) };
-      const result = streamText({
+      return streamAdvisorResponse({
+        ctx,
+        path: "tiered",
         model: provider.model,
         system,
         messages: compression.messages,
         tools,
-        stopWhen: stepCountIs(5),
         maxOutputTokens: tier === "trusted" ? 2048 : 1024,
-        onFinish: ({ text, totalUsage, finishReason, steps, response: aiResponse }) => {
-          logEmptyTurn("tiered", text, aiResponse.modelId, finishReason, steps);
-          runWithDbContext(ctx, () => {
-            if (text) {
-              appendMessage({
-                threadId: finalThreadId,
-                role: "assistant",
-                content: text,
-                model: aiResponse.modelId ?? null,
-              });
-            }
-            // Log tokens regardless of whether prose came back — a tool-only
-            // turn still consumes budget. `totalUsage` aggregates across steps.
-            recordUsage(userId, totalUsage?.inputTokens ?? 0, totalUsage?.outputTokens ?? 0);
-          });
-        },
+        threadId: finalThreadId,
+        setContextHeader,
+        persist: (text, modelId) =>
+          appendMessage({
+            threadId: finalThreadId,
+            role: "assistant",
+            content: text,
+            model: modelId,
+          }),
+        // Log tokens regardless of whether prose came back — a tool-only turn
+        // still consumes budget.
+        recordUsageFor: ({ inputTokens, outputTokens }) =>
+          recordUsage(userId, inputTokens, outputTokens),
       });
-      const response = result.toUIMessageStreamResponse();
-      response.headers.set("x-thread-id", finalThreadId);
-      setContextHeader(response);
-      return response;
     }
 
     // Owner path — full chat, no cap (single-owner / pre-auth mode).
@@ -365,29 +478,23 @@ export async function POST(req: Request) {
     }
 
     const tools = { ...createMemoryTools({ userId }), ...createAdvisorTools({ userId }) };
-    const result = streamText({
+    return streamAdvisorResponse({
+      ctx,
+      path: "owner",
       model: provider.model,
       system,
       messages: compression.messages,
       tools,
-      stopWhen: stepCountIs(5),
       maxOutputTokens: 2048,
-      onFinish: ({ text, finishReason, steps, response: aiResponse }) => {
-        logEmptyTurn("owner", text, aiResponse.modelId, finishReason, steps);
-        if (!text) return;
-        runWithDbContext(ctx, () => {
-          appendMessage({
-            threadId: finalThreadId,
-            role: "assistant",
-            content: text,
-            model: aiResponse.modelId ?? null,
-          });
-        });
-      },
+      threadId: finalThreadId,
+      setContextHeader,
+      persist: (text, modelId) =>
+        appendMessage({
+          threadId: finalThreadId,
+          role: "assistant",
+          content: text,
+          model: modelId,
+        }),
     });
-    const response = result.toUIMessageStreamResponse();
-    response.headers.set("x-thread-id", finalThreadId);
-    setContextHeader(response);
-    return response;
   });
 }
