@@ -131,6 +131,26 @@ function stubResponse(message: string, threadId?: string): Response {
   );
 }
 
+// Observability for the "empty turn" failure mode (issue #21). When a turn ends
+// with no assistant prose the row is otherwise dropped — losing which model
+// OpenRouter routed to and whether a tool ran. Logging it lets us tell a genuine
+// dead-end (no tool; the model just stopped) from a tool-only turn (a read ran
+// but the closing prose never came), and pin the responsible free-tier model.
+// No behaviour change — diagnostic only; see docs/explanation/advisor-context.md.
+function logEmptyTurn(
+  path: "demo" | "tiered" | "owner",
+  text: string,
+  modelId: string | null | undefined,
+  finishReason: string,
+  toolCallCount: number,
+): void {
+  if (text) return;
+  console.warn(
+    `[advisor] empty turn (${path}): model=${modelId ?? "unknown"} ` +
+      `finishReason=${finishReason} toolCalls=${toolCallCount}`,
+  );
+}
+
 export async function POST(req: Request) {
   // IP-keyed rate limit — separate from the per-session demo turn cap; this
   // catches noisy clients regardless of whether they're owner or demo.
@@ -250,7 +270,14 @@ export async function POST(req: Request) {
         // across steps in onFinish, so 6d's per-user budget is unaffected.
         stopWhen: stepCountIs(5),
         maxOutputTokens: 1024,
-        onFinish: ({ text, response: aiResponse }) => {
+        onFinish: ({ text, finishReason, steps, response: aiResponse }) => {
+          logEmptyTurn(
+            "demo",
+            text,
+            aiResponse.modelId,
+            finishReason,
+            steps.flatMap((s) => s.toolCalls).length,
+          );
           if (!text) return;
           runWithDbContext(ctx, () => {
             appendMessage({
@@ -309,7 +336,14 @@ export async function POST(req: Request) {
         tools,
         stopWhen: stepCountIs(5),
         maxOutputTokens: tier === "trusted" ? 2048 : 1024,
-        onFinish: ({ text, totalUsage, response: aiResponse }) => {
+        onFinish: ({ text, totalUsage, finishReason, steps, response: aiResponse }) => {
+          logEmptyTurn(
+            "tiered",
+            text,
+            aiResponse.modelId,
+            finishReason,
+            steps.flatMap((s) => s.toolCalls).length,
+          );
           runWithDbContext(ctx, () => {
             if (text) {
               appendMessage({
@@ -348,7 +382,14 @@ export async function POST(req: Request) {
       tools,
       stopWhen: stepCountIs(5),
       maxOutputTokens: 2048,
-      onFinish: ({ text, response: aiResponse }) => {
+      onFinish: ({ text, finishReason, steps, response: aiResponse }) => {
+        logEmptyTurn(
+          "owner",
+          text,
+          aiResponse.modelId,
+          finishReason,
+          steps.flatMap((s) => s.toolCalls).length,
+        );
         if (!text) return;
         runWithDbContext(ctx, () => {
           appendMessage({
