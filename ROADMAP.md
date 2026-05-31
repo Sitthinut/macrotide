@@ -245,17 +245,22 @@ changelog. What's left is making the benchmark genuinely *theirs*:
 The durable index/FX source **shipped** — keyed EODHD + FMP providers now serve
 real index levels (S&P 500, Nasdaq-100, Dow, Nikkei, SET), with the Twelve Data
 ETF proxy and Yahoo as graceful fallbacks behind the `Provider` registry, fixing
-the Yahoo datacenter-IP 429s; see the changelog. One related gap remains:
+the Yahoo datacenter-IP 429s; see the changelog.
 
-- **Auto-refresh cadence.** The dashboard is fetch-on-mount today: the SWR layer
+- **Auto-refresh cadence — depends on a higher-quota data source.** The dashboard
+  is fetch-on-mount: the SWR layer
   ([lib/fetchers/swr.ts](./lib/fetchers/swr.ts)) runs with defaults — revalidate
-  on focus/reconnect, **no polling** — so an open screen never updates on its
-  own. The 5-min quote TTL is dead code (`void QUOTE_TTL_MS` in
-  [lib/market/cache.ts](./lib/market/cache.ts)); quote freshness rides the 24h
-  history TTL, so intraday index moves can be up to a day stale on a warm cache.
-  Decide a per-surface cadence (indices/FX ~1 min in market hours, news
-  ~15–30 min, NAVs daily after the SEC window), wire `refreshInterval` where it
-  earns its keep, and fix the quote TTL.
+  on focus/reconnect, no polling — so an open screen doesn't update on its own,
+  and the cache serves quotes on a 24h TTL (`CACHE_TTL_MS` in
+  [lib/market/cache.ts](./lib/market/cache.ts)). The daily window follows from
+  provider quotas rather than a code gap: the keyed real-index providers have
+  small free quotas (FMP ~250/day, EODHD ~20/day) and Yahoo returns 429 from the
+  datacenter IP, so ~1 fetch/day/symbol is the budget. A shorter quote TTL plus
+  `refreshInterval` polling exceeds those quotas and falls back to the
+  rate-limited Yahoo (built and reverted 2026-05). Per-surface polling and a
+  shorter TTL become worthwhile once a higher-quota or unblocked provider is in
+  place. Rationale:
+  [docs/reference/auth-and-providers.md § Cache freshness](./docs/reference/auth-and-providers.md).
 
 ### Learn — index education hub
 

@@ -5,8 +5,18 @@ import { fundQuotes, navHistory } from "@/lib/db/schema";
 import type { SeriesInterval, SeriesRange } from "./providers/types";
 import { resolveProviderChain } from "./registry";
 
-const QUOTE_TTL_MS = 5 * 60_000; // 5 min for live quote
-const HISTORY_TTL_MS = 24 * 60 * 60_000; // 24 h for daily series
+// Cache freshness. One TTL governs each cached entry — both the daily series and
+// the latest quote derived from it — so a quote refreshes at most once a day.
+//
+// The window is set by provider quotas, not by how often prices move. The
+// `yahoo` logical source resolves to real-index providers with small free quotas
+// (FMP ~250/day, EODHD ~20/day; see providers/{fmp,eodhd}.ts), and the keyless
+// Yahoo fallback returns 429 from datacenter IPs. At 24h that is ~1 fetch/day per
+// symbol, within quota; a 5-minute TTL would be ~288/day per symbol, past EODHD's
+// and FMP's limits, leaving only the rate-limited Yahoo fallback. Shortening it
+// therefore depends on a higher-quota or unblocked provider, not on the TTL
+// alone. See docs/reference/auth-and-providers.md § Cache freshness.
+const CACHE_TTL_MS = 24 * 60 * 60_000; // 24h; one window for series + quote
 const FAIL_BACKOFF_MS = 3 * 60_000; // after an upstream error, don't refetch this key for 3 min
 
 // Negative cache: last upstream-failure time per (source:ticker) key. Stops a
@@ -65,7 +75,7 @@ export async function getCachedSeries(
   const key = cacheKey(source, ticker);
   const cachedQuote = db.select().from(fundQuotes).where(eq(fundQuotes.ticker, key)).get();
 
-  if (cachedQuote && isFresh(cachedQuote.updatedAt, HISTORY_TTL_MS)) {
+  if (cachedQuote && isFresh(cachedQuote.updatedAt, CACHE_TTL_MS)) {
     return readCached(db, key, ticker, range, cachedQuote);
   }
 
@@ -287,5 +297,3 @@ export function listCachedSymbols(): {
     };
   });
 }
-
-void QUOTE_TTL_MS;

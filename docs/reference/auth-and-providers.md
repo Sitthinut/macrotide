@@ -103,6 +103,25 @@ real-index source and intentionally stays an ETF proxy (`ACWI`); gold stays the
 canonical [AGENTS.md § Environment variables](../../AGENTS.md#environment-variables)
 table.
 
+### Cache freshness
+
+`getCachedSeries` ([lib/market/cache.ts](../../lib/market/cache.ts)) serves a
+symbol's daily series and its latest quote from `data/market.db` for a 24h TTL
+(`CACHE_TTL_MS`), refetching at most once a day.
+
+The daily window follows from the provider quotas above rather than from how
+often prices move. EODHD allows ~20 calls/day and FMP ~250/day, and the keyless
+Yahoo fallback returns 429 from the datacenter prod IP. At ~1 fetch/day per symbol
+the 24h window stays within quota; a 5-minute TTL (~288/day per symbol) would
+exceed EODHD's and FMP's limits and fall back to the rate-limited Yahoo. So a
+shorter quote TTL — and SWR `refreshInterval` polling on top of it — depends on a
+higher-quota or unblocked provider, not on the TTL alone. (An earlier 5-minute
+`QUOTE_TTL_MS` sat `void`-suppressed in the cache and read like dead code; it was
+removed and its intent folded into the comment on `CACHE_TTL_MS`.)
+
+A failed upstream is negatively cached for 3 min (`FAIL_BACKOFF_MS`) and the last
+good value is served stale rather than blanked.
+
 ## Rate limiting
 
 `/api/chat` is IP-rate-limited at **20 requests/minute** regardless of demo / owner status. Demo sessions add a **10-turn-per-session** cap on top. Both are in-memory; replace with Upstash/Redis when you go multi-instance.
