@@ -142,12 +142,14 @@ function logEmptyTurn(
   text: string,
   modelId: string | null | undefined,
   finishReason: string,
-  toolCallCount: number,
+  steps: readonly { finishReason: string; toolCalls: readonly { toolName: string }[] }[],
 ): void {
   if (text) return;
+  const toolNames = steps.flatMap((s) => s.toolCalls.map((t) => t.toolName));
+  const stepReasons = steps.map((s) => s.finishReason).join(">");
   console.warn(
     `[advisor] empty turn (${path}): model=${modelId ?? "unknown"} ` +
-      `finishReason=${finishReason} toolCalls=${toolCallCount}`,
+      `finishReason=${finishReason} steps=[${stepReasons}] tools=[${toolNames.join(",") || "none"}]`,
   );
 }
 
@@ -271,13 +273,7 @@ export async function POST(req: Request) {
         stopWhen: stepCountIs(5),
         maxOutputTokens: 1024,
         onFinish: ({ text, finishReason, steps, response: aiResponse }) => {
-          logEmptyTurn(
-            "demo",
-            text,
-            aiResponse.modelId,
-            finishReason,
-            steps.flatMap((s) => s.toolCalls).length,
-          );
+          logEmptyTurn("demo", text, aiResponse.modelId, finishReason, steps);
           if (!text) return;
           runWithDbContext(ctx, () => {
             appendMessage({
@@ -337,13 +333,7 @@ export async function POST(req: Request) {
         stopWhen: stepCountIs(5),
         maxOutputTokens: tier === "trusted" ? 2048 : 1024,
         onFinish: ({ text, totalUsage, finishReason, steps, response: aiResponse }) => {
-          logEmptyTurn(
-            "tiered",
-            text,
-            aiResponse.modelId,
-            finishReason,
-            steps.flatMap((s) => s.toolCalls).length,
-          );
+          logEmptyTurn("tiered", text, aiResponse.modelId, finishReason, steps);
           runWithDbContext(ctx, () => {
             if (text) {
               appendMessage({
@@ -383,13 +373,7 @@ export async function POST(req: Request) {
       stopWhen: stepCountIs(5),
       maxOutputTokens: 2048,
       onFinish: ({ text, finishReason, steps, response: aiResponse }) => {
-        logEmptyTurn(
-          "owner",
-          text,
-          aiResponse.modelId,
-          finishReason,
-          steps.flatMap((s) => s.toolCalls).length,
-        );
+        logEmptyTurn("owner", text, aiResponse.modelId, finishReason, steps);
         if (!text) return;
         runWithDbContext(ctx, () => {
           appendMessage({
