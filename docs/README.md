@@ -48,7 +48,7 @@ Feature deep dives and the prior-art research behind them live under
 ### Reference — look it up
 | Doc | Contains |
 |---|---|
-| [configuration.md](./reference/configuration.md) | How configuration works; points to the canonical env-var table in AGENTS.md |
+| [configuration.md](./reference/configuration.md) | How configuration works + the canonical env-var table |
 | [api.md](./reference/api.md) | Catalog of `app/api/*` route handlers |
 | [data-model.md](./reference/data-model.md) | The SQLite tables and how they relate |
 | [auth-and-providers.md](./reference/auth-and-providers.md) | Passkeys, OpenRouter, rate limits, where data lives |
@@ -66,7 +66,7 @@ Feature deep dives and the prior-art research behind them live under
 | Doc | Role |
 |---|---|
 | [Project board](https://github.com/users/Sitthinut/projects/2) | Forward-looking work — issues grouped by Priority |
-| [AGENTS.md](../AGENTS.md) | Rules + canonical env-var table for AI agents touching the code |
+| [AGENTS.md](../AGENTS.md) | Rules for AI agents touching the code |
 
 ## Keeping these docs honest
 

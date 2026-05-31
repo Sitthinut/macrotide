@@ -2,12 +2,12 @@
 
 Project-specific rules for AI agents working on this repo.
 
-> **Documentation map.** This file is your rules + canonical env-var table. For
-> everything else — architecture, the data model, the API surface, feature deep
-> dives — the guide lives in [docs/](./docs), with [llms.txt](./llms.txt) as a
-> machine-readable entry point. Load progressively: `llms.txt` →
-> [docs/README.md](./docs/README.md) → the one section you need. When you change
-> behavior, update the doc that owns that fact in the same commit (see below).
+> **Documentation map.** This file is your rules. Reference detail — env vars,
+> architecture, the data model, the API surface, feature deep dives — lives in
+> [docs/](./docs), with [llms.txt](./llms.txt) as a machine-readable entry point.
+> Load progressively: `llms.txt` → [docs/README.md](./docs/README.md) → the one
+> section you need. When you change behavior, update the doc that owns that fact
+> in the same commit (see below).
 
 ## Source of truth for "what's done"
 
@@ -41,7 +41,7 @@ before committing — treat docs as part of the change, not a follow-up.
 | A capability's shipped status | [README.md](./README.md#status) status board |
 | Planned, unbuilt work | the [GitHub Project board](https://github.com/users/Sitthinut/projects/2) (an issue, labelled + prioritized) |
 | A settled technical decision | [docs/explanation/decisions/](./docs/explanation/decisions/) |
-| Env vars | [.env.example](.env.example) + [auth-and-providers.md](./docs/reference/auth-and-providers.md) + [deploy.md](./docs/how-to/deploy.md) + the env table below |
+| Env vars | the canonical table in [configuration.md](./docs/reference/configuration.md#environment-variables) + [.env.example](.env.example) + [auth-and-providers.md](./docs/reference/auth-and-providers.md) + [deploy.md](./docs/how-to/deploy.md) |
 | Auth or security posture | [SECURITY.md](./SECURITY.md) + [auth-and-providers.md](./docs/reference/auth-and-providers.md) |
 | Deployment topology | [deploy.md](./docs/how-to/deploy.md) |
 | Conventions an agent must know | this file |
@@ -85,162 +85,62 @@ committed code, fixtures, tests, or docs:
 Tests use synthetic data only. If you need a real fund code to test against,
 ask the user — never invent one and commit it as if it were real.
 
-## DB routing — read this before touching any route handler
+## DB routing — read before touching a route handler
 
-The database is split along a lifecycle boundary into two SQLite files:
+Two SQLite files split by lifecycle: **app.db** (precious system of record —
+accounts, holdings, plans, chat; `getAppDb()`/`getDb()`) and **market.db**
+(regenerable — catalog/fees + NAV/quote cache; `getMarketDb()`). No FK or join
+crosses the boundary; a module needing both reads each handle and joins app-side.
+Full model (schema split, demo routing, why): [architecture.md § Two databases](./docs/explanation/architecture.md#two-databases-split-by-lifecycle).
 
-- **app.db** (`DB_PATH`, default `data/app.db`) — system of record: accounts,
-  buckets, holdings, plans, journal, models, chat, preferences,
-  `user_market_indicators`. Precious; backed up nightly (`lib/db/backup.ts`).
-  Accessed via `getAppDb()` (alias `getDb()`).
-- **market.db** (`MARKET_DB_PATH`, default `data/market.db`) — regenerable
-  market data: fund catalog/fees, fund enrichment, feeder look-through, and the
-  NAV/quote cache (`nav_history`/`fund_quotes`). Rebuilt from upstream; NOT
-  backed up. Accessed via `getMarketDb()`.
-
-No FK or SQL join crosses the boundary. `holdings` links to market data only
-via the soft `quoteSource`+`ticker` cache key resolved in app code
-(`getCachedSeries`), never a join. A query module touching both (e.g.
-`lib/db/queries/series.ts`) reads each handle and joins app-side. The schema is
-split into `lib/db/schema/app.ts` + `lib/db/schema/market.ts`, re-exported from
-`lib/db/schema/index.ts`. Two drizzle configs (`drizzle/config.{app,market}.ts`)
-generate baselines under `lib/db/migrations/{app,market}/`.
-
-Every API route that calls `getDb()`/`getMarketDb()` (which most queries do via
-[lib/db/queries/](./lib/db/queries)) MUST run inside `withDb`. The wrapper
-reads the `macrotide_demo` cookie and opens an AsyncLocalStorage scope that
-routes the query to the right handles (owner singletons vs per-session demo
-in-memory app.db; the market handle is always the shared real market.db).
-
-```ts
-// app/api/foo/route.ts
-import { withDb } from "@/lib/api/with-db";
-import { listSomething } from "@/lib/db/queries/something";
-
-export async function GET() {
-  return withDb(async () => {
-    const rows = await listSomething();
-    return Response.json(rows);
-  });
-}
-```
-
-### Streaming + callbacks — re-enter the context
-
-`streamText`'s `onFinish` callback fires **after** `withDb` returns. You must
-capture the context and re-enter it manually, or demo writes will land in the
-owner DB. See `app/api/chat/route.ts` for the canonical pattern:
-
-```ts
-return withDb(async (ctx) => {
-  const result = streamText({
-    model,
-    messages,
-    onFinish: ({ text }) => {
-      runWithDbContext(ctx, () => appendMessage(threadId, "assistant", text));
-    },
-  });
-  return result.toUIMessageStreamResponse();
-});
-```
-
-### Server-only
-
-`better-sqlite3` is Node-native. Queries live in
-[lib/db/queries/](./lib/db/queries), gated by `import "server-only"`. Never
-import a query from a client component — go through a fetcher.
+- **Every route handler that queries MUST run inside `withDb`** ([lib/api/with-db.ts](./lib/api/with-db.ts)) — it reads the `macrotide_demo` cookie and routes to the right app.db (owner singleton vs per-session demo). Skip it and demo writes leak into the owner DB.
+- **`streamText`'s `onFinish` fires after `withDb` returns** — capture the context and re-enter with `runWithDbContext(ctx, …)`, or demo writes land in the owner DB. Canonical pattern: `app/api/chat/route.ts`.
+- Queries are `import "server-only"` ([lib/db/queries/](./lib/db/queries)); never import one into a client component — go through a fetcher.
 
 ## Demo mode
 
-- Visitors who click "Try the demo" on `/login` get a `macrotide_demo` cookie.
-- Each session gets a private in-memory **app.db** seeded from
-  [lib/mock/demo-seed.ts](./lib/mock/demo-seed.ts) (buckets/holdings/plan/
-  journal/models — no market data). Market data goes to the SHARED real
-  market.db, used exactly like a real user: reads and write-through cache fills
-  are identical, so a symbol fetched once serves every later session (demo or
-  not) and demo adds no redundant upstream calls. Isolation is in app.db (per
-  session); market.db is global reference data, safe and cheaper to share.
-- 1h idle TTL, hard cap 200 concurrent. Sweep runs on every request.
-- Chat is capped at 10 turns server-side (defends OpenRouter budget).
-- Demo state is intentionally ephemeral — never persist demo data to disk.
+"Try the demo" gives a `macrotide_demo` cookie → a private in-memory app.db per
+session; market.db is the shared real one. Full model:
+[architecture.md § Owner vs demo databases](./docs/explanation/architecture.md#owner-vs-demo-databases).
 
-Test the demo path whenever you touch `/api/chat`, `/api/plan`, or any route
-that takes a write.
+- Demo state is ephemeral — **never persist it to disk.** 1h idle TTL, hard cap
+  200 concurrent, swept every request; chat capped at 10 turns (defends the
+  OpenRouter budget).
+- **Test the demo path whenever you touch `/api/chat`, `/api/plan`, or any route
+  that writes.**
 
-## Where things live (avoid common mistakes)
+## Where things live
 
-| Kind | Lives in | Notes |
-| --- | --- | --- |
-| Editorial content (markets explainers, learn articles, AI personalities) | [lib/static/](./lib/static) | Code-resident strings; ship in the bundle. |
-| Placeholder analytics (ANALYSIS scores etc.) until AI tool-calls land | [lib/static/analysis.ts](./lib/static/analysis.ts) | Returns nulls / "—". Components render placeholder text. |
-| Pure helpers (plan-edit, plan-parser) | [lib/portfolio/](./lib/portfolio) | Unit-testable; no DB / network. |
-| User state (buckets, holdings, plan, journal, chat) | [lib/db/queries/](./lib/db/queries) via `withDb` | Owner vs demo routed automatically. |
-| Mock seeds | [lib/mock/seed.ts](./lib/mock/seed.ts), [lib/mock/demo-seed.ts](./lib/mock/demo-seed.ts) | NEVER imported by components. |
-| Shared types | [lib/static/types.ts](./lib/static/types.ts) | Domain types shared across components and adapters. |
+Concept-to-code index: [architecture.md § Where it lives](./docs/explanation/architecture.md#where-it-lives).
+The rules that prevent mistakes:
 
-**Components MUST NOT import from `@/lib/mock/data`.** Verify with
-`grep -rn 'from "@/lib/mock/data"' components/` — should return zero hits.
+- **Components MUST NOT import from `@/lib/mock/data` or `@/lib/mock/*` seeds** —
+  verify with `grep -rn 'from "@/lib/mock/data"' components/` (zero hits). Seeds
+  are for `db:seed` / demo only.
+- User state goes through [lib/db/queries/](./lib/db/queries) via `withDb` (never
+  a raw handle in a route); pure helpers in [lib/portfolio/](./lib/portfolio) stay
+  DB/network-free; editorial strings + placeholder analytics in [lib/static/](./lib/static).
 
 ## Provider routing via holdings.quote_source
 
-Every holding has a `quote_source` column (NOT NULL, default `"yahoo"`)
-that the market registry uses to dispatch NAV / price fetches:
+Every holding's `quote_source` column (NOT NULL, default `"yahoo"`) routes its
+NAV/price fetch: `"thai_mutual_fund"` → Thai SEC Open API; `"yahoo"` → the
+index/FX/stock chain (FMP → EODHD → Twelve Data → Frankfurter → Yahoo, first that
+returns data wins). The full chain, quotas, per-symbol mapping, and graceful
+degradation: [auth-and-providers.md § Market data providers](./docs/reference/auth-and-providers.md).
 
-| `quote_source` | Provider chain (in order) | Ticker shape |
-| --- | --- | --- |
-| `"thai_mutual_fund"` | Thai SEC Open API | bare proj_abbr_name or share-class (`K-FIXED-A`, `HIDIV-D`) |
-| `"yahoo"` | FMP → EODHD → Twelve Data → Frankfurter (FX) → Yahoo | bare/dotted/caret symbols (`^GSPC`, `^SET.BK`, `AAPL`, `PTT.BK`, `THB=X`) |
-
-For `"yahoo"`, `lib/market/cache.ts` walks the chain (`resolveProviderChain`)
-and uses the first provider that returns data — preferred source first, keyless
-fallbacks last. The full precedence for a real-index symbol:
-
-- **FMP** (`FMP_API_KEY`, free ≈ 250/day) — REAL US index levels for `^GSPC` /
-  `^NDX` / `^DJI`. First because it has the most generous quota.
-- **EODHD** (`EODHD_API_KEY`, free ≈ 20/day) — REAL global index levels via the
-  `{CODE}.INDX` notation, including markets FMP's free tier lacks: Nikkei
-  (`^N225`→`N225.INDX`) and the Thai **SET** index (`^SET.BK`→`SET.INDX`). Also
-  `GSPC.INDX` / `NDX.INDX` / `IXIC.INDX` / `DJI.INDX`.
-- **Twelve Data** (`TWELVE_DATA_API_KEY`, free ≈ 800/day) — the **ETF-proxy**
-  layer: raw index symbols aren't on its free plan, so it maps each index symbol
-  to its tracking ETF (`^GSPC`→SPY, `^NDX`→QQQ, `^DJI`→DIA, `^SET.BK`→THD, …).
-- **Frankfurter** (keyless, ECB) — FX pairs (`THB=X`) only.
-- **Yahoo** (keyless) — last resort; 429s datacenter IPs.
-
-Each provider only matches the symbols it actually serves, and the keyed ones
-drop out when their env var is unset. **Graceful degradation:** with the FMP/
-EODHD keys UNSET, those providers' `matches()` return false and the chain is
-exactly the prior behaviour — Twelve Data ETF proxy → Frankfurter → Yahoo — so
-nothing breaks before those keys exist. The catalog (`lib/market/indicators.ts`)
-uses REAL index canonical symbols (`^GSPC`, `^NDX`, `^DJI`, `^N225`, `^SET.BK`)
-where a real source exists. **MSCI ACWI has no free real index anywhere and
-stays an ETF proxy (`ACWI`); Gold stays the XAU/USD spot commodity (`GC=F`).**
-The daily Markets cron fetches each indicator once/day — well inside every free
-quota (FMP 250/day, EODHD 20/day, Twelve Data 800/day, Frankfurter unmetered).
-
-**The value names the asset class, not the provider.** `"thai_mutual_fund"`
-means "Thai mutual fund regardless of which API serves it." If we ever swap
-the underlying provider, only the registry's routing map changes — holdings
-stay valid.
-
-The user-visible ticker stays bare (`K-FIXED-A`, not `thfund:K-FIXED-A`).
-Routing lives in a separate column so it doesn't leak into UI labels,
-search input, or imported CSV rows. See `lib/market/sources.ts` for the
-constants + UI label map.
-
-When adding a new provider:
-
-1. Add the new source value to `QUOTE_SOURCES` in `lib/market/sources.ts`
-   (use the asset class name — `"crypto"`, `"bond"`, `"fx"`, never the
-   provider's name).
-2. Implement a Provider with `matches(source, ticker)` returning true for
-   that source.
-3. Register it ahead of Yahoo in `lib/market/registry.ts`.
-4. Add a UI label for the type selector in HoldingSheet.
-
-Internal cache keys in `fund_quotes.ticker` and `nav_history.ticker` are
-the combined `${source}:${ticker}` so the same table can hold quotes for
-different sources without a schema change.
+- **The value names the asset class, not the provider** — `"thai_mutual_fund"`
+  means the asset regardless of which API serves it. Swapping a provider changes
+  only the registry map; holdings stay valid. Use asset-class names for new
+  sources (`"crypto"`, `"bond"`, `"fx"`), never a provider name.
+- The user-visible ticker stays bare (`K-FIXED-A`); routing lives in its own
+  column so it can't leak into UI labels, search, or CSV rows. Constants + label
+  map: `lib/market/sources.ts`.
+- **Adding a provider:** add the source to `QUOTE_SOURCES` (`lib/market/sources.ts`),
+  implement a `Provider` with `matches(source, ticker)`, register it ahead of Yahoo
+  (`lib/market/registry.ts`), add a UI label in HoldingSheet.
+- Cache keys in `fund_quotes`/`nav_history` are the combined `${source}:${ticker}`,
+  so one table holds quotes for every source.
 
 ## Auth conventions
 
@@ -259,117 +159,19 @@ different sources without a schema change.
 
 ## Environment variables
 
-**Canonical reference** for every `process.env.*` the app reads. Operator
-setup hints live in [.env.example](.env.example) (a thin template); the
-authoritative behavior, defaults, and code locations are below. Keep this
-table in sync when adding/renaming vars and also update
-[.env.example](.env.example), [auth-and-providers.md](./docs/reference/auth-and-providers.md), and
-[deploy.md](./docs/how-to/deploy.md) where they reference specifics.
+The canonical table — every `process.env.*`, its default, the code that reads it,
+and its behavior — lives in
+[configuration.md § Environment variables](./docs/reference/configuration.md#environment-variables).
+When you add/rename a var, update that table + [.env.example](.env.example) in the
+same commit.
 
-### AI / model selection
+Two invariants protect cost/security — don't regress them:
 
-| Var | Default | Read by | Notes |
-| --- | --- | --- | --- |
-| `OPENROUTER_API_KEY` | — (required for live AI) | [lib/ai/provider.ts](./lib/ai/provider.ts), [lib/portfolio/ocr.ts](./lib/portfolio/ocr.ts) | Chat returns a stub response without it; OCR returns 503. |
-| `AI_MODELS` | `openrouter/free,openrouter/auto` | [lib/ai/provider.ts](./lib/ai/provider.ts) | Comma-separated owner-chat fallback chain. First model is primary. |
-| `DEMO_OPENROUTER_API_KEY` | falls back to `OPENROUTER_API_KEY` | [lib/ai/provider.ts](./lib/ai/provider.ts) | Separate key for demo traffic so demo can't burn owner quota. |
-| `DEMO_AI_MODELS` | `openrouter/free` | [lib/ai/provider.ts](./lib/ai/provider.ts) | Demo-chat model chain. Free-only by default. |
-| `TITLE_MODEL` | `openrouter/free` | [lib/ai/provider.ts](./lib/ai/provider.ts) | Cheap model for auto-titling a chat after its first turn pair (`POST /api/chat/threads/[id]/title`). **Never pin a Claude or GPT model here** — titling is a 3–5-word task and any non-mainstream free model (DeepSeek V3, Qwen3 small, etc.) is more than enough. Comma-separated chain accepted; first model is primary. |
-| `OCR_MODEL` | `google/gemini-2.5-flash` | [lib/portfolio/ocr.ts](./lib/portfolio/ocr.ts) | Add-holdings image extraction (vision). NOT tier-gated — same model for all users (bounded, rate-limited one-shot). Must be vision-capable. (Prior `baidu/qianfan-ocr-fast` was removed upstream.) |
-| `OCR_FALLBACK_MODEL` | `google/gemini-2.0-flash-001` (only when `OCR_MODEL` is unset) | [lib/portfolio/ocr.ts](./lib/portfolio/ocr.ts) | Auto-retry on provider error / rate-limit. Pinning `OCR_MODEL` disables the default fallback unless this is set explicitly. |
-
-### Auth (better-auth)
-
-| Var | Default | Read by | Notes |
-| --- | --- | --- | --- |
-| `AUTH_SECRET` | dev fallback (`macrotide-dev-secret-change-me`) | [lib/auth/index.ts](./lib/auth/index.ts) | REQUIRED in production (boot throws if `NODE_ENV=production` and unset). |
-| `AUTH_DISABLED` | unset | [app/page.tsx](./app/page.tsx), [lib/auth/session.ts](./lib/auth/session.ts), [lib/api/with-db.ts](./lib/api/with-db.ts) | Set to `1` to skip the login gate on trusted local dev only. |
-| `AUTH_RP_NAME` | `Macrotide` | [lib/auth/index.ts](./lib/auth/index.ts) | Passkey relying-party display name. |
-| `AUTH_RP_ID` | inferred from `PUBLIC_APP_URL` | [lib/auth/index.ts](./lib/auth/index.ts) | Override only if you understand WebAuthn `rpID` rules. |
-| `PUBLIC_APP_URL` | `http://localhost:3000` (implicit) | [lib/auth/index.ts](./lib/auth/index.ts), [lib/portfolio/ocr.ts](./lib/portfolio/ocr.ts) | Canonical URL. Used for OpenRouter `HTTP-Referer` and WebAuthn origin. Changing this in prod breaks existing passkeys. |
-| `OWNER_EMAIL` | unset (no owner) | [scripts/backfill-owner.ts](./scripts/backfill-owner.ts), [lib/auth/owner.ts](./lib/auth/owner.ts) | Names the owner account. The backfill attaches `NULL`-owned rows to it + grants `trusted`; at runtime it identifies the owner for the admin UI (gate is **fail-closed** — unset → nobody is owner). **Must be in the running app's env, not just for the one-off script.** Run `npx tsx --env-file=.env.local scripts/backfill-owner.ts` once after migrating. Idempotent. |
-
-### Auth — OAuth + signup gate
-
-All optional and **env-gated**: with none set, the app runs passkey-only and the
-`/login` page hides the OAuth buttons / Turnstile widget. A provider counts as
-"enabled" only when BOTH its id and secret are present.
-
-| Var | Default | Read by | Notes |
-| --- | --- | --- | --- |
-| `GOOGLE_CLIENT_ID` | unset | [lib/auth/providers.ts](./lib/auth/providers.ts) | Enables "Continue with Google" (needs `GOOGLE_CLIENT_SECRET` too). |
-| `GOOGLE_CLIENT_SECRET` | unset | [lib/auth/providers.ts](./lib/auth/providers.ts) | Server-only. |
-| `GITHUB_CLIENT_ID` | unset | [lib/auth/providers.ts](./lib/auth/providers.ts) | Enables "Continue with GitHub" (needs `GITHUB_CLIENT_SECRET` too). |
-| `GITHUB_CLIENT_SECRET` | unset | [lib/auth/providers.ts](./lib/auth/providers.ts) | Server-only. |
-| `TURNSTILE_SITE_KEY` | unset | [lib/auth/turnstile.ts](./lib/auth/turnstile.ts), [/api/auth-config](./app/api/auth-config/route.ts) | **PUBLIC** — shipped to the browser to render the widget. |
-| `TURNSTILE_SECRET_KEY` | unset | [lib/auth/turnstile.ts](./lib/auth/turnstile.ts) | Server verifies the signup/OAuth token here. **When unset, verification is BYPASSED (dev pass).** OAuth callback URIs for both providers must point at `<PUBLIC_APP_URL>/api/auth/callback/{google,github}`. |
-
-Rate limiting: `/api/auth/*` POSTs are IP-limited via `AUTH_RATE_LIMIT`
-(10/min/IP — [lib/api/rate-limit.ts](./lib/api/rate-limit.ts)), wired in
-[app/api/auth/[...all]/route.ts](./app/api/auth/[...all]/route.ts).
-
-### Legal pages
-
-All optional and operator-configurable so the repo ships nothing
-operator-specific; `/legal/terms` + `/legal/privacy` read them at render.
-
-| Var | Default | Read by | Notes |
-| --- | --- | --- | --- |
-| `OPERATOR_NAME` | unset → "a single individual" / "the operator" | [lib/legal/config.ts](./lib/legal/config.ts) | Who runs this instance, shown on both legal pages. |
-| `CONTACT_EMAIL` | unset → no email, just "contact the operator" | [lib/legal/config.ts](./lib/legal/config.ts) | Contact shown (as a `mailto`) on both pages. **No fallback to `OWNER_EMAIL`** — set this only to publish a real address. |
-| `LEGAL_JURISDICTION` | unset → governing-law clause omitted | [lib/legal/config.ts](./lib/legal/config.ts) | Governing-law jurisdiction (e.g. `Thailand`). |
-
-The "Last updated" date is the `LEGAL_LAST_UPDATED` constant in
-[lib/legal/config.ts](./lib/legal/config.ts) (bump it when editing the copy, not
-an env var). Sign-up consent is an inline notice under the create-account button
-("By continuing, you agree to the Terms and Privacy Policy"), not a checkbox.
-
-### Database
-
-| Var | Default | Read by | Notes |
-| --- | --- | --- | --- |
-| `DB_PATH` | `data/app.db` | [lib/db/client.ts](./lib/db/client.ts), [lib/mock/seed.ts](./lib/mock/seed.ts) | app.db (system of record) path. Relative paths resolved from CWD; parent dir auto-created. |
-| `MARKET_DB_PATH` | `data/market.db` | [lib/db/client.ts](./lib/db/client.ts) | market.db (regenerable market data) path. Same `data/` volume as app.db; not backed up. |
-
-### Quotas + tier gating
-
-Per-user metering only applies to **authenticated** requests. Single-owner /
-`AUTH_DISABLED` mode (`getUserId()` === null) is never metered, and demo
-sessions are bounded by the demo turn cap, not these budgets.
-
-| Var | Default | Read by | Notes |
-| --- | --- | --- | --- |
-| `DAILY_TOKEN_BUDGET_FREE` | `20000` | [lib/db/queries/usage.ts](./lib/db/queries/usage.ts) | Daily input+output token cap per `tier='free'` user. Checked before forwarding to OpenRouter; resets at UTC midnight. Malformed/≤0 → default. |
-| `DAILY_TOKEN_BUDGET_TRUSTED` | `200000` | [lib/db/queries/usage.ts](./lib/db/queries/usage.ts) | Same, for `tier='trusted'` users. |
-
-The free-tier **model chain** is pinned to `openrouter/free` in code
-([lib/ai/provider.ts](./lib/ai/provider.ts) `resolveTierProvider`) and is
-deliberately NOT derived from `AI_MODELS` — a free user can never resolve to a
-paid model regardless of operator config. `tier='trusted'` uses the `AI_MODELS`
-owner chain. Tier is stored in `account_tier`; promote via SQL
-(`UPDATE account_tier SET tier='trusted' WHERE user_id=?`).
-
-### External data sources
-
-| Var | Default | Read by | Notes |
-| --- | --- | --- | --- |
-| `SEC_API_KEY` | — (Thai funds render as "—" without it) | [lib/market/providers/sec-thailand.ts](./lib/market/providers/sec-thailand.ts) | Thai SEC Open API subscription key (Primary or Secondary — both valid). Header: `Ocp-Apim-Subscription-Key`. Covers all 6 product groups under one subscription. |
-| `FMP_API_KEY` | — (chain falls through to EODHD → ETF proxy → Yahoo) | [lib/market/providers/fmp.ts](./lib/market/providers/fmp.ts) | Financial Modeling Prep. REAL US index levels for `^GSPC`/`^NDX`/`^DJI` via `/api/v3/historical-price-full`. Free tier ≈ 250 req/day — first in the `yahoo` chain for the US indices it covers. Matches only those symbols + only when set. |
-| `EODHD_API_KEY` | — (chain falls through to ETF proxy → Yahoo) | [lib/market/providers/eodhd.ts](./lib/market/providers/eodhd.ts) | EOD Historical Data. REAL global index levels via `{CODE}.INDX` (e.g. `GSPC.INDX`, `NDX.INDX`, `N225.INDX`, **`SET.INDX`** for Thailand). Free tier ≈ 20 req/day — second in the chain; covers Nikkei + SET that FMP's free tier lacks. Matches only mapped index symbols + only when set. |
-| `TWELVE_DATA_API_KEY` | — (falls back to keyless Yahoo, which 429s from datacenter IPs) | [lib/market/providers/twelvedata.ts](./lib/market/providers/twelvedata.ts) | ETF-proxy layer for `yahoo`-sourced series (Markets indicators, FX, stocks). When set, used after FMP/EODHD; maps index symbols to tracking ETFs (SPY/QQQ/DIA/THD/…) since raw index symbols aren't on the free plan. Free tier ≈ 800 req/day, 8 req/min. ACWI stays an ETF; Gold stays XAU/USD. |
-
-### Dev-only
-
-| Var | Default | Read by | Notes |
-| --- | --- | --- | --- |
-| `CODEX_AUTH_FILE` | OS-default Codex auth path | [lib/ai/codex.local.ts](./lib/ai/codex.local.ts) | Path to a Codex CLI auth JSON file, used by the local-codex integration during development. Test-only outside of dev. |
-| `DEV_ALLOWED_ORIGIN` | unset (localhost only) | [next.config.ts](./next.config.ts) | One extra origin added to Next's `allowedDevOrigins` so the dev server trusts a non-localhost host (reverse proxy, Codespaces, LAN IP, tunnel). Hostname only, no scheme. No effect on prod builds. |
-
-### Framework
-
-| Var | Default | Read by | Notes |
-| --- | --- | --- | --- |
-| `NODE_ENV` | `development` (set by Next.js / build tooling) | [lib/auth/index.ts](./lib/auth/index.ts) | Gates the `AUTH_SECRET` requirement and cookie `secure` flag. |
+- The `free` tier model chain is pinned to `openrouter/free` in code
+  ([lib/ai/provider.ts](./lib/ai/provider.ts) `resolveTierProvider`), never derived
+  from `AI_MODELS`. A free user can't resolve to a paid model.
+- `AUTH_SECRET` is required in production (boot throws); `PUBLIC_APP_URL` is pinned
+  in prod — changing it breaks existing passkeys.
 
 ## Build, lint, test
 
@@ -430,15 +232,9 @@ That exact phrasing — not paraphrased — is the project-wide AI-warning
 copy. Reuse it verbatim anywhere else a similar disclaimer is needed.
 Not dismissible; not a banner.
 
-**Memory / chat-session vocabulary** (full table in
-[docs/explanation/memory.md](./docs/explanation/memory.md)):
-
-| Concept | Use | Don't use |
-|---|---|---|
-| Session state after 7-day idle | "Archived" | "Wrapped up", "Compressed" |
-| In-progress chat summarization | "Summarizing…" | "Compressing…" |
-| Auto-extracted preferences | "notes" | "facts", "memories" |
-| Soft-deleted chat | "Deleted chats" (with 30-day restore) | "Trash" alone |
+**Memory / chat-session vocabulary:** "Archived" (not "Compressed"/"Wrapped up"),
+"Summarizing…" (not "Compressing…"), "notes" (not "facts"/"memories"), "Deleted
+chats" (not "Trash"). Full table: [memory.md](./docs/explanation/memory.md).
 
 **Timestamps:** store UTC, render in the user's IANA timezone. Timezone
 itself is a `profile`-category preference in `user_preferences` (set

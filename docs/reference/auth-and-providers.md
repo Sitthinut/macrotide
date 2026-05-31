@@ -6,7 +6,7 @@ and [SECURITY.md](../../SECURITY.md). To *set it up*, see
 [local development](../how-to/local-development.md) (dev) and
 [deploy](../how-to/deploy.md) (shared deployment). Every env var named below is
 defined in the canonical
-[AGENTS.md § Environment variables](../../AGENTS.md#environment-variables) table.
+[configuration.md § Environment variables](./configuration.md#environment-variables) table.
 
 ## Defaults
 
@@ -100,7 +100,7 @@ With **no keys** the chain is exactly Frankfurter (FX) → Yahoo; with **only**
 Twelve Data set you get the prior ETF-proxy behaviour. MSCI ACWI has no free
 real-index source and intentionally stays an ETF proxy (`ACWI`); gold stays the
 `XAU/USD` spot commodity, not an index. Every var above is defined in the
-canonical [AGENTS.md § Environment variables](../../AGENTS.md#environment-variables)
+canonical [configuration.md § Environment variables](./configuration.md#environment-variables)
 table.
 
 ### Cache freshness

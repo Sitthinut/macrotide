@@ -18,9 +18,8 @@ OPENROUTER_API_KEY=...   # optional — real AI chat instead of a stub
 
 The authoritative list of every variable the app reads — defaults, behavior,
 and the code that reads each one — is the env-var table in
-[AGENTS.md](../../AGENTS.md#environment-variables). `.env.example` is a thin
-template; AGENTS.md is the single source of truth. See also
-[reference/configuration.md](../reference/configuration.md).
+[configuration.md](../reference/configuration.md#environment-variables).
+`.env.example` is a thin template; that table is the single source of truth.
 
 ## npm scripts
 
