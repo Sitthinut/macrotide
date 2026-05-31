@@ -50,20 +50,19 @@ before committing — treat docs as part of the change, not a follow-up.
 
 ### Project board conventions
 
-The [board](https://github.com/users/Sitthinut/projects/2) holds the data; these
-are the conventions for using it (don't duplicate the issue list, colors, or IDs
-here — they live on the board and would go stale).
+The [board](https://github.com/users/Sitthinut/projects/2) holds the data — don't
+restate the issue list, colors, or IDs here; they'd go stale. The conventions:
 
-- **Priority** = tier. **P0** = now (launch + small/high-trust changes or a
-  visible-fix); **P1** = next; **P2** = later. Stay within P0 unless told
-  otherwise.
-- **Status** = workflow state: `Backlog` (not queued) → `Todo` (next up) →
-  `In Progress` → `Done`. File new planned work as an issue in **Backlog**.
-- **Labels** = one `area:*` (which pillar/domain the work serves) + one type
-  (`bug` / `enhancement` / `documentation`); `parked` marks work to revisit only
-  on a real need.
-- **Lifecycle:** when you ship an issue, close it, flip the README status row, and
-  add the CHANGELOG line (same commit) — see the table above.
+- **Priority** = tier: **P0** now (launch, small/high-trust, or visible fixes),
+  **P1** next, **P2** later. Stay within P0 unless told otherwise.
+- **Status** = `Backlog → Todo → In Progress → Done`. File new planned work in
+  **Backlog**.
+- **Labels** = one `area:*` + one type (`bug` / `enhancement` / `documentation`);
+  `parked` = revisit only on a real need.
+- **Lifecycle:** on "what's next", lead with Todo (by Priority) but scan all of
+  Backlog first — surface anything relevant to the task or higher-impact than the
+  Todo items. Move to In Progress on start, Done on ship — closing the issue and
+  doing the ship-docs pass above. A Status nobody moves is worse than none.
 
 A doc reference to a function, env var, or file path is a contract: when you
 rename/move/delete it, `grep -rn "thing" *.md docs/` and fix the references.
