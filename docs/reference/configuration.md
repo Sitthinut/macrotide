@@ -26,19 +26,23 @@ keep it in sync with [.env.example](../../.env.example) when adding/renaming var
 | Var | Default | Read by | Notes |
 | --- | --- | --- | --- |
 | `OPENROUTER_API_KEY` | — (required for live AI) | [lib/ai/provider.ts](../../lib/ai/provider.ts), [lib/portfolio/ocr.ts](../../lib/portfolio/ocr.ts) | Chat returns a stub response without it; OCR returns 503. |
-| `AI_MODELS` | `openrouter/free,openrouter/auto` | [lib/ai/provider.ts](../../lib/ai/provider.ts) | Comma-separated owner-chat fallback chain. First model is primary. |
+| `AI_MODELS` | `openrouter/free,openrouter/auto` | [lib/ai/provider.ts](../../lib/ai/provider.ts) | Comma-separated owner-chat fallback chain (also used by `tier='trusted'`). First model is primary. |
+| `FREE_TIER_MODEL` | `openrouter/free` | [lib/ai/provider.ts](../../lib/ai/provider.ts) | Model chain for `tier='free'` chat. Read from its OWN var, never from `AI_MODELS` (the invariant below). Defaults to the zero-cost free router; point it at a cheap PAID model (e.g. `google/gemini-2.5-flash`) to lift free-tier quality — bounded by the daily token + optional cents caps. |
 | `DEMO_OPENROUTER_API_KEY` | falls back to `OPENROUTER_API_KEY` | [lib/ai/provider.ts](../../lib/ai/provider.ts) | Separate key for demo traffic so demo can't burn owner quota. |
 | `DEMO_AI_MODELS` | `openrouter/free` | [lib/ai/provider.ts](../../lib/ai/provider.ts) | Demo-chat model chain. Free-only by default. |
 | `TITLE_MODEL` | `openrouter/free` | [lib/ai/provider.ts](../../lib/ai/provider.ts) | Cheap model for auto-titling a chat after its first turn pair (`POST /api/chat/threads/[id]/title`). **Never pin a Claude or GPT model here** — titling is a 3–5-word task and any non-mainstream free model (DeepSeek V3, Qwen3 small, etc.) is more than enough. Comma-separated chain accepted; first model is primary. |
 | `OCR_MODEL` | `google/gemini-2.5-flash` | [lib/portfolio/ocr.ts](../../lib/portfolio/ocr.ts) | Add-holdings image extraction (vision). NOT tier-gated — same model for all users (bounded, rate-limited one-shot). Must be vision-capable. (Prior `baidu/qianfan-ocr-fast` was removed upstream.) |
 | `OCR_FALLBACK_MODEL` | `google/gemini-2.0-flash-001` (only when `OCR_MODEL` is unset) | [lib/portfolio/ocr.ts](../../lib/portfolio/ocr.ts) | Auto-retry on provider error / rate-limit. Pinning `OCR_MODEL` disables the default fallback unless this is set explicitly. |
 
-The free-tier **model chain** is pinned to `openrouter/free` in code
+The free-tier **model chain** is derived ONLY from its own `FREE_TIER_MODEL` var
+(default `openrouter/free`) in code
 ([lib/ai/provider.ts](../../lib/ai/provider.ts) `resolveTierProvider`) and is
-deliberately NOT derived from `AI_MODELS` — a free user can never resolve to a
-paid model regardless of operator config. `tier='trusted'` uses the `AI_MODELS`
-owner chain. Tier is stored in `account_tier`; promote via SQL
-(`UPDATE account_tier SET tier='trusted' WHERE user_id=?`).
+deliberately NOT derived from `AI_MODELS` — so a slip in the owner chain can
+never widen free-tier access. Pointing free at a cheap paid model is a separate,
+conscious operator act (`FREE_TIER_MODEL=…`), and free spend stays bounded by the
+daily token cap plus the optional cents cost cap (see **Quotas + tier gating**).
+`tier='trusted'` uses the `AI_MODELS` owner chain. Tier is stored in
+`account_tier`; promote via SQL (`UPDATE account_tier SET tier='trusted' WHERE user_id=?`).
 
 ### Auth (better-auth)
 
@@ -101,8 +105,15 @@ sessions are bounded by the demo turn cap, not these budgets.
 
 | Var | Default | Read by | Notes |
 | --- | --- | --- | --- |
-| `DAILY_TOKEN_BUDGET_FREE` | `20000` | [lib/db/queries/usage.ts](../../lib/db/queries/usage.ts) | Daily input+output token cap per `tier='free'` user. Checked before forwarding to OpenRouter; resets at UTC midnight. Malformed/≤0 → default. |
+| `DAILY_TOKEN_BUDGET_FREE` | `20000` | [lib/db/queries/usage.ts](../../lib/db/queries/usage.ts) | Daily input+output token cap per `tier='free'` user. Checked before forwarding to OpenRouter; resets at UTC midnight. Malformed/≤0 → default. Always on (the floor). |
 | `DAILY_TOKEN_BUDGET_TRUSTED` | `200000` | [lib/db/queries/usage.ts](../../lib/db/queries/usage.ts) | Same, for `tier='trusted'` users. |
+| `DAILY_CENTS_BUDGET_FREE` | unset → **cost cap OFF** | [lib/db/queries/usage.ts](../../lib/db/queries/usage.ts) | Optional daily **cost** ceiling in US cents per `tier='free'` user — the right bound when `FREE_TIER_MODEL` is a paid model with asymmetric in/out pricing. Checked alongside the token cap (either tripping blocks the turn). Unset or malformed/≤0 → disabled (no invented money cap; the token cap still applies). |
+| `DAILY_CENTS_BUDGET_TRUSTED` | unset → **cost cap OFF** | [lib/db/queries/usage.ts](../../lib/db/queries/usage.ts) | Same, for `tier='trusted'` users. |
+| `MODEL_PRICES` | built-in table | [lib/db/queries/usage.ts](../../lib/db/queries/usage.ts) | JSON map `{"<model-id>":{"in":<USD/Mtok>,"out":<USD/Mtok>}}` keyed by the model id OpenRouter reports back, merged OVER the built-in prices. Drives the per-turn cost estimate that feeds `DAILY_CENTS_BUDGET_*`. Set it to match whatever `FREE_TIER_MODEL` resolves to. Unpriced (free) models contribute 0 cost. Malformed JSON → built-ins. |
+
+The cost cap is **off by default** — until you both set a `DAILY_CENTS_BUDGET_*`
+and run a priced model, only the token cap bites. Cost is an *estimate*
+(`served tokens × MODEL_PRICES`), not a provider-reported charge.
 
 ### External data sources
 

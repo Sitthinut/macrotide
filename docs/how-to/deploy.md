@@ -85,6 +85,15 @@ AUTH_RP_ID=macrotide.example.com
 AUTH_SECRET=        # fresh: openssl rand -base64 32 — do NOT reuse a dev secret
 OPENROUTER_API_KEY=sk-or-...
 AI_MODELS=openrouter/free,openrouter/auto
+# Free-tier chat model (own var, never AI_MODELS). Default openrouter/free; point
+# at a cheap paid model to lift free quality, bounded by the caps below.
+# FREE_TIER_MODEL=google/gemini-2.5-flash
+# Free-tier spend caps (checked pre-request, reset UTC midnight). Token cap is
+# always on; the cents cost cap is OFF unless set (the right bound for a paid
+# free-tier model). MODEL_PRICES feeds the cost estimate — match FREE_TIER_MODEL.
+# DAILY_TOKEN_BUDGET_FREE=20000
+# DAILY_CENTS_BUDGET_FREE=50
+# MODEL_PRICES={"google/gemini-2.5-flash":{"in":0.3,"out":2.5}}
 # Separate key so demo traffic never burns the owner quota (hardening item):
 DEMO_OPENROUTER_API_KEY=sk-or-...
 SEC_API_KEY=...     # same subscription key works in every environment

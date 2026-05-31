@@ -103,22 +103,25 @@ export function resolveOwnerProvider(): ResolvedProvider {
   return { model: openrouter(key, models), ready: true, label: chainLabel("OpenRouter", models) };
 }
 
-// The free tier is pinned to OpenRouter's free meta-router — DELIBERATELY not
-// derived from `AI_MODELS`. This is a cost/security-critical invariant: a
-// free-tier user can never resolve to a paid model regardless of how the
-// operator configures the owner chain. It's a constant, not an env var, so a
-// config slip can't widen it.
-const FREE_TIER_MODELS = ["openrouter/free"];
+// The free tier derives ONLY from its own dedicated `FREE_TIER_MODEL` var,
+// defaulting to OpenRouter's zero-cost free meta-router — DELIBERATELY never
+// from `AI_MODELS`. This preserves the cost/security invariant by construction:
+// a slip in the owner chain (`AI_MODELS`) can't widen free-tier access, because
+// the free branch doesn't read it. Pointing free at a cheap PAID model is a
+// separate, conscious operator act (set `FREE_TIER_MODEL`), and it's bounded by
+// the daily token + optional cents cap — see lib/db/queries/usage.ts.
+const FREE_TIER_DEFAULT = ["openrouter/free"];
 
 /**
  * Resolve the chat provider for a tier:
  *   - 'trusted' → the owner model chain (`AI_MODELS`, default
  *                 `openrouter/free → openrouter/auto`); identical to the owner
  *                 path.
- *   - 'free'    → `openrouter/free` ONLY. Zero owner cost; ignores `AI_MODELS`.
+ *   - 'free'    → `FREE_TIER_MODEL` (default `openrouter/free`) ONLY. Reads its
+ *                 own var, NEVER `AI_MODELS`, so the owner chain can't leak in.
  *
  * Both read the shared `OPENROUTER_API_KEY`; per-user keys are out of scope —
- * tier gating + the daily cap are what bound free-tier spend.
+ * tier gating + the daily caps are what bound free-tier spend.
  */
 export function resolveTierProvider(tier: "free" | "trusted"): ResolvedProvider {
   const key = process.env.OPENROUTER_API_KEY;
@@ -127,11 +130,8 @@ export function resolveTierProvider(tier: "free" | "trusted"): ResolvedProvider 
     const models = parseModels(process.env.AI_MODELS) ?? OWNER_DEFAULT;
     return { model: openrouter(key, models), ready: true, label: chainLabel("Trusted", models) };
   }
-  return {
-    model: openrouter(key, FREE_TIER_MODELS),
-    ready: true,
-    label: chainLabel("Free", FREE_TIER_MODELS),
-  };
+  const models = parseModels(process.env.FREE_TIER_MODEL) ?? FREE_TIER_DEFAULT;
+  return { model: openrouter(key, models), ready: true, label: chainLabel("Free", models) };
 }
 
 export function resolveDemoProvider(): ResolvedProvider {

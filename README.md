@@ -27,7 +27,7 @@ responsive across mobile / tablet / desktop with light/dark/system themes.
 | Instant fund finder — fuzzy + feeder-aware search, fee-annotated | ✅ Shipped |
 | Portfolio import — Paste/CSV, editable table entry with autocomplete, image OCR review | ✅ Shipped |
 | Long-term memory + chat archival — recall, FTS, session lifecycle | ✅ Shipped |
-| Multi-user — per-user isolation, tiers/quotas, owner admin | 🟡 Code shipped; launch prep open |
+| Multi-user — per-user isolation, tiers/quotas (token + optional cost caps, configurable cheap-paid free tier), owner admin | 🟡 Code shipped; launch prep open |
 | Benchmark comparison — "match or beat your index" (SET / S&P / Nasdaq / Nikkei) | ✅ Shipped; custom/goal-based benchmarks planned |
 | Reliable index/FX source (Yahoo 429 fix) | ✅ Shipped |
 | What's next — richer AI, custom benchmarks, fund-data depth, scheduled jobs | ⬜ Planned — see the [project board](https://github.com/users/Sitthinut/projects/2) |
