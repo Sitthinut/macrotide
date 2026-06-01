@@ -25,6 +25,10 @@ export interface Expect {
   mustNotInclude?: Matcher[];
   /** These tool names must have been called during the turn. */
   expectTools?: string[];
+  /** These tool names must NOT have been called — guards against over-calling
+   * (a simple lookup spuriously proposing an edit, or a concept question that
+   * fires a fund search). Per the agent-evals research: test negative cases. */
+  mustNotCallTools?: string[];
   /** Minimum number of tool calls (defaults to expectTools.length when unset). */
   minToolCalls?: number;
 }
@@ -54,6 +58,8 @@ export const QUESTIONS: EvalQuestion[] = [
     expect: {
       expectTools: ["read_portfolio"],
       mustInclude: ["EXAMPLE-FUND-A", /50\s?%/],
+      // A read-only lookup must not propose changes to the portfolio/plan.
+      mustNotCallTools: ["propose_holding", "propose_plan_edit"],
     },
     note: "Pure lookup: a tool returns the answer. Reasoning is wasted cost.",
   },
@@ -105,8 +111,29 @@ export const QUESTIONS: EvalQuestion[] = [
     expect: {
       anyOf: [/index/i],
       mustNotInclude: [/EXAMPLE-FUND-[B-Z]/],
+      // A concept explanation shouldn't search the catalog or propose anything.
+      mustNotCallTools: ["find_funds", "propose_holding", "propose_plan_edit"],
     },
     note: "Knowledge recall + clear writing, not deduction; no tool strictly required.",
+  },
+  {
+    // Negative control: a definitional question the model should answer from
+    // knowledge with NO tool call at all — guards against reflexive over-calling.
+    id: "N1-no-overcall",
+    tier: "retrieve",
+    prompt: "Quick one — what does the abbreviation TER stand for?",
+    expect: {
+      anyOf: [/total expense ratio/i, /expense ratio/i],
+      mustNotCallTools: [
+        "read_portfolio",
+        "read_performance",
+        "find_funds",
+        "find_cheaper_alternatives",
+        "propose_holding",
+        "propose_plan_edit",
+      ],
+    },
+    note: "No tool needed; a model that reads the portfolio to define an acronym is over-calling.",
   },
 
   // ── Tier 2: complex multi-step (where reasoning may help) ─────────────────
@@ -170,43 +197,73 @@ export interface GradeInput {
   toolNames: string[];
 }
 
+// The three sub-signals the agent-evals research recommends reporting separately
+// rather than collapsing into one number (so a regression localizes):
+//   - facts:  grounded completeness (mustInclude / anyOf) — did it carry the data
+//   - tools:  trajectory (expectTools / minToolCalls / mustNotCallTools) — right
+//             tools, no over-calling
+//   - safety: no-hallucination guards (mustNotInclude)
+export type GradeCategory = "facts" | "tools" | "safety";
+export interface CategoryScore {
+  passed: number;
+  total: number;
+}
+
 export interface GradeResult {
   passed: number;
   total: number;
   score: number; // passed / total, 1 = perfect
   failures: string[];
+  byCategory: Record<GradeCategory, CategoryScore>;
 }
 
 /**
  * Deterministically grade one answer against a question's expectations. Each
- * matcher / group / tool requirement is one check; score is the pass fraction.
- * A grounded, complete, safe answer scores 1.0; a dead-end (empty text) scores 0
- * on every text check.
+ * matcher / group / tool requirement is one check, tagged with a category; the
+ * overall score is the pass fraction and per-category sub-scores localize a
+ * regression. A grounded, complete, safe answer scores 1.0; a dead-end (empty
+ * text) scores 0 on every text check.
  */
 export function gradeAnswer(q: EvalQuestion, input: GradeInput): GradeResult {
   const { text, toolNames } = input;
-  const checks: Array<{ ok: boolean; label: string }> = [];
+  const checks: Array<{ ok: boolean; label: string; cat: GradeCategory }> = [];
 
   for (const m of q.expect.mustInclude ?? []) {
-    checks.push({ ok: matches(text, m), label: `mustInclude ${String(m)}` });
+    checks.push({ ok: matches(text, m), label: `mustInclude ${String(m)}`, cat: "facts" });
   }
   if (q.expect.anyOf?.length) {
     checks.push({
       ok: q.expect.anyOf.some((m) => matches(text, m)),
       label: `anyOf ${q.expect.anyOf.map(String).join(" | ")}`,
+      cat: "facts",
     });
   }
   for (const m of q.expect.mustNotInclude ?? []) {
-    checks.push({ ok: !matches(text, m), label: `mustNotInclude ${String(m)}` });
+    checks.push({ ok: !matches(text, m), label: `mustNotInclude ${String(m)}`, cat: "safety" });
   }
-  if (q.expect.expectTools?.length) {
-    for (const t of q.expect.expectTools) {
-      checks.push({ ok: toolNames.includes(t), label: `expectTool ${t}` });
-    }
+  for (const t of q.expect.expectTools ?? []) {
+    checks.push({ ok: toolNames.includes(t), label: `expectTool ${t}`, cat: "tools" });
+  }
+  for (const t of q.expect.mustNotCallTools ?? []) {
+    checks.push({ ok: !toolNames.includes(t), label: `mustNotCallTool ${t}`, cat: "tools" });
   }
   const minTools = q.expect.minToolCalls ?? q.expect.expectTools?.length ?? 0;
   if (minTools > 0) {
-    checks.push({ ok: toolNames.length >= minTools, label: `minToolCalls ${minTools}` });
+    checks.push({
+      ok: toolNames.length >= minTools,
+      label: `minToolCalls ${minTools}`,
+      cat: "tools",
+    });
+  }
+
+  const byCategory: Record<GradeCategory, CategoryScore> = {
+    facts: { passed: 0, total: 0 },
+    tools: { passed: 0, total: 0 },
+    safety: { passed: 0, total: 0 },
+  };
+  for (const c of checks) {
+    byCategory[c.cat].total++;
+    if (c.ok) byCategory[c.cat].passed++;
   }
 
   const passed = checks.filter((c) => c.ok).length;
@@ -216,6 +273,7 @@ export function gradeAnswer(q: EvalQuestion, input: GradeInput): GradeResult {
     total,
     score: passed / total,
     failures: checks.filter((c) => !c.ok).map((c) => c.label),
+    byCategory,
   };
 }
 

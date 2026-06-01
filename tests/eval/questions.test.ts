@@ -103,4 +103,30 @@ describe("gradeAnswer", () => {
     });
     expect(r.failures.join(" ")).toContain("EXAMPLE-FUND-Z");
   });
+
+  it("splits checks into facts / tools / safety sub-signals", () => {
+    const r = gradeAnswer(q, {
+      text: "Your largest holding is EXAMPLE-FUND-A at 50%.",
+      toolNames: ["read_portfolio"],
+    });
+    // facts = mustInclude(2) + anyOf(1); tools = expectTool(1) + minToolCalls(1);
+    // safety = mustNotInclude(1).
+    expect(r.byCategory.facts).toEqual({ passed: 3, total: 3 });
+    expect(r.byCategory.tools).toEqual({ passed: 2, total: 2 });
+    expect(r.byCategory.safety).toEqual({ passed: 1, total: 1 });
+  });
+
+  it("mustNotCallTools penalizes over-calling under the tools category", () => {
+    const overcall: EvalQuestion = {
+      id: "N",
+      tier: "retrieve",
+      prompt: "x",
+      expect: { anyOf: [/ok/i], mustNotCallTools: ["propose_holding"] },
+    };
+    const bad = gradeAnswer(overcall, { text: "ok", toolNames: ["propose_holding"] });
+    expect(bad.failures.join(" ")).toContain("mustNotCallTool propose_holding");
+    expect(bad.byCategory.tools.passed).toBe(0);
+    const good = gradeAnswer(overcall, { text: "ok", toolNames: [] });
+    expect(good.score).toBe(1);
+  });
 });

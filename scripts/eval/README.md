@@ -7,15 +7,25 @@ reasoning (#58) so model/prompt changes are measured, not guessed.
 It runs a fixed question set through one or more models against a **synthetic**
 tool surface (no real fund codes — `EXAMPLE-FUND-*` only) that mirrors the real
 advisor + memory tools, using the **exact production system prompt**
-(`lib/advisor/system-prompt.ts`) and OpenRouter wiring. For each turn it records:
+(`lib/advisor/system-prompt.ts`) and OpenRouter wiring. For each turn it records, and aggregates per `(model, tier)`:
 
-- **dead-end rate** — turns that produced no prose (the issue #21 failure mode)
-- **latency** — wall-clock per turn
-- **token cost** — input/output tokens + an at-a-glance USD estimate
-- **answer quality** — deterministic grading: did the answer carry the grounded
-  facts (it read the synthetic data), call the right tools, and avoid inventing
-  holdings? Score is the fraction of those checks that passed. See
-  `questions.ts` for the per-question expectations.
+- **dead-end rate** — turns that produced no prose (the issue #21 failure mode),
+  reported as its own % (a distinct reliability failure, not a zero in quality)
+- **quality (avg@N)** — mean deterministic score across runs
+- **pass^k** — the fraction of QUESTIONS where *all* `EVAL_N` runs passed: the
+  load-bearing reliability number a single-run mean hides (75%/run ≈ 42% at k=3)
+- **three sub-signals**, reported separately rather than collapsed —
+  **facts** (grounded completeness), **tools** (right tools, no over-calling),
+  **safety** (no invented holdings)
+- **latency / tokens / cost** — wall-clock, in/out tokens, USD estimate
+- a **PASS/FAIL verdict** against pre-declared per-tier thresholds (dead-end,
+  grounded-facts floor, hallucination=0). Set `EVAL_GATE=on` to exit non-zero on
+  a breach (a pre-change gate). See `questions.ts` for per-question expectations
+  and `run.ts` `THRESHOLDS` for the acceptance criteria.
+
+The grading is **deterministic** (no LLM judge) — the floor that survives model
+swaps. An LLM-as-judge layer is deliberately deferred (see the research survey
+and inference-strategy.md § Evaluation).
 
 Two tiers (`questions.ts`):
 
@@ -48,6 +58,18 @@ of the question set + grader is guarded for free in `tests/eval/questions.test.t
 | `EVAL_REASONING` | _unset_ | `none`\|`minimal`\|`low`\|`medium`\|`high` (injected as `reasoning.effort`) |
 | `EVAL_MAX_TOKENS` | 1024 (2048 when reasoning ≥ low) | output cap per turn |
 | `EVAL_OUT` | `eval-results/<timestamp>.json` | raw per-turn results (gitignored) |
+| `EVAL_GATE` | _off_ | `on` → exit non-zero when a pre-declared threshold is breached |
+
+Use `EVAL_N≥3` for any comparison (a single run conflates model variance with
+capability).
+
+## Changing the question set
+
+The questions are a small **golden set**. To keep it honest (and avoid
+Goodharting a score by editing the test): treat the current set as **frozen** —
+fix only genuine grader bugs (e.g. a regex missing a number format), and **add**
+new questions rather than loosening existing ones. Prefer growing the complex
+tier, which is where reasoning and harder grounding live.
 
 ## Out of scope
 

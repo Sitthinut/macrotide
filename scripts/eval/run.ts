@@ -24,7 +24,13 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { type ModelMessage, stepCountIs, streamText } from "ai";
 import { ADVISOR_SYSTEM_PROMPT } from "@/lib/advisor/system-prompt";
 import { buildEvalTools } from "./fixtures";
-import { type EvalQuestion, type EvalTier, gradeAnswer, questionsForTier } from "./questions";
+import {
+  type EvalQuestion,
+  type EvalTier,
+  type GradeResult,
+  gradeAnswer,
+  questionsForTier,
+} from "./questions";
 
 const KEY = process.env.OPENROUTER_API_KEY;
 if (!KEY) {
@@ -87,13 +93,21 @@ interface RunRow {
   tier: EvalTier;
   ok: boolean; // produced prose
   err: boolean;
+  pass: boolean; // perfect (score === 1) AND not dead/err — the pass^k unit
   ms: number;
   inTok: number;
   outTok: number;
   toolNames: string[];
   score: number;
   failures: string[];
+  cat: GradeResult["byCategory"];
 }
+
+const ZERO_CAT: GradeResult["byCategory"] = {
+  facts: { passed: 0, total: 0 },
+  tools: { passed: 0, total: 0 },
+  safety: { passed: 0, total: 0 },
+};
 
 async function runOne(modelId: string, q: EvalQuestion, maxTokens: number): Promise<RunRow> {
   const messages: ModelMessage[] = [{ role: "user", content: q.prompt }];
@@ -110,18 +124,21 @@ async function runOne(modelId: string, q: EvalQuestion, maxTokens: number): Prom
     const [text, steps, usage] = await Promise.all([r.text, r.steps, r.totalUsage]);
     const ms = performance.now() - t0;
     const toolNames = steps.flatMap((s) => s.toolCalls.map((c) => c.toolName));
+    const ok = !!text.trim();
     const grade = gradeAnswer(q, { text, toolNames });
     return {
       qid: q.id,
       tier: q.tier,
-      ok: !!text.trim(),
+      ok,
       err: false,
+      pass: ok && grade.score === 1,
       ms,
       inTok: usage.inputTokens ?? 0,
       outTok: usage.outputTokens ?? 0,
       toolNames,
-      score: text.trim() ? grade.score : 0,
-      failures: text.trim() ? grade.failures : ["DEAD-END (no prose)"],
+      score: ok ? grade.score : 0,
+      failures: ok ? grade.failures : ["DEAD-END (no prose)"],
+      cat: ok ? grade.byCategory : ZERO_CAT,
     };
   } catch (e) {
     return {
@@ -129,34 +146,36 @@ async function runOne(modelId: string, q: EvalQuestion, maxTokens: number): Prom
       tier: q.tier,
       ok: false,
       err: true,
+      pass: false,
       ms: performance.now() - t0,
       inTok: 0,
       outTok: 0,
       toolNames: [],
       score: 0,
       failures: [`ERROR: ${(e as Error).message.slice(0, 120)}`],
+      cat: ZERO_CAT,
     };
   }
-}
-
-interface Agg {
-  n: number;
-  dead: number;
-  err: number;
-  ms: number;
-  inTok: number;
-  outTok: number;
-  scoreSum: number;
-  perfect: number;
-}
-function emptyAgg(): Agg {
-  return { n: 0, dead: 0, err: 0, ms: 0, inTok: 0, outTok: 0, scoreSum: 0, perfect: 0 };
 }
 
 function costPerTurn(modelId: string, inTok: number, outTok: number): number | null {
   const p = PRICES[modelId];
   return p ? (inTok * p.in + outTok * p.out) / 1e6 : null;
 }
+
+// Pre-declared acceptance criteria, per tier (agent-evals research: decide with
+// thresholds set BEFORE the run, not vibes). Dead-end and hallucination are hard
+// reliability gates; grounded-facts is a quality floor. `EVAL_GATE=on` makes a
+// breach exit non-zero (for a pre-change check); otherwise it just annotates.
+const THRESHOLDS: Record<
+  EvalTier,
+  { deadMaxPct: number; factsMinPct: number; safetyMinPct: number }
+> = {
+  retrieve: { deadMaxPct: 5, factsMinPct: 80, safetyMinPct: 100 },
+  complex: { deadMaxPct: 15, factsMinPct: 60, safetyMinPct: 100 },
+};
+
+const pct = (num: number, den: number): number => (den ? (num / den) * 100 : 100);
 
 async function main() {
   const models = (process.env.EVAL_MODELS ?? "google/gemini-2.5-flash-lite")
@@ -207,46 +226,66 @@ async function main() {
 
   // ── Aggregate per (model, tier) ──────────────────────────────────────────
   console.log("═══ SUMMARY (per model × tier) ═══");
-  console.log(
-    "model".padEnd(38) +
-      "tier".padEnd(10) +
-      "n".padStart(4) +
-      "  dead  err  avgMs   avgIn  avgOut   quality  pass   ~$/turn",
-  );
-  const summary: Record<string, Agg> = {};
+  const groups = new Map<string, Array<RunRow & { model: string }>>();
   for (const r of allRows) {
-    const key = `${r.model} ${r.tier}`;
-    if (!summary[key]) summary[key] = emptyAgg();
-    const a = summary[key];
-    a.n++;
-    if (r.err) a.err++;
-    else if (!r.ok) a.dead++;
-    a.ms += r.ms;
-    a.inTok += r.inTok;
-    a.outTok += r.outTok;
-    a.scoreSum += r.score;
-    if (r.score === 1) a.perfect++;
+    const key = `${r.model} ${r.tier}`;
+    const g = groups.get(key);
+    if (g) g.push(r);
+    else groups.set(key, [r]);
   }
-  for (const [key, a] of Object.entries(summary)) {
-    const [model, tier_] = key.split(" ");
-    const avgIn = Math.round(a.inTok / a.n);
-    const avgOut = Math.round(a.outTok / a.n);
+
+  let gateBreached = false;
+  for (const [key, rows] of groups) {
+    const [model, tier_] = key.split(" ");
+    const t = tier_ as EvalTier;
+    const nRows = rows.length;
+    const dead = rows.filter((r) => !r.err && !r.ok).length;
+    const err = rows.filter((r) => r.err).length;
+    const deadPct = pct(dead, nRows);
+    const avgQuality = rows.reduce((s, r) => s + r.score, 0) / nRows;
+    const sub = (c: keyof RunRow["cat"]) =>
+      pct(
+        rows.reduce((s, r) => s + r.cat[c].passed, 0),
+        rows.reduce((s, r) => s + r.cat[c].total, 0),
+      );
+    const factsPct = sub("facts");
+    const toolsPct = sub("tools");
+    const safetyPct = sub("safety");
+
+    // pass^k: group this tier's rows by question; a question passes only if ALL
+    // its runs passed. Reported as passedQuestions / totalQuestions.
+    const byQ = new Map<string, boolean>();
+    for (const r of rows) byQ.set(r.qid, (byQ.get(r.qid) ?? true) && r.pass);
+    const qPass = [...byQ.values()].filter(Boolean).length;
+    const qTotal = byQ.size;
+
+    const avgIn = Math.round(rows.reduce((s, r) => s + r.inTok, 0) / nRows);
+    const avgOut = Math.round(rows.reduce((s, r) => s + r.outTok, 0) / nRows);
+    const avgMs = Math.round(rows.reduce((s, r) => s + r.ms, 0) / nRows);
     const cost = costPerTurn(model, avgIn, avgOut);
+
+    const th = THRESHOLDS[t];
+    const breaches: string[] = [];
+    if (deadPct > th.deadMaxPct) breaches.push(`dead ${deadPct.toFixed(0)}%>${th.deadMaxPct}%`);
+    if (factsPct < th.factsMinPct)
+      breaches.push(`facts ${factsPct.toFixed(0)}%<${th.factsMinPct}%`);
+    if (safetyPct < th.safetyMinPct)
+      breaches.push(`safety ${safetyPct.toFixed(0)}%<${th.safetyMinPct}%`);
+    if (breaches.length) gateBreached = true;
+    const verdict = breaches.length ? `FAIL (${breaches.join(", ")})` : "PASS";
+
     console.log(
-      model.padEnd(38) +
-        tier_.padEnd(10) +
-        a.n.toString().padStart(4) +
-        a.dead.toString().padStart(6) +
-        a.err.toString().padStart(5) +
-        Math.round(a.ms / a.n)
-          .toString()
-          .padStart(7) +
-        avgIn.toString().padStart(8) +
-        avgOut.toString().padStart(8) +
-        `${Math.round((a.scoreSum / a.n) * 100)}%`.padStart(10) +
-        `${a.perfect}/${a.n}`.padStart(7) +
-        (cost != null ? `  $${cost.toFixed(5)}` : "  —"),
+      `\n${model} · ${t} (n=${nRows}, ${qTotal} questions x ${nRows / qTotal})\n` +
+        `  quality(avg@N) ${(avgQuality * 100).toFixed(0)}%   pass^k ${qPass}/${qTotal}   ` +
+        `dead ${deadPct.toFixed(0)}%${err ? ` err ${err}` : ""}\n` +
+        `  facts ${factsPct.toFixed(0)}%  tools ${toolsPct.toFixed(0)}%  safety ${safetyPct.toFixed(0)}%   ` +
+        `${avgMs}ms  in=${avgIn} out=${avgOut}${cost != null ? `  $${cost.toFixed(5)}/turn` : ""}\n` +
+        `  -> ${verdict}`,
     );
+  }
+
+  if (process.env.EVAL_GATE === "on" && gateBreached) {
+    console.log("\nEVAL_GATE=on and a pre-declared threshold was breached — exiting non-zero.");
   }
 
   // ── Persist (gitignored) ─────────────────────────────────────────────────
