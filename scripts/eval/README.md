@@ -11,12 +11,15 @@ advisor + memory tools, using the **exact production system prompt**
 
 - **dead-end rate** — turns that produced no prose (the issue #21 failure mode),
   reported as its own % (a distinct reliability failure, not a zero in quality)
-- **quality (avg@N)** — mean deterministic score across runs
+- **quality (avg@N) ± 95% CI** — mean deterministic score across runs, with a
+  confidence interval (shown when `EVAL_N ≥ 2`) so a gap that's just run-variance
+  rather than a real difference is visible at a glance
 - **pass^k** — the fraction of QUESTIONS where *all* `EVAL_N` runs passed: the
   load-bearing reliability number a single-run mean hides (75%/run ≈ 42% at k=3)
 - **three sub-signals**, reported separately rather than collapsed —
-  **facts** (grounded completeness), **tools** (right tools, no over-calling),
-  **safety** (no invented holdings)
+  **facts** (grounded completeness), **tools** (right tools called, with the right
+  arguments, a bounded trajectory, no over-calling), **safety** (no invented
+  holdings)
 - **latency / tokens / cost** — wall-clock, in/out tokens, USD estimate
 - a **PASS/FAIL verdict** against pre-declared per-tier thresholds (dead-end,
   grounded-facts floor, hallucination=0). Set `EVAL_GATE=on` to exit non-zero on
@@ -46,7 +49,27 @@ EVAL_TIER=complex EVAL_REASONING=none   npm run eval:advisor    # … vs the bas
 
 It hits the live OpenRouter API and **spends real tokens** (`OPENROUTER_API_KEY`
 from `.env.local`), so it is intentionally NOT part of `npm test`. The structure
-of the question set + grader is guarded for free in `tests/eval/questions.test.ts`.
+of the question set, grader, statistics, and diff is guarded for free in
+`tests/eval/*.test.ts`.
+
+Each run writes its results to `eval-results/<timestamp>.json` (gitignored),
+tagged with the current commit SHA, every per-turn row, the trajectory length
+(`steps`), and the tool calls *with arguments* — enough to re-grade or audit a
+run after the fact. A question can bound its trajectory with `maxSteps` (a simple
+lookup that takes five generations is thrashing) or `minSteps`.
+
+## Compare two runs
+
+```bash
+npm run eval:diff -- eval-results/<before>.json eval-results/<after>.json
+```
+
+Pairs questions by `(model, qid)` across the two files and reports the score
+delta, which questions newly **fail** or got **fixed** (pass^k flips), and a
+**paired McNemar test** over the shared set — so a before/after comparison is
+mechanical, and a "winner" is only declared significant when the flips lean one
+way beyond chance. The first file is the baseline; a positive delta means the
+second (candidate) scored higher.
 
 ### Env knobs
 
@@ -70,6 +93,15 @@ Goodharting a score by editing the test): treat the current set as **frozen** �
 fix only genuine grader bugs (e.g. a regex missing a number format), and **add**
 new questions rather than loosening existing ones. Prefer growing the complex
 tier, which is where reasoning and harder grounding live.
+
+A question can opt into a different data surface with `fixture: "empty"`, which
+routes the portfolio reads to a **no-holdings** fixture — used by the
+`N2-empty-holdings` *negative control*, where the only correct answer is "you
+have no holdings yet" and naming a fund or an allocation % is a hallucination.
+Negative controls (the right move is to *refuse*, not answer) are as important as
+the positive ones. Beyond names, a question can assert a tool was called with the
+right **arguments** via `expectToolArgs` (e.g. `find_cheaper_alternatives` was
+asked about the fund the user actually holds), which a name-only check misses.
 
 ## Out of scope
 

@@ -60,6 +60,27 @@ export const PORTFOLIO = {
   message: "Read 3 holding(s) across 2 bucket(s); total ฿1,000,000.",
 };
 
+// ─── Empty portfolio (negative control, issue #69) ──────────────────────────
+// Mirrors the real read_portfolio shape when the user has NOT added holdings:
+// hasHoldings:false and nothing to analyze. The correct answer to any "how am I
+// doing / rebalance me" question here is "you have no holdings yet" — NOT an
+// invented allocation. The N2 question grades that the Advisor refuses rather
+// than fabricating, the failure mode a synthetic-data eval most needs to guard.
+export const EMPTY_PORTFOLIO = {
+  ok: true as const,
+  hasHoldings: false,
+  totalValue: 0,
+  baseCurrency: "THB",
+  message: "No holdings yet — add a holding to see your allocation, drift, and fees.",
+};
+
+// Performance with no holdings: no series to compute a return from.
+export const EMPTY_PERFORMANCE = {
+  ok: true as const,
+  hasData: false,
+  message: "No performance history yet — add holdings to start tracking returns.",
+};
+
 // ─── Synthetic performance ──────────────────────────────────────────────────
 // +7.1% over 6mo — BEATS the SET (+4.3%) but TRAILS the S&P 500 (+9.8%). The
 // split lets a question about "beating my index" be answered with nuance.
@@ -186,6 +207,14 @@ export interface BuildEvalToolsOptions {
    * model saw before shaping, so the same harness can A/B the token delta.
    */
   shape?: boolean;
+  /**
+   * When true, the portfolio reads return the EMPTY fixture (no holdings) so a
+   * question can probe whether the Advisor refuses to fabricate an analysis
+   * (issue #69). A question opts in via `fixture: "empty"`; the catalog reads
+   * (find_funds / find_cheaper_alternatives) are unaffected — the fund universe
+   * exists regardless of what the user holds.
+   */
+  empty?: boolean;
 }
 
 export function buildEvalTools(opts: BuildEvalToolsOptions = {}) {
@@ -210,7 +239,7 @@ export function buildEvalTools(opts: BuildEvalToolsOptions = {}) {
         "concentration (largest holding, top-3, HHI), and cash drag. Use before answering " +
         "anything about how they're doing, their mix, fees, concentration, or rebalancing.",
       inputSchema: z.object({}),
-      execute: async () => PORTFOLIO,
+      execute: async () => (opts.empty ? EMPTY_PORTFOLIO : PORTFOLIO),
       ...shaped("portfolio"),
     }),
     read_performance: tool({
@@ -221,7 +250,7 @@ export function buildEvalTools(opts: BuildEvalToolsOptions = {}) {
       inputSchema: z.object({
         range: z.enum(["1mo", "3mo", "6mo", "1y", "5y", "max"]).optional(),
       }),
-      execute: async () => PERFORMANCE,
+      execute: async () => (opts.empty ? EMPTY_PERFORMANCE : PERFORMANCE),
       ...shaped("performance"),
     }),
     read_plan: tool({
