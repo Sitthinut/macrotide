@@ -303,13 +303,14 @@ gated metric — never a zero folded into quality), **latency / token / cost**, 
 runs pass, the number a single-run mean hides).
 
 **How we grade.** A **deterministic floor** (`mustInclude` / `anyOf` /
-`mustNotInclude` / `expectTools` / `mustNotCallTools` / `expectToolArgs`) — fast,
-reproducible, and it survives model swaps, so it's the regression gate. It grades
-not just *which* tools were called but *with what arguments* (e.g. the fee-switch
-question asked about the fund the user actually holds), and it includes a
-**negative control** — an empty-holdings turn where the only correct answer is
-"you have no holdings yet" and naming a fund is a hallucination, so the harness
-rewards *refusing* as well as answering. An **LLM-as-judge** layer is deliberately
+`mustNotInclude` / `expectTools` / `mustNotCallTools` / `expectToolArgs` /
+`maxSteps`) — fast, reproducible, and it survives model swaps, so it's the
+regression gate. It grades not just *which* tools were called but *with what
+arguments* (e.g. the fee-switch question asked about the fund the user actually
+holds) and *over how long a trajectory* (a lookup that loops to five generations
+is thrashing), and it includes a **negative control** — an empty-holdings turn
+where the only correct answer is "you have no holdings yet" and naming a fund is a
+hallucination, so the harness rewards *refusing* as well as answering. An **LLM-as-judge** layer is deliberately
 *deferred*: the floor already gates regressions, and an uncalibrated judge adds
 cost and bias, not signal (it earns its place only once observed grader-vs-human
 disagreement justifies it — see the survey).

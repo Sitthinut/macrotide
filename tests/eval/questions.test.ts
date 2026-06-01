@@ -169,6 +169,23 @@ describe("gradeAnswer", () => {
     expect(ungrounded.byCategory.tools.passed).toBeLessThan(ungrounded.byCategory.tools.total);
   });
 
+  it("maxSteps flags a lookup that thrashed; passes a tight trajectory (issue #68)", () => {
+    const stepQ: EvalQuestion = {
+      id: "S",
+      tier: "retrieve",
+      prompt: "x",
+      expect: { anyOf: [/ok/i], maxSteps: 3 },
+    };
+    const tight = gradeAnswer(stepQ, { text: "ok", toolNames: ["read_portfolio"], steps: 2 });
+    expect(tight.score).toBe(1);
+    const looped = gradeAnswer(stepQ, { text: "ok", toolNames: ["read_portfolio"], steps: 5 });
+    expect(looped.failures.join(" ")).toContain("maxSteps");
+    expect(looped.byCategory.tools.passed).toBeLessThan(looped.byCategory.tools.total);
+    // A bound with no reported step count fails closed rather than silently passing.
+    const noSteps = gradeAnswer(stepQ, { text: "ok", toolNames: [] });
+    expect(noSteps.failures.join(" ")).toContain("maxSteps");
+  });
+
   it("the empty-holdings control passes a refusal, fails a fabrication (issue #69)", () => {
     const n2 = QUESTIONS.find((q) => q.id === "N2-empty-holdings");
     expect(n2, "N2-empty-holdings exists").toBeDefined();

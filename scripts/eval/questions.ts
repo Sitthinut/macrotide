@@ -45,6 +45,13 @@ export interface Expect {
   /** A tool was called with arguments matching a pattern (grounding, not just
    * the tool name). Needs the run to capture tool inputs (run.ts). */
   expectToolArgs?: ToolArgCheck[];
+  /** Upper bound on trajectory length (model generations) — catches a lookup
+   * that thrashes or loops instead of answering in a step or two (issue #68).
+   * Graded under "tools"; needs the run to report `steps`. */
+  maxSteps?: number;
+  /** Lower bound on trajectory length (rarely needed; a turn that should have
+   * taken at least one tool round-trip). Graded under "tools". */
+  minSteps?: number;
 }
 
 export type EvalTier = "retrieve" | "complex";
@@ -77,6 +84,8 @@ export const QUESTIONS: EvalQuestion[] = [
       mustInclude: ["EXAMPLE-FUND-A", /50\s?%/],
       // A read-only lookup must not propose changes to the portfolio/plan.
       mustNotCallTools: ["propose_holding", "propose_plan_edit"],
+      // One read + one answer ≈ 2 generations; >3 means it looped on a lookup.
+      maxSteps: 3,
     },
     note: "Pure lookup: a tool returns the answer. Reasoning is wasted cost.",
   },
@@ -245,6 +254,8 @@ export interface GradeInput {
   /** Tool calls with arguments, for expectToolArgs grounding checks (issue #68).
    * Optional: callers that only track names still grade name-level checks. */
   toolCalls?: ToolCall[];
+  /** Trajectory length (model generations) for maxSteps/minSteps checks (#68). */
+  steps?: number;
 }
 
 // The three sub-signals the agent-evals research recommends reporting separately
@@ -275,7 +286,7 @@ export interface GradeResult {
  * text) scores 0 on every text check.
  */
 export function gradeAnswer(q: EvalQuestion, input: GradeInput): GradeResult {
-  const { text, toolNames, toolCalls } = input;
+  const { text, toolNames, toolCalls, steps } = input;
   const checks: Array<{ ok: boolean; label: string; cat: GradeCategory }> = [];
 
   for (const m of q.expect.mustInclude ?? []) {
@@ -312,6 +323,22 @@ export function gradeAnswer(q: EvalQuestion, input: GradeInput): GradeResult {
       (c) => c.name === a.tool && matches(JSON.stringify(c.args ?? {}), a.contains),
     );
     checks.push({ ok, label: `expectToolArgs ${a.tool} ~ ${String(a.contains)}`, cat: "tools" });
+  }
+  // Trajectory-length bounds (issue #68). Only graded when the run reported a
+  // step count; a question that sets a bound but runs without one fails closed.
+  if (q.expect.maxSteps != null) {
+    checks.push({
+      ok: steps != null && steps <= q.expect.maxSteps,
+      label: `maxSteps ${q.expect.maxSteps} (got ${steps ?? "?"})`,
+      cat: "tools",
+    });
+  }
+  if (q.expect.minSteps != null) {
+    checks.push({
+      ok: steps != null && steps >= q.expect.minSteps,
+      label: `minSteps ${q.expect.minSteps} (got ${steps ?? "?"})`,
+      cat: "tools",
+    });
   }
 
   const byCategory: Record<GradeCategory, CategoryScore> = {

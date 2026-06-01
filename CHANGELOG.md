@@ -42,10 +42,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   and a **paired McNemar significance test** over the shared question set. Each
   result file is tagged with its git SHA. The grader gained **argument grounding**
   (`expectToolArgs` — asserts a tool was called with the right inputs, not just by
-  name) and a **negative control** (an empty-holdings turn where the right answer
-  is "you have no holdings yet" and naming a fund is a hallucination), so refusing
-  is rewarded alongside answering. Runs persist tool calls with their arguments
-  for after-the-fact audit. All token-free, guarded by `tests/eval/`.
+  name), a **trajectory bound** (`maxSteps`/`minSteps` — a lookup that takes five
+  generations is thrashing), and a **negative control** (an empty-holdings turn
+  where the right answer is "you have no holdings yet" and naming a fund is a
+  hallucination), so refusing is rewarded alongside answering. Runs persist each
+  turn's step count and tool calls with their arguments for after-the-fact audit.
+  All token-free, guarded by `tests/eval/`.
 
 - **Tool-result shaping — compact model-facing tool outputs.**
   The heavy reads (`read_portfolio`, `read_performance`, `find_funds`,

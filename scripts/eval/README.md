@@ -18,7 +18,8 @@ advisor + memory tools, using the **exact production system prompt**
   load-bearing reliability number a single-run mean hides (75%/run ≈ 42% at k=3)
 - **three sub-signals**, reported separately rather than collapsed —
   **facts** (grounded completeness), **tools** (right tools called, with the right
-  arguments, no over-calling), **safety** (no invented holdings)
+  arguments, a bounded trajectory, no over-calling), **safety** (no invented
+  holdings)
 - **latency / tokens / cost** — wall-clock, in/out tokens, USD estimate
 - a **PASS/FAIL verdict** against pre-declared per-tier thresholds (dead-end,
   grounded-facts floor, hallucination=0). Set `EVAL_GATE=on` to exit non-zero on
@@ -52,8 +53,10 @@ of the question set, grader, statistics, and diff is guarded for free in
 `tests/eval/*.test.ts`.
 
 Each run writes its results to `eval-results/<timestamp>.json` (gitignored),
-tagged with the current commit SHA, every per-turn row, and the tool calls *with
-arguments* — enough to re-grade or audit a run after the fact.
+tagged with the current commit SHA, every per-turn row, the trajectory length
+(`steps`), and the tool calls *with arguments* — enough to re-grade or audit a
+run after the fact. A question can bound its trajectory with `maxSteps` (a simple
+lookup that takes five generations is thrashing) or `minSteps`.
 
 ## Compare two runs
 

@@ -100,6 +100,7 @@ interface RunRow {
   ms: number;
   inTok: number;
   outTok: number;
+  steps: number; // trajectory length = model generations this turn (issue #68)
   toolNames: string[];
   toolCalls: ToolCall[]; // names + arguments (issue #68), persisted for arg-grounding analysis
   score: number;
@@ -134,8 +135,9 @@ async function runOne(modelId: string, q: EvalQuestion, maxTokens: number): Prom
       s.toolCalls.map((c) => ({ name: c.toolName, args: c.input })),
     );
     const toolNames = toolCalls.map((c) => c.name);
+    const stepCount = steps.length;
     const ok = !!text.trim();
-    const grade = gradeAnswer(q, { text, toolNames, toolCalls });
+    const grade = gradeAnswer(q, { text, toolNames, toolCalls, steps: stepCount });
     return {
       qid: q.id,
       tier: q.tier,
@@ -145,6 +147,7 @@ async function runOne(modelId: string, q: EvalQuestion, maxTokens: number): Prom
       ms,
       inTok: usage.inputTokens ?? 0,
       outTok: usage.outputTokens ?? 0,
+      steps: stepCount,
       toolNames,
       toolCalls,
       score: ok ? grade.score : 0,
@@ -161,6 +164,7 @@ async function runOne(modelId: string, q: EvalQuestion, maxTokens: number): Prom
       ms: performance.now() - t0,
       inTok: 0,
       outTok: 0,
+      steps: 0,
       toolNames: [],
       toolCalls: [],
       score: 0,
@@ -227,7 +231,7 @@ async function main() {
         console.log(
           `  [${tag}] ${row.qid.padEnd(20)} ${Math.round(row.ms).toString().padStart(6)}ms ` +
             `in=${row.inTok.toString().padStart(5)} out=${row.outTok.toString().padStart(4)} ` +
-            `tools=[${row.toolNames.join(",") || "—"}]` +
+            `steps=${row.steps} tools=[${row.toolNames.join(",") || "—"}]` +
             (cost != null ? ` ~$${cost.toFixed(5)}` : "") +
             (row.failures.length ? `  ✗ ${row.failures.join("; ")}` : ""),
         );
