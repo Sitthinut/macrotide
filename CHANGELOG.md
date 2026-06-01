@@ -15,6 +15,29 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Free tier can run a cheap paid model, bounded by a daily cost cap.** The
+  free-tier chat model is now its own operator knob (`FREE_TIER_MODEL`, default
+  the zero-cost `openrouter/free`) — set it to a cheap paid model (e.g.
+  `google/gemini-2.5-flash`) to lift answer quality without touching the owner
+  chain. It reads its OWN var, never `AI_MODELS`, so the long-standing "a free
+  user can't be widened to a paid model by an owner-chain slip" invariant holds
+  by construction. Spend stays bounded by two pre-request caps: the always-on
+  daily **token** cap and a new optional daily **cost** cap in cents
+  (`DAILY_CENTS_BUDGET_FREE`/`_TRUSTED`) — the right bound for a paid model with
+  asymmetric input/output pricing. Per-turn cost is estimated from a
+  `MODEL_PRICES` table (USD/Mtok) keyed on the model OpenRouter actually served;
+  free/unpriced models contribute zero, so the cap is a no-op until you opt in.
+  Owner mode stays uncapped.
+
+- **Reasoning disabled on the cost-sensitive paths.** Free-tier, demo, and the
+  ancillary title/extract calls now send `reasoning: { effort: "none" }` to
+  OpenRouter, so a reasoning-capable model the router lands on doesn't silently
+  burn hidden chain-of-thought (billed at the output rate, and measured at 8–29s
+  vs ~2s per turn) on a chat turn that doesn't need it. Owner and trusted tiers
+  keep their model-default reasoning — selectively raising effort for genuinely
+  analytical asks is a planned, intent-gated follow-up. Non-reasoning models
+  ignore the flag, so it's a safe no-op for them.
+
 - **Reliable Advisor replies — no more "I didn't have a reply."** Free-tier chat
   turns that read a tool but stopped before writing an answer — or that hit an
   upstream provider error mid-turn — now recover automatically: the Advisor

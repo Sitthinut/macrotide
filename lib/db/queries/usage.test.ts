@@ -14,10 +14,14 @@ import { runWithDbContext } from "../context";
 import * as schema from "../schema";
 import { accountTier, user } from "../schema";
 import {
+  dailyCentsBudget,
   dailyTokenBudget,
+  estimateCostMicros,
   getTier,
   getTodayUsage,
   isOverDailyCap,
+  isOverDailyCostCap,
+  modelPrice,
   recordUsage,
   utcDate,
 } from "./usage";
@@ -139,16 +143,31 @@ describe("getTier", () => {
 describe("usage accounting", () => {
   it("getTodayUsage is zero with no row", () => {
     withFresh(() => {
-      expect(getTodayUsage("u1")).toEqual({ inputTokens: 0, outputTokens: 0, total: 0 });
+      expect(getTodayUsage("u1")).toEqual({
+        inputTokens: 0,
+        outputTokens: 0,
+        total: 0,
+        costMicros: 0,
+      });
     });
   });
 
   it("recordUsage inserts then atomically increments today's row", () => {
     withFresh(() => {
       recordUsage("u1", 100, 50);
-      expect(getTodayUsage("u1")).toEqual({ inputTokens: 100, outputTokens: 50, total: 150 });
+      expect(getTodayUsage("u1")).toEqual({
+        inputTokens: 100,
+        outputTokens: 50,
+        total: 150,
+        costMicros: 0,
+      });
       recordUsage("u1", 25, 75);
-      expect(getTodayUsage("u1")).toEqual({ inputTokens: 125, outputTokens: 125, total: 250 });
+      expect(getTodayUsage("u1")).toEqual({
+        inputTokens: 125,
+        outputTokens: 125,
+        total: 250,
+        costMicros: 0,
+      });
     });
   });
 
@@ -157,7 +176,12 @@ describe("usage accounting", () => {
       recordUsage("u1", Number.NaN, -10);
       expect(getTodayUsage("u1").total).toBe(0);
       recordUsage("u1", 10, Number.NaN);
-      expect(getTodayUsage("u1")).toEqual({ inputTokens: 10, outputTokens: 0, total: 10 });
+      expect(getTodayUsage("u1")).toEqual({
+        inputTokens: 10,
+        outputTokens: 0,
+        total: 10,
+        costMicros: 0,
+      });
     });
   });
 
@@ -209,6 +233,133 @@ describe("isOverDailyCap", () => {
       recordUsage("u1", 600, 600); // 1200: over free (1000), under trusted (10000)
       expect(isOverDailyCap("u1", "free")).toBe(true);
       expect(isOverDailyCap("u1", "trusted")).toBe(false);
+    });
+  });
+});
+
+describe("model pricing", () => {
+  const orig = { ...process.env };
+  afterEach(() => {
+    process.env = { ...orig };
+  });
+
+  it("prices a known built-in model and returns null for an unknown one", () => {
+    process.env.MODEL_PRICES = undefined;
+    expect(modelPrice("google/gemini-2.5-flash")).toEqual({ in: 0.3, out: 2.5 });
+    expect(modelPrice("some/free-model:free")).toBeNull();
+    expect(modelPrice(null)).toBeNull();
+  });
+
+  it("matches a dated snapshot id by stripping a trailing -YYYY-MM-DD", () => {
+    process.env.MODEL_PRICES = undefined;
+    // OpenRouter reports openai models with a dated suffix.
+    expect(modelPrice("openai/gpt-4.1-mini-2025-04-14")).toEqual({ in: 0.4, out: 1.6 });
+    // …but a real variant (flash-lite) must NOT collapse onto its base (flash).
+    expect(modelPrice("google/gemini-2.5-flash-lite")).toEqual({ in: 0.1, out: 0.4 });
+  });
+
+  it("estimateCostMicros = tokens × price (USD/Mtok == micro-USD/token)", () => {
+    process.env.MODEL_PRICES = undefined;
+    // 1000 in × 0.3 + 1000 out × 2.5 = 300 + 2500 = 2800 micro-dollars
+    expect(estimateCostMicros("google/gemini-2.5-flash", 1000, 1000)).toBe(2800);
+    // unpriced / free model → no cost accrues
+    expect(estimateCostMicros("some/free-model:free", 1000, 1000)).toBe(0);
+    expect(estimateCostMicros(null, 1000, 1000)).toBe(0);
+  });
+
+  it("MODEL_PRICES env overrides/extends the built-in table; malformed degrades", () => {
+    process.env.MODEL_PRICES = JSON.stringify({ "x/custom": { in: 1, out: 2 } });
+    expect(modelPrice("x/custom")).toEqual({ in: 1, out: 2 });
+    // built-ins still present alongside the override
+    expect(modelPrice("google/gemini-2.5-flash")).toEqual({ in: 0.3, out: 2.5 });
+    process.env.MODEL_PRICES = "{not json";
+    expect(modelPrice("google/gemini-2.5-flash")).toEqual({ in: 0.3, out: 2.5 });
+    expect(modelPrice("x/custom")).toBeNull();
+  });
+});
+
+describe("dailyCentsBudget", () => {
+  const orig = { ...process.env };
+  afterEach(() => {
+    process.env = { ...orig };
+  });
+
+  it("is null (cost gating off) when unset", () => {
+    process.env.DAILY_CENTS_BUDGET_FREE = undefined;
+    process.env.DAILY_CENTS_BUDGET_TRUSTED = undefined;
+    expect(dailyCentsBudget("free")).toBeNull();
+    expect(dailyCentsBudget("trusted")).toBeNull();
+  });
+
+  it("honors a positive env value", () => {
+    process.env.DAILY_CENTS_BUDGET_FREE = "50";
+    process.env.DAILY_CENTS_BUDGET_TRUSTED = "500";
+    expect(dailyCentsBudget("free")).toBe(50);
+    expect(dailyCentsBudget("trusted")).toBe(500);
+  });
+
+  it("is null (not a default) on a malformed or non-positive value", () => {
+    process.env.DAILY_CENTS_BUDGET_FREE = "not-a-number";
+    process.env.DAILY_CENTS_BUDGET_TRUSTED = "-5";
+    expect(dailyCentsBudget("free")).toBeNull();
+    expect(dailyCentsBudget("trusted")).toBeNull();
+  });
+});
+
+describe("cost accounting + cost cap", () => {
+  const orig = { ...process.env };
+  afterEach(() => {
+    process.env = { ...orig };
+  });
+
+  it("recordUsage accumulates costMicros atomically alongside tokens", () => {
+    withFresh(() => {
+      recordUsage("u1", 100, 50, undefined, 2800);
+      expect(getTodayUsage("u1")).toEqual({
+        inputTokens: 100,
+        outputTokens: 50,
+        total: 150,
+        costMicros: 2800,
+      });
+      recordUsage("u1", 10, 10, undefined, 1200);
+      expect(getTodayUsage("u1").costMicros).toBe(4000);
+    });
+  });
+
+  it("clamps NaN/negative cost to 0", () => {
+    withFresh(() => {
+      recordUsage("u1", 10, 10, undefined, Number.NaN);
+      expect(getTodayUsage("u1").costMicros).toBe(0);
+      recordUsage("u1", 0, 0, undefined, -500);
+      expect(getTodayUsage("u1").costMicros).toBe(0);
+    });
+  });
+
+  it("isOverDailyCostCap is false when no cents budget is configured", () => {
+    process.env.DAILY_CENTS_BUDGET_FREE = undefined;
+    withFresh(() => {
+      recordUsage("u1", 0, 0, undefined, 9_999_999);
+      expect(isOverDailyCostCap("u1", "free")).toBe(false);
+    });
+  });
+
+  it("trips at the cents boundary (1 cent = 10_000 micro-dollars, >=)", () => {
+    process.env.DAILY_CENTS_BUDGET_FREE = "1";
+    withFresh(() => {
+      recordUsage("u1", 0, 0, undefined, 9_999); // just under 1 cent
+      expect(isOverDailyCostCap("u1", "free")).toBe(false);
+      recordUsage("u1", 0, 0, undefined, 1); // exactly 10_000 = 1 cent
+      expect(isOverDailyCostCap("u1", "free")).toBe(true);
+    });
+  });
+
+  it("token cap and cost cap are independent (one trips, the other doesn't)", () => {
+    process.env.DAILY_TOKEN_BUDGET_FREE = "1000000"; // effectively unbounded here
+    process.env.DAILY_CENTS_BUDGET_FREE = "1"; // 1 cent
+    withFresh(() => {
+      recordUsage("u1", 100, 50, undefined, 10_000); // tiny tokens, 1 cent cost
+      expect(isOverDailyCap("u1", "free")).toBe(false); // under the token cap
+      expect(isOverDailyCostCap("u1", "free")).toBe(true); // at the cost cap
     });
   });
 });

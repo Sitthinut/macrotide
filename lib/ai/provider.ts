@@ -60,8 +60,22 @@ function parseModels(value: string | undefined): string[] | null {
   return list.length > 0 ? list : null;
 }
 
-function openrouter(apiKey: string, models: string[]): LanguageModel {
+interface OpenRouterOpts {
+  /**
+   * OpenRouter `reasoning.effort`. `"none"` disables a reasoning model's hidden
+   * chain-of-thought — which is billed at the output rate and adds large latency.
+   * Set it on cost-sensitive paths (free/demo/title/extract) so a reasoning model
+   * the router lands on doesn't silently reason on a trivial turn (measured 8–29s
+   * vs ~2s). Omit it to inherit each model's default — owner/trusted keep their
+   * reasoning until effort is gated by intent. Non-reasoning models ignore it.
+   */
+  reasoningEffort?: "none" | "minimal" | "low" | "medium" | "high";
+}
+
+function openrouter(apiKey: string, models: string[], opts: OpenRouterOpts = {}): LanguageModel {
   const [primary, ...rest] = models;
+  const injectModels = rest.length > 0;
+  const injectReasoning = opts.reasoningEffort !== undefined;
   const provider = createOpenAICompatible({
     name: "openrouter",
     baseURL: "https://openrouter.ai/api/v1",
@@ -70,17 +84,19 @@ function openrouter(apiKey: string, models: string[]): LanguageModel {
       "HTTP-Referer": process.env.PUBLIC_APP_URL ?? "https://macrotide.local",
       "X-Title": "Macrotide",
     },
-    // OpenRouter accepts a `models: [primary, ...fallbacks]` body field; tries
-    // each in order if the previous one fails. Only inject when there's an
-    // actual fallback list — single-model requests stay clean.
+    // OpenRouter takes a `models: [primary, ...fallbacks]` fallback list and a
+    // `reasoning: { effort }` control as body fields. Only override fetch when we
+    // actually need to inject one of them — a single-model, default-reasoning
+    // request stays clean.
     fetch:
-      rest.length === 0
+      !injectModels && !injectReasoning
         ? undefined
         : async (input, init) => {
             if (init && typeof init.body === "string") {
               try {
                 const body = JSON.parse(init.body);
-                body.models = models;
+                if (injectModels) body.models = models;
+                if (injectReasoning) body.reasoning = { effort: opts.reasoningEffort };
                 init = { ...init, body: JSON.stringify(body) };
               } catch {
                 // Body wasn't JSON — forward untouched rather than crashing.
@@ -103,22 +119,25 @@ export function resolveOwnerProvider(): ResolvedProvider {
   return { model: openrouter(key, models), ready: true, label: chainLabel("OpenRouter", models) };
 }
 
-// The free tier is pinned to OpenRouter's free meta-router — DELIBERATELY not
-// derived from `AI_MODELS`. This is a cost/security-critical invariant: a
-// free-tier user can never resolve to a paid model regardless of how the
-// operator configures the owner chain. It's a constant, not an env var, so a
-// config slip can't widen it.
-const FREE_TIER_MODELS = ["openrouter/free"];
+// The free tier derives ONLY from its own dedicated `FREE_TIER_MODEL` var,
+// defaulting to OpenRouter's zero-cost free meta-router — DELIBERATELY never
+// from `AI_MODELS`. This preserves the cost/security invariant by construction:
+// a slip in the owner chain (`AI_MODELS`) can't widen free-tier access, because
+// the free branch doesn't read it. Pointing free at a cheap PAID model is a
+// separate, conscious operator act (set `FREE_TIER_MODEL`), and it's bounded by
+// the daily token + optional cents cap — see lib/db/queries/usage.ts.
+const FREE_TIER_DEFAULT = ["openrouter/free"];
 
 /**
  * Resolve the chat provider for a tier:
  *   - 'trusted' → the owner model chain (`AI_MODELS`, default
  *                 `openrouter/free → openrouter/auto`); identical to the owner
  *                 path.
- *   - 'free'    → `openrouter/free` ONLY. Zero owner cost; ignores `AI_MODELS`.
+ *   - 'free'    → `FREE_TIER_MODEL` (default `openrouter/free`) ONLY. Reads its
+ *                 own var, NEVER `AI_MODELS`, so the owner chain can't leak in.
  *
  * Both read the shared `OPENROUTER_API_KEY`; per-user keys are out of scope —
- * tier gating + the daily cap are what bound free-tier spend.
+ * tier gating + the daily caps are what bound free-tier spend.
  */
 export function resolveTierProvider(tier: "free" | "trusted"): ResolvedProvider {
   const key = process.env.OPENROUTER_API_KEY;
@@ -127,10 +146,14 @@ export function resolveTierProvider(tier: "free" | "trusted"): ResolvedProvider 
     const models = parseModels(process.env.AI_MODELS) ?? OWNER_DEFAULT;
     return { model: openrouter(key, models), ready: true, label: chainLabel("Trusted", models) };
   }
+  const models = parseModels(process.env.FREE_TIER_MODEL) ?? FREE_TIER_DEFAULT;
+  // Free tier: pin reasoning off. The cheap model the router lands on may reason
+  // by default (slow + billed at the output rate); the free tier wants fast,
+  // cheap turns. Higher effort for genuinely analytical asks is a gated follow-up.
   return {
-    model: openrouter(key, FREE_TIER_MODELS),
+    model: openrouter(key, models, { reasoningEffort: "none" }),
     ready: true,
-    label: chainLabel("Free", FREE_TIER_MODELS),
+    label: chainLabel("Free", models),
   };
 }
 
@@ -138,7 +161,13 @@ export function resolveDemoProvider(): ResolvedProvider {
   const key = process.env.DEMO_OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY;
   if (!key) return { model: null, ready: false, label: "Demo (no key configured)" };
   const models = parseModels(process.env.DEMO_AI_MODELS) ?? DEMO_DEFAULT;
-  return { model: openrouter(key, models), ready: true, label: chainLabel("Demo", models) };
+  // Demo: pin reasoning off — public, abuse-exposed, and on the free chain; it
+  // should never burn reasoning latency/cost on a throwaway demo turn.
+  return {
+    model: openrouter(key, models, { reasoningEffort: "none" }),
+    ready: true,
+    label: chainLabel("Demo", models),
+  };
 }
 
 /**
@@ -152,7 +181,12 @@ export function resolveTitleProvider(): ResolvedProvider {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) return { model: null, ready: false, label: "Title (no key)" };
   const models = parseModels(process.env.TITLE_MODEL) ?? TITLE_DEFAULT;
-  return { model: openrouter(key, models), ready: true, label: chainLabel("Title", models) };
+  // Reasoning off — a 3–5-word title never needs chain-of-thought.
+  return {
+    model: openrouter(key, models, { reasoningEffort: "none" }),
+    ready: true,
+    label: chainLabel("Title", models),
+  };
 }
 
 /**
@@ -169,5 +203,10 @@ export function resolveExtractorProvider(): ResolvedProvider {
     parseModels(process.env.EXTRACT_MODEL) ??
     parseModels(process.env.TITLE_MODEL) ??
     EXTRACT_DEFAULT;
-  return { model: openrouter(key, models), ready: true, label: chainLabel("Extract", models) };
+  // Reasoning off — a background summarize-and-extract pass doesn't need it.
+  return {
+    model: openrouter(key, models, { reasoningEffort: "none" }),
+    ready: true,
+    label: chainLabel("Extract", models),
+  };
 }

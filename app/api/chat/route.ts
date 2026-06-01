@@ -25,7 +25,14 @@ import {
   reactivateThread,
   upsertSummary,
 } from "@/lib/db/queries/chat";
-import { dailyTokenBudget, getTier, isOverDailyCap, recordUsage } from "@/lib/db/queries/usage";
+import {
+  dailyTokenBudget,
+  estimateCostMicros,
+  getTier,
+  isOverDailyCap,
+  isOverDailyCostCap,
+  recordUsage,
+} from "@/lib/db/queries/usage";
 import { buildMemoryBlock } from "@/lib/memory/inject";
 import { createMemoryTools } from "@/lib/memory/tools";
 
@@ -178,8 +185,15 @@ interface AdvisorStreamOptions {
   setContextHeader: (res: Response) => void;
   /** Persist the final assistant text. Runs inside the captured DB context. */
   persist: (text: string, modelId: string | null) => void;
-  /** Record token usage even on an empty turn (free tier). Runs inside ctx. */
-  recordUsageFor?: (usage: { inputTokens: number; outputTokens: number }) => void;
+  /**
+   * Record token usage (and cost) even on an empty turn (free tier). Runs inside
+   * ctx. Gets the served `modelId` so the caller can price the turn.
+   */
+  recordUsageFor?: (usage: {
+    inputTokens: number;
+    outputTokens: number;
+    modelId: string | null;
+  }) => void;
 }
 
 // Stream an advisor turn with a recover-on-empty safety net. When the first
@@ -266,7 +280,7 @@ function streamAdvisorResponse(opts: AdvisorStreamOptions): Response {
 
       runWithDbContext(opts.ctx, () => {
         if (text.trim()) opts.persist(text, modelId);
-        opts.recordUsageFor?.({ inputTokens, outputTokens });
+        opts.recordUsageFor?.({ inputTokens, outputTokens, modelId });
       });
     },
     onError: (err) => {
@@ -420,17 +434,21 @@ export async function POST(req: Request) {
     if (userId !== null) {
       const tier = getTier(userId);
 
-      // Hard gate BEFORE forwarding to OpenRouter: a user already at/over the
-      // cap never starts a (possibly paid) request. The cap resets at UTC
-      // midnight as the usage date key rolls over.
-      if (isOverDailyCap(userId, tier)) {
-        const budget = dailyTokenBudget(tier);
-        const limit = stubResponse(
-          `You've reached today's usage limit (${budget.toLocaleString()} tokens). ` +
-            `It resets at midnight UTC. Your dashboard and saved notes still work — ` +
-            `come back tomorrow to keep chatting.`,
-          finalThreadId,
-        );
+      // Hard gate BEFORE forwarding to OpenRouter: a user already at/over EITHER
+      // the token cap or the optional cents cost cap never starts a (possibly
+      // paid) request. Both reset at UTC midnight as the usage date key rolls
+      // over. The token figure is only surfaced when the token cap is the one
+      // that tripped — a cents figure is operator-internal, so a cost-cap stop
+      // stays generic.
+      const overTokens = isOverDailyCap(userId, tier);
+      if (overTokens || isOverDailyCostCap(userId, tier)) {
+        const reset =
+          "It resets at midnight UTC. Your dashboard and saved notes still work — " +
+          "come back tomorrow to keep chatting.";
+        const message = overTokens
+          ? `You've reached today's usage limit (${dailyTokenBudget(tier).toLocaleString()} tokens). ${reset}`
+          : `You've reached today's usage limit. ${reset}`;
+        const limit = stubResponse(message, finalThreadId);
         limit.headers.set("x-daily-limit", "reached");
         return limit;
       }
@@ -461,10 +479,17 @@ export async function POST(req: Request) {
             content: text,
             model: modelId,
           }),
-        // Log tokens regardless of whether prose came back — a tool-only turn
-        // still consumes budget.
-        recordUsageFor: ({ inputTokens, outputTokens }) =>
-          recordUsage(userId, inputTokens, outputTokens),
+        // Log tokens (and estimated cost) regardless of whether prose came back
+        // — a tool-only turn still consumes budget. Cost is 0 for free/unpriced
+        // models, so this is additive and only bites a priced paid model.
+        recordUsageFor: ({ inputTokens, outputTokens, modelId }) =>
+          recordUsage(
+            userId,
+            inputTokens,
+            outputTokens,
+            undefined,
+            estimateCostMicros(modelId, inputTokens, outputTokens),
+          ),
       });
     }
 

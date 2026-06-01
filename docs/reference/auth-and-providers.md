@@ -60,7 +60,36 @@ OpenRouter proxies every major model behind one API:
 - Free-tier router (`openrouter/free`) covers demo use without billing.
 - Pay per-token credit; load up via the OpenRouter dashboard.
 
-If you want a specific model, set `AI_MODELS` to any id from [openrouter.ai/models](https://openrouter.ai/models). It's a comma-separated fallback chain — the first model is tried first, and the next one is used if the previous fails. The default `openrouter/auto` lets OpenRouter pick the best model per prompt.
+If you want a specific model, set `AI_MODELS` to any id from [openrouter.ai/models](https://openrouter.ai/models). It's a comma-separated fallback chain — the first model is tried first, and the next one is used if the previous fails. The default `openrouter/auto` lets OpenRouter pick the best model per prompt. `AI_MODELS` also serves `tier='trusted'` users.
+
+### Tier model selection + spend caps
+
+A `tier='free'` user's chat model comes from its **own** `FREE_TIER_MODEL` var
+(default `openrouter/free`), never from `AI_MODELS` — so an owner-chain change
+can't widen free access. To lift free-tier quality, point it at a cheap paid
+model:
+
+```sh
+FREE_TIER_MODEL=google/gemini-2.5-flash
+```
+
+Free-tier spend is bounded by two caps, checked before each request (either
+tripping blocks the turn, both reset at UTC midnight):
+
+- **Token cap** — `DAILY_TOKEN_BUDGET_FREE` (default 20k tokens/day). Always on.
+- **Cost cap** — `DAILY_CENTS_BUDGET_FREE` (US cents/day). **Off unless set**; the
+  right bound for a paid model with asymmetric in/out pricing. The per-turn cost
+  estimate reads `MODEL_PRICES` (USD/Mtok), so set that to match `FREE_TIER_MODEL`.
+
+Owner / `AUTH_DISABLED` mode is never metered. Full var table:
+[configuration.md § Quotas + tier gating](./configuration.md#quotas--tier-gating).
+
+The free, demo, and ancillary (title/extract) paths also send
+`reasoning: { effort: "none" }` so a reasoning-capable model the router picks
+doesn't spend hidden chain-of-thought (billed at the output rate, ~8–29s/turn
+vs ~2s) on a turn that doesn't need it. Owner/trusted keep their model-default
+reasoning. Rationale + the when-to-reason policy:
+[inference-strategy.md § Reasoning-token policy](../explanation/inference-strategy.md).
 
 ### Demo provider isolation
 

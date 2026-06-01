@@ -339,6 +339,11 @@ export const usage = sqliteTable(
     date: text("date").notNull(), // 'YYYY-MM-DD' UTC
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
+    // Accumulated estimated cost in micro-dollars (millionths of a USD).
+    // 1 cent = 10_000 micro-dollars. Stays 0 for free/zero-cost models (only
+    // priced models in MODEL_PRICES contribute), so it's additive and never
+    // regresses the token-only accounting. Enables the optional cents-based cap.
+    costMicros: integer("cost_micros").notNull().default(0),
   },
   (table) => [primaryKey({ columns: [table.userId, table.date] })],
 );
