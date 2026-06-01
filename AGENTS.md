@@ -33,7 +33,10 @@ anything user-visible:
    change — only touch it when the set or purpose of docs shifts.
 
 Stale docs are the #1 failure mode here. After implementing, do a docs pass
-before committing — treat docs as part of the change, not a follow-up.
+before committing — treat docs as part of the change, not a follow-up. Keep docs
+**timeless** — present-tense capability, no issue numbers or status tags; status
+lives in the board, CHANGELOG, and README status board (the table below), not in
+the prose.
 
 | When you change… | Update… |
 | --- | --- |
