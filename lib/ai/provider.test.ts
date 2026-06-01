@@ -196,6 +196,56 @@ describe("openrouter fetch wrapper", () => {
     expect(body.reasoning).toEqual({ effort: "none" });
   });
 
+  // Helper: capture the request body for one doGenerate call.
+  async function captureBody(resolve: () => { model: unknown }): Promise<Record<string, unknown>> {
+    let capturedBody: string | undefined;
+    vi.stubGlobal("fetch", async (_url: unknown, init?: RequestInit) => {
+      capturedBody = init?.body as string;
+      return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const p = resolve() as {
+      model: { doGenerate: (a: unknown) => Promise<unknown> } | null | string;
+    };
+    if (!p.model || typeof p.model === "string") throw new Error("expected model object");
+    try {
+      await p.model.doGenerate({
+        prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      });
+    } catch {
+      // forward
+    }
+    return JSON.parse(capturedBody as string);
+  }
+
+  it("owner path injects the intent-gated effort when given one (#58)", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    process.env.AI_MODELS = "openrouter/auto";
+    const body = await captureBody(() => resolveOwnerProvider({ reasoningEffort: "medium" }));
+    expect(body.reasoning).toEqual({ effort: "medium" });
+  });
+
+  it("trusted path injects the intent-gated effort when given one (#58)", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    process.env.AI_MODELS = "openrouter/auto";
+    const body = await captureBody(() =>
+      resolveTierProvider("trusted", { reasoningEffort: "medium" }),
+    );
+    expect(body.reasoning).toEqual({ effort: "medium" });
+  });
+
+  it("INVARIANT: free tier IGNORES a gated effort and stays pinned to none (#58)", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    delete process.env.FREE_TIER_MODEL;
+    // Even if the route passed `medium`, free must never reason (cost-protected).
+    const body = await captureBody(() =>
+      resolveTierProvider("free", { reasoningEffort: "medium" }),
+    );
+    expect(body.reasoning).toEqual({ effort: "none" });
+  });
+
   it("owner path does NOT pin reasoning (keeps model default for the owner)", async () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
     process.env.AI_MODELS = "openrouter/auto"; // single model → no models[] override either

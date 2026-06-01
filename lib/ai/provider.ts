@@ -60,16 +60,21 @@ function parseModels(value: string | undefined): string[] | null {
   return list.length > 0 ? list : null;
 }
 
+/** OpenRouter `reasoning.effort` levels (highest → lowest cost/latency). */
+export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high";
+
 interface OpenRouterOpts {
   /**
    * OpenRouter `reasoning.effort`. `"none"` disables a reasoning model's hidden
    * chain-of-thought — which is billed at the output rate and adds large latency.
    * Set it on cost-sensitive paths (free/demo/title/extract) so a reasoning model
    * the router lands on doesn't silently reason on a trivial turn (measured 8–29s
-   * vs ~2s). Omit it to inherit each model's default — owner/trusted keep their
-   * reasoning until effort is gated by intent. Non-reasoning models ignore it.
+   * vs ~2s). Omit it to inherit each model's default. Owner/trusted now pass a
+   * per-turn effort gated by analytical intent (see lib/advisor/intent.ts):
+   * `"none"` on retrieve-then-explain turns, `"medium"` on multi-step asks.
+   * Non-reasoning models ignore it.
    */
-  reasoningEffort?: "none" | "minimal" | "low" | "medium" | "high";
+  reasoningEffort?: ReasoningEffort;
 }
 
 function openrouter(apiKey: string, models: string[], opts: OpenRouterOpts = {}): LanguageModel {
@@ -112,11 +117,18 @@ function chainLabel(prefix: string, models: string[]): string {
   return models.length === 1 ? `${prefix} · ${models[0]}` : `${prefix} · ${models.join(" → ")}`;
 }
 
-export function resolveOwnerProvider(): ResolvedProvider {
+export function resolveOwnerProvider(
+  opts: { reasoningEffort?: ReasoningEffort } = {},
+): ResolvedProvider {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) return { model: null, ready: false, label: "OpenRouter (no key)" };
   const models = parseModels(process.env.AI_MODELS) ?? OWNER_DEFAULT;
-  return { model: openrouter(key, models), ready: true, label: chainLabel("OpenRouter", models) };
+  // Effort is gated per-turn by intent in the route (undefined = model default).
+  return {
+    model: openrouter(key, models, { reasoningEffort: opts.reasoningEffort }),
+    ready: true,
+    label: chainLabel("OpenRouter", models),
+  };
 }
 
 // The free tier derives ONLY from its own dedicated `FREE_TIER_MODEL` var,
@@ -139,17 +151,26 @@ const FREE_TIER_DEFAULT = ["openrouter/free"];
  * Both read the shared `OPENROUTER_API_KEY`; per-user keys are out of scope —
  * tier gating + the daily caps are what bound free-tier spend.
  */
-export function resolveTierProvider(tier: "free" | "trusted"): ResolvedProvider {
+export function resolveTierProvider(
+  tier: "free" | "trusted",
+  opts: { reasoningEffort?: ReasoningEffort } = {},
+): ResolvedProvider {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) return { model: null, ready: false, label: "OpenRouter (no key)" };
   if (tier === "trusted") {
     const models = parseModels(process.env.AI_MODELS) ?? OWNER_DEFAULT;
-    return { model: openrouter(key, models), ready: true, label: chainLabel("Trusted", models) };
+    // Trusted shares the owner chain AND the per-turn intent-gated effort.
+    return {
+      model: openrouter(key, models, { reasoningEffort: opts.reasoningEffort }),
+      ready: true,
+      label: chainLabel("Trusted", models),
+    };
   }
   const models = parseModels(process.env.FREE_TIER_MODEL) ?? FREE_TIER_DEFAULT;
-  // Free tier: pin reasoning off. The cheap model the router lands on may reason
-  // by default (slow + billed at the output rate); the free tier wants fast,
-  // cheap turns. Higher effort for genuinely analytical asks is a gated follow-up.
+  // Free tier: ALWAYS pin reasoning off, ignoring any gated effort. Free is the
+  // cost-protected path — a cheap model the router lands on must not reason
+  // (slow + billed at the output rate) even on an analytical-looking turn. The
+  // intent gate raises effort only for owner/trusted, who value (and fund) it.
   return {
     model: openrouter(key, models, { reasoningEffort: "none" }),
     ready: true,

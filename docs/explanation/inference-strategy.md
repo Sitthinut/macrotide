@@ -34,7 +34,7 @@ with recover-on-empty + retry-on-error resilience.
 |---|---|---|
 | **Model routing** | free pinned to its own `FREE_TIER_MODEL`; multi-model fallback; recover-on-empty net | route by tool-call reliability, not just price |
 | **Prompt caching** | frozen prefix is cache-*ready* but no breakpoints sent | keep volatile data after the prefix; exploit free-chain auto-caching; clear the floor |
-| **Reasoning tokens** | `effort:none` pinned on free/demo/title/extract; owner/trusted at model default | gate higher effort behind analytical intent (rebalance/tax), not every turn |
+| **Reasoning tokens** | `effort:none` pinned on free/demo/title/extract; owner/trusted gated by intent (`none`↔`medium`) | push more "complex math" into tools so even complex turns need less reasoning |
 | **Context loading** | JIT tool reads + the entry-context envelope | keep JIT default; app-layer compaction; shape tool results |
 | **Structured output** | tool-call-as-extraction via the AI SDK | one schema to the strictest intersection + Zod re-validate |
 
@@ -159,19 +159,33 @@ cut the slowest of them 2–4× with no reliability loss.
 The free tier, demo, and the ancillary title/extract calls send
 `reasoning:{effort:"none"}` (`openrouter()` in `lib/ai/provider.ts`), so a
 reasoning-capable model the router lands on doesn't burn hidden chain-of-thought
-(billed at the output rate) on a turn that doesn't need it. **Owner and trusted
-keep their model-default reasoning** — the owner is the one who values it on a
-complex question — until effort is gated by intent (below). Non-reasoning models
-ignore the flag. Beware the multiplier when you *do* raise effort: at `high`
-OpenRouter allocates ~80% of `max_tokens` to reasoning, so keep `max_tokens` tight
-(the free tier is already 1024).
+(billed at the output rate) on a turn that doesn't need it. Free stays pinned to
+`none` **even when the intent gate would raise it** — it is the cost-protected
+path. Non-reasoning models ignore the flag. Beware the multiplier when you *do*
+raise effort: at `high` OpenRouter allocates ~80% of `max_tokens` to reasoning,
+so keep `max_tokens` tight (the free tier is already 1024).
 
-**Gate higher effort behind analytical intent.**
-Reserve `medium`/`high` for genuinely multi-step asks (rebalancing rationale,
-feeder look-through, "should I tilt to gold given THB weakness"), classified
-cheaply so you don't pay reasoning rates on every turn. Use `reasoning:{exclude:
-true}` to hide chain-of-thought from the UI (still billed), and verify per-model
-that `reasoning_details` is actually returned — some silently drop it.
+**Gate higher effort behind analytical intent — shipped.**
+The owner/trusted paths no longer inherit model-default reasoning; a cheap,
+deterministic classifier (`classifyReasoningIntent`, `lib/advisor/intent.ts`)
+reads the user's turn plus the `EntryContext.intent` and sends `effort:"medium"`
+on genuine multi-step asks (rebalance, SSF-vs-RMF, a plan-anchored tilt) and
+`effort:"none"` otherwise — so reasoning rates are paid only where they buy
+something. The route consults it once per turn and passes the effort to
+`resolveOwnerProvider`/`resolveTierProvider`; `REASONING_GATE=off` restores
+model-default behavior. The classifier is pure (no model call) — the whole point
+is to avoid paying to decide whether to pay. It errs toward `none`: only strong
+signals of multi-step judgment flip it on.
+
+*Measured (committed eval, `gemini-2.5-flash`, complex tier, n=2):* `medium`
+lifted answer quality 78%→88% — and on the SSF-vs-RMF turn it was the difference
+between answering from nothing and actually planning the `find_funds` calls — at
+~3.5× latency (2.4s→8.3s) and ~2.7× cost. That premium is exactly why the gate
+exists: pay it on the few turns that earn it, not every turn. Re-run with
+`EVAL_TIER=complex EVAL_REASONING=medium` vs `none` before retuning the trigger
+set. Use `reasoning:{exclude:true}` to hide chain-of-thought from the UI (still
+billed) if a reasoning trace is ever surfaced, and verify per-model that
+`reasoning_details` is actually returned — some silently drop it.
 
 **Never high/max effort on structured-output paths.**
 Anthropic warns `max` overthinks structured tasks — costing more *and* risking

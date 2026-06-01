@@ -16,6 +16,7 @@ import {
   injectEntryContext,
   parseEntryContext,
 } from "@/lib/advisor/entry-context";
+import { classifyReasoningIntent } from "@/lib/advisor/intent";
 import { ADVISOR_SYSTEM_PROMPT } from "@/lib/advisor/system-prompt";
 import { createAdvisorTools } from "@/lib/advisor/tools";
 import { resolveDemoProvider, resolveOwnerProvider, resolveTierProvider } from "@/lib/ai/provider";
@@ -380,7 +381,21 @@ export async function POST(req: Request) {
     // user's question so the model can answer from the carried facts (the fee
     // comparison, the tracking gap) instead of forcing a tool round-trip. Absent
     // for ordinary turns → `messages` is exactly `compression.messages`.
-    const messages = injectEntryContext(compression.messages, parseEntryContext(body.entryContext));
+    const entryCtx = parseEntryContext(body.entryContext);
+    const messages = injectEntryContext(compression.messages, entryCtx);
+
+    // Reasoning-intent gate (#58): cheaply classify whether THIS turn is genuine
+    // multi-step judgment (rebalance/SSF-vs-RMF/tilt) and raise reasoning effort
+    // for it, keeping the fast non-reasoning path for the common retrieve-then-
+    // explain turn. Applied to owner/trusted only — free/demo stay pinned `none`
+    // (cost). `undefined` when the gate is disabled → model-default reasoning.
+    // Set REASONING_GATE=off to restore model-default behavior.
+    const gateOn = process.env.REASONING_GATE !== "off";
+    const reasoningDecision = classifyReasoningIntent(lastUserText, entryCtx);
+    const reasoningEffort = gateOn ? reasoningDecision.effort : undefined;
+    if (gateOn && reasoningDecision.analytical) {
+      console.info(`[advisor] reasoning gate → medium (${reasoningDecision.signals.join(",")})`);
+    }
 
     if (demoId) {
       const provider = resolveDemoProvider();
@@ -442,7 +457,7 @@ export async function POST(req: Request) {
         return limit;
       }
 
-      const provider = resolveTierProvider(tier);
+      const provider = resolveTierProvider(tier, { reasoningEffort });
       if (!provider.ready || !provider.model) {
         return stubResponse(
           `AI chat isn't configured yet (${provider.label}). Set OPENROUTER_API_KEY in .env.local — see docs/reference/auth-and-providers.md.`,
@@ -483,7 +498,7 @@ export async function POST(req: Request) {
     }
 
     // Owner path — full chat, no cap (single-owner / pre-auth mode).
-    const provider = resolveOwnerProvider();
+    const provider = resolveOwnerProvider({ reasoningEffort });
     if (!provider.ready || !provider.model) {
       return stubResponse(
         `AI chat isn't configured yet (${provider.label}). Set OPENROUTER_API_KEY in .env.local — see docs/reference/auth-and-providers.md.`,
