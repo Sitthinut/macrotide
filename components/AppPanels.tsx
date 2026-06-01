@@ -403,7 +403,15 @@ export function PlanPanel({ onClose }: { onClose: () => void }) {
             className="btn ghost sm"
             style={{ marginTop: 8, gap: 4 }}
             onClick={() =>
-              window.dispatchEvent(new CustomEvent("ai-prompt", { detail: headline.prompt }))
+              window.dispatchEvent(
+                new CustomEvent("ai-prompt", {
+                  detail: {
+                    display: headline.prompt,
+                    send: headline.prompt,
+                    context: { screen: "portfolio", intent: "health_review" },
+                  },
+                }),
+              )
             }
           >
             <Icon name="chat" size={12} /> Discuss

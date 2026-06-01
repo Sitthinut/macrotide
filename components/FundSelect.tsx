@@ -528,7 +528,16 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
     if (onAskAdvisor) {
       onAskAdvisor(prompt);
     } else {
-      window.dispatchEvent(new CustomEvent("ai-prompt", { detail: prompt }));
+      // Tag the fund in focus so the Advisor can look it up directly.
+      window.dispatchEvent(
+        new CustomEvent("ai-prompt", {
+          detail: {
+            display: prompt,
+            send: prompt,
+            context: { screen: "funds", intent: "fund_lookup", subject: abbr },
+          },
+        }),
+      );
     }
   };
 

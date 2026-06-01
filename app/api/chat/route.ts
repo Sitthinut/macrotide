@@ -11,6 +11,11 @@ import {
 } from "ai";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import {
+  type EntryContext,
+  injectEntryContext,
+  parseEntryContext,
+} from "@/lib/advisor/entry-context";
 import { createAdvisorTools } from "@/lib/advisor/tools";
 import { resolveDemoProvider, resolveOwnerProvider, resolveTierProvider } from "@/lib/ai/provider";
 import { compressContext, estimateTokens } from "@/lib/ai/summarize";
@@ -42,6 +47,8 @@ export const dynamic = "force-dynamic";
 interface IncomingPayload {
   messages: UIMessage[] | ModelMessage[];
   threadId?: string;
+  /** Structured context from an Ask-Advisor entry point (untrusted; parsed). */
+  entryContext?: EntryContext;
 }
 
 async function toModelMessagesAsync(
@@ -393,6 +400,13 @@ export async function POST(req: Request) {
       }
     };
 
+    // Structured entry context from an Ask-Advisor button (defensively parsed —
+    // it's client-controlled). Rendered as a per-turn message spliced before the
+    // user's question so the model can answer from the carried facts (the fee
+    // comparison, the tracking gap) instead of forcing a tool round-trip. Absent
+    // for ordinary turns → `messages` is exactly `compression.messages`.
+    const messages = injectEntryContext(compression.messages, parseEntryContext(body.entryContext));
+
     if (demoId) {
       const provider = resolveDemoProvider();
       if (!provider.ready || !provider.model) {
@@ -409,7 +423,7 @@ export async function POST(req: Request) {
         path: "demo",
         model: provider.model,
         system,
-        messages: compression.messages,
+        messages,
         tools,
         maxOutputTokens: 1024,
         threadId: finalThreadId,
@@ -467,7 +481,7 @@ export async function POST(req: Request) {
         path: "tiered",
         model: provider.model,
         system,
-        messages: compression.messages,
+        messages,
         tools,
         maxOutputTokens: tier === "trusted" ? 2048 : 1024,
         threadId: finalThreadId,
@@ -508,7 +522,7 @@ export async function POST(req: Request) {
       path: "owner",
       model: provider.model,
       system,
-      messages: compression.messages,
+      messages,
       tools,
       maxOutputTokens: 2048,
       threadId: finalThreadId,

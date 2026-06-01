@@ -2,12 +2,11 @@
 
 *Last updated: 2026-05-31*
 
-> **Status: living doc, mixed maturity.** The [turn-reliability](#turn-reliability-the-empty-turn)
-> recovery is **shipped** (issue #21); the structured
-> [context envelope](#proposed-the-context-envelope) and the per-entry-point
-> contract are still a **design target** the entry-point audit is steering toward.
-> Each section says which it is. Trust the code over the doc and fix the doc when
-> they disagree. The external best-practice survey behind these choices is
+> **Living doc.** It describes the Advisor's current per-turn context design: the
+> three channels, the structured entry-context envelope the high-value entry
+> points carry, the per-turn injection rule, and the empty-turn recovery. Trust
+> the code over the doc and fix the doc when they disagree. The external
+> best-practice survey behind these choices is
 > [research/context-engineering.md](./research/context-engineering.md).
 
 How does the Advisor know what you're looking at when you tap **Ask advisor**?
@@ -33,13 +32,14 @@ catch-all.
 |---|---|---|---|
 | **Memory block** | Durable user facts — goals, risk tolerance, response preferences | Prepended to the system prompt (`composeSystemPrompt`, `app/api/chat/route.ts`) | Frozen for the session |
 | **Tool reads** | The user's *real* live data — holdings, drift, fees, performance, plan, journal, fund catalog | Pulled on demand by the model via `lib/advisor/tools.ts` | Fetched per call |
-| **Entry-point context** | *Why this chat started* — the screen, the holding/fund/finding in focus, the figures already on screen | The user message text (today) | This turn only |
+| **Entry-point context** | *Why this chat started* — the screen, the intent, the subject in focus, the figures already on screen | A structured `EntryContext` envelope on the request, injected as a per-turn message (`lib/advisor/entry-context.ts`) | This turn only |
 
 The first two are well-modelled. The memory block is bounded and visible
 ([memory.md](./memory.md)); the tool reads return deterministic structured data
 (`read_portfolio` returns allocation, drift, blended TER, concentration, cash
-drag — see `lib/advisor/tools.ts`). **The third channel is the weak one**, and
-it's what the entry-point contract below exists to fix.
+drag — see `lib/advisor/tools.ts`). **The third channel used to be the weak one**
+— entry-point facts travelled as prose — which is what the
+[context envelope](#the-context-envelope) below now fixes.
 
 ## How entry-point context flows today
 
@@ -50,19 +50,20 @@ chat. `ChatScreen` consumes it as a **`SeedPrompt`**:
 
 ```ts
 // components/screens/ChatScreen.tsx
-export type SeedPrompt = string | { display: string; send: string };
+export type SeedPrompt = string | { display: string; send: string; context?: EntryContext };
 ```
 
 A bare string is shown verbatim as the user's bubble and sent as-is. The
 `{ display, send }` split lets a short visible bubble ride alongside a larger
-hidden payload (used today only by the image-OCR handoff, where the raw
-transcription goes in `send` but stays out of the visible body).
+hidden payload (the image-OCR handoff uses it to keep the raw transcription out
+of the visible body). The optional `context` is the structured
+[envelope](#the-context-envelope) an Ask-Advisor button attaches — never shown in
+the bubble.
 
-The seed is then sent to `POST /api/chat` as part of an ordinary chat request
-whose body is **only `{ messages, threadId }`** (`ChatScreen.tsx`, the `askLive`
-fetch). There is no structured side-channel: **all entry-point context is
-smuggled inside the prose of the user message.** That single fact explains every
-thin-context symptom below.
+The seed is sent to `POST /api/chat` whose body is now `{ messages, threadId,
+entryContext? }` (`ChatScreen.tsx`, the `askLive` fetch). A plain typed turn or a
+string seed omits `entryContext`, so its body is byte-identical to before — the
+structured side-channel is purely additive.
 
 ### What "thin" means
 
@@ -77,87 +78,97 @@ still pay for steps 1 and 3.
 ## The per-entry-point contract
 
 The contract is the same for every surface: **pass the structured subject and
-the figures already on screen, not just a sentence that mentions them.** Until a
-structured side-channel exists (see [the proposed context envelope](#proposed-the-context-envelope)),
-the interim contract is "put every figure the screen knows into the seed so the
-Advisor never has to re-derive it." The target contract is "pass an
-`entryContext` object so the Advisor *and* the suggestion engine read the same
-structured facts."
+the figures already on screen, not just a sentence that mentions them.** That
+side-channel now exists — the [context envelope](#the-context-envelope) — so the
+contract is concrete: an Ask-Advisor button attaches an `entryContext` object
+(screen, intent, subject, the figures as `signals`) alongside the visible prose,
+and the server hands those to the model as facts. The richer entries
+(rebalance, fee-switch) carry their figures; the open-ended ones (custom-allocation
+kickoff, journal chips) legitimately stay prose-only.
 
 ### Audit of current entry points
 
-| Entry point | File | Trigger | Context passed today | Verdict |
+| Entry point | File | Trigger | Envelope it now passes | State |
 |---|---|---|---|---|
-| Fund-row shortcut | `components/FundSelect.tsx` (`handleAskAdvisor`) | Tap the chat icon on a fund row | Fund **abbreviation only**, templated into a sentence | **Thin** — no projId, asset class, TER, index flag, or "do I hold this?" |
-| Portfolio headline ("Discuss") | `components/screens/PortfolioScreen.tsx`; mirrored in `components/AppPanels.tsx`; prompt built in `lib/portfolio/health.ts` (`summarizeHealth`) | Tap **Discuss** on the "Top thing to know" card | The headline figure as prose (e.g. drift pp, target name) | **Rich-but-prose** — figures are there but flattened; no structured handle, no "which finding" |
-| Suggested rebalance | `components/screens/PortfolioScreen.tsx` (rebalance card) | Tap **Plan the rebalance** | Tracking gap pp + target model name, as prose | **Rich-but-prose** — trim/add tickers shown on screen are *not* in the seed |
-| Fee-creep finding | `components/screens/PortfolioScreen.tsx` (fee-creep card) | Tap **Ask advisor** on a fee finding | Held ticker, held TER, one alternative + its TER, asset class — as prose | **Rich-but-prose** — the richest entry point; still no projIds for a clean tool lookup |
-| Journal suggested question | `components/screens/JournalScreen.tsx` | Tap a parsed question chip | The bare question string (editorial content) | **Thin by design** — generic, but carries zero portfolio handle |
-| Model-portfolio explainer | `components/screens/ModelPortfoliosScreen.tsx` | "Ask the advisor about this" on a model | Model name, as prose | **Thin** — model id and its mix/TER are on screen, not in the seed |
-| Custom-allocation kickoff | `components/screens/ModelPortfoliosScreen.tsx` (`startChat`) | "Help me design an allocation" | Fixed generic sentence | **Intentionally open** — kicks off a Q&A; no subject to pass |
-| Free-typed chat | `components/screens/ChatScreen.tsx` (chat input) | User types directly | Whatever the user wrote | N/A — the user *is* the context |
-| OCR / image handoff | image-import flow → `SeedPrompt.send` | Hand off a transcribed statement | `display` bubble + raw transcription in `send` | **Modelled** — the only entry point already using the split payload deliberately |
+| Suggested rebalance | `components/screens/PortfolioScreen.tsx` (rebalance card) | Tap **Plan the rebalance** | `intent: rebalance`, `subject: <target name>`, `signals: { trackingGapPp }` | **Rich** — the gap + target arrive as facts |
+| Fee-creep finding | `components/screens/PortfolioScreen.tsx` (fee-creep card) | Tap **Ask advisor** on a fee finding | `intent: fee_switch`, `subject: <held ticker>`, `signals: { heldTer, alternative, altTer, assetClass }` | **Rich** — the whole fee comparison the screen showed |
+| Fund-row shortcut | `components/FundSelect.tsx` (`handleAskAdvisor`) | Tap the chat icon on a fund row | `screen: funds`, `intent: fund_lookup`, `subject: <abbr>` | **Tagged** — the fund in focus; the catalog tools recover the rest |
+| Model-portfolio explainer | `components/screens/ModelPortfoliosScreen.tsx` | "Ask the advisor about this" on a model | `screen: models`, `intent: strategy_explain`, `subject: <model name>` | **Tagged** |
+| Portfolio headline ("Discuss") | `components/screens/PortfolioScreen.tsx`; mirrored in `components/AppPanels.tsx` | Tap **Discuss** on the "Top thing to know" card | `screen: portfolio`, `intent: score_review` / `health_review` | **Tagged** — screen + intent; the headline prose carries the figure |
+| Journal suggested question | `components/screens/JournalScreen.tsx` | Tap a parsed question chip | none (bare string) | **Prose-only by design** — generic editorial question |
+| Custom-allocation kickoff | `components/screens/ModelPortfoliosScreen.tsx` (`startChat`) | "Help me design an allocation" | none (bare string) | **Prose-only by design** — opens a Q&A; no subject to pass |
+| Free-typed chat | `components/screens/ChatScreen.tsx` (chat input) | User types directly | none | N/A — the user *is* the context |
+| OCR / image handoff | image-import flow → `SeedPrompt.send` | Hand off a transcribed statement | `{ display, send }` split (no `context` yet) | **Modelled** — the split payload; `EntryContext.image` is the reserved slot for wiring this through the envelope later |
 
-The pattern: the catalog (`FundSelect`, model explainer) entry points are thin;
-the dashboard (`PortfolioScreen`) entry points are rich-but-prose. None of them
-pass a *structured* handle, so even the rich ones force the Advisor to re-fetch
-via tools to act (e.g. `find_cheaper_alternatives` needs a projId or abbr it has
-to parse back out of the sentence).
+The two high-value dashboard findings (rebalance, fee-switch) now hand over the
+exact figures the screen computed, so the Advisor can reason about the action
+without a `read_portfolio` / `find_cheaper_alternatives` round-trip. The catalog
+entries pass the subject as a tag; the Advisor still recovers full fund data via
+the catalog tools when it needs it (see note below). The open-ended entries
+legitimately stay prose-only — exercising the additive, backward-compatible path.
 
-> **Note — the catalog tools already exist.** `find_funds`,
-> `find_cheaper_alternatives`, and `getFundsByAbbr` (all in `lib/advisor/tools.ts`)
-> let the Advisor *recover* a fund from an abbreviation. So a thin `FundSelect`
-> seed is recoverable — but only if the small free-tier model reliably parses the
-> abbr, calls the tool, and then writes prose. The contract removes that gamble
-> by handing the structured subject over directly.
+> **Note — the catalog tools still back the tagged entries.** `find_funds`,
+> `find_cheaper_alternatives`, and `getFundsByAbbr` (`lib/advisor/tools.ts`) let
+> the Advisor recover a fund from the `subject` abbreviation. The envelope removes
+> the gamble of parsing the subject back out of prose, but the tools remain the
+> path to the *live* per-user-scoped data the envelope deliberately doesn't carry.
 
-## Proposed: the context envelope
+## The context envelope
 
-The target model adds a fourth, structured field to the chat request so
-entry-point context stops travelling as prose:
+A structured field on the chat request carries entry-point context so it stops
+travelling as prose (`lib/advisor/entry-context.ts`):
 
 ```ts
-// Shape sketch — the structured entry-point context channel.
-interface EntryContext {
-  screen: "portfolio" | "funds" | "markets" | "journal" | "models" | "chat";
-  // The subject in focus, if any. Discriminated by `kind`.
-  subject?:
-    | { kind: "fund"; projId: string; abbr: string; assetClass?: string; ter?: number; indexOnly?: boolean; held?: boolean }
-    | { kind: "holding"; ticker: string; pct?: number; ter?: number }
-    | { kind: "finding"; type: "rebalance" | "fee_creep" | "concentration" | "cash_drag"; figures: Record<string, number | string> }
-    | { kind: "model"; modelId: string; name: string };
+export interface EntryContext {
+  screen?: string;   // "portfolio" | "funds" | "models" | "journal" | …
+  intent?: string;   // "rebalance" | "fee_switch" | "fund_lookup" | "strategy_explain" | …
+  subject?: string;  // the thing in focus — a ticker, a target-model name, a fund abbr
+  signals?: Record<string, string | number>; // the figures the screen already had
+  image?: { ref: string; mime?: string };     // RESERVED for a future in-chat vision handoff
 }
 ```
 
-The seed `display` string stays for the visible bubble (so the user sees a
-natural sentence), but the structured `EntryContext` rides alongside it and is
-sent to `/api/chat` as a typed field next to `messages` and `threadId`. The
-server renders it into a compact, deterministic context preamble for the model —
-the same way the memory block is prepended — so the figures arrive as *facts*,
-not as a sentence the model has to trust and re-derive.
+The shape is deliberately **flat and open** — a `signals` bag rather than a
+discriminated `subject` union. Each Ask-Advisor button only has a handful of
+facts to pass, and a flat record absorbs new ones (or a new `intent`) without a
+schema change per finding-type. The `image` field is declared but not yet wired,
+so the envelope is the single forward-compatible home for the vision handoff.
 
-Two properties make this reusable beyond the buttons:
+The seed `display` string stays for the visible bubble (the user sees a natural
+sentence); the `EntryContext` rides alongside it on `SeedPrompt`, is sent to
+`/api/chat` as a typed `entryContext` field, and the server renders it with
+`entryContextMessage()`.
 
-1. **One subject vocabulary.** `fund` / `holding` / `finding` / `model` is the
-   same set the context-aware chatbar suggestions need to answer "what should I
-   ask about *this* screen?" Both features read the same `EntryContext` rather
-   than each re-deriving "what's in focus."
-2. **No personal data leaks into the seam.** `EntryContext` carries handles
-   (projId, ticker, modelId) and on-screen figures — never cost basis or account
+**Where it lands matters — and it is NOT the system prompt.** The memory block
+is *prepended* to the system prompt precisely because it's frozen for the
+session, which keeps the prompt prefix stable and prefix-cache-friendly (see
+[memory.md § Why "frozen for the session"](./memory.md)).
+Entry-point context is the opposite: it's different every turn. Folding a
+per-turn value into the cached prefix would invalidate the cache on every turn.
+So `injectEntryContext()` splices the rendered block in as a **`user` message
+immediately before the latest user turn** — after the cached system+memory
+prefix — so the model reads `context → question` while the cacheable prefix stays
+byte-stable. The block is model-facing only; it is never persisted as a chat row.
+
+Two properties keep it safe and reusable:
+
+1. **It reduces tool hops, it doesn't replace tools.** With the fee comparison or
+   the tracking gap already in hand, the model can answer without a
+   `read_portfolio` / `find_cheaper_alternatives` round-trip — but the tools stay
+   available for anything the envelope didn't carry. The block is additive
+   context, not a contract.
+2. **No personal data leaks into the seam.** The envelope carries on-screen
+   handles and figures (a ticker, a TER, a gap) — never cost basis or account
    identifiers beyond what the screen already shows. The Advisor still reads
-   *live* private data through the per-user-scoped tool layer, never through this
-   envelope.
-
-This is a design target, not shipped wiring. The request body is `{ messages,
-threadId }` today; adding the envelope is the implementation step that the
-entry-point audit motivates.
+   *live* private data through the per-user-scoped tool layer, and the server
+   defensively re-parses the client-supplied envelope (`parseEntryContext`),
+   capping field count and length.
 
 ## Turn reliability: the empty turn
 
 The context model and the "I didn't have a reply" dead-end are the same problem
 from two directions — what reaches the model isn't enough to *finish* a turn — so
-the diagnosis and the fix live here. **This part is shipped** (issue #21); the
-structured envelope above is still a target.
+the diagnosis and the fix live here.
 
 An **empty turn** is when the model runs a read tool (e.g. `read_portfolio`) and
 then *stops without emitting a final prose step*. The client
@@ -218,22 +229,23 @@ retry also failed), which only a more reliable model removes. The custom
 stream-envelope chunks, so the recovered/retried generation renders as one
 coherent message.
 
-### Still open
+### Complementary reliability levers
 
-- **A cheaper, more reliable model for the free tier.** A cheap *paid* model
-  (Gemini-Flash / GPT-4o-mini / Haiku class) would remove most dead-ends at the
-  source — but it changes the pinned-free cost invariant (`FREE_TIER_MODELS` in
-  `lib/ai/provider.ts`) and needs usage limits first. Tracked on the board; the
-  recovery above stays as the belt-and-suspenders either way.
-- **Tool-result shaping.** Returning a compact, model-legible subset instead of
+Beyond the recovery net, three levers reduce dead-ends further:
+
+- **The context envelope already cuts tool hops** for the high-value flows
+  (rebalance, fee-switch): the figures arrive as facts (see
+  [the context envelope](#the-context-envelope)), so the model can skip a
+  `read_portfolio` hop and has fewer chances to stall.
+- **A cheaper, more reliable free-tier model** removes most dead-ends at the
+  source. The free tier's model is operator-configurable and bounded by usage
+  limits, so pointing it at a cheap paid model (Gemini-Flash class) is a config
+  choice, not a code change; the recovery stays as belt-and-suspenders either way.
+- **Tool-result shaping** — returning a compact, model-legible subset instead of
   the full rich object lifts small-model reliability further
   ([research § tool design for reliability](./research/context-engineering.md)).
-  `read_portfolio` returns a large structured object today; a trimmed
-  model-facing view is a clean follow-up.
-- **Reducing the tool hops.** The structured
-  [context envelope](#proposed-the-context-envelope) removes the "re-fetch what
-  the screen already knew" step for common entry-point flows — fewer multi-step
-  hops means fewer chances to stall in the first place.
+  `read_portfolio` returns a large structured object, so a trimmed model-facing
+  view is the natural refinement.
 
 ## Related
 
