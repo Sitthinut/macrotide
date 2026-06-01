@@ -15,6 +15,43 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Advisor eval harness — a committed benchmark for the chat loop.**
+  `scripts/eval/` promotes the throwaway model-trial script into a repeatable
+  eval: a hermetic synthetic tool surface (`EXAMPLE-FUND-*`, never the live DB),
+  two question tiers (retrieve-then-explain + complex multi-step), and a
+  deterministic grader scoring each answer on grounded facts, right tool calls,
+  and no invented holdings — plus dead-end rate, latency, tokens, and est cost.
+  Run `npm run eval:advisor` before flipping `FREE_TIER_MODEL`, editing the
+  system prompt, or tuning the reasoning gate. A token-free vitest
+  (`tests/eval/`) guards its structure; the prompt is shared with the route via
+  `lib/advisor/system-prompt.ts` so the benchmark can't drift from production.
+  Grounded in a new prior-art survey
+  ([research/agent-evals.md](./docs/explanation/research/agent-evals.md)) and
+  written up as [inference-strategy.md § 7 Evaluation](./docs/explanation/inference-strategy.md):
+  reports the metrics separately (dead-end rate, quality, `pass^k` reliability,
+  and grounded-facts / tool-trace / no-hallucination sub-signals), grades against
+  pre-declared per-tier thresholds (PASS/FAIL; `EVAL_GATE=on` exits non-zero), and
+  tests negative cases (`mustNotCallTools` over-call guards). An LLM-as-judge
+  layer is deliberately deferred until the deterministic floor demands it.
+
+- **Tool-result shaping — compact model-facing tool outputs.**
+  The heavy reads (`read_portfolio`, `read_performance`, `find_funds`,
+  `find_cheaper_alternatives`) now expose a lean text view to the model via
+  `toModelOutput` while the UI still gets the full object (proposal cards and
+  fund lists unchanged). Keeps the headline facts (largest holding, drift, fee,
+  the benchmark gap, each fund's TER), drops JSON scaffolding/HHI/ids — measured
+  54–73% smaller per result. In the eval the retrieve tier went to zero
+  dead-ends with higher quality. Shapers are pure (`lib/advisor/shape.ts`).
+
+- **Reasoning-intent gate — reason only when it earns its cost.**
+  A cheap deterministic classifier (`lib/advisor/intent.ts`) raises reasoning
+  `effort` to `medium` on the owner/trusted paths only for genuine multi-step
+  turns (rebalance, SSF-vs-RMF, plan-anchored tilt) and `none` otherwise;
+  free/demo stay pinned `none` (cost-protected). Measured on the complex tier,
+  `medium` lifted answer quality 78%→88% at ~3.5× latency — so paying it only on
+  the turns that earn it is the win. `REASONING_GATE=off` restores model-default
+  reasoning. See [inference-strategy.md §3](./docs/explanation/inference-strategy.md).
+
 - **Inference-strategy docs — how the Advisor stays smart/fast/token-efficient.**
   A new design doc ([inference-strategy.md](./docs/explanation/inference-strategy.md))
   records the cost/latency/quality decisions for the Advisor — model routing &

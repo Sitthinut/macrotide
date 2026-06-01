@@ -25,6 +25,9 @@ npm-debug.log*
 # scratch — working checklists, notes, throwaway files (not shared)
 /tmp/
 
+# advisor eval raw results (scripts/eval) — regenerated per run, time/cost-bound
+/eval-results/
+
 # local-only experiments — files ending in .local.ts / .local.test.ts stay
 # out of git. Useful for AI provider variants, scratch scripts, etc.
 *.local.ts

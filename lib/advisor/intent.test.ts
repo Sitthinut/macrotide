@@ -1,0 +1,69 @@
+import { describe, expect, it } from "vitest";
+import { classifyReasoningIntent } from "./intent";
+
+describe("classifyReasoningIntent — retrieve-then-explain stays fast (effort none)", () => {
+  const simple = [
+    "Read my portfolio and tell me my biggest holding.",
+    "Am I beating my index?",
+    "Give me a quick health check on my portfolio.",
+    "What's my blended fee?",
+    "What is index investing?",
+    "Explain this fund's expense ratio.",
+    "How concentrated am I?",
+    "",
+  ];
+  for (const text of simple) {
+    it(`none: ${JSON.stringify(text).slice(0, 40)}`, () => {
+      const d = classifyReasoningIntent(text);
+      expect(d.analytical).toBe(false);
+      expect(d.effort).toBe("none");
+    });
+  }
+});
+
+describe("classifyReasoningIntent — multi-step judgment raises effort (medium)", () => {
+  const analytical = [
+    "Give me a step-by-step rebalance plan to hit my target.",
+    "Should I rebalance now or wait?",
+    "SSF vs RMF for my situation this year?",
+    "Should I tilt more to global equity given the weak baht?",
+    "Given the THB has been weak, should I overweight US stocks?",
+    "Compare hedged versus unhedged exposure for me.",
+    "Is it worth tilting toward gold as a hedge?",
+  ];
+  for (const text of analytical) {
+    it(`medium: ${text.slice(0, 40)}`, () => {
+      const d = classifyReasoningIntent(text);
+      expect(d.analytical).toBe(true);
+      expect(d.effort).toBe("medium");
+      expect(d.signals.length).toBeGreaterThan(0);
+    });
+  }
+});
+
+describe("classifyReasoningIntent — EntryContext intent", () => {
+  it("rebalance intent is analytical even with a terse prompt", () => {
+    const d = classifyReasoningIntent("help", { intent: "rebalance" });
+    expect(d.effort).toBe("medium");
+    expect(d.signals).toContain("intent:rebalance");
+  });
+
+  it("retrieve-then-explain intents stay none", () => {
+    for (const intent of [
+      "health_review",
+      "score_review",
+      "fund_lookup",
+      "fee_switch",
+      "strategy_explain",
+    ]) {
+      const d = classifyReasoningIntent("what does this mean?", { intent });
+      expect(d.effort, intent).toBe("none");
+    }
+  });
+
+  it("combines prompt + intent signals", () => {
+    const d = classifyReasoningIntent("step-by-step please", { intent: "rebalance" });
+    expect(d.signals).toContain("intent:rebalance");
+    expect(d.signals).toContain("step-by-step");
+  });
+});

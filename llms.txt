@@ -46,3 +46,4 @@ root so they resolve when browsing the source.
 - [Context-engineering research](./docs/explanation/research/context-engineering.md): Prior-art survey on context engineering for tool-using agents — the Advisor loop, failure modes, and recovery.
 - [LLM-platform-primitives research](./docs/explanation/research/llm-platform-primitives.md): Prior-art survey of how Anthropic/OpenAI/Gemini/OpenRouter expose tool calling, system prompts, reasoning tokens, and citations/structured output.
 - [Context-and-caching research](./docs/explanation/research/context-and-caching.md): Prior-art survey on prompt caching (cost/latency math) and context-window management / progressive context loading.
+- [Agent-evals research](./docs/explanation/research/agent-evals.md): Prior-art survey on evaluating tool-using agents — the task/harness/grader triple, deterministic vs LLM-judge graders, pass^k reliability, dead-end metrics; the evidence behind scripts/eval.

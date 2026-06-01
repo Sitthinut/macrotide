@@ -16,6 +16,8 @@ import {
   injectEntryContext,
   parseEntryContext,
 } from "@/lib/advisor/entry-context";
+import { classifyReasoningIntent } from "@/lib/advisor/intent";
+import { ADVISOR_SYSTEM_PROMPT } from "@/lib/advisor/system-prompt";
 import { createAdvisorTools } from "@/lib/advisor/tools";
 import { resolveDemoProvider, resolveOwnerProvider, resolveTierProvider } from "@/lib/ai/provider";
 import { compressContext, estimateTokens } from "@/lib/ai/summarize";
@@ -95,35 +97,9 @@ function deriveTitle(text: string): string | null {
   return trimmed.length > 60 ? `${trimmed.slice(0, 57)}…` : trimmed;
 }
 
-const SYSTEM_PROMPT = `You are Macrotide, an AI companion for index investors focused on the Thai market.
-Your job is to help the user understand their portfolio, follow their own written plan, and ACT on it —
-including giving concrete, plan-anchored buy/sell/hold and rebalancing guidance when they ask. The core
-promise is to help them at least match their chosen index, ideally beat it. Don't refuse the rebalancing
-question — it's the heart of the product (the app itself shows a "Suggested rebalance" card).
-
-You are NOT a licensed financial advisor. So: keep guidance educational, ground every recommendation in the
-user's REAL data and their stated plan/goals (not generic market opinions), and whenever you give specific
-buy/sell/hold or rebalancing guidance, add a brief reminder that it's educational, not licensed advice, and
-the final decision is theirs. Default to short, conservative, evidence-based answers; favor low-cost,
-broadly-diversified, long-horizon index investing.
-
-You have tools to read the user's real data — use them instead of guessing:
-- read_portfolio for their actual holdings, allocation, drift, fees, and concentration;
-- read_performance for returns over a period AND the same-period index returns (SET, S&P 500) — call it for
-  any "how am I doing / am I beating my index?" question, and answer with the real numbers it returns;
-- read_plan for their written investing plan;
-- read_journal to recall past notes, decisions, and questions.
-Use write_journal to log a decision or note when the user asks.
-When the user wants to add a rule/principle/risk note/target to their plan, call propose_plan_edit — it
-shows them a card to confirm; it does NOT change the plan itself.
-When the user wants to add holdings — including when you're handed a transcribed brokerage statement and
-asked to extract positions — call propose_holding ONCE PER POSITION. It shows a card to confirm per holding;
-it does NOT write anything until they Accept. Only propose rows you can actually read from the source; omit
-fields you can't read rather than inventing them.
-
-Strict honesty: only reference holdings, tickers, and figures that your tools actually returned — never
-invent a ticker, a holding the user doesn't own, or a number. Always read before you reference numbers or
-propose changes. If a tool reports data is unavailable, say so plainly instead of guessing.`;
+// The base instruction layer lives in lib/advisor/system-prompt.ts so the
+// committed eval (scripts/eval) measures the exact same prompt the route sends.
+const SYSTEM_PROMPT = ADVISOR_SYSTEM_PROMPT;
 
 // Compose the system prompt with the user's active-preference block prepended.
 // The block is computed once per request (frozen-for-the-session discipline;
@@ -405,7 +381,21 @@ export async function POST(req: Request) {
     // user's question so the model can answer from the carried facts (the fee
     // comparison, the tracking gap) instead of forcing a tool round-trip. Absent
     // for ordinary turns → `messages` is exactly `compression.messages`.
-    const messages = injectEntryContext(compression.messages, parseEntryContext(body.entryContext));
+    const entryCtx = parseEntryContext(body.entryContext);
+    const messages = injectEntryContext(compression.messages, entryCtx);
+
+    // Reasoning-intent gate (#58): cheaply classify whether THIS turn is genuine
+    // multi-step judgment (rebalance/SSF-vs-RMF/tilt) and raise reasoning effort
+    // for it, keeping the fast non-reasoning path for the common retrieve-then-
+    // explain turn. Applied to owner/trusted only — free/demo stay pinned `none`
+    // (cost). `undefined` when the gate is disabled → model-default reasoning.
+    // Set REASONING_GATE=off to restore model-default behavior.
+    const gateOn = process.env.REASONING_GATE !== "off";
+    const reasoningDecision = classifyReasoningIntent(lastUserText, entryCtx);
+    const reasoningEffort = gateOn ? reasoningDecision.effort : undefined;
+    if (gateOn && reasoningDecision.analytical) {
+      console.info(`[advisor] reasoning gate → medium (${reasoningDecision.signals.join(",")})`);
+    }
 
     if (demoId) {
       const provider = resolveDemoProvider();
@@ -467,7 +457,7 @@ export async function POST(req: Request) {
         return limit;
       }
 
-      const provider = resolveTierProvider(tier);
+      const provider = resolveTierProvider(tier, { reasoningEffort });
       if (!provider.ready || !provider.model) {
         return stubResponse(
           `AI chat isn't configured yet (${provider.label}). Set OPENROUTER_API_KEY in .env.local — see docs/reference/auth-and-providers.md.`,
@@ -508,7 +498,7 @@ export async function POST(req: Request) {
     }
 
     // Owner path — full chat, no cap (single-owner / pre-auth mode).
-    const provider = resolveOwnerProvider();
+    const provider = resolveOwnerProvider({ reasoningEffort });
     if (!provider.ready || !provider.model) {
       return stubResponse(
         `AI chat isn't configured yet (${provider.label}). Set OPENROUTER_API_KEY in .env.local — see docs/reference/auth-and-providers.md.`,

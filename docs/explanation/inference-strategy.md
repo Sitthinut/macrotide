@@ -34,7 +34,7 @@ with recover-on-empty + retry-on-error resilience.
 |---|---|---|
 | **Model routing** | free pinned to its own `FREE_TIER_MODEL`; multi-model fallback; recover-on-empty net | route by tool-call reliability, not just price |
 | **Prompt caching** | frozen prefix is cache-*ready* but no breakpoints sent | keep volatile data after the prefix; exploit free-chain auto-caching; clear the floor |
-| **Reasoning tokens** | `effort:none` pinned on free/demo/title/extract; owner/trusted at model default | gate higher effort behind analytical intent (rebalance/tax), not every turn |
+| **Reasoning tokens** | `effort:none` pinned on free/demo/title/extract; owner/trusted gated by intent (`none`↔`medium`) | push more "complex math" into tools so even complex turns need less reasoning |
 | **Context loading** | JIT tool reads + the entry-context envelope | keep JIT default; app-layer compaction; shape tool results |
 | **Structured output** | tool-call-as-extraction via the AI SDK | one schema to the strictest intersection + Zod re-validate |
 
@@ -159,19 +159,33 @@ cut the slowest of them 2–4× with no reliability loss.
 The free tier, demo, and the ancillary title/extract calls send
 `reasoning:{effort:"none"}` (`openrouter()` in `lib/ai/provider.ts`), so a
 reasoning-capable model the router lands on doesn't burn hidden chain-of-thought
-(billed at the output rate) on a turn that doesn't need it. **Owner and trusted
-keep their model-default reasoning** — the owner is the one who values it on a
-complex question — until effort is gated by intent (below). Non-reasoning models
-ignore the flag. Beware the multiplier when you *do* raise effort: at `high`
-OpenRouter allocates ~80% of `max_tokens` to reasoning, so keep `max_tokens` tight
-(the free tier is already 1024).
+(billed at the output rate) on a turn that doesn't need it. Free stays pinned to
+`none` **even when the intent gate would raise it** — it is the cost-protected
+path. Non-reasoning models ignore the flag. Beware the multiplier when you *do*
+raise effort: at `high` OpenRouter allocates ~80% of `max_tokens` to reasoning,
+so keep `max_tokens` tight (the free tier is already 1024).
 
-**Gate higher effort behind analytical intent.**
-Reserve `medium`/`high` for genuinely multi-step asks (rebalancing rationale,
-feeder look-through, "should I tilt to gold given THB weakness"), classified
-cheaply so you don't pay reasoning rates on every turn. Use `reasoning:{exclude:
-true}` to hide chain-of-thought from the UI (still billed), and verify per-model
-that `reasoning_details` is actually returned — some silently drop it.
+**Gate higher effort behind analytical intent — shipped.**
+The owner/trusted paths no longer inherit model-default reasoning; a cheap,
+deterministic classifier (`classifyReasoningIntent`, `lib/advisor/intent.ts`)
+reads the user's turn plus the `EntryContext.intent` and sends `effort:"medium"`
+on genuine multi-step asks (rebalance, SSF-vs-RMF, a plan-anchored tilt) and
+`effort:"none"` otherwise — so reasoning rates are paid only where they buy
+something. The route consults it once per turn and passes the effort to
+`resolveOwnerProvider`/`resolveTierProvider`; `REASONING_GATE=off` restores
+model-default behavior. The classifier is pure (no model call) — the whole point
+is to avoid paying to decide whether to pay. It errs toward `none`: only strong
+signals of multi-step judgment flip it on.
+
+*Measured (committed eval, `gemini-2.5-flash`, complex tier, n=2):* `medium`
+lifted answer quality 78%→88% — and on the SSF-vs-RMF turn it was the difference
+between answering from nothing and actually planning the `find_funds` calls — at
+~3.5× latency (2.4s→8.3s) and ~2.7× cost. That premium is exactly why the gate
+exists: pay it on the few turns that earn it, not every turn. Re-run with
+`EVAL_TIER=complex EVAL_REASONING=medium` vs `none` before retuning the trigger
+set. Use `reasoning:{exclude:true}` to hide chain-of-thought from the UI (still
+billed) if a reasoning trace is ever surfaced, and verify per-model that
+`reasoning_details` is actually returned — some silently drop it.
 
 **Never high/max effort on structured-output paths.**
 Anthropic warns `max` overthinks structured tasks — costing more *and* risking
@@ -270,6 +284,52 @@ statement-import UX *if* Anthropic is ever pinned. For market/news grounding, ga
 web search behind explicit user intent (Gemini 3 bills per query). Moot on the free
 chain today, which has no Anthropic route.
 
+## 7. Evaluation
+
+Every lever above is a hypothesis ("flash-lite is good enough", "reasoning helps
+complex turns", "shaping cuts dead-ends") — the eval is how we **measure** it
+before shipping, instead of guessing. The prior art is surveyed in
+[research/agent-evals.md](./research/agent-evals.md); this is the decision.
+
+**What we measure.** A committed harness (`scripts/eval/`) runs a fixed question
+set over a **hermetic synthetic tool surface** (`EXAMPLE-FUND-*`, never the live
+DB) in two tiers — *retrieve-then-explain* (the common path) and *complex
+multi-step* (rebalance, SSF-vs-RMF, a plan-anchored tilt) — using the exact
+production system prompt and OpenRouter wiring. Four metric families:
+deterministic **quality** (three separately-reported sub-signals: grounded-facts
+/ tool-trace / no-hallucination), **dead-end rate** (the #21 empty-turn, its own
+gated metric — never a zero folded into quality), **latency / token / cost**, and
+**reliability across runs** (`pass^k` — the fraction of questions where *all* N
+runs pass, the number a single-run mean hides).
+
+**How we grade.** A **deterministic floor** (`mustInclude` / `anyOf` /
+`mustNotInclude` / `expectTools` / `mustNotCallTools`) — fast, reproducible, and
+it survives model swaps, so it's the regression gate. An **LLM-as-judge** layer
+is deliberately *deferred*: the floor already gates regressions, and an
+uncalibrated judge adds cost and bias, not signal (it earns its place only once
+observed grader-vs-human disagreement justifies it — see the survey).
+
+**How we decide.** Acceptance criteria are **pre-declared** per tier (`THRESHOLDS`
+in `run.ts`: dead-end ≤5% retrieve / ≤15% complex, grounded-facts ≥80%/≥60%,
+hallucination = 0) so a run yields a PASS/FAIL verdict, not a vibe; `EVAL_GATE=on`
+makes a breach exit non-zero for a pre-change check. Use `EVAL_N≥3` for any
+comparison (a single run conflates model variance with capability). Confidence
+intervals + a paired significance test are the next increment. The run hits the
+live API and **stays out of CI** (a token-free vitest guards the harness
+structure there).
+
+**When we run it.** Before flipping `FREE_TIER_MODEL`, editing the system prompt,
+or changing the reasoning budget (§3) — exactly the changes whose effect a single
+manual test would misjudge. The reasoning-gate decision in §3 was made this way:
+the complex tier measured `medium` reasoning at +10pp quality for ~3.5× latency,
+which is *why* the gate pays it only on the turns that earn it. The question set
+is a small **golden set**: frozen once baselined, extended (not loosened) over
+time — see [scripts/eval/README.md](../../../scripts/eval/README.md).
+
+> Doc map: [research/agent-evals.md](./research/agent-evals.md) (the evidence) ↔
+> this section (the decision) ↔
+> [scripts/eval/README.md](../../../scripts/eval/README.md) (the operation).
+
 ---
 
 ## Related
@@ -280,6 +340,8 @@ chain today, which has no Anthropic route.
   caching cost/latency math and context-window management.
 - [research/context-engineering.md](./research/context-engineering.md) — the
   tool-use loop, failure modes, and the empty-turn recovery.
+- [research/agent-evals.md](./research/agent-evals.md) — how to evaluate a
+  tool-using agent (the triple, graders, `pass^k`, LLM-judge); evidence for § 7.
 - [advisor-context.md](./advisor-context.md) — the three context channels, the
   entry-context envelope, and the per-turn cache-safe injection rule.
 - [configuration.md § AI / model selection](../reference/configuration.md#ai--model-selection)
