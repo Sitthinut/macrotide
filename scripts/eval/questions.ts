@@ -16,6 +16,17 @@
 
 export type Matcher = string | RegExp;
 
+/**
+ * Assert a tool was called with grounded ARGUMENTS, not just by name (issue
+ * #68): some call to `tool` had a serialized argument object matching `contains`.
+ * Checks the call carried the right inputs (e.g. find_cheaper_alternatives was
+ * asked about the fund the user actually holds), which a name-only check misses.
+ */
+export interface ToolArgCheck {
+  tool: string;
+  contains: Matcher;
+}
+
 export interface Expect {
   /** Every matcher must appear in the answer (grounded facts / completeness). */
   mustInclude?: Matcher[];
@@ -31,6 +42,9 @@ export interface Expect {
   mustNotCallTools?: string[];
   /** Minimum number of tool calls (defaults to expectTools.length when unset). */
   minToolCalls?: number;
+  /** A tool was called with arguments matching a pattern (grounding, not just
+   * the tool name). Needs the run to capture tool inputs (run.ts). */
+  expectToolArgs?: ToolArgCheck[];
 }
 
 export type EvalTier = "retrieve" | "complex";
@@ -40,6 +54,9 @@ export interface EvalQuestion {
   tier: EvalTier;
   prompt: string;
   expect: Expect;
+  /** Which synthetic data surface to run against (issue #69). "empty" routes the
+   * portfolio reads to the no-holdings fixture; defaults to the populated one. */
+  fixture?: "default" | "empty";
   /** Why this question is here / what it probes. */
   note?: string;
 }
@@ -135,6 +152,26 @@ export const QUESTIONS: EvalQuestion[] = [
     },
     note: "No tool needed; a model that reads the portfolio to define an acronym is over-calling.",
   },
+  {
+    // Negative control (issue #69): the user has NO holdings. The honest answer
+    // is "you have nothing to analyze yet" — refusing to fabricate an analysis.
+    // Inventing a fund code or an allocation here is the hallucination this
+    // synthetic-data eval most needs to catch.
+    id: "N2-empty-holdings",
+    tier: "retrieve",
+    fixture: "empty",
+    prompt: "How's my portfolio doing? Give me a rebalance plan to get back on target.",
+    expect: {
+      expectTools: ["read_portfolio"],
+      anyOf: [
+        /no holding|don'?t have any|haven'?t added|nothing to|once you add|add (a |your )?holding|get started|empty/i,
+      ],
+      // With no data, there is nothing real to name or quantify — any fund code
+      // or concrete allocation % is invented.
+      mustNotInclude: [/EXAMPLE-FUND-[A-Z]/, /\b\d{1,3}\s?%/],
+    },
+    note: "Refusal control: empty portfolio → must say 'no holdings', not fabricate a plan.",
+  },
 
   // ── Tier 2: complex multi-step (where reasoning may help) ─────────────────
   {
@@ -157,6 +194,8 @@ export const QUESTIONS: EvalQuestion[] = [
       expectTools: ["find_funds"],
       mustInclude: [/SSF/i, /RMF/i],
       anyOf: [/lock|withdraw|until|age 55|horizon|liquid/i],
+      // Grounding: the search was actually filtered to a tax wrapper, not generic.
+      expectToolArgs: [{ tool: "find_funds", contains: /SSF|RMF/i }],
     },
     note: "Rules interplay (lock-up, deductions) + the user's numbers → a real weighing.",
   },
@@ -181,6 +220,8 @@ export const QUESTIONS: EvalQuestion[] = [
       expectTools: ["find_cheaper_alternatives"],
       mustInclude: ["EXAMPLE-FUND-D", /0\.2(0)?\s?%/],
       anyOf: [/0\.4(0)?\s?(pp|%)|saving|cheaper|lower fee/i],
+      // Grounding: it asked about the fund the user actually said they hold.
+      expectToolArgs: [{ tool: "find_cheaper_alternatives", contains: /EXAMPLE-FUND-A/i }],
     },
     note: "Fee delta reasoning + a switch recommendation grounded in the alternative the tool returned.",
   },
@@ -192,9 +233,18 @@ function matches(text: string, m: Matcher): boolean {
   return typeof m === "string" ? text.includes(m) : m.test(text);
 }
 
+/** One captured tool call: its name and the arguments the model passed. */
+export interface ToolCall {
+  name: string;
+  args: unknown;
+}
+
 export interface GradeInput {
   text: string;
   toolNames: string[];
+  /** Tool calls with arguments, for expectToolArgs grounding checks (issue #68).
+   * Optional: callers that only track names still grade name-level checks. */
+  toolCalls?: ToolCall[];
 }
 
 // The three sub-signals the agent-evals research recommends reporting separately
@@ -225,7 +275,7 @@ export interface GradeResult {
  * text) scores 0 on every text check.
  */
 export function gradeAnswer(q: EvalQuestion, input: GradeInput): GradeResult {
-  const { text, toolNames } = input;
+  const { text, toolNames, toolCalls } = input;
   const checks: Array<{ ok: boolean; label: string; cat: GradeCategory }> = [];
 
   for (const m of q.expect.mustInclude ?? []) {
@@ -254,6 +304,14 @@ export function gradeAnswer(q: EvalQuestion, input: GradeInput): GradeResult {
       label: `minToolCalls ${minTools}`,
       cat: "tools",
     });
+  }
+  for (const a of q.expect.expectToolArgs ?? []) {
+    // Match `contains` against the serialized args of any call to that tool.
+    // Fails closed when args weren't captured (toolCalls absent).
+    const ok = (toolCalls ?? []).some(
+      (c) => c.name === a.tool && matches(JSON.stringify(c.args ?? {}), a.contains),
+    );
+    checks.push({ ok, label: `expectToolArgs ${a.tool} ~ ${String(a.contains)}`, cat: "tools" });
   }
 
   const byCategory: Record<GradeCategory, CategoryScore> = {

@@ -29,11 +29,21 @@ describe("eval tool surface", () => {
   });
 
   it("read_portfolio returns the synthetic fixture with a clear biggest holding", async () => {
-    const out = (await tools.read_portfolio.execute?.({}, {} as never)) as {
+    const out = (await tools.read_portfolio.execute?.({}, {} as never)) as unknown as {
       concentration: { top: { ticker: string; pct: number } };
     };
     expect(out.concentration.top.ticker).toBe("EXAMPLE-FUND-A");
     expect(out.concentration.top.pct).toBe(50);
+  });
+
+  it("the empty fixture routes portfolio reads to no-holdings (issue #69)", async () => {
+    const empty = buildEvalTools({ empty: true });
+    const p = (await empty.read_portfolio.execute?.({}, {} as never)) as { hasHoldings: boolean };
+    const perf = (await empty.read_performance.execute?.({}, {} as never)) as { hasData: boolean };
+    expect(p.hasHoldings).toBe(false);
+    expect(perf.hasData).toBe(false);
+    // The catalog is unaffected — funds exist regardless of what the user holds.
+    expect(typeof empty.find_funds.execute).toBe("function");
   });
 });
 
@@ -128,5 +138,51 @@ describe("gradeAnswer", () => {
     expect(bad.byCategory.tools.passed).toBe(0);
     const good = gradeAnswer(overcall, { text: "ok", toolNames: [] });
     expect(good.score).toBe(1);
+  });
+
+  it("expectToolArgs checks grounded arguments, not just the tool name (issue #68)", () => {
+    const argQ: EvalQuestion = {
+      id: "A",
+      tier: "complex",
+      prompt: "x",
+      expect: {
+        expectTools: ["find_cheaper_alternatives"],
+        expectToolArgs: [{ tool: "find_cheaper_alternatives", contains: /EXAMPLE-FUND-A/i }],
+      },
+    };
+    const grounded = gradeAnswer(argQ, {
+      text: "ok",
+      toolNames: ["find_cheaper_alternatives"],
+      toolCalls: [{ name: "find_cheaper_alternatives", args: { fundAbbr: "EXAMPLE-FUND-A" } }],
+    });
+    expect(grounded.failures.join(" ")).not.toContain("expectToolArgs");
+    expect(grounded.score).toBe(1);
+
+    // Right tool, but the call didn't carry the held fund → the arg check fails
+    // even though the name-level check still passes.
+    const ungrounded = gradeAnswer(argQ, {
+      text: "ok",
+      toolNames: ["find_cheaper_alternatives"],
+      toolCalls: [{ name: "find_cheaper_alternatives", args: {} }],
+    });
+    expect(ungrounded.failures.join(" ")).toContain("expectToolArgs");
+    expect(ungrounded.byCategory.tools.passed).toBeLessThan(ungrounded.byCategory.tools.total);
+  });
+
+  it("the empty-holdings control passes a refusal, fails a fabrication (issue #69)", () => {
+    const n2 = QUESTIONS.find((q) => q.id === "N2-empty-holdings");
+    expect(n2, "N2-empty-holdings exists").toBeDefined();
+    if (!n2) return;
+    const refusal = gradeAnswer(n2, {
+      text: "You have no holdings yet — add a holding to get started.",
+      toolNames: ["read_portfolio"],
+    });
+    expect(refusal.score).toBe(1);
+    const fabricated = gradeAnswer(n2, {
+      text: "Trim EXAMPLE-FUND-A from 50% and add bonds.",
+      toolNames: ["read_portfolio"],
+    });
+    expect(fabricated.score).toBeLessThan(1);
+    expect(fabricated.byCategory.safety.passed).toBeLessThan(fabricated.byCategory.safety.total);
   });
 });

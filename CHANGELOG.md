@@ -34,6 +34,19 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   tests negative cases (`mustNotCallTools` over-call guards). An LLM-as-judge
   layer is deliberately deferred until the deterministic floor demands it.
 
+- **Eval harness rigor — uncertainty, grounding, refusal, and run diffing.**
+  Builds on the eval harness so before/after comparisons are statistically honest
+  and mechanical: quality is now reported with a **95% confidence interval** (so a
+  gap that's only run-variance is visible), and `npm run eval:diff -- <before>
+  <after>` compares two result files — per-question score deltas, `pass^k` flips,
+  and a **paired McNemar significance test** over the shared question set. Each
+  result file is tagged with its git SHA. The grader gained **argument grounding**
+  (`expectToolArgs` — asserts a tool was called with the right inputs, not just by
+  name) and a **negative control** (an empty-holdings turn where the right answer
+  is "you have no holdings yet" and naming a fund is a hallucination), so refusing
+  is rewarded alongside answering. Runs persist tool calls with their arguments
+  for after-the-fact audit. All token-free, guarded by `tests/eval/`.
+
 - **Tool-result shaping — compact model-facing tool outputs.**
   The heavy reads (`read_portfolio`, `read_performance`, `find_funds`,
   `find_cheaper_alternatives`) now expose a lean text view to the model via

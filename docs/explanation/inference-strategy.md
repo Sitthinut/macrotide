@@ -1,6 +1,6 @@
 # Inference strategy — how the Advisor stays smart, fast, and token-efficient
 
-*Last updated: 2026-05-31*
+*Last updated: 2026-06-01*
 
 > **Living design doc.** It records the cost/latency/quality decisions for the
 > Advisor — what the design does, and the principle behind each lever. Some of
@@ -303,20 +303,28 @@ gated metric — never a zero folded into quality), **latency / token / cost**, 
 runs pass, the number a single-run mean hides).
 
 **How we grade.** A **deterministic floor** (`mustInclude` / `anyOf` /
-`mustNotInclude` / `expectTools` / `mustNotCallTools`) — fast, reproducible, and
-it survives model swaps, so it's the regression gate. An **LLM-as-judge** layer
-is deliberately *deferred*: the floor already gates regressions, and an
-uncalibrated judge adds cost and bias, not signal (it earns its place only once
-observed grader-vs-human disagreement justifies it — see the survey).
+`mustNotInclude` / `expectTools` / `mustNotCallTools` / `expectToolArgs`) — fast,
+reproducible, and it survives model swaps, so it's the regression gate. It grades
+not just *which* tools were called but *with what arguments* (e.g. the fee-switch
+question asked about the fund the user actually holds), and it includes a
+**negative control** — an empty-holdings turn where the only correct answer is
+"you have no holdings yet" and naming a fund is a hallucination, so the harness
+rewards *refusing* as well as answering. An **LLM-as-judge** layer is deliberately
+*deferred*: the floor already gates regressions, and an uncalibrated judge adds
+cost and bias, not signal (it earns its place only once observed grader-vs-human
+disagreement justifies it — see the survey).
 
 **How we decide.** Acceptance criteria are **pre-declared** per tier (`THRESHOLDS`
 in `run.ts`: dead-end ≤5% retrieve / ≤15% complex, grounded-facts ≥80%/≥60%,
 hallucination = 0) so a run yields a PASS/FAIL verdict, not a vibe; `EVAL_GATE=on`
 makes a breach exit non-zero for a pre-change check. Use `EVAL_N≥3` for any
-comparison (a single run conflates model variance with capability). Confidence
-intervals + a paired significance test are the next increment. The run hits the
-live API and **stays out of CI** (a token-free vitest guards the harness
-structure there).
+comparison (a single run conflates model variance with capability): quality is
+reported with a **95% confidence interval** so a gap that's only run-variance is
+visible, and `eval:diff` compares two result files — score deltas, pass^k flips,
+and a **paired McNemar test** over the shared question set — so a before/after
+A/B is mechanical and only calls a winner when the flips are significant. Each
+result file is tagged with its git SHA. The run hits the live API and **stays out
+of CI** (a token-free vitest guards the harness structure there).
 
 **When we run it.** Before flipping `FREE_TIER_MODEL`, editing the system prompt,
 or changing the reasoning budget (§3) — exactly the changes whose effect a single

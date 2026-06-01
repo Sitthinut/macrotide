@@ -18,6 +18,7 @@
 // EVAL_N (repeats/question, default 1), EVAL_REASONING (none|minimal|low|medium|
 // high), EVAL_MAX_TOKENS, EVAL_OUT (json path; default eval-results/<ts>.json).
 
+import { execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
@@ -30,7 +31,9 @@ import {
   type GradeResult,
   gradeAnswer,
   questionsForTier,
+  type ToolCall,
 } from "./questions";
+import { ci95 } from "./stats";
 
 const KEY = process.env.OPENROUTER_API_KEY;
 if (!KEY) {
@@ -98,6 +101,7 @@ interface RunRow {
   inTok: number;
   outTok: number;
   toolNames: string[];
+  toolCalls: ToolCall[]; // names + arguments (issue #68), persisted for arg-grounding analysis
   score: number;
   failures: string[];
   cat: GradeResult["byCategory"];
@@ -117,15 +121,21 @@ async function runOne(modelId: string, q: EvalQuestion, maxTokens: number): Prom
       model: makeModel(modelId),
       system: ADVISOR_SYSTEM_PROMPT,
       messages,
-      tools: buildEvalTools({ shape: SHAPE }),
+      // A question can opt into the empty-holdings surface (issue #69).
+      tools: buildEvalTools({ shape: SHAPE, empty: q.fixture === "empty" }),
       stopWhen: stepCountIs(5),
       maxOutputTokens: maxTokens,
     });
     const [text, steps, usage] = await Promise.all([r.text, r.steps, r.totalUsage]);
     const ms = performance.now() - t0;
-    const toolNames = steps.flatMap((s) => s.toolCalls.map((c) => c.toolName));
+    // Capture each call's NAME and ARGUMENTS (issue #68); names stay derived for
+    // the existing name-level checks and the display line.
+    const toolCalls: ToolCall[] = steps.flatMap((s) =>
+      s.toolCalls.map((c) => ({ name: c.toolName, args: c.input })),
+    );
+    const toolNames = toolCalls.map((c) => c.name);
     const ok = !!text.trim();
-    const grade = gradeAnswer(q, { text, toolNames });
+    const grade = gradeAnswer(q, { text, toolNames, toolCalls });
     return {
       qid: q.id,
       tier: q.tier,
@@ -136,6 +146,7 @@ async function runOne(modelId: string, q: EvalQuestion, maxTokens: number): Prom
       inTok: usage.inputTokens ?? 0,
       outTok: usage.outputTokens ?? 0,
       toolNames,
+      toolCalls,
       score: ok ? grade.score : 0,
       failures: ok ? grade.failures : ["DEAD-END (no prose)"],
       cat: ok ? grade.byCategory : ZERO_CAT,
@@ -151,6 +162,7 @@ async function runOne(modelId: string, q: EvalQuestion, maxTokens: number): Prom
       inTok: 0,
       outTok: 0,
       toolNames: [],
+      toolCalls: [],
       score: 0,
       failures: [`ERROR: ${(e as Error).message.slice(0, 120)}`],
       cat: ZERO_CAT,
@@ -243,6 +255,10 @@ async function main() {
     const err = rows.filter((r) => r.err).length;
     const deadPct = pct(dead, nRows);
     const avgQuality = rows.reduce((s, r) => s + r.score, 0) / nRows;
+    // 95% CI on the quality mean (issue #66) — shows when a difference is noise.
+    // Undefined at n=1 (no spread): printed as a bare mean.
+    const qCi = ci95(rows.map((r) => r.score));
+    const ciStr = Number.isNaN(qCi.margin) ? "" : ` ±${(qCi.margin * 100).toFixed(0)}%`;
     const sub = (c: keyof RunRow["cat"]) =>
       pct(
         rows.reduce((s, r) => s + r.cat[c].passed, 0),
@@ -276,7 +292,7 @@ async function main() {
 
     console.log(
       `\n${model} · ${t} (n=${nRows}, ${qTotal} questions x ${nRows / qTotal})\n` +
-        `  quality(avg@N) ${(avgQuality * 100).toFixed(0)}%   pass^k ${qPass}/${qTotal}   ` +
+        `  quality(avg@N) ${(avgQuality * 100).toFixed(0)}%${ciStr}   pass^k ${qPass}/${qTotal}   ` +
         `dead ${deadPct.toFixed(0)}%${err ? ` err ${err}` : ""}\n` +
         `  facts ${factsPct.toFixed(0)}%  tools ${toolsPct.toFixed(0)}%  safety ${safetyPct.toFixed(0)}%   ` +
         `${avgMs}ms  in=${avgIn} out=${avgOut}${cost != null ? `  $${cost.toFixed(5)}/turn` : ""}\n` +
@@ -289,6 +305,14 @@ async function main() {
   }
 
   // ── Persist (gitignored) ─────────────────────────────────────────────────
+  // Tag the run with the current commit (issue #67) so a result file is traceable
+  // to the code it measured and diff.ts can label before/after by SHA.
+  let gitSha: string | null = null;
+  try {
+    gitSha = execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
+  } catch {
+    // not a git checkout — leave null
+  }
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const out = process.env.EVAL_OUT ?? `eval-results/${stamp}.json`;
   mkdirSync(dirname(out), { recursive: true });
@@ -297,6 +321,7 @@ async function main() {
     JSON.stringify(
       {
         ranAt: new Date().toISOString(),
+        gitSha,
         models,
         tier,
         n,
@@ -309,7 +334,7 @@ async function main() {
       2,
     ),
   );
-  console.log(`\nwrote ${out}`);
+  console.log(`\nwrote ${out}${gitSha ? ` (sha ${gitSha})` : ""}`);
 }
 
 main().catch((e) => {
