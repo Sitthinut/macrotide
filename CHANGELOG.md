@@ -25,6 +25,14 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   system prompt, or tuning the reasoning gate. A token-free vitest
   (`tests/eval/`) guards its structure; the prompt is shared with the route via
   `lib/advisor/system-prompt.ts` so the benchmark can't drift from production.
+  Grounded in a new prior-art survey
+  ([research/agent-evals.md](./docs/explanation/research/agent-evals.md)) and
+  written up as [inference-strategy.md § 7 Evaluation](./docs/explanation/inference-strategy.md):
+  reports the metrics separately (dead-end rate, quality, `pass^k` reliability,
+  and grounded-facts / tool-trace / no-hallucination sub-signals), grades against
+  pre-declared per-tier thresholds (PASS/FAIL; `EVAL_GATE=on` exits non-zero), and
+  tests negative cases (`mustNotCallTools` over-call guards). An LLM-as-judge
+  layer is deliberately deferred until the deterministic floor demands it.
 
 - **Tool-result shaping — compact model-facing tool outputs.**
   The heavy reads (`read_portfolio`, `read_performance`, `find_funds`,

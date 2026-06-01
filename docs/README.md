@@ -66,6 +66,7 @@ Feature deep dives and the prior-art research behind them live under
 | [research/context-engineering.md](./explanation/research/context-engineering.md) | Prior-art survey on context engineering for tool-using agents |
 | [research/llm-platform-primitives.md](./explanation/research/llm-platform-primitives.md) | Prior-art survey: tool calling, system prompts, reasoning tokens, structured output across providers |
 | [research/context-and-caching.md](./explanation/research/context-and-caching.md) | Prior-art survey: prompt caching + context-window management / progressive loading |
+| [research/agent-evals.md](./explanation/research/agent-evals.md) | Prior-art survey: evaluating tool-using agents — graders, `pass^k`, dead-end metrics; evidence behind `scripts/eval` |
 
 ### Project status & process (repo root)
 | Doc | Role |
