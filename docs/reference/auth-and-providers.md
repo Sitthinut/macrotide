@@ -84,6 +84,13 @@ tripping blocks the turn, both reset at UTC midnight):
 Owner / `AUTH_DISABLED` mode is never metered. Full var table:
 [configuration.md § Quotas + tier gating](./configuration.md#quotas--tier-gating).
 
+The free, demo, and ancillary (title/extract) paths also send
+`reasoning: { effort: "none" }` so a reasoning-capable model the router picks
+doesn't spend hidden chain-of-thought (billed at the output rate, ~8–29s/turn
+vs ~2s) on a turn that doesn't need it. Owner/trusted keep their model-default
+reasoning. Rationale + the when-to-reason policy:
+[inference-strategy.md § Reasoning-token policy](../explanation/inference-strategy.md).
+
 ### Demo provider isolation
 
 Demo chat is routed through `DEMO_OPENROUTER_API_KEY`. If unset, it falls back to `OPENROUTER_API_KEY` — that's fine when paired with the `openrouter/free` default model (zero-cost, no billing impact). For stricter isolation, create a second OpenRouter account with prepaid limits and use a separate key.

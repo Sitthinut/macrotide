@@ -29,6 +29,15 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   free/unpriced models contribute zero, so the cap is a no-op until you opt in.
   Owner mode stays uncapped.
 
+- **Reasoning disabled on the cost-sensitive paths.** Free-tier, demo, and the
+  ancillary title/extract calls now send `reasoning: { effort: "none" }` to
+  OpenRouter, so a reasoning-capable model the router lands on doesn't silently
+  burn hidden chain-of-thought (billed at the output rate, and measured at 8–29s
+  vs ~2s per turn) on a chat turn that doesn't need it. Owner and trusted tiers
+  keep their model-default reasoning — selectively raising effort for genuinely
+  analytical asks is a planned, intent-gated follow-up. Non-reasoning models
+  ignore the flag, so it's a safe no-op for them.
+
 - **Reliable Advisor replies — no more "I didn't have a reply."** Free-tier chat
   turns that read a tool but stopped before writing an answer — or that hit an
   upstream provider error mid-turn — now recover automatically: the Advisor

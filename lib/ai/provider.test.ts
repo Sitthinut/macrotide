@@ -6,6 +6,7 @@ const ENV_KEYS = [
   "DEMO_OPENROUTER_API_KEY",
   "AI_MODELS",
   "DEMO_AI_MODELS",
+  "FREE_TIER_MODEL",
 ] as const;
 
 const saved: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
@@ -166,5 +167,59 @@ describe("openrouter fetch wrapper", () => {
     const body = JSON.parse(capturedBody as string);
     expect(body.model).toBe("openrouter/free");
     expect(body.models).toEqual(["openrouter/free", "openrouter/auto"]);
+  });
+
+  it("free tier injects reasoning:{effort:'none'} to disable reasoning", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    delete process.env.FREE_TIER_MODEL;
+
+    let capturedBody: string | undefined;
+    vi.stubGlobal("fetch", async (_url: unknown, init?: RequestInit) => {
+      capturedBody = init?.body as string;
+      return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const p = resolveTierProvider("free");
+    if (!p.model || typeof p.model === "string") throw new Error("expected model object");
+    try {
+      await p.model.doGenerate({
+        prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      });
+    } catch {
+      // forward
+    }
+
+    const body = JSON.parse(capturedBody as string);
+    expect(body.reasoning).toEqual({ effort: "none" });
+  });
+
+  it("owner path does NOT pin reasoning (keeps model default for the owner)", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    process.env.AI_MODELS = "openrouter/auto"; // single model → no models[] override either
+
+    let capturedBody: string | undefined;
+    vi.stubGlobal("fetch", async (_url: unknown, init?: RequestInit) => {
+      capturedBody = init?.body as string;
+      return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const p = resolveOwnerProvider();
+    if (!p.model || typeof p.model === "string") throw new Error("expected model object");
+    try {
+      await p.model.doGenerate({
+        prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      });
+    } catch {
+      // forward
+    }
+
+    const body = JSON.parse(capturedBody as string);
+    expect(body.reasoning).toBeUndefined();
   });
 });
