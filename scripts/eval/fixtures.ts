@@ -12,6 +12,7 @@
 // surface shape.
 import { tool } from "ai";
 import { z } from "zod";
+import { shapeForModel } from "@/lib/advisor/shape";
 
 // ─── Synthetic portfolio ────────────────────────────────────────────────────
 // ฿1,000,000 across three EXAMPLE funds + 10% cash. Target model is 40/20/30/10
@@ -178,7 +179,29 @@ function fundItem(f: CatalogFund) {
 
 const okResult = (o: object) => ({ ok: true as const, ...o });
 
-export function buildEvalTools() {
+export interface BuildEvalToolsOptions {
+  /**
+   * When true, attach the production toModelOutput shapers (#60) so the eval
+   * measures the SHAPED model-facing view. Default false = the raw object the
+   * model saw before shaping, so the same harness can A/B the token delta.
+   */
+  shape?: boolean;
+}
+
+export function buildEvalTools(opts: BuildEvalToolsOptions = {}) {
+  // When shaping is on, attach the same toModelOutput shapers the real tools use
+  // (lib/advisor/shape.ts). When off, omitting toModelOutput makes the AI SDK
+  // serialize the raw object (the pre-#60 view) — so one harness measures both.
+  const shaped = (kind: keyof typeof shapeForModel) =>
+    opts.shape
+      ? {
+          toModelOutput: ({ output }: { output: unknown }) => ({
+            type: "text" as const,
+            value: shapeForModel[kind](output as never),
+          }),
+        }
+      : {};
+
   return {
     read_portfolio: tool({
       description:
@@ -188,6 +211,7 @@ export function buildEvalTools() {
         "anything about how they're doing, their mix, fees, concentration, or rebalancing.",
       inputSchema: z.object({}),
       execute: async () => PORTFOLIO,
+      ...shaped("portfolio"),
     }),
     read_performance: tool({
       description:
@@ -198,6 +222,7 @@ export function buildEvalTools() {
         range: z.enum(["1mo", "3mo", "6mo", "1y", "5y", "max"]).optional(),
       }),
       execute: async () => PERFORMANCE,
+      ...shaped("performance"),
     }),
     read_plan: tool({
       description:
@@ -320,6 +345,7 @@ export function buildEvalTools() {
           message: `Found ${items.length} fund(s) — sorted cheapest first. Lowest TER: ${items[0]?.terLabel} (${items[0]?.abbr}).`,
         });
       },
+      ...shaped("funds"),
     }),
     find_cheaper_alternatives: tool({
       description:
@@ -345,6 +371,7 @@ export function buildEvalTools() {
             "(vs 0.60% p.a., a 0.40pp saving). Even a 0.5% TER difference compounds materially.",
         });
       },
+      ...shaped("cheaper"),
     }),
     // ─── memory tools (terse synthetic stand-ins; here for surface fidelity) ──
     save_preference: tool({

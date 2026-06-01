@@ -23,6 +23,12 @@ import { QUOTE_SOURCES } from "../market/sources";
 import { adaptModelPortfolio, adaptPortfolios } from "../portfolio/adapter";
 import { computeHealth, summarizeHealth } from "../portfolio/health";
 import { parsePlan } from "../portfolio/plan-parser";
+import {
+  type CheaperOutput,
+  type FundsOutput,
+  type PerformanceOutput,
+  shapeForModel,
+} from "./shape";
 
 const JOURNAL_KINDS = ["note", "decision", "question", "reading"] as const;
 const PERF_RANGES = ["1mo", "3mo", "6mo", "1y", "5y", "max"] as const;
@@ -51,6 +57,11 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
       "doing, their mix, fees, concentration, or rebalancing. Numbers are " +
       "computed deterministically from holdings — never invent figures.",
     inputSchema: z.object({}),
+    // Model sees a compact text view (#60); the UI still gets the full object.
+    toModelOutput: ({ output }) => ({
+      type: "text" as const,
+      value: shapeForModel.portfolio(output),
+    }),
     execute: async () => {
       const buckets = listBuckets();
       const holdings = listHoldings();
@@ -122,6 +133,11 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
       "unavailable its return comes back null; say so rather than guessing.",
     inputSchema: z.object({
       range: z.enum(PERF_RANGES).optional().describe("Look-back window; default 6mo."),
+    }),
+    // Model sees a compact text view (#60); the UI still gets the full object.
+    toModelOutput: ({ output }) => ({
+      type: "text" as const,
+      value: shapeForModel.performance(output as PerformanceOutput),
     }),
     execute: async ({ range }) => {
       const r = range ?? "6mo";
@@ -499,6 +515,11 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
         .optional()
         .describe("Max funds to return (default 10). Keep this small — present the top options."),
     }),
+    // Model sees a compact one-line-per-fund view (#60); the UI gets the full list.
+    toModelOutput: ({ output }) => ({
+      type: "text" as const,
+      value: shapeForModel.funds(output as FundsOutput),
+    }),
     execute: async ({ assetClass, indexOnly, taxIncentive, region, query, limit }) => {
       const funds = findFunds({
         assetClass,
@@ -598,6 +619,11 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
         .max(10)
         .optional()
         .describe("Max alternatives to return (default 5)."),
+    }),
+    // Model sees a compact one-line-per-fund view (#60); the UI gets the full list.
+    toModelOutput: ({ output }) => ({
+      type: "text" as const,
+      value: shapeForModel.cheaper(output as CheaperOutput),
     }),
     execute: async ({ fundAbbr, projId, limit }) => {
       // Resolve projId from abbr if needed.
