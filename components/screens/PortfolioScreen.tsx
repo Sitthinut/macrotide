@@ -15,19 +15,22 @@ import {
 } from "@/lib/fetchers/legacy";
 import {
   type FeeCreepFinding,
+  type HiddenActionItem,
   mutateActionItemState,
   restoreActionItem,
   type SeriesRange,
-  type SnoozeDuration,
   useBenchmarkSeries,
   useFeeCreep,
+  useHiddenActionItems,
 } from "@/lib/fetchers/portfolio";
 import { invalidate } from "@/lib/fetchers/swr";
 import { fmtPct } from "@/lib/format";
 import { BENCHMARK_OPTIONS } from "@/lib/market/benchmark-options";
 import { DEFAULT_QUOTE_SOURCE, isQuoteSource } from "@/lib/market/sources";
 import { feeCreepKey } from "@/lib/portfolio/action-item-key";
+import { REASON_CHIPS, type ReasonChip } from "@/lib/portfolio/action-item-resurface";
 import { formatSeriesDate } from "@/lib/portfolio/adapter";
+import { presentFeeChecks } from "@/lib/portfolio/fee-creep-presentation";
 import { computeHealth, rebalanceHint, summarizeHealth } from "@/lib/portfolio/health";
 import { scorePortfolio } from "@/lib/portfolio/score";
 import type { AssetClass, Holding, Portfolio } from "@/lib/static/types";
@@ -71,6 +74,171 @@ function swatchAbbr(t: string) {
   return SWATCH_ABBR[t] || t.slice(0, 3);
 }
 
+// Human labels for the "Not for me" reason chips (keys from REASON_CHIPS).
+const REASON_CHIP_LABELS: Record<ReasonChip, string> = {
+  too_small: "Too small to matter",
+  tax_switching: "Tax & switching cost",
+  prefer_this_fund: "I prefer this fund",
+  already_considered: "Already considered",
+};
+
+// One fee-check finding rendered as a full card: held fund, cheaper
+// alternatives, the annual saving, and the two honest controls — Archive and
+// "Not for me" (#74). "Not for me" expands an inline reason picker (the four
+// chips + an optional "Other…" free text); none of it is a blocking modal.
+function FeeCheckCard({
+  finding,
+  reasonOpen,
+  reasonText,
+  onOpenReason,
+  onReasonText,
+  onArchive,
+  onReject,
+}: {
+  finding: FeeCreepFinding;
+  reasonOpen: boolean;
+  reasonText: string;
+  onOpenReason: (open: boolean) => void;
+  onReasonText: (text: string) => void;
+  onArchive: () => void;
+  onReject: (reason: ReasonChip | string | null) => void;
+}) {
+  return (
+    <div style={{ borderTop: "1px solid var(--line-soft)", paddingTop: 8 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          marginBottom: 4,
+        }}
+      >
+        <div>
+          <span style={{ fontSize: 13, fontWeight: 500, letterSpacing: "-0.01em" }}>
+            {finding.heldTicker}
+          </span>
+          <span style={{ fontSize: 11, color: "var(--muted)", marginLeft: 6 }}>
+            {finding.heldName}
+          </span>
+        </div>
+        <span
+          className="num"
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: "var(--amber)",
+            whiteSpace: "nowrap",
+            marginLeft: 8,
+          }}
+        >
+          {finding.heldTer.toFixed(2)}% TER
+        </span>
+      </div>
+      {finding.alternatives.slice(0, 2).map((alt) => (
+        <div
+          key={alt.projId}
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            padding: "3px 0",
+            paddingLeft: 10,
+          }}
+        >
+          <span style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
+            {alt.abbrName}
+            {alt.englishName ? (
+              <span style={{ color: "var(--muted)", marginLeft: 4 }}>· {alt.englishName}</span>
+            ) : null}
+          </span>
+          <span
+            className="num"
+            style={{ fontSize: 11.5, color: "var(--gain)", whiteSpace: "nowrap" }}
+          >
+            {alt.ter.toFixed(2)}%
+          </span>
+        </div>
+      ))}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, paddingLeft: 10 }}>
+        <span style={{ fontSize: 11, color: "var(--muted)" }}>Potential saving:</span>
+        <span className="num" style={{ fontSize: 12, fontWeight: 600, color: "var(--gain)" }}>
+          −{finding.savingsPp.toFixed(2)}pp/yr
+        </span>
+      </div>
+
+      {/* Two honest actions: Archive (file it) and "Not for me" (reject). */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, paddingLeft: 10 }}>
+        <button
+          type="button"
+          className="btn ghost sm"
+          style={{ gap: 4 }}
+          onClick={onArchive}
+          aria-label={`Archive the fee check for ${finding.heldTicker}`}
+          title="File this. It returns only if the saving grows materially."
+        >
+          <Icon name="archive" size={11} /> Archive
+        </button>
+        <button
+          type="button"
+          className="btn ghost sm"
+          style={{ gap: 4 }}
+          onClick={() => onOpenReason(!reasonOpen)}
+          aria-expanded={reasonOpen}
+          aria-label={`Reject the fee check for ${finding.heldTicker}`}
+          title="This advice isn't right for me. Optionally tell us why."
+        >
+          <Icon name="thumbs-down" size={11} /> Not for me
+        </button>
+      </div>
+
+      {reasonOpen && (
+        <div style={{ marginTop: 8, paddingLeft: 10 }}>
+          <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>
+            Why isn&apos;t this right for you? (optional)
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+            {REASON_CHIPS.map((chip) => (
+              <button
+                key={chip}
+                type="button"
+                className="btn ghost sm"
+                onClick={() => onReject(chip)}
+              >
+                {REASON_CHIP_LABELS[chip]}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input
+              type="text"
+              value={reasonText}
+              onChange={(e) => onReasonText(e.target.value)}
+              placeholder="Other… (optional)"
+              aria-label="Other reason"
+              style={{
+                flex: 1,
+                fontSize: 12,
+                padding: "5px 8px",
+                borderRadius: 6,
+                border: "1px solid var(--line)",
+                background: "var(--bg)",
+                color: "var(--ink)",
+              }}
+            />
+            <button
+              type="button"
+              className="btn sm"
+              onClick={() => onReject(reasonText.trim() || null)}
+            >
+              Confirm
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface ViewPortfolio {
   name: string;
   notes: string | null;
@@ -110,12 +278,18 @@ export function PortfolioScreen({
   // holding no longer drops the user straight into an edit form.
   const [holdingSheet, setHoldingSheet] = useState<Holding | null>(null);
   const [detailHolding, setDetailHolding] = useState<Holding | null>(null);
-  // Which fee-creep card has its snooze menu open (by heldTicker).
-  const [snoozeMenuFor, setSnoozeMenuFor] = useState<string | null>(null);
-  // The most recently suppressed fee-creep card, for the inline "Undo" affordance.
+  // Which fee-creep card has its "Not for me" reason picker open (by heldTicker).
+  const [reasonPickerFor, setReasonPickerFor] = useState<string | null>(null);
+  // Free-text reason ("Other…") typed in the open reason picker.
+  const [reasonText, setReasonText] = useState("");
+  // Whether the low-severity tail ("N more") is expanded.
+  const [showAllFeeChecks, setShowAllFeeChecks] = useState(false);
+  // Whether the Hidden-checks (N) review-and-restore list is expanded.
+  const [showHidden, setShowHidden] = useState(false);
+  // The most recently suppressed fee-creep card(s), for the inline "Undo" affordance.
   const [lastSuppressed, setLastSuppressed] = useState<{
-    ticker: string;
-    name: string;
+    keys: string[];
+    label: string;
   } | null>(null);
 
   // App owns the create/edit sheet; request it through the shared store.
@@ -173,6 +347,7 @@ export function PortfolioScreen({
   const { portfolios, aggregate, isLoading } = usePortfolioView(seriesRange);
   const { models } = useModelPortfoliosView();
   const { data: feeCreepData, mutate: mutateFeeCreep } = useFeeCreep();
+  const { data: hiddenData } = useHiddenActionItems();
   const planSelectedModelId = useSelectedModelId();
 
   // Real benchmark overlay: fetch the selected index over the SAME range as the
@@ -261,40 +436,91 @@ export function PortfolioScreen({
     return feeCreepData.filter((f) => activeTickers.has(f.heldTicker));
   }, [feeCreepData, view]);
 
-  // Suppress a fee-creep finding. Optimistically drops the card from the SWR
-  // cache so it disappears immediately, records the state server-side, then
-  // revalidates. A brief inline Undo lets a misclick restore it. Suppression is
-  // keyed by fee_creep:{heldTicker} (identity only), so a choice survives NAV
-  // ticks but a genuinely different finding resurfaces.
-  //
-  // Wave A note (#74): the action model is now Archive + "Not for me" (Snooze
-  // dropped). The existing buttons still pass their legacy labels; this shim maps
-  // them onto the new states and snapshots the saving for the resurface check.
-  // The card redesign (reason chips, Hidden list) is Wave B.
-  const suppressFeeCreep = (
-    finding: FeeCreepFinding,
-    state: "dismissed" | "snoozed" | "disagreed",
-    _snoozeDuration?: SnoozeDuration,
-  ) => {
-    setSnoozeMenuFor(null);
-    setLastSuppressed({ ticker: finding.heldTicker, name: finding.heldName });
-    // Optimistic remove; mutateActionItemState revalidates /api/portfolio/fee-creep.
-    mutateFeeCreep((curr) => (curr ?? []).filter((f) => f.heldTicker !== finding.heldTicker), {
+  // Long-list presentation (#74 §5): severity order, top-N as full cards, the
+  // rest behind a "N more" expander, plus a calm summary line.
+  const feeCheckView = useMemo(() => presentFeeChecks(feeCreepFindings), [feeCreepFindings]);
+
+  // Hidden (archived / rejected) fee-creep items — the "Hidden checks (N)" list.
+  // Scoped to fee_creep so the surface stays about the section it sits under.
+  const hiddenFeeChecks = useMemo<HiddenActionItem[]>(
+    () => (hiddenData?.hidden ?? []).filter((h) => h.itemType === "fee_creep"),
+    [hiddenData],
+  );
+
+  // Optimistically drop one or more fee-creep cards from the SWR cache so they
+  // disappear at once, then record each server-side. Suppression is keyed by
+  // fee_creep:{heldTicker} (identity only), so a choice survives NAV ticks but a
+  // genuinely worse finding can resurface (lib/portfolio/action-item-resurface).
+  const dropCards = (tickers: string[]) => {
+    const drop = new Set(tickers);
+    mutateFeeCreep((curr) => (curr ?? []).filter((f) => !drop.has(f.heldTicker)), {
       revalidate: false,
     });
-    // disagree → reject ("Not for me"); dismiss / snooze → archive (file it).
-    const mapped: "archived" | "not_for_me" = state === "disagreed" ? "not_for_me" : "archived";
+  };
+
+  // Archive ("I've seen this; file it") — the soft action; resurfaces on a
+  // material jump in the saving. No reason, no feedback signal.
+  const archiveFeeCreep = (finding: FeeCreepFinding) => {
+    setReasonPickerFor(null);
+    dropCards([finding.heldTicker]);
+    setLastSuppressed({ keys: [feeCreepKey(finding.heldTicker)], label: finding.heldTicker });
     void mutateActionItemState({
       itemType: "fee_creep",
       itemKey: feeCreepKey(finding.heldTicker),
-      state: mapped,
+      state: "archived",
       savingsPp: finding.savingsPp,
     });
   };
 
+  // Archive every currently shown fee check in one calm tap (batch is Archive
+  // only — never "Not for me", which carries a per-item reason). Undo restores
+  // the whole group.
+  const archiveAllFeeChecks = (findings: FeeCreepFinding[]) => {
+    if (findings.length === 0) return;
+    setReasonPickerFor(null);
+    const tickers = findings.map((f) => f.heldTicker);
+    dropCards(tickers);
+    setLastSuppressed({
+      keys: tickers.map(feeCreepKey),
+      label: `${findings.length} fee ${findings.length === 1 ? "check" : "checks"}`,
+    });
+    for (const f of findings) {
+      void mutateActionItemState({
+        itemType: "fee_creep",
+        itemKey: feeCreepKey(f.heldTicker),
+        state: "archived",
+        savingsPp: f.savingsPp,
+      });
+    }
+  };
+
+  // "Not for me" (reject) — optionally with a reason chip or free text. Writes a
+  // Journal feedback entry server-side and is stickier than Archive.
+  const rejectFeeCreep = (finding: FeeCreepFinding, reason: ReasonChip | string | null) => {
+    setReasonPickerFor(null);
+    setReasonText("");
+    dropCards([finding.heldTicker]);
+    setLastSuppressed({ keys: [feeCreepKey(finding.heldTicker)], label: finding.heldTicker });
+    void mutateActionItemState({
+      itemType: "fee_creep",
+      itemKey: feeCreepKey(finding.heldTicker),
+      state: "not_for_me",
+      reason: reason || null,
+      savingsPp: finding.savingsPp,
+      topic: `Fee check — ${finding.heldTicker}`,
+    });
+  };
+
+  // Restore a single hidden item from the Hidden-checks list.
+  const restoreHidden = (itemKey: string) => {
+    void restoreActionItem(itemKey).then(() => mutateFeeCreep());
+  };
+
   const undoSuppress = () => {
     if (!lastSuppressed) return;
-    void restoreActionItem(feeCreepKey(lastSuppressed.ticker)).then(() => mutateFeeCreep());
+    void Promise.all(lastSuppressed.keys.map((k) => restoreActionItem(k))).then(() =>
+      mutateFeeCreep(),
+    );
     setLastSuppressed(null);
   };
 
@@ -1120,6 +1346,7 @@ export function PortfolioScreen({
             >
               ● FEE CREEP — COMPARABLE EXPOSURE, LOWER COST
             </div>
+            {/* Calm, no-deadline summary line (#74 §5) — never count-pressure. */}
             <div
               style={{
                 fontSize: 12,
@@ -1128,172 +1355,72 @@ export function PortfolioScreen({
                 marginBottom: 10,
               }}
             >
-              {feeCreepFindings.length === 1
-                ? "One of your funds has a cheaper alternative offering comparable exposure."
-                : `${feeCreepFindings.length} of your funds have cheaper alternatives offering comparable exposure.`}
+              {feeCheckView.summary}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {feeCreepFindings.map((f) => (
-                <div
+              {/* Top findings (severity order) as full cards. */}
+              {feeCheckView.top.map((f) => (
+                <FeeCheckCard
                   key={f.heldTicker}
-                  style={{
-                    borderTop: "1px solid var(--line-soft)",
-                    paddingTop: 8,
+                  finding={f}
+                  reasonOpen={reasonPickerFor === f.heldTicker}
+                  reasonText={reasonText}
+                  onOpenReason={(open) => {
+                    setReasonPickerFor(open ? f.heldTicker : null);
+                    setReasonText("");
                   }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "flex-start",
-                      marginBottom: 4,
-                    }}
-                  >
-                    <div>
-                      <span style={{ fontSize: 13, fontWeight: 500, letterSpacing: "-0.01em" }}>
-                        {f.heldTicker}
-                      </span>
-                      <span style={{ fontSize: 11, color: "var(--muted)", marginLeft: 6 }}>
-                        {f.heldName}
-                      </span>
-                    </div>
-                    <span
-                      className="num"
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 600,
-                        color: "var(--amber)",
-                        whiteSpace: "nowrap",
-                        marginLeft: 8,
-                      }}
-                    >
-                      {f.heldTer.toFixed(2)}% TER
-                    </span>
-                  </div>
-                  {f.alternatives.slice(0, 2).map((alt) => (
-                    <div
-                      key={alt.projId}
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        padding: "3px 0",
-                        paddingLeft: 10,
-                      }}
-                    >
-                      <span style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
-                        {alt.abbrName}
-                        {alt.englishName ? (
-                          <span style={{ color: "var(--muted)", marginLeft: 4 }}>
-                            · {alt.englishName}
-                          </span>
-                        ) : null}
-                      </span>
-                      <span
-                        className="num"
-                        style={{ fontSize: 11.5, color: "var(--gain)", whiteSpace: "nowrap" }}
-                      >
-                        {alt.ter.toFixed(2)}%
-                      </span>
-                    </div>
-                  ))}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      marginTop: 6,
-                      paddingLeft: 10,
-                    }}
-                  >
-                    <span style={{ fontSize: 11, color: "var(--muted)" }}>Potential saving:</span>
-                    <span
-                      className="num"
-                      style={{ fontSize: 12, fontWeight: 600, color: "var(--gain)" }}
-                    >
-                      −{f.savingsPp.toFixed(2)}pp/yr
-                    </span>
-                  </div>
-                  {/* Dismiss / Snooze / Disagree — per-fund suppression. */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      marginTop: 8,
-                      paddingLeft: 10,
-                      position: "relative",
-                    }}
-                  >
-                    <button
-                      className="btn ghost sm"
-                      style={{ gap: 4 }}
-                      onClick={() => suppressFeeCreep(f, "dismissed")}
-                      title="Hide this for now. It returns only if the finding materially changes."
-                    >
-                      <Icon name="close" size={11} /> Dismiss
-                    </button>
-                    <button
-                      className="btn ghost sm"
-                      style={{ gap: 4 }}
-                      onClick={() =>
-                        setSnoozeMenuFor((cur) => (cur === f.heldTicker ? null : f.heldTicker))
-                      }
-                      title="Hide this for a set period, then bring it back."
-                    >
-                      <Icon name="clock" size={11} /> Snooze
-                    </button>
-                    <button
-                      className="btn ghost sm"
-                      style={{ gap: 4 }}
-                      onClick={() => suppressFeeCreep(f, "disagreed")}
-                      title="This suggestion isn't right for me. Hide it permanently."
-                    >
-                      <Icon name="thumbs-down" size={11} /> Disagree
-                    </button>
-                    {snoozeMenuFor === f.heldTicker && (
-                      <div
-                        className="card"
-                        style={{
-                          position: "absolute",
-                          top: "calc(100% + 4px)",
-                          left: 10,
-                          zIndex: 10,
-                          padding: 4,
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 2,
-                          minWidth: 120,
-                        }}
-                      >
-                        {(
-                          [
-                            ["7d", "7 days"],
-                            ["30d", "30 days"],
-                            ["90d", "90 days"],
-                          ] as [SnoozeDuration, string][]
-                        ).map(([dur, label]) => (
-                          <button
-                            key={dur}
-                            className="btn ghost sm"
-                            style={{ justifyContent: "flex-start" }}
-                            onClick={() => suppressFeeCreep(f, "snoozed", dur)}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
+                  onReasonText={setReasonText}
+                  onArchive={() => archiveFeeCreep(f)}
+                  onReject={(reason) => rejectFeeCreep(f, reason)}
+                />
               ))}
+
+              {/* The lower-severity tail, default-collapsed behind "N more". */}
+              {feeCheckView.moreCount > 0 && !showAllFeeChecks && (
+                <button
+                  type="button"
+                  className="btn ghost sm"
+                  style={{ alignSelf: "flex-start", marginTop: 2 }}
+                  onClick={() => setShowAllFeeChecks(true)}
+                  aria-expanded={false}
+                >
+                  Show {feeCheckView.moreCount} more
+                </button>
+              )}
+              {showAllFeeChecks &&
+                feeCheckView.rest.map((f) => (
+                  <FeeCheckCard
+                    key={f.heldTicker}
+                    finding={f}
+                    reasonOpen={reasonPickerFor === f.heldTicker}
+                    reasonText={reasonText}
+                    onOpenReason={(open) => {
+                      setReasonPickerFor(open ? f.heldTicker : null);
+                      setReasonText("");
+                    }}
+                    onReasonText={setReasonText}
+                    onArchive={() => archiveFeeCreep(f)}
+                    onReject={(reason) => rejectFeeCreep(f, reason)}
+                  />
+                ))}
+              {showAllFeeChecks && feeCheckView.moreCount > 0 && (
+                <button
+                  type="button"
+                  className="btn ghost sm"
+                  style={{ alignSelf: "flex-start" }}
+                  onClick={() => setShowAllFeeChecks(false)}
+                  aria-expanded={true}
+                >
+                  Show fewer
+                </button>
+              )}
             </div>
             <div style={{ marginTop: 12, display: "flex", gap: 6 }}>
               <button
                 className="btn sm primary"
                 style={{ flex: 1 }}
                 onClick={() => {
-                  const top = feeCreepFindings[0];
+                  const top = feeCheckView.top[0] ?? feeCreepFindings[0];
                   const alt = top.alternatives[0];
                   const prompt = `I hold ${top.heldTicker} at a ${top.heldTer.toFixed(2)}% TER. ${alt.abbrName} offers comparable ${top.assetClass ?? "same-class"} exposure at ${(alt.ter ?? 0).toFixed(2)}%. Walk me through what it would take to switch, and whether the saving justifies the move.`;
                   window.dispatchEvent(
@@ -1321,6 +1448,17 @@ export function PortfolioScreen({
               >
                 <Icon name="chat" size={12} /> Ask advisor
               </button>
+              {/* Batch action — Archive only; never "Not for me" (which carries
+                  a per-item reason). Clears the noise in one calm tap, with Undo. */}
+              {feeCreepFindings.length > 1 && (
+                <button
+                  className="btn sm ghost"
+                  onClick={() => archiveAllFeeChecks(feeCreepFindings)}
+                  aria-label="Archive all fee checks"
+                >
+                  <Icon name="archive" size={12} /> Archive all
+                </button>
+              )}
             </div>
             <div
               style={{
@@ -1352,15 +1490,71 @@ export function PortfolioScreen({
             color: "var(--ink-soft)",
           }}
         >
-          <span>Hid the fee check for {lastSuppressed.ticker}.</span>
+          <span>Hid {lastSuppressed.label}.</span>
           <div style={{ display: "flex", gap: 6 }}>
             <button className="btn ghost sm" onClick={undoSuppress}>
               Undo
             </button>
-            <button className="btn ghost sm" onClick={() => setLastSuppressed(null)}>
+            <button
+              className="btn ghost sm"
+              onClick={() => setLastSuppressed(null)}
+              aria-label="Dismiss"
+            >
               <Icon name="close" size={11} />
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Hidden checks (N) — a quiet, restorable list of archived / rejected fee
+          checks. Discoverable but unobtrusive: collapsed by default, no badge. */}
+      {hiddenFeeChecks.length > 0 && (
+        <div className="section" style={{ marginTop: 8 }}>
+          <button
+            type="button"
+            className="btn ghost sm"
+            style={{ gap: 4, color: "var(--muted)" }}
+            onClick={() => setShowHidden((v) => !v)}
+            aria-expanded={showHidden}
+          >
+            <Icon name={showHidden ? "chevron-down" : "chevron-right"} size={12} />
+            Hidden checks ({hiddenFeeChecks.length})
+          </button>
+          {showHidden && (
+            <div className="card" style={{ marginTop: 6, padding: "6px 12px" }}>
+              {hiddenFeeChecks.map((h) => {
+                const ticker = h.itemKey.replace(/^fee_creep:/, "");
+                const label = h.state === "not_for_me" ? "Not for me" : "Archived";
+                const reasonLabel =
+                  h.reason && h.reason in REASON_CHIP_LABELS
+                    ? REASON_CHIP_LABELS[h.reason as ReasonChip]
+                    : h.reason;
+                return (
+                  <div
+                    key={h.itemKey}
+                    className="row between"
+                    style={{ padding: "6px 0", gap: 8, alignItems: "center" }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 500 }}>{ticker}</div>
+                      <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                        {label}
+                        {reasonLabel ? ` · ${reasonLabel}` : ""}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn ghost sm"
+                      onClick={() => restoreHidden(h.itemKey)}
+                      aria-label={`Restore the fee check for ${ticker}`}
+                    >
+                      Restore
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

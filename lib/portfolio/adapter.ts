@@ -10,6 +10,7 @@ import { fmtRelativeDate } from "@/lib/format";
 import type {
   AggregatePortfolio,
   AssetClass,
+  FeedbackItem,
   Holding,
   ModelPortfolio,
   Note,
@@ -279,6 +280,26 @@ function noteFromEntry(e: JournalEntry): Note {
   };
 }
 
+// Kept in sync with FEEDBACK_RATING_TAG_PREFIX in lib/db/queries/journal.ts.
+// Duplicated as a literal (not imported) so this client-bundled adapter never
+// pulls the server-only DB module into the browser graph.
+const FEEDBACK_RATING_TAG_PREFIX = "rating:";
+
+// A `kind: "feedback"` journal entry carries its rating in a `rating:up|down`
+// tag (journal_entries has no rating column). Default down — feedback we surface
+// in the subtab is overwhelmingly a "Not for me" rejection.
+function feedbackFromEntry(e: JournalEntry): FeedbackItem {
+  const ratingTag = (e.tags ?? []).find((t) => t.startsWith(FEEDBACK_RATING_TAG_PREFIX));
+  const rating = ratingTag?.slice(FEEDBACK_RATING_TAG_PREFIX.length) === "up" ? "up" : "down";
+  return {
+    id: `j${e.id}`,
+    topic: e.title ?? "",
+    rating,
+    note: e.body ?? "",
+    date: fmtRelativeDate(e.createdAt),
+  };
+}
+
 function readingFromEntry(e: JournalEntry): ReadingItem {
   return {
     id: `j${e.id}`,
@@ -293,20 +314,23 @@ function readingFromEntry(e: JournalEntry): ReadingItem {
 }
 
 // Synthesizes the legacy UserJournal shape from journal_entries.
-// `plan`, `feedback`, and `savedModels` are advisor / import surface and stay
-// empty for now — the screens render the empty states fine.
+// `feedback` is populated from `kind: "feedback"` entries (e.g. a Portfolio
+// "Not for me" rejection); `plan` and `savedModels` stay empty for now — the
+// screens render the empty states fine.
 export function adaptJournal(entries: JournalEntry[]): UserJournal {
   const notes: Note[] = [];
   const reading: ReadingItem[] = [];
+  const feedback: FeedbackItem[] = [];
   for (const e of entries) {
     if (e.kind === "reading") reading.push(readingFromEntry(e));
+    else if (e.kind === "feedback") feedback.push(feedbackFromEntry(e));
     else notes.push(noteFromEntry(e));
   }
   return {
     notes,
     reading,
     plan: { target: "", monthlyContribution: 0, nextRebalanceDate: "", commitments: [] },
-    feedback: [],
+    feedback,
     savedModels: [],
   };
 }

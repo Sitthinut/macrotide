@@ -27,14 +27,22 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   wobble, so funds visibly trail their index and the blended portfolio diverges
   from any single benchmark. Owner mode is unchanged — it still reads live market
   data. Regenerate the fixture with `npm run refresh:demo-history`.
-- **Fee-creep flags can now be dismissed, snoozed, or disagreed with.** Each fee
-  check card on the Portfolio screen carries Dismiss, Snooze (7 / 30 / 90 days),
-  and Disagree controls, with an inline Undo. The choice is recorded per fund and
-  survives reloads: a dismissal stays hidden until the finding materially changes,
-  a snooze reappears automatically once its window passes, and a disagree hides
-  the flag permanently. Suppression is applied server-side and is per-user (and
-  ephemeral in the demo), built on a reusable action-item suppression layer the
-  headline and rebalance suggestions can adopt later.
+- **Fee-creep flags now offer two honest actions — Archive and "Not for me".**
+  Each fee check card on the Portfolio screen carries Archive ("I've seen this;
+  file it") and "Not for me" (reject, with an optional reason — four chips plus a
+  free-text "Other…"), with an inline Undo. Both choices are recorded per fund,
+  survive reloads, and resurface only when the finding materially worsens: the
+  reason a rejection carries selects how stubborn that is (a magnitude reason can
+  return on a bigger jump; a preference or structural reason stays hidden), and a
+  ratchet means nothing nags more than once per material jump. A "Not for me" also
+  writes a Journal ▸ Feedback entry so the rejection — and its reason — is
+  reviewable and feeds the Advisor's "don't repeat rejected advice" context. A
+  quiet, collapsed "Hidden checks (N)" list under the section restores anything
+  filed or rejected. The long list is presented calmly: findings in severity
+  order, the top few as full cards with the rest behind a "Show N more" expander,
+  a no-deadline summary line, and a batch "Archive all". Suppression is applied
+  server-side and is per-user (ephemeral in the demo), built on a reusable
+  action-item layer the headline and rebalance suggestions can adopt later.
 - **Tapping a holding now opens a read-only detail view instead of the edit
   form.** The Portfolio screen's holding rows open a "Holding detail" sheet that
   reuses the fund detail view — performance, allocation, top holdings, and feeder

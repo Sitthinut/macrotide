@@ -174,18 +174,29 @@ export function useFeeCreep() {
 
 export type ActionItemStateValue = "archived" | "not_for_me";
 
-/**
- * @deprecated Snooze is dropped from the action model (#74). This type only
- * survives so the legacy fee-creep snooze menu in PortfolioScreen keeps
- * compiling until the Wave B card redesign removes it.
- */
-export type SnoozeDuration = "7d" | "30d" | "90d";
+/** A hidden (archived / rejected) action item, as the Hidden-checks list shows it. */
+export interface HiddenActionItem {
+  id: number;
+  itemType: string;
+  itemKey: string;
+  state: ActionItemStateValue;
+  reason: string | null;
+  snapshotSavingsPp: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** The current owner's hidden set — the source for the "Hidden checks (N)" surface. */
+export function useHiddenActionItems() {
+  return useResource<{ hidden: HiddenActionItem[] }>("/api/portfolio/action-items");
+}
 
 /**
  * Record an Archive / "Not for me" on a generated action item, then revalidate
  * the consuming feeds so the card disappears. `reason` (a chip key or free text)
  * and `savingsPp` (the magnitude the user saw, snapshotted server-side for the
- * resurface check) apply to a "Not for me"; both are optional.
+ * resurface check) apply to a "Not for me"; both are optional. `topic` is the
+ * human label used for the Journal feedback entry a rejection writes server-side.
  */
 export async function mutateActionItemState(input: {
   itemType: "fee_creep" | "headline" | "rebalance";
@@ -193,14 +204,20 @@ export async function mutateActionItemState(input: {
   state: ActionItemStateValue;
   reason?: string | null;
   savingsPp?: number | null;
+  topic?: string | null;
 }): Promise<void> {
   await fetch("/api/portfolio/action-items", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  // Revalidate the feeds the suppression affects.
-  await Promise.all([invalidate("/api/portfolio/fee-creep")]);
+  // Revalidate the feeds the suppression affects: the fee-creep list, the Hidden
+  // set, and (for a rejection) the Journal feed the feedback entry lands in.
+  await Promise.all([
+    invalidate("/api/portfolio/fee-creep"),
+    invalidate("/api/portfolio/action-items"),
+    invalidate("/api/journal"),
+  ]);
 }
 
 /** Restore a previously archived / rejected item (un-suppress). */
@@ -208,5 +225,8 @@ export async function restoreActionItem(itemKey: string): Promise<void> {
   await fetch(`/api/portfolio/action-items?key=${encodeURIComponent(itemKey)}`, {
     method: "DELETE",
   });
-  await invalidate("/api/portfolio/fee-creep");
+  await Promise.all([
+    invalidate("/api/portfolio/fee-creep"),
+    invalidate("/api/portfolio/action-items"),
+  ]);
 }

@@ -7,7 +7,37 @@ export type JournalEntry = typeof journalEntries.$inferSelect;
 export type JournalEntryInsert = typeof journalEntries.$inferInsert;
 export type JournalEntryUpdate = Partial<Omit<JournalEntryInsert, "id" | "createdAt">>;
 
-export type JournalKind = "note" | "decision" | "question" | "reading";
+export type JournalKind = "note" | "decision" | "question" | "reading" | "feedback";
+
+/**
+ * The rating of a `kind: "feedback"` entry is encoded as a `rating:up` /
+ * `rating:down` tag, since journal_entries has no dedicated rating column. The
+ * adapter (lib/portfolio/adapter.ts) reads it back into a FeedbackItem. Keeping
+ * feedback inside journal_entries reuses one store rather than inventing a table
+ * (the "quick kind:'feedback' now" approach from the #74 design).
+ */
+export const FEEDBACK_RATING_TAG_PREFIX = "rating:";
+
+/**
+ * Record a "Not for me" rejection (or any thumbs reaction) as a journal feedback
+ * entry. Shows up in Journal ▸ Feedback. `topic` → title, `note` → body, and the
+ * rating rides in a `rating:up|down` tag. Scoped to the current owner via the
+ * shared createJournalEntry path.
+ */
+export function createFeedbackEntry(input: {
+  topic: string;
+  rating: "up" | "down";
+  note?: string | null;
+  source?: string | null;
+}): JournalEntry {
+  return createJournalEntry({
+    kind: "feedback",
+    title: input.topic,
+    body: input.note ?? null,
+    source: input.source ?? "action_item",
+    tags: [`${FEEDBACK_RATING_TAG_PREFIX}${input.rating}`],
+  });
+}
 
 export interface JournalFilters {
   kind?: JournalKind;
