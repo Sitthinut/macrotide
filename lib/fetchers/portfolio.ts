@@ -162,28 +162,37 @@ export interface FeeCreepFinding {
   assetClass: string | null;
   alternatives: FeeCreepAlternative[];
   savingsPp: number;
+  /** Deterministic suppression key (fee_creep:{heldTicker}); the route adds it. */
+  key: string;
 }
 
 export function useFeeCreep() {
   return useResource<FeeCreepFinding[]>("/api/portfolio/fee-creep");
 }
 
-// ─── Action-item suppression (dismiss / snooze / disagree) ──────────────────────
+// ─── Action-item suppression (Archive / Not for me) ─────────────────────────────
 
-export type ActionItemStateValue = "dismissed" | "snoozed" | "disagreed";
+export type ActionItemStateValue = "archived" | "not_for_me";
+
+/**
+ * @deprecated Snooze is dropped from the action model (#74). This type only
+ * survives so the legacy fee-creep snooze menu in PortfolioScreen keeps
+ * compiling until the Wave B card redesign removes it.
+ */
 export type SnoozeDuration = "7d" | "30d" | "90d";
 
 /**
- * Record a dismiss / snooze / disagree on a generated action item, then
- * revalidate the consuming feeds so the card disappears. `snoozeDuration` is
- * required (and only used) when `state === "snoozed"`; the server resolves it to
- * an absolute date.
+ * Record an Archive / "Not for me" on a generated action item, then revalidate
+ * the consuming feeds so the card disappears. `reason` (a chip key or free text)
+ * and `savingsPp` (the magnitude the user saw, snapshotted server-side for the
+ * resurface check) apply to a "Not for me"; both are optional.
  */
 export async function mutateActionItemState(input: {
   itemType: "fee_creep" | "headline" | "rebalance";
   itemKey: string;
   state: ActionItemStateValue;
-  snoozeDuration?: SnoozeDuration;
+  reason?: string | null;
+  savingsPp?: number | null;
 }): Promise<void> {
   await fetch("/api/portfolio/action-items", {
     method: "POST",
@@ -194,7 +203,7 @@ export async function mutateActionItemState(input: {
   await Promise.all([invalidate("/api/portfolio/fee-creep")]);
 }
 
-/** Restore a previously dismissed / snoozed / disagreed item (un-suppress). */
+/** Restore a previously archived / rejected item (un-suppress). */
 export async function restoreActionItem(itemKey: string): Promise<void> {
   await fetch(`/api/portfolio/action-items?key=${encodeURIComponent(itemKey)}`, {
     method: "DELETE",

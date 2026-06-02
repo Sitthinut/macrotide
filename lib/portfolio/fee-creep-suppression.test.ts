@@ -1,18 +1,19 @@
 // Integration contract for the fee-creep suppression filter — the composition
 // GET /api/portfolio/fee-creep performs: computeFeeCreep() minus the suppressed
-// set (keyed by fee_creep:{heldTicker}). Covers:
-//   - dismissed findings are hidden
-//   - snoozed findings are hidden until snoozeUntil, then reappear
-//   - disagreed findings stay hidden
+// set (keyed by fee_creep:{heldTicker}, resurface-aware). Covers (#74):
+//   - archived findings are hidden
+//   - not_for_me findings are hidden
+//   - a finding resurfaces once its saving materially worsens past the bar
+//   - a preference reject never resurfaces
 //   - the DEMO write path (isDemo: true) records + filters within the session
 //
 // We replay the migration baseline into a fresh in-memory app.db so the new
-// action_item_states migration is exercised end-to-end. Synthetic data only.
+// action_item_states columns are exercised end-to-end. Synthetic data only.
 
 import { describe, expect, it } from "vitest";
 import { makeTestDbContext } from "@/tests/db-helpers";
 import { type DbContext, runWithDbContext } from "../db/context";
-import { listSuppressed, setActionItemState } from "../db/queries/action-items";
+import { type CurrentFinding, listSuppressed, recordActionItem } from "../db/queries/action-items";
 import {
   type FundFeeInsert,
   type FundInsert,
@@ -69,15 +70,16 @@ function seededCtx(overrides: Partial<Pick<DbContext, "isDemo" | "sessionId" | "
   return ctx;
 }
 
-/** Mirror the route's composition: computeFeeCreep minus the suppressed set. */
-function visibleFindings(now?: string) {
+/** Mirror the route's composition: computeFeeCreep minus the resurface-aware suppressed set. */
+function visibleFindings() {
   const findings = computeFeeCreep();
-  const suppressed = new Set(listSuppressed(now).map((s) => s.itemKey));
+  const current: CurrentFinding[] = findings.map((f) => ({
+    itemKey: feeCreepKey(f.heldTicker),
+    savingsPp: f.savingsPp,
+  }));
+  const suppressed = new Set(listSuppressed(current).map((s) => s.itemKey));
   return findings.filter((f) => !suppressed.has(feeCreepKey(f.heldTicker)));
 }
-
-const FUTURE = new Date(Date.now() + 86_400_000).toISOString();
-const PAST = new Date(Date.now() - 86_400_000).toISOString();
 
 // ─── tests ───────────────────────────────────────────────────────────────────
 
@@ -93,59 +95,59 @@ describe("fee-creep suppression filter", () => {
     });
   });
 
-  it("hides a dismissed finding, leaves the others", () => {
+  it("hides an archived finding, leaves the others", () => {
     const ctx = seededCtx();
     runWithDbContext(ctx, () => {
-      setActionItemState({
+      recordActionItem({
         itemType: "fee_creep",
         itemKey: feeCreepKey("PRICEY"),
-        state: "dismissed",
+        state: "archived",
+        snapshotSavingsPp: 0.9, // PRICEY: 1.2 − 0.3 = 0.9pp
       });
       expect(visibleFindings().map((f) => f.heldTicker)).toEqual(["PRICEY2"]);
     });
   });
 
-  it("hides a disagreed finding permanently", () => {
+  it("hides a not_for_me finding", () => {
     const ctx = seededCtx();
     runWithDbContext(ctx, () => {
-      setActionItemState({
+      recordActionItem({
         itemType: "fee_creep",
         itemKey: feeCreepKey("PRICEY"),
-        state: "disagreed",
+        state: "not_for_me",
+        reason: "too_small",
+        snapshotSavingsPp: 0.9,
       });
       expect(visibleFindings().map((f) => f.heldTicker)).toEqual(["PRICEY2"]);
     });
   });
 
-  it("hides a snoozed finding until snoozeUntil, then it reappears", () => {
+  it("never resurfaces a preference reject even if the saving is large", () => {
     const ctx = seededCtx();
     runWithDbContext(ctx, () => {
-      setActionItemState({
+      // Snapshot a tiny saving, but PRICEY actually saves 0.9pp now — a preference
+      // reject must stay hidden regardless.
+      recordActionItem({
         itemType: "fee_creep",
         itemKey: feeCreepKey("PRICEY"),
-        state: "snoozed",
-        snoozeUntil: FUTURE,
+        state: "not_for_me",
+        reason: "prefer_this_fund",
+        snapshotSavingsPp: 0.1,
       });
-      // Hidden while snoozed.
       expect(visibleFindings().map((f) => f.heldTicker)).toEqual(["PRICEY2"]);
-      // After the snooze window (evaluate "now" past snoozeUntil) it returns.
-      const afterExpiry = new Date(Date.now() + 2 * 86_400_000).toISOString();
-      expect(
-        visibleFindings(afterExpiry)
-          .map((f) => f.heldTicker)
-          .sort(),
-      ).toEqual(["PRICEY", "PRICEY2"]);
     });
   });
 
-  it("treats an already-expired snooze as not suppressing", () => {
+  it("resurfaces an archived finding once its saving materially worsens", () => {
     const ctx = seededCtx();
     runWithDbContext(ctx, () => {
-      setActionItemState({
+      // Snapshot a small saving; the live finding (0.9pp) is now ≥ 0.20pp worse,
+      // so it crosses the normal bar and comes back.
+      recordActionItem({
         itemType: "fee_creep",
         itemKey: feeCreepKey("PRICEY"),
-        state: "snoozed",
-        snoozeUntil: PAST,
+        state: "archived",
+        snapshotSavingsPp: 0.3,
       });
       expect(
         visibleFindings()
@@ -160,12 +162,12 @@ describe("fee-creep suppression filter", () => {
     // NULL, isolated by the session's own in-memory app.db. No special-casing.
     const ctx = seededCtx({ isDemo: true, sessionId: "demo-1", userId: null });
     runWithDbContext(ctx, () => {
-      setActionItemState({
+      recordActionItem({
         itemType: "fee_creep",
         itemKey: feeCreepKey("PRICEY"),
-        state: "dismissed",
+        state: "archived",
+        snapshotSavingsPp: 0.9,
       });
-      expect(listSuppressed().map((s) => s.itemKey)).toEqual([feeCreepKey("PRICEY")]);
       expect(visibleFindings().map((f) => f.heldTicker)).toEqual(["PRICEY2"]);
     });
   });

@@ -215,11 +215,17 @@ export const userMarketIndicators = sqliteTable(
   ],
 );
 
-// User-scoped dismiss / snooze / disagree state for generated Portfolio action
-// items (fee-creep flags today; headline / rebalance later). Those items are
-// recomputed every render and carry no DB row of their own, so we key state by a
-// deterministic item_key (see lib/portfolio/action-item-key.ts). Idempotent: one
-// row per (user, item_key); re-acting upserts the same row.
+// User-scoped suppression state for generated Portfolio action items (fee-creep
+// flags today; headline / rebalance later). Those items are recomputed every
+// render and carry no DB row of their own, so we key state by a deterministic
+// item_key (see lib/portfolio/action-item-key.ts). Idempotent: one row per
+// (user, item_key); re-acting upserts the same row.
+//
+// Two honest states (#74): 'archived' (filed) and 'not_for_me' (rejected, with
+// an optional reason). Both resurface only on a MATERIAL, worse change — the
+// reason selects the bar (see lib/portfolio/action-item-resurface.ts). The
+// state string is validated at the Zod/route boundary; the DB column is plain
+// TEXT so a future state needs no migration.
 export const actionItemStates = sqliteTable(
   "action_item_states",
   {
@@ -230,11 +236,22 @@ export const actionItemStates = sqliteTable(
     itemType: text("item_type").notNull(),
     // Deterministic identity string (see action-item-key.ts recipe table).
     itemKey: text("item_key").notNull(),
-    // 'dismissed'  — one-shot hide until the recomputed key changes.
-    // 'snoozed'    — hidden until snoozeUntil, then reappears (self-heals).
-    // 'disagreed'  — permanent suppression of this exact key.
-    state: text("state", { enum: ["dismissed", "snoozed", "disagreed"] }).notNull(),
-    // ISO-8601 UTC; set only when state = 'snoozed', else NULL.
+    // 'archived'   — acknowledged ("I've seen it, file it").
+    // 'not_for_me' — rejected (optionally with a `reason`).
+    // Plain TEXT, not a drizzle enum: state is validated at the route boundary,
+    // and a new state must not force a migration.
+    state: text("state").notNull(),
+    // Optional reason on a 'not_for_me' (a REASON_CHIPS key or free text); the
+    // chip selects the deterministic resurface policy. NULL = archive / no-reason
+    // reject. See lib/portfolio/action-item-resurface.ts.
+    reason: text("reason"),
+    // Magnitude snapshot at suppression time — the finding's annual saving
+    // (pp/yr). The resurface check compares the CURRENT saving against this; the
+    // ratchet re-snapshots the new value on re-suppression. NULL = no snapshot
+    // (e.g. headline/rebalance items with no magnitude).
+    snapshotSavingsPp: real("snapshot_savings_pp"),
+    // Legacy Snooze column — UNUSED in the new model (Snooze dropped, #74). Kept
+    // nullable to keep the migration forward-only/non-destructive; do not write it.
     snoozeUntil: text("snooze_until"),
     createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
     updatedAt: text("updated_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),

@@ -1,43 +1,33 @@
-// POST /api/portfolio/action-items — record a dismiss / snooze / disagree on a
+// POST /api/portfolio/action-items — record an Archive / "Not for me" on a
 // generated Portfolio action item (fee-creep flags today). The state is keyed by
 // a deterministic item_key (see lib/portfolio/action-item-key.ts) so it survives
-// reloads. GET returns the current owner's suppression set; DELETE restores an
-// item (un-dismiss / un-snooze).
+// reloads. GET returns the current owner's hidden set; DELETE restores an item.
 //
-// Snooze duration is a whitelisted token (7d / 30d / 90d) resolved to an absolute
-// snoozeUntil SERVER-SIDE — never trust a client timestamp.
+// Two honest actions (#74): 'archived' (filed) and 'not_for_me' (rejected, with
+// an optional reason chip or free text). Snooze is dropped. On record we snapshot
+// the finding's current magnitude (savingsPp) so the resurface check has a
+// baseline and the ratchet re-baselines on re-suppression.
+//
+// Wave A scope: backend only. The Journal-feedback signal a "Not for me" should
+// write, and the Hidden-checks UI that consumes GET, are Wave B.
 
 import { NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
 import {
   type ActionItemState,
   clearActionItemState,
-  listActionItemStates,
-  listSuppressed,
-  setActionItemState,
+  listHidden,
+  recordActionItem,
 } from "@/lib/db/queries/action-items";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VALID_STATES: ReadonlyArray<ActionItemState> = ["dismissed", "snoozed", "disagreed"];
+const VALID_STATES: ReadonlyArray<ActionItemState> = ["archived", "not_for_me"];
 const VALID_ITEM_TYPES = ["headline", "rebalance", "fee_creep"] as const;
 
-// Whitelisted snooze durations → days. Closed set so a client can't pick an
-// arbitrary window.
-const SNOOZE_DAYS: Record<string, number> = { "7d": 7, "30d": 30, "90d": 90 };
-
-function snoozeUntilFrom(token: string | undefined): string | null {
-  if (!token) return null;
-  const days = SNOOZE_DAYS[token];
-  if (days === undefined) return null;
-  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
-}
-
 export async function GET() {
-  return withDb(() =>
-    NextResponse.json({ suppressed: listSuppressed(), all: listActionItemStates() }),
-  );
+  return withDb(() => NextResponse.json({ hidden: listHidden() }));
 }
 
 export async function POST(req: Request) {
@@ -45,7 +35,8 @@ export async function POST(req: Request) {
     itemType?: string;
     itemKey?: string;
     state?: string;
-    snoozeDuration?: string;
+    reason?: string | null;
+    savingsPp?: number | null;
   } | null;
 
   if (!body || typeof body.itemKey !== "string" || body.itemKey.length === 0) {
@@ -59,26 +50,25 @@ export async function POST(req: Request) {
   }
 
   const state = body.state as ActionItemState;
-  let snoozeUntil: string | null = null;
-  if (state === "snoozed") {
-    snoozeUntil = snoozeUntilFrom(body.snoozeDuration);
-    if (snoozeUntil === null) {
-      return NextResponse.json(
-        { error: "snooze requires a valid snoozeDuration (7d / 30d / 90d)" },
-        { status: 400 },
-      );
-    }
-  }
+  // Reason is free-form (a chip key or "Other…" free text); only kept on a reject.
+  const reason =
+    state === "not_for_me" && typeof body.reason === "string" && body.reason.length > 0
+      ? body.reason
+      : null;
+  // Snapshot the magnitude the client saw; only finite numbers are stored.
+  const snapshotSavingsPp =
+    typeof body.savingsPp === "number" && Number.isFinite(body.savingsPp) ? body.savingsPp : null;
 
   return withDb(() =>
     NextResponse.json(
-      setActionItemState({
+      recordActionItem({
         // biome-ignore lint/style/noNonNullAssertion: validated above
         itemType: body.itemType!,
         // biome-ignore lint/style/noNonNullAssertion: validated above
         itemKey: body.itemKey!,
         state,
-        snoozeUntil,
+        reason,
+        snapshotSavingsPp,
       }),
       { status: 201 },
     ),

@@ -261,15 +261,20 @@ export function PortfolioScreen({
     return feeCreepData.filter((f) => activeTickers.has(f.heldTicker));
   }, [feeCreepData, view]);
 
-  // Suppress a fee-creep finding (dismiss / snooze / disagree). Optimistically
-  // drops the card from the SWR cache so it disappears immediately, records the
-  // state server-side, then revalidates. A brief inline Undo lets a misclick
-  // restore it. Suppression is keyed by fee_creep:{heldTicker} (identity only),
-  // so a dismissal survives NAV ticks but a genuinely different finding resurfaces.
+  // Suppress a fee-creep finding. Optimistically drops the card from the SWR
+  // cache so it disappears immediately, records the state server-side, then
+  // revalidates. A brief inline Undo lets a misclick restore it. Suppression is
+  // keyed by fee_creep:{heldTicker} (identity only), so a choice survives NAV
+  // ticks but a genuinely different finding resurfaces.
+  //
+  // Wave A note (#74): the action model is now Archive + "Not for me" (Snooze
+  // dropped). The existing buttons still pass their legacy labels; this shim maps
+  // them onto the new states and snapshots the saving for the resurface check.
+  // The card redesign (reason chips, Hidden list) is Wave B.
   const suppressFeeCreep = (
     finding: FeeCreepFinding,
     state: "dismissed" | "snoozed" | "disagreed",
-    snoozeDuration?: SnoozeDuration,
+    _snoozeDuration?: SnoozeDuration,
   ) => {
     setSnoozeMenuFor(null);
     setLastSuppressed({ ticker: finding.heldTicker, name: finding.heldName });
@@ -277,11 +282,13 @@ export function PortfolioScreen({
     mutateFeeCreep((curr) => (curr ?? []).filter((f) => f.heldTicker !== finding.heldTicker), {
       revalidate: false,
     });
+    // disagree → reject ("Not for me"); dismiss / snooze → archive (file it).
+    const mapped: "archived" | "not_for_me" = state === "disagreed" ? "not_for_me" : "archived";
     void mutateActionItemState({
       itemType: "fee_creep",
       itemKey: feeCreepKey(finding.heldTicker),
-      state,
-      snoozeDuration,
+      state: mapped,
+      savingsPp: finding.savingsPp,
     });
   };
 
