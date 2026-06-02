@@ -286,11 +286,6 @@ export function PortfolioScreen({
   const [showAllFeeChecks, setShowAllFeeChecks] = useState(false);
   // Whether the Hidden-checks (N) review-and-restore list is expanded.
   const [showHidden, setShowHidden] = useState(false);
-  // The most recently suppressed fee-creep card(s), for the inline "Undo" affordance.
-  const [lastSuppressed, setLastSuppressed] = useState<{
-    keys: string[];
-    label: string;
-  } | null>(null);
 
   // App owns the create/edit sheet; request it through the shared store.
   const openNewPortfolio = () => requestNew();
@@ -459,11 +454,11 @@ export function PortfolioScreen({
   };
 
   // Archive ("I've seen this; file it") — the soft action; resurfaces on a
-  // material jump in the saving. No reason, no feedback signal.
+  // material jump in the saving. No reason, no feedback signal. Restore lives in
+  // the "Hidden checks (N)" list, the single restore path.
   const archiveFeeCreep = (finding: FeeCreepFinding) => {
     setReasonPickerFor(null);
     dropCards([finding.heldTicker]);
-    setLastSuppressed({ keys: [feeCreepKey(finding.heldTicker)], label: finding.heldTicker });
     void mutateActionItemState({
       itemType: "fee_creep",
       itemKey: feeCreepKey(finding.heldTicker),
@@ -473,17 +468,13 @@ export function PortfolioScreen({
   };
 
   // Archive every currently shown fee check in one calm tap (batch is Archive
-  // only — never "Not for me", which carries a per-item reason). Undo restores
-  // the whole group.
+  // only — never "Not for me", which carries a per-item reason). Restore lives
+  // in the "Hidden checks (N)" list.
   const archiveAllFeeChecks = (findings: FeeCreepFinding[]) => {
     if (findings.length === 0) return;
     setReasonPickerFor(null);
     const tickers = findings.map((f) => f.heldTicker);
     dropCards(tickers);
-    setLastSuppressed({
-      keys: tickers.map(feeCreepKey),
-      label: `${findings.length} fee ${findings.length === 1 ? "check" : "checks"}`,
-    });
     for (const f of findings) {
       void mutateActionItemState({
         itemType: "fee_creep",
@@ -500,7 +491,6 @@ export function PortfolioScreen({
     setReasonPickerFor(null);
     setReasonText("");
     dropCards([finding.heldTicker]);
-    setLastSuppressed({ keys: [feeCreepKey(finding.heldTicker)], label: finding.heldTicker });
     void mutateActionItemState({
       itemType: "fee_creep",
       itemKey: feeCreepKey(finding.heldTicker),
@@ -511,17 +501,10 @@ export function PortfolioScreen({
     });
   };
 
-  // Restore a single hidden item from the Hidden-checks list.
+  // Restore a single hidden item from the Hidden-checks list — the single
+  // restore path now that the post-archive Undo toast is gone.
   const restoreHidden = (itemKey: string) => {
     void restoreActionItem(itemKey).then(() => mutateFeeCreep());
-  };
-
-  const undoSuppress = () => {
-    if (!lastSuppressed) return;
-    void Promise.all(lastSuppressed.keys.map((k) => restoreActionItem(k))).then(() =>
-      mutateFeeCreep(),
-    );
-    setLastSuppressed(null);
   };
 
   // Real, computed health signals — drift vs target, blended fee, concentration,
@@ -1375,12 +1358,13 @@ export function PortfolioScreen({
                 />
               ))}
 
-              {/* The lower-severity tail, default-collapsed behind "N more". */}
+              {/* The lower-severity tail, default-collapsed behind "N more".
+                  A subtle centered text link, not a chunky bordered block. */}
               {feeCheckView.moreCount > 0 && !showAllFeeChecks && (
                 <button
                   type="button"
-                  className="btn ghost sm"
-                  style={{ alignSelf: "flex-start", marginTop: 2 }}
+                  className="btn link sm"
+                  style={{ alignSelf: "center" }}
                   onClick={() => setShowAllFeeChecks(true)}
                   aria-expanded={false}
                 >
@@ -1406,8 +1390,8 @@ export function PortfolioScreen({
               {showAllFeeChecks && feeCheckView.moreCount > 0 && (
                 <button
                   type="button"
-                  className="btn ghost sm"
-                  style={{ alignSelf: "flex-start" }}
+                  className="btn link sm"
+                  style={{ alignSelf: "center" }}
                   onClick={() => setShowAllFeeChecks(false)}
                   aria-expanded={true}
                 >
@@ -1415,10 +1399,12 @@ export function PortfolioScreen({
                 </button>
               )}
             </div>
-            <div style={{ marginTop: 12, display: "flex", gap: 6 }}>
+            {/* Intrinsic-width actions, left-aligned — flex-wrap so they stack
+                on a narrow (mobile) surface but never stretch full-width on a
+                wide pane. Matches the app's default inline-flex button width. */}
+            <div style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
               <button
                 className="btn sm primary"
-                style={{ flex: 1 }}
                 onClick={() => {
                   const top = feeCheckView.top[0] ?? feeCreepFindings[0];
                   const alt = top.alternatives[0];
@@ -1449,7 +1435,8 @@ export function PortfolioScreen({
                 <Icon name="chat" size={12} /> Ask advisor
               </button>
               {/* Batch action — Archive only; never "Not for me" (which carries
-                  a per-item reason). Clears the noise in one calm tap, with Undo. */}
+                  a per-item reason). Clears the noise in one calm tap; restore
+                  via the "Hidden checks (N)" list. */}
               {feeCreepFindings.length > 1 && (
                 <button
                   className="btn sm ghost"
@@ -1473,35 +1460,6 @@ export function PortfolioScreen({
               Comparable exposure means same asset class. Lower fee, not necessarily better fund.
               Tax implications and switching costs apply.
             </div>
-          </div>
-        </div>
-      )}
-
-      {lastSuppressed && (
-        <div
-          className="card"
-          style={{
-            marginTop: 8,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 8,
-            fontSize: 12,
-            color: "var(--ink-soft)",
-          }}
-        >
-          <span>Hid {lastSuppressed.label}.</span>
-          <div style={{ display: "flex", gap: 6 }}>
-            <button className="btn ghost sm" onClick={undoSuppress}>
-              Undo
-            </button>
-            <button
-              className="btn ghost sm"
-              onClick={() => setLastSuppressed(null)}
-              aria-label="Dismiss"
-            >
-              <Icon name="close" size={11} />
-            </button>
           </div>
         </div>
       )}

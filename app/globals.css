@@ -1305,6 +1305,20 @@ textarea.sheet-input {
   font-size: 12.5px;
   border-radius: var(--r-sm);
 }
+/* Borderless, low-emphasis text affordance — a quiet link styled as a button so
+   it stays keyboard-focusable. For inline disclosures ("Show N more") and other
+   subtle in-context actions that shouldn't read as a chunky bordered block. */
+.btn.link {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  padding: 4px 6px;
+  font-weight: 400;
+}
+.btn.link:hover {
+  color: var(--ink);
+  background: transparent;
+}
 /* Uniform modal-footer button height. Placed AFTER the `.btn` rules so the
    descendant selector stays non-descending in specificity. Floors every footer
    button to one height — ghost / primary / danger all match regardless of label,

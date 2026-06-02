@@ -30,7 +30,7 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 - **Fee-creep flags now offer two honest actions — Archive and "Not for me".**
   Each fee check card on the Portfolio screen carries Archive ("I've seen this;
   file it") and "Not for me" (reject, with an optional reason — four chips plus a
-  free-text "Other…"), with an inline Undo. Both choices are recorded per fund,
+  free-text "Other…"). Both choices are recorded per fund,
   survive reloads, and resurface only when the finding materially worsens: the
   reason a rejection carries selects how stubborn that is (a magnitude reason can
   return on a bigger jump; a preference or structural reason stays hidden), and a
