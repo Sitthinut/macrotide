@@ -15,7 +15,10 @@ import {
 } from "@/lib/fetchers/legacy";
 import {
   type FeeCreepFinding,
+  mutateActionItemState,
+  restoreActionItem,
   type SeriesRange,
+  type SnoozeDuration,
   useBenchmarkSeries,
   useFeeCreep,
 } from "@/lib/fetchers/portfolio";
@@ -23,6 +26,7 @@ import { invalidate } from "@/lib/fetchers/swr";
 import { fmtPct } from "@/lib/format";
 import { BENCHMARK_OPTIONS } from "@/lib/market/benchmark-options";
 import { DEFAULT_QUOTE_SOURCE, isQuoteSource } from "@/lib/market/sources";
+import { feeCreepKey } from "@/lib/portfolio/action-item-key";
 import { formatSeriesDate } from "@/lib/portfolio/adapter";
 import { computeHealth, rebalanceHint, summarizeHealth } from "@/lib/portfolio/health";
 import { scorePortfolio } from "@/lib/portfolio/score";
@@ -106,6 +110,13 @@ export function PortfolioScreen({
   // holding no longer drops the user straight into an edit form.
   const [holdingSheet, setHoldingSheet] = useState<Holding | null>(null);
   const [detailHolding, setDetailHolding] = useState<Holding | null>(null);
+  // Which fee-creep card has its snooze menu open (by heldTicker).
+  const [snoozeMenuFor, setSnoozeMenuFor] = useState<string | null>(null);
+  // The most recently suppressed fee-creep card, for the inline "Undo" affordance.
+  const [lastSuppressed, setLastSuppressed] = useState<{
+    ticker: string;
+    name: string;
+  } | null>(null);
 
   // App owns the create/edit sheet; request it through the shared store.
   const openNewPortfolio = () => requestNew();
@@ -161,7 +172,7 @@ export function PortfolioScreen({
 
   const { portfolios, aggregate, isLoading } = usePortfolioView(seriesRange);
   const { models } = useModelPortfoliosView();
-  const { data: feeCreepData } = useFeeCreep();
+  const { data: feeCreepData, mutate: mutateFeeCreep } = useFeeCreep();
   const planSelectedModelId = useSelectedModelId();
 
   // Real benchmark overlay: fetch the selected index over the SAME range as the
@@ -249,6 +260,36 @@ export function PortfolioScreen({
     const activeTickers = new Set(view.holdings.map((h) => h.ticker));
     return feeCreepData.filter((f) => activeTickers.has(f.heldTicker));
   }, [feeCreepData, view]);
+
+  // Suppress a fee-creep finding (dismiss / snooze / disagree). Optimistically
+  // drops the card from the SWR cache so it disappears immediately, records the
+  // state server-side, then revalidates. A brief inline Undo lets a misclick
+  // restore it. Suppression is keyed by fee_creep:{heldTicker} (identity only),
+  // so a dismissal survives NAV ticks but a genuinely different finding resurfaces.
+  const suppressFeeCreep = (
+    finding: FeeCreepFinding,
+    state: "dismissed" | "snoozed" | "disagreed",
+    snoozeDuration?: SnoozeDuration,
+  ) => {
+    setSnoozeMenuFor(null);
+    setLastSuppressed({ ticker: finding.heldTicker, name: finding.heldName });
+    // Optimistic remove; mutateActionItemState revalidates /api/portfolio/fee-creep.
+    mutateFeeCreep((curr) => (curr ?? []).filter((f) => f.heldTicker !== finding.heldTicker), {
+      revalidate: false,
+    });
+    void mutateActionItemState({
+      itemType: "fee_creep",
+      itemKey: feeCreepKey(finding.heldTicker),
+      state,
+      snoozeDuration,
+    });
+  };
+
+  const undoSuppress = () => {
+    if (!lastSuppressed) return;
+    void restoreActionItem(feeCreepKey(lastSuppressed.ticker)).then(() => mutateFeeCreep());
+    setLastSuppressed(null);
+  };
 
   // Real, computed health signals — drift vs target, blended fee, concentration,
   // cash drag. No mock fixtures.
@@ -1166,6 +1207,77 @@ export function PortfolioScreen({
                       −{f.savingsPp.toFixed(2)}pp/yr
                     </span>
                   </div>
+                  {/* Dismiss / Snooze / Disagree — per-fund suppression. */}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      marginTop: 8,
+                      paddingLeft: 10,
+                      position: "relative",
+                    }}
+                  >
+                    <button
+                      className="btn ghost sm"
+                      style={{ gap: 4 }}
+                      onClick={() => suppressFeeCreep(f, "dismissed")}
+                      title="Hide this for now. It returns only if the finding materially changes."
+                    >
+                      <Icon name="close" size={11} /> Dismiss
+                    </button>
+                    <button
+                      className="btn ghost sm"
+                      style={{ gap: 4 }}
+                      onClick={() =>
+                        setSnoozeMenuFor((cur) => (cur === f.heldTicker ? null : f.heldTicker))
+                      }
+                      title="Hide this for a set period, then bring it back."
+                    >
+                      <Icon name="clock" size={11} /> Snooze
+                    </button>
+                    <button
+                      className="btn ghost sm"
+                      style={{ gap: 4 }}
+                      onClick={() => suppressFeeCreep(f, "disagreed")}
+                      title="This suggestion isn't right for me. Hide it permanently."
+                    >
+                      <Icon name="thumbs-down" size={11} /> Disagree
+                    </button>
+                    {snoozeMenuFor === f.heldTicker && (
+                      <div
+                        className="card"
+                        style={{
+                          position: "absolute",
+                          top: "calc(100% + 4px)",
+                          left: 10,
+                          zIndex: 10,
+                          padding: 4,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 2,
+                          minWidth: 120,
+                        }}
+                      >
+                        {(
+                          [
+                            ["7d", "7 days"],
+                            ["30d", "30 days"],
+                            ["90d", "90 days"],
+                          ] as [SnoozeDuration, string][]
+                        ).map(([dur, label]) => (
+                          <button
+                            key={dur}
+                            className="btn ghost sm"
+                            style={{ justifyContent: "flex-start" }}
+                            onClick={() => suppressFeeCreep(f, "snoozed", dur)}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -1216,6 +1328,31 @@ export function PortfolioScreen({
               Comparable exposure means same asset class. Lower fee, not necessarily better fund.
               Tax implications and switching costs apply.
             </div>
+          </div>
+        </div>
+      )}
+
+      {lastSuppressed && (
+        <div
+          className="card"
+          style={{
+            marginTop: 8,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+            fontSize: 12,
+            color: "var(--ink-soft)",
+          }}
+        >
+          <span>Hid the fee check for {lastSuppressed.ticker}.</span>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button className="btn ghost sm" onClick={undoSuppress}>
+              Undo
+            </button>
+            <button className="btn ghost sm" onClick={() => setLastSuppressed(null)}>
+              <Icon name="close" size={11} />
+            </button>
           </div>
         </div>
       )}

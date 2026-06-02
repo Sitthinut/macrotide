@@ -215,6 +215,36 @@ export const userMarketIndicators = sqliteTable(
   ],
 );
 
+// User-scoped dismiss / snooze / disagree state for generated Portfolio action
+// items (fee-creep flags today; headline / rebalance later). Those items are
+// recomputed every render and carry no DB row of their own, so we key state by a
+// deterministic item_key (see lib/portfolio/action-item-key.ts). Idempotent: one
+// row per (user, item_key); re-acting upserts the same row.
+export const actionItemStates = sqliteTable(
+  "action_item_states",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    // Owner. NULL in single-owner / AUTH_DISABLED / demo (matches other tables).
+    userId: text("user_id").references(() => user.id),
+    // 'headline' | 'rebalance' | 'fee_creep' — which generator produced the item.
+    itemType: text("item_type").notNull(),
+    // Deterministic identity string (see action-item-key.ts recipe table).
+    itemKey: text("item_key").notNull(),
+    // 'dismissed'  — one-shot hide until the recomputed key changes.
+    // 'snoozed'    — hidden until snoozeUntil, then reappears (self-heals).
+    // 'disagreed'  — permanent suppression of this exact key.
+    state: text("state", { enum: ["dismissed", "snoozed", "disagreed"] }).notNull(),
+    // ISO-8601 UTC; set only when state = 'snoozed', else NULL.
+    snoozeUntil: text("snooze_until"),
+    createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
+    updatedAt: text("updated_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
+  },
+  (table) => [
+    // One state per (user, item) — upsert target.
+    uniqueIndex("idx_action_item_user_key").on(table.userId, table.itemKey),
+  ],
+);
+
 // Generic key-value settings.
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),

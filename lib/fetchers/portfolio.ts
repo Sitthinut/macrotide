@@ -7,7 +7,7 @@ import type { ModelPortfolio as DbModelPortfolio } from "@/lib/db/queries/models
 import type { Plan } from "@/lib/db/queries/plan";
 import type { FundQuote } from "@/lib/db/queries/quotes";
 import type { IndicatorDef } from "@/lib/market/indicators";
-import { useResource } from "./swr";
+import { invalidate, useResource } from "./swr";
 
 export type { Bucket, DbHolding, DbModelPortfolio, FundQuote, JournalEntry, Plan };
 
@@ -166,4 +166,38 @@ export interface FeeCreepFinding {
 
 export function useFeeCreep() {
   return useResource<FeeCreepFinding[]>("/api/portfolio/fee-creep");
+}
+
+// ─── Action-item suppression (dismiss / snooze / disagree) ──────────────────────
+
+export type ActionItemStateValue = "dismissed" | "snoozed" | "disagreed";
+export type SnoozeDuration = "7d" | "30d" | "90d";
+
+/**
+ * Record a dismiss / snooze / disagree on a generated action item, then
+ * revalidate the consuming feeds so the card disappears. `snoozeDuration` is
+ * required (and only used) when `state === "snoozed"`; the server resolves it to
+ * an absolute date.
+ */
+export async function mutateActionItemState(input: {
+  itemType: "fee_creep" | "headline" | "rebalance";
+  itemKey: string;
+  state: ActionItemStateValue;
+  snoozeDuration?: SnoozeDuration;
+}): Promise<void> {
+  await fetch("/api/portfolio/action-items", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  // Revalidate the feeds the suppression affects.
+  await Promise.all([invalidate("/api/portfolio/fee-creep")]);
+}
+
+/** Restore a previously dismissed / snoozed / disagreed item (un-suppress). */
+export async function restoreActionItem(itemKey: string): Promise<void> {
+  await fetch(`/api/portfolio/action-items?key=${encodeURIComponent(itemKey)}`, {
+    method: "DELETE",
+  });
+  await invalidate("/api/portfolio/fee-creep");
 }

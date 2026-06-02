@@ -15,6 +15,14 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Fee-creep flags can now be dismissed, snoozed, or disagreed with.** Each fee
+  check card on the Portfolio screen carries Dismiss, Snooze (7 / 30 / 90 days),
+  and Disagree controls, with an inline Undo. The choice is recorded per fund and
+  survives reloads: a dismissal stays hidden until the finding materially changes,
+  a snooze reappears automatically once its window passes, and a disagree hides
+  the flag permanently. Suppression is applied server-side and is per-user (and
+  ephemeral in the demo), built on a reusable action-item suppression layer the
+  headline and rebalance suggestions can adopt later.
 - **Tapping a holding now opens a read-only detail view instead of the edit
   form.** The Portfolio screen's holding rows open a "Holding detail" sheet that
   reuses the fund detail view — performance, allocation, top holdings, and feeder

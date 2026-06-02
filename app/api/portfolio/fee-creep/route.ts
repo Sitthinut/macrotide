@@ -10,6 +10,8 @@
 
 import { NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
+import { listSuppressed } from "@/lib/db/queries/action-items";
+import { feeCreepKey } from "@/lib/portfolio/action-item-key";
 import { computeFeeCreep } from "@/lib/portfolio/fee-creep";
 
 export const runtime = "nodejs";
@@ -18,6 +20,12 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   return withDb(() => {
     const findings = computeFeeCreep();
-    return NextResponse.json(findings);
+    // Drop findings the user has dismissed, is currently snoozing, or has
+    // disagreed with. Suppression is applied server-side so it's authoritative —
+    // the client never has to know the rules. Expired snoozes self-heal in
+    // listSuppressed (they aren't returned), so the finding reappears.
+    const suppressed = new Set(listSuppressed().map((s) => s.itemKey));
+    const visible = findings.filter((f) => !suppressed.has(feeCreepKey(f.heldTicker)));
+    return NextResponse.json(visible);
   });
 }

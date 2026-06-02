@@ -35,6 +35,7 @@ app.db but share the real market.db read-write (same warm cache as real users).
 | `plans` | The investment plan | Single-row in v1; `markdown`, `selected_model_id`, `user_id` |
 | `journal_entries` | Notes, decisions, questions, reading | `kind`, `tags` (JSON), `pinned`, `archived_at`, `user_id` |
 | `model_portfolios` | Built-in + custom model allocations | `built_in`, `allocation` (JSON slices), risk/return metadata, `user_id` |
+| `action_item_states` | Dismiss / snooze / disagree state for generated Portfolio action items (fee-creep flags today) | one row per (`user_id`, `item_key`); `state` ∈ dismissed/snoozed/disagreed, `snooze_until`, `item_type`. Keyed by a deterministic `item_key` (`lib/portfolio/action-item-key.ts`) since the items carry no row of their own |
 | `settings` | Generic key-value app settings | `key` → `value` (JSON) |
 
 ### Market data (market.db — written by the market layer + the SEC crawl)
