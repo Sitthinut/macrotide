@@ -1,8 +1,8 @@
-import { and, gte, inArray } from "drizzle-orm";
+import { and, gte, inArray, lt, sql } from "drizzle-orm";
 import { inferHoldingCurrency } from "@/lib/market/currency";
 import { buildFxConverter } from "@/lib/market/fx";
 import { demoHoldingSeries } from "@/lib/mock/demo-history-read";
-import { getAppDb, getMarketDb, isDemoRequest } from "../context";
+import { getAppDb, getMarketDb, isDemoRequest, type MarketDb } from "../context";
 import { holdings, navHistory } from "../schema";
 
 export type SeriesRange = "1mo" | "3mo" | "6mo" | "1y" | "5y" | "max";
@@ -86,9 +86,56 @@ function demoNavRows(
     if (seen.has(key)) continue;
     seen.add(key);
     if (!h.units) continue;
+    // demoHoldingSeries supplies the in-window points plus a carry-in dated to
+    // `since`, so every holding has a value on the window's first date.
     const series = demoHoldingSeries(key, since);
     if (!series) continue;
     for (const p of series) rows.push({ ticker: key, date: p.date, nav: p.value / h.units });
+  }
+  return rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+/**
+ * Owner-mode nav_history read with CARRY-IN. Returns the in-window rows
+ * (`date >= since`) PLUS, for each cache key that has NO row exactly on `since`,
+ * its most recent pre-window nav re-dated to `since`. That seeds the forward-fill
+ * so the window's FIRST date is never partial (e.g. a window that opens on a
+ * weekend/holiday still shows every holding). The carry-in date is `since`
+ * itself, so it never widens the plotted timeline before the window start.
+ */
+function marketNavRows(
+  marketDb: MarketDb,
+  cacheKeys: string[],
+  since: string,
+): { ticker: string; date: string; nav: number }[] {
+  const inWindow = marketDb
+    .select({ ticker: navHistory.ticker, date: navHistory.date, nav: navHistory.nav })
+    .from(navHistory)
+    .where(and(inArray(navHistory.ticker, cacheKeys), gte(navHistory.date, since)))
+    .orderBy(navHistory.date)
+    .all();
+
+  // Latest pre-window nav per cache key: group by ticker, take max(date) < since,
+  // then the nav on that row. One grouped query, not a per-key scan. Relies on
+  // SQLite's documented "bare column" rule: with max(date) in the SELECT, the
+  // bare `nav` column comes from the row holding that max date.
+  const carryIn = marketDb
+    .select({
+      ticker: navHistory.ticker,
+      date: sql<string>`max(${navHistory.date})`.as("d"),
+      nav: navHistory.nav,
+    })
+    .from(navHistory)
+    .where(and(inArray(navHistory.ticker, cacheKeys), lt(navHistory.date, since)))
+    .groupBy(navHistory.ticker)
+    .all();
+
+  // Only carry in keys that lack an exact `since` row, re-dating the carry to
+  // `since` so it seeds the fill without adding a pre-window date.
+  const hasSinceRow = new Set(inWindow.filter((r) => r.date === since).map((r) => r.ticker));
+  const rows = [...inWindow];
+  for (const c of carryIn) {
+    if (!hasSinceRow.has(c.ticker)) rows.push({ ticker: c.ticker, date: since, nav: c.nav });
   }
   return rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
@@ -111,19 +158,15 @@ export async function getPortfolioSeries(
   const cacheKeys = Array.from(new Set(allHoldings.map((h) => `${h.quoteSource}:${h.ticker}`)));
 
   // DEMO MODE: source NAV history from the committed fixture instead of
-  // market.db. The fixture holds ~5y of monthly TOTAL value per holding (units ×
-  // NAV, already scaled to the seeded current value, in THB); we divide by the
+  // market.db. The fixture holds ~5y of TOTAL value per holding (units × NAV,
+  // already scaled to the seeded current value, in THB); we divide by the
   // holding's units to recover a per-unit "nav" so the rest of this function —
   // forward-fill, FX (THB→THB = 1), aggregation — runs unchanged. Owner mode is
-  // untouched and still reads market.db. See lib/mock/demo-history.ts.
+  // untouched and still reads market.db. Both sources seed a carry-in on `since`
+  // so the window's first date is never partial. See lib/mock/demo-history.ts.
   const navRows = isDemoRequest()
     ? demoNavRows(allHoldings, since)
-    : marketDb
-        .select()
-        .from(navHistory)
-        .where(and(inArray(navHistory.ticker, cacheKeys), gte(navHistory.date, since)))
-        .orderBy(navHistory.date)
-        .all();
+    : marketNavRows(marketDb, cacheKeys, since);
 
   // ticker (cache key) → ordered [date, nav][]
   const navByKey = new Map<string, { date: string; nav: number }[]>();

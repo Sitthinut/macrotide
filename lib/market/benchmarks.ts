@@ -1,5 +1,7 @@
 import "server-only";
-import { isDemoRequest } from "@/lib/db/context";
+import { and, desc, eq, lt } from "drizzle-orm";
+import { getMarketDb, isDemoRequest } from "@/lib/db/context";
+import { navHistory } from "@/lib/db/schema";
 import { demoIndexSeries } from "@/lib/mock/demo-history-read";
 import { findBenchmark } from "./benchmark-options";
 import { getCachedSeries } from "./cache";
@@ -28,18 +30,36 @@ export async function getBenchmarkSeries(
 ): Promise<BenchmarkSeriesPoint[]> {
   const b = findBenchmark(key);
   if (!b) return [];
+  const since = benchmarkRangeStart(range);
 
-  // DEMO MODE: serve the benchmark overlay from the committed ~5y monthly
-  // fixture instead of market.db. The benchmark `key` (set / sp500 / nasdaq /
-  // nikkei) is also the fixture index key, so the lookup is direct. Owner mode
-  // is untouched and still reads the live cache. See lib/mock/demo-history.ts.
+  // DEMO MODE: serve the benchmark overlay from the committed ~5y fixture instead
+  // of market.db. The benchmark `key` (set / sp500 / nasdaq / nikkei) is also the
+  // fixture index key, so the lookup is direct. demoIndexSeries seeds a carry-in
+  // on `since` so the overlay spans the full window. Owner mode reads the live
+  // cache (with the same carry-in below). See lib/mock/demo-history.ts.
   if (isDemoRequest()) {
-    return demoIndexSeries(key, benchmarkRangeStart(range));
+    return demoIndexSeries(key, since);
   }
 
   try {
     const cached = await getCachedSeries(b.source, b.ticker, range);
-    return cached.series.map((p) => ({ date: p.date, value: p.close }));
+    const series = cached.series.map((p) => ({ date: p.date, value: p.close }));
+    // CARRY-IN: if the cached series' first in-window point is after `since`
+    // (the window opened on a non-trading day for this index), seed the left edge
+    // with the most recent pre-window close, re-dated to `since`, so the overlay
+    // spans the full window and the client rebases from the same start as the
+    // portfolio line. Re-dating to `since` keeps the axis at the window start.
+    if (series.length > 0 && series[0].date > since) {
+      const carry = getMarketDb()
+        .select({ nav: navHistory.nav })
+        .from(navHistory)
+        .where(and(eq(navHistory.ticker, `${b.source}:${b.ticker}`), lt(navHistory.date, since)))
+        .orderBy(desc(navHistory.date))
+        .limit(1)
+        .get();
+      if (carry) series.unshift({ date: since, value: carry.nav });
+    }
+    return series;
   } catch {
     return [];
   }

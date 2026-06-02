@@ -46,6 +46,15 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Fixed
 
+- **The performance chart's left edge no longer jumps on shorter ranges.** When a
+  range window (1M/3M/6M/1Y) opened on a non-trading day, holdings with no price
+  exactly on that date were missing from the first plotted point, so the chart
+  started at a fraction of the real total and snapped up a day or two later. The
+  value series now carries in each holding's most recent price from before the
+  window to seed the first in-window date (without plotting any date earlier than
+  the window start), and the benchmark overlay does the same — so every range
+  starts with the full book and a complete benchmark line. Applies to both real
+  accounts and the demo.
 - **Navigating to another screen now opens scrolled to the top.** Screens are
   swapped in place inside one persistent scroll container, which previously kept
   its scroll offset across the swap — so opening the Templates view from the

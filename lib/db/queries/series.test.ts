@@ -173,3 +173,63 @@ describe("getPortfolioSeries — FX conversion", () => {
     expect(missingFx).toContain("USD");
   });
 });
+
+describe("getPortfolioSeries — carry-in (owner mode left edge)", () => {
+  /** Insert a nav row at an arbitrary date offset from today. */
+  function navAtOffset(key: string, daysAgo: number, nav: number): void {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - daysAgo);
+    marketDb
+      .insert(navHistory)
+      .values({ ticker: key, date: d.toISOString().slice(0, 10), nav })
+      .run();
+    marketDb
+      .insert(fundQuotes)
+      .values({ ticker: key, nav, updatedAt: new Date().toISOString() })
+      .onConflictDoNothing()
+      .run();
+  }
+
+  it("seeds the window's first date from the last pre-window nav", async () => {
+    seedBucket(appDb);
+    seedHolding(appDb, { ticker: "EXAMPLE-FUND-A", quoteSource: "thai_mutual_fund", units: 10 });
+    // Only data point is BEFORE the 1mo window (45 days ago). Without carry-in
+    // the windowed query returns nothing and the holding vanishes; with carry-in
+    // it's forward-filled from that pre-window value onto the window's first date.
+    navAtOffset("thai_mutual_fund:EXAMPLE-FUND-A", 45, 12);
+
+    const { aggregate } = await run(() => getPortfolioSeries("1mo"));
+    expect(aggregate.length).toBeGreaterThan(0);
+    expect(aggregate[0].value).toBe(120); // 10 units * 12, carried in
+  });
+
+  it("left edge includes EVERY holding that has prior data (no partial edge)", async () => {
+    seedBucket(appDb);
+    // Both funds were held before the window opened: A only has a pre-window
+    // point; B has both a pre-window point and a later in-window one.
+    seedHolding(appDb, { ticker: "EXAMPLE-FUND-A", quoteSource: "thai_mutual_fund", units: 10 });
+    seedHolding(appDb, { ticker: "EXAMPLE-FUND-B", quoteSource: "thai_mutual_fund", units: 5 });
+    navAtOffset("thai_mutual_fund:EXAMPLE-FUND-A", 50, 12); // 10*12 = 120 carried in
+    navAtOffset("thai_mutual_fund:EXAMPLE-FUND-B", 40, 20); // 5*20 = 100 carried in (pre-window)
+    navAtOffset("thai_mutual_fund:EXAMPLE-FUND-B", 10, 22); // later in-window move
+
+    const { aggregate } = await run(() => getPortfolioSeries("1mo"));
+    // Both funds present on the first plotted date → 120 + 100, no partial edge.
+    expect(aggregate[0].value).toBe(220);
+  });
+
+  it("does not widen the timeline before the window start", async () => {
+    seedBucket(appDb);
+    seedHolding(appDb, { ticker: "EXAMPLE-FUND-A", quoteSource: "thai_mutual_fund", units: 10 });
+    navAtOffset("thai_mutual_fund:EXAMPLE-FUND-A", 45, 12);
+
+    const since = (() => {
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() - 31);
+      return d.toISOString().slice(0, 10);
+    })();
+    const { aggregate } = await run(() => getPortfolioSeries("1mo"));
+    // No plotted date precedes the window start; the carry-in is re-dated to it.
+    expect(aggregate.every((p) => p.date >= since)).toBe(true);
+  });
+});

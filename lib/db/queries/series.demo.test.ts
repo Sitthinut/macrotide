@@ -78,6 +78,21 @@ describe("getPortfolioSeries — demo mode (fixture-backed)", () => {
     expect(aggregate.length).toBeGreaterThanOrEqual(18);
   });
 
+  it("the window's FIRST date is full, not partial (carry-in seeds the left edge)", async () => {
+    // Total seeded book value (all holdings' last fixture point).
+    const fullBook = Object.values(DEMO_HOLDING_HISTORY).reduce(
+      (s, series) => s + (series.at(-1)?.[1] ?? 0),
+      0,
+    );
+    // The first 1M point must already include every holding — close to the full
+    // book (a month's drift, never a fraction like 3/12 ≈ 20%). Regression guard
+    // for the left-edge jump: pre-fix this was ~250k (3 of 12 funds present).
+    const { aggregate } = await runDemo(() => getPortfolioSeries("1mo"));
+    const first = aggregate[0].value;
+    expect(first).toBeGreaterThan(fullBook * 0.85);
+    expect(first).toBeLessThan(fullBook * 1.15);
+  });
+
   it("the demo aggregate equals the sum of every seeded holding's current value", async () => {
     const { aggregate } = await runDemo(() => getPortfolioSeries("max"));
     const lastTotal = aggregate.at(-1)?.value as number;
@@ -115,6 +130,18 @@ describe("getBenchmarkSeries — demo mode (fixture-backed)", () => {
   it("the benchmark recent window is daily (1-month ≈ 20+ points)", async () => {
     const series = await runDemo(() => getBenchmarkSeries("sp500", "1mo"));
     expect(series.length).toBeGreaterThanOrEqual(18);
+  });
+
+  it("the benchmark window's first point is on/before the range start (carry-in)", async () => {
+    const since = (() => {
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() - 31); // matches the "1mo" window
+      return d.toISOString().slice(0, 10);
+    })();
+    const series = await runDemo(() => getBenchmarkSeries("sp500", "1mo"));
+    // First point seeds the left edge: dated at/before `since`, so the overlay
+    // spans the full window (the client rebases from the same start).
+    expect(series[0].date <= since).toBe(true);
   });
 
   it("respects the range window", async () => {
