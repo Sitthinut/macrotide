@@ -15,6 +15,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Demo portfolio history extended to a multi-year span so the All-range chart
+  is meaningful.** The seeded NAV series now spans ~3 years of monthly points
+  (deterministically generated, anchored to the current value) instead of a
+  handful of recent months, so the Portfolio chart's "All" range shows a real
+  long-term curve rather than a near-flat line.
+
 - **Advisor eval harness — a committed benchmark for the chat loop.**
   `scripts/eval/` promotes the throwaway model-trial script into a repeatable
   eval: a hermetic synthetic tool surface (`EXAMPLE-FUND-*`, never the live DB),

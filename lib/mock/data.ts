@@ -22,6 +22,84 @@ import type {
   UserPlan,
 } from "@/lib/static/types";
 
+// ===== Synthetic NAV-history generator =====
+// The demo portfolio chart's "All" range needs a multi-year curve, not the
+// handful of recent points it once had. This builds a deterministic ~3-year
+// monthly series (36 points) ending at the bucket's current value, with a
+// generally upward trend and mild month-to-month volatility — no Math.random /
+// Date.now (banned: they'd make the seed non-reproducible).
+//
+// `wobble` is a fixed per-index oscillation (two out-of-phase sines) so the
+// line breathes without implausible spikes. `endLabel` anchors the last point
+// to the existing latest month; earlier labels count backwards from it.
+
+const SERIES_MONTHS = 36;
+
+// Month labels go back `count` months from (and including) `endLabel`, in the
+// existing "Mon YY" shape (e.g. "May 26"). Kept as a small table-driven helper
+// so the formatting never drifts from the hand-written points it replaces.
+const MONTH_ABBR = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+function monthLabelsEndingAt(endLabel: string, count: number): string[] {
+  const [mon, yy] = endLabel.split(" ");
+  const endMonthIdx = MONTH_ABBR.indexOf(mon);
+  const endYear = 2000 + Number(yy);
+  // Absolute month index (year*12 + month) of the final point.
+  const endAbs = endYear * 12 + endMonthIdx;
+  const labels: string[] = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const abs = endAbs - i;
+    const m = ((abs % 12) + 12) % 12;
+    const y = Math.floor(abs / 12);
+    labels.push(`${MONTH_ABBR[m]} ${String(y % 100).padStart(2, "0")}`);
+  }
+  return labels;
+}
+
+// Deterministic mild oscillation in [-1, 1], smooth and reproducible per index.
+function wobble(i: number): number {
+  return 0.6 * Math.sin(i * 0.9) + 0.4 * Math.sin(i * 0.37 + 1.3);
+}
+
+// Build a `count`-point monthly series that ENDS at `endValue` on `endLabel`.
+// `cagr` sets the long-run drift; `vol` scales the monthly wobble around it.
+// Values are derived from the end backwards so the latest point (the one the
+// rest of the demo already keys off) stays exactly as authored.
+function syntheticSeries(
+  endValue: number,
+  endLabel: string,
+  cagr: number,
+  vol: number,
+  count = SERIES_MONTHS,
+): SeriesPoint[] {
+  const labels = monthLabelsEndingAt(endLabel, count);
+  const monthlyGrowth = (1 + cagr) ** (1 / 12);
+  // Zero out the wobble at the final index so the last point lands EXACTLY on
+  // `endValue` — the rest of the demo keys off that latest figure.
+  const endWobble = wobble(count - 1);
+  return labels.map((d, i) => {
+    // Months before the end point (0 at the end, count-1 at the start).
+    const back = count - 1 - i;
+    // Undo the trend to reach this month's baseline, then apply the wobble.
+    const baseline = endValue / monthlyGrowth ** back;
+    const v = baseline * (1 + vol * (wobble(i) - endWobble));
+    return { d, v: Math.round(v) };
+  });
+}
+
 // ===== PORTFOLIOS: user has multiple, each with own holdings + constraints =====
 export const PORTFOLIOS: Portfolio[] = [
   {
@@ -38,15 +116,8 @@ export const PORTFOLIOS: Portfolio[] = [
     asOf: "20 May 2026, 14:32 ICT",
     brokerage: "Demo Broker",
     perfPct: { d7: 1.1, d30: 3.2, ytd: 8.4, y1: 12.1 },
-    series: [
-      { d: "Nov 25", v: 880000 },
-      { d: "Dec 25", v: 894720 },
-      { d: "Jan 26", v: 876160 },
-      { d: "Feb 26", v: 913600 },
-      { d: "Mar 26", v: 944240 },
-      { d: "Apr 26", v: 974880 },
-      { d: "May 26", v: 1024280 },
-    ],
+    // ~3 years of monthly points ending at the current ฿1,024,280 (May 26).
+    series: syntheticSeries(1024280, "May 26", 0.12, 0.025),
     holdings: [
       {
         ticker: "ASP-S&P500",
@@ -173,15 +244,8 @@ export const PORTFOLIOS: Portfolio[] = [
     asOf: "20 May 2026, 14:32 ICT",
     brokerage: "Demo Broker",
     perfPct: { d7: 0.4, d30: 1.1, ytd: 3.2, y1: 4.0 },
-    series: [
-      { d: "Nov 25", v: 180000 },
-      { d: "Dec 25", v: 181400 },
-      { d: "Jan 26", v: 179800 },
-      { d: "Feb 26", v: 182300 },
-      { d: "Mar 26", v: 184100 },
-      { d: "Apr 26", v: 185600 },
-      { d: "May 26", v: 186940 },
-    ],
+    // Conservative RMF sleeve — gentler drift, lower volatility.
+    series: syntheticSeries(186940, "May 26", 0.05, 0.012),
     holdings: [
       {
         ticker: "K-USARMF",
@@ -254,15 +318,8 @@ export const PORTFOLIOS: Portfolio[] = [
     asOf: "20 May 2026, 14:32 ICT",
     brokerage: "Demo Broker",
     perfPct: { d7: 0.8, d30: 2.4, ytd: 4.2, y1: 6.1 },
-    series: [
-      { d: "Nov 25", v: 73530 },
-      { d: "Dec 25", v: 74100 },
-      { d: "Jan 26", v: 72800 },
-      { d: "Feb 26", v: 74200 },
-      { d: "Mar 26", v: 75100 },
-      { d: "Apr 26", v: 73900 },
-      { d: "May 26", v: 73530 },
-    ],
+    // Sandbox bucket — flatter long-run drift but choppier month to month.
+    series: syntheticSeries(73530, "May 26", 0.03, 0.03),
     holdings: [
       {
         ticker: "1DIV",
