@@ -328,7 +328,7 @@
 .mt-imgslot[data-shot="real"] {
   background: repeating-linear-gradient(135deg, #f1efe7 0 16px, #eceae2 16px 32px);
 }
-.mt-imgslot[data-shot="abstract"] {
+.mt-imgslot[data-shot="decorative"] {
   background: radial-gradient(140% 80% at 50% 110%, #d8d5cb 0%, #ece9e0 60%, #f3f1ea 100%);
 }
 .mt-imgslot-inner {
@@ -351,22 +351,9 @@
   border-radius: 999px;
   align-self: flex-start;
 }
-.mt-imgslot[data-shot="abstract"] .mt-imgslot-kind {
+.mt-imgslot[data-shot="decorative"] .mt-imgslot-kind {
   color: var(--accent-2-ink);
   background: var(--accent-2-soft);
-}
-.mt-imgslot-prompt {
-  font-family: var(--mt-font-mono);
-  font-size: 12.5px;
-  color: var(--ink-soft);
-  line-height: 1.5;
-  max-width: 62ch;
-}
-.mt-imgslot-spec {
-  font-family: var(--mt-font-mono);
-  font-size: 11px;
-  color: var(--muted);
-  letter-spacing: 0.04em;
 }
 .mt-imgslot img,
 .mt-imgslot video {
@@ -480,7 +467,7 @@
   }
 }
 
-/* Floating overlays over hero abstract image */
+/* Floating overlays over the hero media */
 .mt-hero-overlays {
   position: absolute;
   inset: 0;
@@ -1343,13 +1330,6 @@
 .mt-shot-phone .mt-imgslot-inner {
   padding: 28px 22px;
   justify-content: flex-end;
-}
-.mt-shot-phone .mt-imgslot-prompt {
-  font-size: 11.5px;
-  line-height: 1.45;
-}
-.mt-shot-phone .mt-imgslot-spec {
-  font-size: 10.5px;
 }
 .mt-shot-phone::before {
   content: "";

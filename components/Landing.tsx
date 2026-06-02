@@ -10,8 +10,8 @@
 // Honesty rule: anything not yet shipped is described as planned, never
 // present. Status table is the README; intent is product-direction.md.
 //
-// Image-slot strategy: each <ImageSlot> keeps the source prompt in code, while
-// the rendered page uses project-local screenshots and generated hero art.
+// Image-slot strategy: render project-local screenshots and media assets,
+// with a generic placeholder only if an expected asset is missing.
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -43,40 +43,44 @@ function ScreenSlot({ src, alt, fallback }: { src: string; alt: string; fallback
 }
 
 /* ============================================================
- * <ImageSlot> — placeholder for real screenshots / abstract images
+ * <ImageSlot> — placeholder for screenshots and media assets.
  *
- *   <ImageSlot kind="real" prompt="…" spec="…">
+ *   <ImageSlot kind="real">
  *     <img src="/landing/portfolio.png" alt="" />
  *   </ImageSlot>
  *
- * Drop an <img> or <video> in as a child; CSS `:has()` hides the prompt.
+ * Drop an <img> or <video> in as a child.
  * ============================================================ */
 interface ImageSlotProps {
-  kind?: "real" | "abstract";
-  prompt: string;
-  spec?: string;
+  kind?: "real" | "decorative";
   className?: string;
   children?: ReactNode;
+  decorative?: boolean;
   style?: CSSProperties;
 }
 
 function ImageSlot({
   kind = "real",
-  prompt,
-  spec,
   className = "",
   children,
+  decorative = false,
   style,
 }: ImageSlotProps) {
-  const label = kind === "real" ? "Real app screenshot" : "Abstract image";
+  const label = kind === "real" ? "Screenshot unavailable" : "Image unavailable";
+  const showPlaceholder = !children;
   return (
-    <figure className={`mt-imgslot ${className}`} data-shot={kind} style={style}>
+    <figure
+      className={`mt-imgslot ${className}`}
+      data-shot={kind}
+      aria-hidden={decorative ? "true" : undefined}
+      style={style}
+    >
       {children}
-      <div className="mt-imgslot-inner">
-        <span className="mt-imgslot-kind">{label}</span>
-        <div className="mt-imgslot-prompt">{prompt}</div>
-        {spec ? <div className="mt-imgslot-spec">{spec}</div> : null}
-      </div>
+      {showPlaceholder ? (
+        <div className="mt-imgslot-inner">
+          <span className="mt-imgslot-kind">{label}</span>
+        </div>
+      ) : null}
     </figure>
   );
 }
@@ -105,7 +109,7 @@ function ArrowIcon() {
 }
 
 /* ============================================================
- * Hero — center-aligned, single short headline, abstract image
+ * Hero — center-aligned, single short headline, visual stage
  * ============================================================ */
 function Hero({ onSignIn, onDemo, demoBusy }: HeroProps) {
   return (
@@ -151,12 +155,7 @@ function Hero({ onSignIn, onDemo, demoBusy }: HeroProps) {
 
       <div className="mt-container">
         <div className="mt-hero-stage">
-          <ImageSlot
-            kind="abstract"
-            className="mt-hero-image"
-            prompt="Calm horizon at dawn — a single thin band of cool teal water between soft warm sand and a hazy off-white sky. Slow long-exposure, painterly grain, no people, no boats, no text. Suggests tide, patience, evidence. Subtle warm-to-cool gradient. Premium, restrained, financial-publication feel."
-            spec="aspect-ratio 16 / 9 · prefer 2400×1350 · JPG or WebP"
-          >
+          <ImageSlot kind="decorative" className="mt-hero-image" decorative>
             <Image
               src="/landing/hero-tide.jpg"
               alt=""
@@ -625,13 +624,7 @@ function DesktopView() {
           <ScreenSlot
             src="/landing/desktop-portfolio.png"
             alt="Macrotide on desktop"
-            fallback={
-              <ImageSlot
-                kind="real"
-                prompt="Real app screenshot — Macrotide portfolio dashboard at a laptop viewport."
-                spec="aspect 16 / 10 · prefer 2880×1800 · PNG"
-              />
-            }
+            fallback={<ImageSlot kind="real" />}
           />
         </div>
       </div>
