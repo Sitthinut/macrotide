@@ -29,6 +29,7 @@ import { usePortfolioView, useSelectedModelId } from "@/lib/fetchers/legacy";
 import { usePlan } from "@/lib/fetchers/portfolio";
 import { invalidate, useResource } from "@/lib/fetchers/swr";
 import type { AdvisorScreenContext } from "@/lib/portfolio/chat-suggestions";
+import { scrollScreenToTop } from "@/lib/scrollScreenToTop";
 import type { Portfolio } from "@/lib/static/types";
 import { setActiveId, usePortfolioUi } from "@/lib/stores/portfolio-ui";
 import { useScrollHide } from "@/lib/useScrollHide";
@@ -282,6 +283,19 @@ export function App() {
       setScreen("portfolio");
     }
   }, [isWide, screen]);
+
+  // Screens are swapped in place inside one persistent scroll container, which
+  // keeps its scrollTop across a swap. Reset to the top whenever the screen
+  // changes so a new screen (e.g. Templates opened from Portfolio) starts at the
+  // top instead of inheriting the previous screen's scroll offset. Layout effect
+  // so it lands before paint — no flash of the scrolled position. `screen` is
+  // the trigger: re-run on every screen change.
+  useLayoutEffect(() => {
+    // Reference `screen` so it's a genuine dependency, not just a trigger token
+    // (and so this stays correct if a future screen ever opts out).
+    void screen;
+    scrollScreenToTop();
+  }, [screen]);
 
   // Portfolio sheet intents come from the shared store (PortfolioScreen and
   // PortfoliosPanel both request through it). Open the create sheet whenever the

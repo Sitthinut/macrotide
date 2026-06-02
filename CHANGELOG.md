@@ -34,6 +34,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Fixed
 
+- **Navigating to another screen now opens scrolled to the top.** Screens are
+  swapped in place inside one persistent scroll container, which previously kept
+  its scroll offset across the swap — so opening the Templates view from the
+  Portfolio screen inherited the Portfolio scroll position and appeared partway
+  down. The scroll container is now reset to the top on every screen change, on
+  both the mobile (window) and tablet/desktop (in-pane) scroll roots.
 - **Performance-vs-index now converts foreign holdings to baht before summing.**
   The portfolio value/return series previously added each holding's `units × NAV`
   across currencies (THB funds, USD ETFs, JPY indices) without conversion, then
