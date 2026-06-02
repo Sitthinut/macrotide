@@ -275,4 +275,35 @@ describe("getCheaperAlternatives", () => {
       expect(getCheaperAlternatives("HELD2")).toEqual([]);
     });
   });
+
+  it("does NOT offer a different-region peer (same asset class, wrong exposure)", () => {
+    withDb(() => {
+      // Held: a foreign/global equity fund. A cheaper DOMESTIC equity fund is
+      // the same broad asset class but a different exposure — must be excluded.
+      upsertFund(fund("GLOBAL-EQ", { investRegion: "foreign" }));
+      upsertFund(fund("DOMESTIC-EQ", { investRegion: "domestic" }));
+      upsertFund(fund("GLOBAL-EQ-CHEAP", { investRegion: "foreign" }));
+      upsertFundFees([
+        ter("GLOBAL-EQ", 1.0),
+        ter("DOMESTIC-EQ", 0.2), // cheaper but wrong region
+        ter("GLOBAL-EQ-CHEAP", 0.4), // cheaper AND same region
+      ]);
+      const alts = getCheaperAlternatives("GLOBAL-EQ").map((f) => f.projId);
+      expect(alts).toEqual(["GLOBAL-EQ-CHEAP"]);
+      expect(alts).not.toContain("DOMESTIC-EQ");
+    });
+  });
+
+  it("matches region exactly including null (no cross-region match on null)", () => {
+    withDb(() => {
+      // Held fund has no region. A cheaper fund with a non-null region must not
+      // be offered; a cheaper region-less fund of the same class still is.
+      upsertFund(fund("NOREGION", { investRegion: null }));
+      upsertFund(fund("FOREIGN-CHEAP", { investRegion: "foreign" }));
+      upsertFund(fund("NOREGION-CHEAP", { investRegion: null }));
+      upsertFundFees([ter("NOREGION", 1.0), ter("FOREIGN-CHEAP", 0.2), ter("NOREGION-CHEAP", 0.5)]);
+      const alts = getCheaperAlternatives("NOREGION").map((f) => f.projId);
+      expect(alts).toEqual(["NOREGION-CHEAP"]);
+    });
+  });
 });

@@ -282,9 +282,20 @@ export function findFunds(filter: FindFundsFilter = {}): FundWithTer[] {
 
 /**
  * Given a fund the user holds, find cheaper funds with comparable exposure
- * (same normalized asset class, falling back to SEC fund type) ranked by TER.
- * Powers the "fee creep" flag in Analyze and the advisor's cheaper-alternative
- * suggestion. Returns only funds strictly cheaper than the reference, capped.
+ * ranked by TER. Powers the "fee creep" flag in Analyze and the advisor's
+ * cheaper-alternative suggestion. Returns only funds strictly cheaper than the
+ * reference, capped.
+ *
+ * "Comparable" means same ACTUAL exposure, not just broad asset class: a
+ * suggested peer must share both the reference fund's normalized `assetClass`
+ * AND its geographic mandate (`investRegion`). Asset class alone is too loose —
+ * it would offer a Thai-equity fund as an "alternative" to a global-equity one.
+ * We deliberately err toward showing nothing over showing a wrong match.
+ *
+ * Region matching is exact, including null: if the reference has no region we
+ * only match other region-less funds, never a fund with a differing non-null
+ * region. (`findFunds`' `region` filter can't express "region IS NULL", so we
+ * apply the region predicate here in JS.)
  */
 export function getCheaperAlternatives(projId: string, limit = 5): FundWithTer[] {
   const ref = getMarketDb().select().from(fundCatalog).where(eq(fundCatalog.projId, projId)).get();
@@ -297,7 +308,13 @@ export function getCheaperAlternatives(projId: string, limit = 5): FundWithTer[]
     limit: 200,
   });
   return peers
-    .filter((f) => f.projId !== projId && f.ter != null && f.ter < refTer)
+    .filter(
+      (f) =>
+        f.projId !== projId &&
+        f.ter != null &&
+        f.ter < refTer &&
+        f.investRegion === ref.investRegion,
+    )
     .slice(0, limit);
 }
 

@@ -1,9 +1,9 @@
 // GET /api/portfolio/fee-creep — fee-creep analysis for the current portfolio.
 //
-// Returns the list of held funds that have a cheaper active peer in the same
-// asset class. Each finding includes the held fund's name, current TER, up to
-// three cheaper alternatives sorted cheapest-first, and the potential annual
-// fee saving in percentage-points.
+// Returns the list of held funds that have a cheaper active peer with the same
+// exposure (asset class + geographic region). Each finding includes the held
+// fund's name, current TER, up to three cheaper alternatives sorted
+// cheapest-first, and the potential annual fee saving in percentage-points.
 //
 // An empty array is a valid (and happy-path) response — it means the user is
 // already paying the lowest fees available for their exposure.

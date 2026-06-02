@@ -13,6 +13,10 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ## [Unreleased]
 
+### Fixed
+
+- Fee-creep now only suggests cheaper funds with the same exposure (region + asset class), not just the same broad asset class — so a global-equity fund is no longer offered a Thai/domestic-equity "alternative".
+
 ### Added
 
 - **Demo portfolio history extended to a multi-year span so the All-range chart
