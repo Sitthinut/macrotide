@@ -68,7 +68,7 @@ function holdingFromDb(
     d1: q?.d1Pct ?? 0,
     ytd: q?.ytdPct ?? 0,
     y1: q?.y1Pct ?? 0,
-    ter: h.ter ?? 0,
+    ter: h.ter ?? null,
     color: h.color ?? "var(--accent)",
     source: h.source ?? fallbackSource,
     quoteSource: h.quoteSource,

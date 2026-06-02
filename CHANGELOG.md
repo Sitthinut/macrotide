@@ -35,6 +35,22 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   accounted for), and that benchmarks use price-return indices, which exclude
   dividends.
 - Fee-creep now only suggests cheaper funds with the same exposure (region + asset class), not just the same broad asset class — so a global-equity fund is no longer offered a Thai/domestic-equity "alternative".
+- **The portfolio score and its "why this score" breakdown now show for any book
+  with holdings, even without a target model.** The breakdown card was previously
+  hidden unless a target model was selected, so users tracking no plan never saw
+  their score at all; it now renders whenever there are holdings and a score.
+- **A portfolio with no target model no longer has its score inflated by an
+  auto-awarded drift component.** Previously the drift component silently scored
+  full marks when no target was set, rewarding the absence of a plan. Drift is now
+  excluded from the composite when there's no target and the remaining components
+  (fees, diversification, cash) are rescaled onto 0–100; the breakdown shows the
+  drift row as "Not scored — set a target model" rather than a full mark.
+- **Holdings with an unpublished expense ratio no longer inflate the fee score.**
+  The blended fee was computed with unknown TERs treated as 0% (perfect), making a
+  book with missing fee data look cheaper than it is. The blended rate is now
+  weighted over holdings with a known TER only, and the fee component notes "fee
+  data incomplete for N holdings" when any are missing — missing data neither
+  helps nor hurts the score.
 
 ### Added
 

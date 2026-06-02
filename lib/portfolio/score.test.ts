@@ -19,7 +19,7 @@ function holding(partial: Partial<Holding> & { ticker: string; value: number }):
     d1: 0,
     ytd: 0,
     y1: 0,
-    ter: partial.ter ?? 0,
+    ter: partial.ter === undefined ? 0 : partial.ter,
     color: "var(--accent)",
     source: "",
   };
@@ -28,8 +28,8 @@ function holding(partial: Partial<Holding> & { ticker: string; value: number }):
 // ─── Edge cases ──────────────────────────────────────────────────────────────
 
 describe("scorePortfolio — empty portfolio", () => {
-  it("returns full marks except fees=0 and concentration=25 for an empty portfolio", () => {
-    // Empty portfolio: no holdings, totalValue = 0
+  it("excludes drift (no target) and renormalises the rest for an empty portfolio", () => {
+    // Empty portfolio: no holdings, totalValue = 0, no target.
     const health = computeHealth([], 0, null);
     const score = scorePortfolio(health, false);
 
@@ -39,9 +39,10 @@ describe("scorePortfolio — empty portfolio", () => {
     expect(score.components).toHaveLength(4);
     expect(score.hasTarget).toBe(false);
 
-    // Drift: no target → full marks (30)
+    // Drift: no target → NOT scored (0/30, excluded from total).
     const drift = score.components.find((c) => c.key === "drift");
-    expect(drift?.score).toBe(30);
+    expect(drift?.score).toBe(0);
+    expect(drift?.detail).toContain("Not scored");
 
     // Cash: 0% cash → full marks (20)
     const cash = score.components.find((c) => c.key === "cash");
@@ -54,6 +55,10 @@ describe("scorePortfolio — empty portfolio", () => {
     // Fees: TER = 0 → 25 pts
     const fees = score.components.find((c) => c.key === "fees");
     expect(fees?.score).toBe(25);
+
+    // total = renormalise(fees 25 + conc 25 + cash 20 = 70 of 65 max) → 100.
+    // (An empty book has nothing to penalise on the scored axes → 100.)
+    expect(score.total).toBe(100);
   });
 });
 
@@ -132,14 +137,79 @@ describe("scorePortfolio — no target (hasTarget = false)", () => {
     holding({ ticker: "K-FIXED-A", value: 200, class: "bond", ter: 0.5 }),
   ];
 
-  it("awards full drift marks when no target is set", () => {
+  it("does NOT score drift when no target is set (0/30, CTA detail)", () => {
     const health = computeHealth(holdings, 1000, null);
     const score = scorePortfolio(health, false);
     const drift = score.components.find((c) => c.key === "drift");
-    expect(drift?.score).toBe(30);
+    expect(drift?.score).toBe(0);
     expect(drift?.max).toBe(30);
-    expect(drift?.detail).toContain("No target set");
+    expect(drift?.detail).toContain("Not scored");
+    expect(drift?.detail).toContain("set a target");
     expect(score.hasTarget).toBe(false);
+  });
+
+  it("excludes drift from the total and renormalises fees+conc+cash onto 0–100", () => {
+    const health = computeHealth(holdings, 1000, null);
+    const score = scorePortfolio(health, false);
+
+    const scored = score.components.filter((c) => c.key !== "drift");
+    const scoredSum = scored.reduce((s, c) => s + c.score, 0);
+    const scoredMax = scored.reduce((s, c) => s + c.max, 0); // fees 25 + conc 25 + cash 20 = 70
+
+    // total must equal round(scoredSum / scoredMax * 100), and must NOT include
+    // any drift points.
+    const expected = Math.round((scoredSum / scoredMax) * 100);
+    expect(score.total).toBe(expected);
+
+    // Sanity: the renormalised total scales the 70-point sum up onto 0–100,
+    // and never exceeds 100.
+    expect(score.total).toBeGreaterThanOrEqual(scoredSum);
+    expect(score.total).toBeLessThanOrEqual(100);
+  });
+
+  it("does not inflate the headline vs the with-target equivalent", () => {
+    // Same holdings; once with a perfectly-matched target, once without.
+    // The old code auto-awarded drift 30 with no target, which inflated the
+    // headline. With renormalisation, the no-target total should NOT exceed
+    // the on-target total (which earns real drift points).
+    const target: MixSlice[] = [
+      { label: "US Equity", pct: 80, ticker: "SCBS&P500", color: "var(--accent)" },
+      { label: "Thai Bonds", pct: 20, ticker: "K-FIXED-A", color: "#F4A434" },
+    ];
+    const withTarget = scorePortfolio(computeHealth(holdings, 1000, target), true);
+    const noTarget = scorePortfolio(computeHealth(holdings, 1000, null), false);
+    // On-target here is a perfect match → drift 30; no-target renormalises the
+    // weaker axes (TER 1.3% blended) up, but must not beat the on-target score.
+    expect(noTarget.total).toBeLessThanOrEqual(withTarget.total);
+  });
+});
+
+// ─── Missing-fee handling ─────────────────────────────────────────────────────
+
+describe("scorePortfolio — unknown TER (null)", () => {
+  it("does not let unknown fees inflate the fee sub-score", () => {
+    // One expensive known fund + one unknown-fee fund of equal value. The fee
+    // score must reflect the known 1.7% rate, NOT a blended ~0.85% that the old
+    // `ter ?? 0` would have produced by scoring the unknown as free.
+    const holdings: Holding[] = [
+      holding({ ticker: "PRICEY", value: 500, ter: 1.7 }),
+      holding({ ticker: "MYSTERY", value: 500, ter: null }),
+    ];
+    const score = scorePortfolio(computeHealth(holdings, 1000, null), false);
+    const fees = score.components.find((c) => c.key === "fees");
+
+    // blendedTer over KNOWN only = 1.7% → max(0, round(25*(1-(1.7-0.2)/1.8))) = 4
+    expect(fees?.score).toBe(4);
+    // and the component flags the incomplete data.
+    expect(fees?.detail).toContain("Fee data incomplete for 1 holding");
+  });
+
+  it("treats an explicit 0% TER as known (index-grade), not unknown", () => {
+    const holdings: Holding[] = [holding({ ticker: "CHEAP", value: 1000, ter: 0 })];
+    const score = scorePortfolio(computeHealth(holdings, 1000, null), false);
+    const fees = score.components.find((c) => c.key === "fees");
+    expect(fees?.score).toBe(25);
+    expect(fees?.detail).not.toContain("incomplete");
   });
 });
 
@@ -247,11 +317,28 @@ describe("scorePortfolio — structural invariants", () => {
     holding({ ticker: "KFCASH-A", value: 100, class: "cash", ter: 0.1 }),
   ];
 
-  it("total equals sum of component scores", () => {
-    const health = computeHealth(someHoldings, 1000, null);
-    const score = scorePortfolio(health, false);
+  it("total equals the simple sum of all components WHEN a target is set", () => {
+    const target: MixSlice[] = [
+      { label: "US Equity", pct: 60, ticker: "SCBS&P500", color: "var(--accent)" },
+      { label: "Thai Bonds", pct: 30, ticker: "K-FIXED-A", color: "#F4A434" },
+      { label: "Cash", pct: 10, ticker: "KFCASH-A", color: "#9E9EA8" },
+    ];
+    const health = computeHealth(someHoldings, 1000, target);
+    const score = scorePortfolio(health, true);
     const componentSum = score.components.reduce((s, c) => s + c.score, 0);
     expect(score.total).toBe(componentSum);
+  });
+
+  it("total renormalises (excludes drift) WHEN no target is set", () => {
+    const health = computeHealth(someHoldings, 1000, null);
+    const score = scorePortfolio(health, false);
+    const scored = score.components.filter((c) => c.key !== "drift");
+    const scoredSum = scored.reduce((s, c) => s + c.score, 0);
+    const scoredMax = scored.reduce((s, c) => s + c.max, 0); // 70
+    expect(score.total).toBe(Math.round((scoredSum / scoredMax) * 100));
+    // and the raw 4-way sum (which includes a 0 drift) is NOT the total.
+    const rawSum = score.components.reduce((s, c) => s + c.score, 0);
+    expect(score.total).toBeGreaterThanOrEqual(rawSum);
   });
 
   it("component maxes sum to 100", () => {

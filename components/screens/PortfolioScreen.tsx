@@ -39,7 +39,8 @@ function holdingToFormValues(h: Holding, fallbackBucketId: string): HoldingFormV
     region: h.region,
     units: h.units,
     avgCost: h.units > 0 ? h.cost / h.units : 0,
-    ter: h.ter,
+    // The edit form represents an unknown fee as 0 (the field starts blank).
+    ter: h.ter ?? 0,
     source: h.source,
     quoteSource: isQuoteSource(h.quoteSource) ? h.quoteSource : DEFAULT_QUOTE_SOURCE,
     color: h.color,
@@ -672,118 +673,135 @@ export function PortfolioScreen({
         </div>
       )}
 
-      {showAnalysis && targetModel && (
+      {/* ── Composite health score — always shown when there are holdings, ──
+           regardless of whether a target model is selected. With no target the
+           drift component is excluded and the remaining components renormalise
+           onto 0–100 (see lib/portfolio/score.ts). */}
+      {score && hasHoldings && (
         <div className="section" style={{ marginTop: 8 }}>
           <div className="section-header" style={{ padding: "0 4px" }}>
-            <h3>Plan & health</h3>
-            <span className="link" onClick={onOpenModels} style={{ cursor: "pointer" }}>
-              Target: {targetModel.name} →
-            </span>
+            <h3>Portfolio score</h3>
+            {targetModel ? (
+              <span className="link" onClick={onOpenModels} style={{ cursor: "pointer" }}>
+                Target: {targetModel.name} →
+              </span>
+            ) : (
+              <span className="link" onClick={onOpenModels} style={{ cursor: "pointer" }}>
+                Set a target →
+              </span>
+            )}
           </div>
 
-          {/* ── Composite health score ─────────────────────────────── */}
-          {score && hasHoldings && (
-            <div
-              className="card"
-              style={{
-                marginBottom: 10,
-                padding: "12px 14px",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 10 }}>
-                <ScoreCircle value={score.total} max={100} size={58} color={scoreColor} />
-                <div style={{ flex: 1 }}>
-                  <div
+          <div
+            className="card"
+            style={{
+              marginBottom: 10,
+              padding: "12px 14px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 10 }}>
+              <ScoreCircle value={score.total} max={100} size={58} color={scoreColor} />
+              <div style={{ flex: 1 }}>
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontFamily: "var(--font-mono)",
+                    color: "var(--muted)",
+                    letterSpacing: "0.04em",
+                    marginBottom: 2,
+                  }}
+                >
+                  PORTFOLIO SCORE
+                </div>
+                <div
+                  style={{
+                    fontSize: 22,
+                    fontWeight: 700,
+                    color: scoreColor,
+                    letterSpacing: "-0.02em",
+                    lineHeight: 1,
+                  }}
+                >
+                  {score.total}
+                  <span
                     style={{
-                      fontSize: 10,
-                      fontFamily: "var(--font-mono)",
+                      fontSize: 12,
+                      fontWeight: 400,
                       color: "var(--muted)",
-                      letterSpacing: "0.04em",
-                      marginBottom: 2,
+                      marginLeft: 2,
                     }}
                   >
-                    PORTFOLIO SCORE
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 22,
-                      fontWeight: 700,
-                      color: scoreColor,
-                      letterSpacing: "-0.02em",
-                      lineHeight: 1,
-                    }}
-                  >
-                    {score.total}
-                    <span
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 400,
-                        color: "var(--muted)",
-                        marginLeft: 2,
-                      }}
-                    >
-                      /100
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 3 }}>
-                    {scoreLabel}
-                  </div>
+                    /100
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 3 }}>
+                  {scoreLabel}
                 </div>
               </div>
+            </div>
 
-              {/* Score breakdown — why this score */}
-              <div
-                style={{
-                  fontSize: 10,
-                  fontFamily: "var(--font-mono)",
-                  color: "var(--muted)",
-                  letterSpacing: "0.04em",
-                  marginBottom: 6,
-                }}
-              >
-                ● WHY THIS SCORE
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                {score.components.map((c) => {
-                  const pct = c.score / c.max;
-                  const barColor =
-                    pct >= 0.8 ? "var(--gain)" : pct >= 0.5 ? "var(--amber)" : "var(--loss)";
-                  return (
-                    <div key={c.key}>
-                      <div
+            {/* Score breakdown — why this score */}
+            <div
+              style={{
+                fontSize: 10,
+                fontFamily: "var(--font-mono)",
+                color: "var(--muted)",
+                letterSpacing: "0.04em",
+                marginBottom: 6,
+              }}
+            >
+              ● WHY THIS SCORE
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              {score.components.map((c) => {
+                // Drift with no target isn't scored — render it as a muted CTA row
+                // rather than a 0/30 bar that reads like a failing grade.
+                const notScored = c.key === "drift" && !score.hasTarget;
+                const pct = c.score / c.max;
+                const barColor = notScored
+                  ? "var(--muted)"
+                  : pct >= 0.8
+                    ? "var(--gain)"
+                    : pct >= 0.5
+                      ? "var(--amber)"
+                      : "var(--loss)";
+                return (
+                  <div key={c.key}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        marginBottom: 2,
+                      }}
+                    >
+                      <span
                         style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 6,
-                          marginBottom: 2,
+                          width: 14,
+                          textAlign: "center",
+                          fontSize: 10,
+                          color: "var(--muted)",
                         }}
                       >
-                        <span
-                          style={{
-                            width: 14,
-                            textAlign: "center",
-                            fontSize: 10,
-                            color: "var(--muted)",
-                          }}
-                        >
-                          {COMPONENT_ICONS[c.key]}
-                        </span>
-                        <span style={{ flex: 1, fontSize: 11.5, color: "var(--ink-soft)" }}>
-                          {c.label}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 11,
-                            fontFamily: "var(--font-mono)",
-                            color: barColor,
-                            minWidth: 36,
-                            textAlign: "right",
-                          }}
-                        >
-                          {c.score}/{c.max}
-                        </span>
-                      </div>
-                      {/* Mini progress bar */}
+                        {COMPONENT_ICONS[c.key]}
+                      </span>
+                      <span style={{ flex: 1, fontSize: 11.5, color: "var(--ink-soft)" }}>
+                        {c.label}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontFamily: "var(--font-mono)",
+                          color: notScored ? "var(--muted)" : barColor,
+                          minWidth: 36,
+                          textAlign: "right",
+                        }}
+                      >
+                        {notScored ? "—" : `${c.score}/${c.max}`}
+                      </span>
+                    </div>
+                    {/* Mini progress bar — hidden for the not-scored drift row */}
+                    {!notScored && (
                       <div
                         style={{
                           marginLeft: 20,
@@ -802,36 +820,48 @@ export function PortfolioScreen({
                           }}
                         />
                       </div>
-                      <div
-                        style={{
-                          marginLeft: 20,
-                          fontSize: 10.5,
-                          color: "var(--muted)",
-                          marginTop: 2,
-                          lineHeight: 1.35,
-                        }}
-                      >
-                        {c.detail}
-                      </div>
+                    )}
+                    <div
+                      style={{
+                        marginLeft: 20,
+                        fontSize: 10.5,
+                        color: "var(--muted)",
+                        marginTop: 2,
+                        lineHeight: 1.35,
+                      }}
+                    >
+                      {c.detail}
                     </div>
-                  );
-                })}
-              </div>
-              <div
-                style={{
-                  fontSize: 10,
-                  color: "var(--muted)",
-                  marginTop: 8,
-                  lineHeight: 1.4,
-                  borderTop: "1px solid var(--line-soft)",
-                  paddingTop: 6,
-                }}
-              >
-                Score = drift (30) + fees (25) + diversification (25) + cash (20). Deterministic, no
-                AI — each rule is documented in lib/portfolio/score.ts.
-              </div>
+                  </div>
+                );
+              })}
             </div>
-          )}
+            <div
+              style={{
+                fontSize: 10,
+                color: "var(--muted)",
+                marginTop: 8,
+                lineHeight: 1.4,
+                borderTop: "1px solid var(--line-soft)",
+                paddingTop: 6,
+              }}
+            >
+              {score.hasTarget
+                ? "Score = drift (30) + fees (25) + diversification (25) + cash (20). Deterministic, no AI — each rule is documented in lib/portfolio/score.ts."
+                : "Drift isn't scored without a target — score is fees, diversification, and cash, rescaled to 100. Set a target to include plan tracking. Deterministic, no AI — each rule is documented in lib/portfolio/score.ts."}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAnalysis && targetModel && (
+        <div className="section" style={{ marginTop: 8 }}>
+          <div className="section-header" style={{ padding: "0 4px" }}>
+            <h3>Plan & health</h3>
+            <span className="link" onClick={onOpenModels} style={{ cursor: "pointer" }}>
+              Target: {targetModel.name} →
+            </span>
+          </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
             {(

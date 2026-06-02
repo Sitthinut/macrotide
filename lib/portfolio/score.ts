@@ -11,7 +11,12 @@
 //   cash drag     20 pts  — uninvested cash as a % of portfolio
 //
 // Each component is scored independently and can be read in isolation.
-// The total is their sum — nothing more.
+//
+// With a target: total is the simple sum of all four — nothing more.
+// Without a target: drift is undefined, so it is EXCLUDED rather than awarded
+// full marks (which would inflate the headline by rewarding the absence of a
+// plan). The remaining 70 points (fees 25 + concentration 25 + cash 20) are
+// renormalised onto a 0–100 scale so the headline stays comparable.
 
 import type { HealthSignals } from "./health";
 
@@ -32,7 +37,11 @@ export interface PortfolioScore {
   total: number;
   /** Individual component breakdown — ordered drift, fees, concentration, cash. */
   components: ScoreComponent[];
-  /** Whether a target mix was present. When false, drift scores full marks. */
+  /**
+   * Whether a target mix was present. When false, the drift component is
+   * excluded from `total` and the remaining components are renormalised onto
+   * 0–100 (the drift component is still listed, scored 0, as a CTA).
+   */
   hasTarget: boolean;
 }
 
@@ -48,7 +57,8 @@ const CASH_MAX = 20;
  * Drift sub-score (0–30 pts).
  *
  * Rule: −2 pts per percentage-point of tracking gap; full penalty at ≥ 15 pp.
- * No target → full marks (drift is undefined without a benchmark).
+ * No target → not scored: returns 0 with a CTA detail and is excluded from the
+ * composite by scorePortfolio (drift is undefined without a benchmark).
  *
  *   trackingGapPp = 0   → 30 pts
  *   trackingGapPp = 5   → 20 pts
@@ -57,12 +67,15 @@ const CASH_MAX = 20;
  */
 function driftScore(trackingGapPp: number, hasTarget: boolean): ScoreComponent {
   if (!hasTarget) {
+    // Not scored at all — excluded from the composite (see scorePortfolio) so
+    // the absence of a plan neither helps nor hurts the headline. The UI shows
+    // this row as a call to action rather than a fake full mark.
     return {
       key: "drift",
       label: "Drift from target",
-      score: DRIFT_MAX,
+      score: 0,
       max: DRIFT_MAX,
-      detail: "No target set — pick a model portfolio to track drift.",
+      detail: "Not scored — set a target model to track how closely you follow your plan.",
     };
   }
   const score = Math.max(0, Math.round(DRIFT_MAX - trackingGapPp * 2));
@@ -89,9 +102,9 @@ function driftScore(trackingGapPp: number, hasTarget: boolean): ScoreComponent {
  *   TER = 1.00% → ~18 pts
  *   TER ≥ 2.00% →  0 pts
  */
-function feeScore(ter: number): ScoreComponent {
+function feeScore(ter: number, unknownCount: number): ScoreComponent {
   const score = ter <= 0.2 ? FEE_MAX : Math.max(0, Math.round(FEE_MAX * (1 - (ter - 0.2) / 1.8)));
-  const detail =
+  const base =
     ter <= 0.2
       ? `${ter.toFixed(2)}% TER — index-grade efficiency.`
       : ter <= 0.75
@@ -99,7 +112,13 @@ function feeScore(ter: number): ScoreComponent {
         : ter <= 1.5
           ? `${ter.toFixed(2)}% TER — moderately high; consider cheaper alternatives.`
           : `${ter.toFixed(2)}% TER — high cost drag on long-term returns.`;
-  return { key: "fees", label: "Blended fees", score, max: FEE_MAX, detail };
+  // Holdings with no published fee are excluded from the blended rate so missing
+  // data neither rewards nor punishes the score. Flag it so the number is honest.
+  const note =
+    unknownCount > 0
+      ? ` Fee data incomplete for ${unknownCount} holding${unknownCount !== 1 ? "s" : ""}.`
+      : "";
+  return { key: "fees", label: "Blended fees", score, max: FEE_MAX, detail: base + note };
 }
 
 /**
@@ -160,10 +179,15 @@ function cashScore(cashPct: number): ScoreComponent {
  * Compute a transparent 0-100 composite portfolio-health score.
  *
  * The four components (drift, fees, concentration, cash) each contribute a
- * clearly-documented sub-score. The total is their sum — no hidden factors,
- * no AI calls. Pass `hasTarget = false` when no model-portfolio target has
- * been selected; drift then scores full marks rather than penalising the user
- * for not having set a target.
+ * clearly-documented sub-score. Pass `hasTarget = false` when no model-portfolio
+ * target has been selected.
+ *
+ * With a target: `total` is the simple sum of all four components (0–100).
+ * Without a target: drift is undefined, so it is EXCLUDED from the composite
+ * and the remaining three components (fees + concentration + cash, max 70) are
+ * renormalised onto a 0–100 scale: `total = round(rawSum / 70 × 100)`. The drift
+ * component is still returned (score 0, with a "set a target" CTA detail) so the
+ * UI can render the full breakdown, but it does not contribute to the total.
  *
  * @example
  * const health = computeHealth(holdings, totalValue, targetMix, targetTer);
@@ -174,7 +198,7 @@ function cashScore(cashPct: number): ScoreComponent {
 export function scorePortfolio(health: HealthSignals, hasTarget: boolean): PortfolioScore {
   const components: ScoreComponent[] = [
     driftScore(health.trackingGapPp, hasTarget),
-    feeScore(health.blendedTer),
+    feeScore(health.blendedTer, health.unknownTerCount),
     concentrationScore(
       health.concentration.hhi,
       health.concentration.top,
@@ -184,6 +208,16 @@ export function scorePortfolio(health: HealthSignals, hasTarget: boolean): Portf
     cashScore(health.cashPct),
   ];
 
-  const total = components.reduce((s, c) => s + c.score, 0);
+  let total: number;
+  if (hasTarget) {
+    total = components.reduce((s, c) => s + c.score, 0);
+  } else {
+    // Exclude drift; renormalise the remaining 70 points onto 0–100 so the
+    // headline stays comparable and isn't inflated by an auto-awarded drift.
+    const scored = components.filter((c) => c.key !== "drift");
+    const rawSum = scored.reduce((s, c) => s + c.score, 0);
+    const rawMax = scored.reduce((s, c) => s + c.max, 0);
+    total = rawMax > 0 ? Math.round((rawSum / rawMax) * 100) : 0;
+  }
   return { total, components, hasTarget };
 }

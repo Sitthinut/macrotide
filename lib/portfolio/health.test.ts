@@ -11,6 +11,7 @@ import {
   rebalanceHint,
   summarizeHealth,
   trackingGap,
+  unknownTerCount,
 } from "./health";
 
 function holding(partial: Partial<Holding> & { ticker: string; value: number }): Holding {
@@ -27,7 +28,7 @@ function holding(partial: Partial<Holding> & { ticker: string; value: number }):
     d1: partial.d1 ?? 0,
     ytd: partial.ytd ?? 0,
     y1: partial.y1 ?? 0,
-    ter: partial.ter ?? 0,
+    ter: partial.ter === undefined ? 0 : partial.ter,
     color: partial.color ?? "var(--accent)",
     source: partial.source ?? "",
   };
@@ -132,6 +133,42 @@ describe("blendedTer", () => {
   });
   it("returns 0 for empty portfolio", () => {
     expect(blendedTer([], 0)).toBe(0);
+  });
+
+  it("weights only over holdings with a KNOWN ter — unknowns don't drag it to 0", () => {
+    // One cheap known fund + one unknown-fee fund. The blended rate is the
+    // known fund's rate (0.40%), NOT diluted toward 0 by the unknown.
+    const mixed = [
+      holding({ ticker: "KNOWN", value: 500, ter: 0.4 }),
+      holding({ ticker: "UNKNOWN", value: 500, ter: null }),
+    ];
+    expect(blendedTer(mixed, 1000)).toBeCloseTo(0.4);
+  });
+
+  it("returns 0 when no holding has a known ter", () => {
+    const allUnknown = [
+      holding({ ticker: "A", value: 500, ter: null }),
+      holding({ ticker: "B", value: 500, ter: null }),
+    ];
+    expect(blendedTer(allUnknown, 1000)).toBe(0);
+  });
+});
+
+describe("unknownTerCount", () => {
+  it("counts holdings whose ter is null", () => {
+    const mixed = [
+      holding({ ticker: "A", value: 100, ter: 0.4 }),
+      holding({ ticker: "B", value: 100, ter: null }),
+      holding({ ticker: "C", value: 100, ter: null }),
+    ];
+    expect(unknownTerCount(mixed)).toBe(2);
+  });
+  it("is 0 when every ter is known (including an explicit 0)", () => {
+    const known = [
+      holding({ ticker: "A", value: 100, ter: 0 }),
+      holding({ ticker: "B", value: 100, ter: 0.4 }),
+    ];
+    expect(unknownTerCount(known)).toBe(0);
   });
 });
 

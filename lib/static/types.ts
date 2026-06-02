@@ -20,7 +20,8 @@ export interface Holding {
   d1: number;
   ytd: number;
   y1: number;
-  ter: number;
+  /** Total expense ratio in %. `null` when the fund's fee is not published. */
+  ter: number | null;
   color: string;
   source: string;
   /** Data-routing key. Present on adapted holdings from /api/holdings. */
