@@ -8,6 +8,7 @@
 // so the sheet looks clean in dev before the SEC ingest job has run.
 
 import { useState } from "react";
+import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import type {
   FeederLookThroughHoldingRow,
@@ -22,7 +23,9 @@ import type {
 } from "@/lib/db/queries/fund-enrichment";
 import type { FundWithTer } from "@/lib/db/queries/funds";
 import { useResource } from "@/lib/fetchers/swr";
+import { buildHoldingDetailRows } from "@/lib/portfolio/holding-detail";
 import { buildPortfolioDisplayRows } from "@/lib/portfolio/portfolio-display";
+import type { Holding } from "@/lib/static/types";
 
 // ─── API response type ────────────────────────────────────────────────────────
 
@@ -1026,15 +1029,100 @@ function FundHeader({ fund }: { fund: FundDetailResponse }) {
   );
 }
 
+// ─── Holding fallback (non-catalog positions: stocks, indices, cash) ──────────
+// Shown when a holding has no matching catalog fund, so there's no SEC
+// enrichment to render. Displays the holding's own stored data so tapping a
+// stock/index/cash row still opens a useful read-only view instead of an error.
+
+function HoldingFallbackBody({ holding }: { holding: Holding }) {
+  const rows = buildHoldingDetailRows(holding);
+  return (
+    <div>
+      <div style={{ marginBottom: 4 }}>
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 15,
+            fontWeight: 700,
+            letterSpacing: "0.02em",
+            color: "var(--ink)",
+          }}
+        >
+          {holding.ticker}
+        </span>
+        {holding.thai && (
+          <div style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 2 }}>{holding.thai}</div>
+        )}
+      </div>
+
+      <SectionHeader title="Holding" />
+      <dl style={{ margin: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+        {rows.map((row) => (
+          <div
+            key={row.label}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "baseline",
+              gap: 12,
+            }}
+          >
+            <dt
+              style={{
+                fontSize: 11.5,
+                color: "var(--muted)",
+                fontFamily: "var(--font-mono)",
+                letterSpacing: "0.02em",
+              }}
+            >
+              {row.label}
+            </dt>
+            <dd
+              style={{
+                margin: 0,
+                fontSize: 12.5,
+                color: "var(--ink)",
+                textAlign: "right",
+                minWidth: 0,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {row.value ?? "—"}
+            </dd>
+          </div>
+        ))}
+      </dl>
+
+      <div
+        style={{
+          marginTop: 16,
+          fontSize: 11.5,
+          color: "var(--muted)",
+          lineHeight: 1.5,
+        }}
+      >
+        This position isn't a fund in the SEC catalog, so factsheet enrichment (performance,
+        allocation, holdings) isn't available. Use Edit to update its details.
+      </div>
+    </div>
+  );
+}
+
 // ─── Detail body (fetches + renders all sections) ─────────────────────────────
 
-function FundDetailBody({ projId }: { projId: string }) {
+function FundDetailBody({ projId, holding }: { projId: string; holding?: Holding | null }) {
   const { data, isLoading, error } = useResource<FundDetailResponse>(
     projId ? `/api/funds/${encodeURIComponent(projId)}` : null,
   );
 
   if (isLoading) return <LoadingState />;
-  if (error || !data) return <ErrorState message={error?.message} />;
+  // No catalog match (a stock/index/cash holding, or a 404). When we opened this
+  // from a holding, degrade to the holding's own data rather than erroring.
+  if (error || !data) {
+    if (holding) return <HoldingFallbackBody holding={holding} />;
+    return <ErrorState message={error?.message} />;
+  }
 
   const hasAnyEnrichment =
     data.performance.length > 0 ||
@@ -1081,16 +1169,48 @@ function FundDetailBody({ projId }: { projId: string }) {
 // ─── Public sheet component ───────────────────────────────────────────────────
 
 export interface FundDetailSheetProps {
-  /** The SEC proj_id of the fund to show. null/undefined = closed. */
-  projId: string | null;
+  /**
+   * What to look up. Either the SEC proj_id of a fund (Explore) or a portfolio
+   * holding (whose bare ticker is matched against the catalog's abbr_name).
+   * null/undefined = closed.
+   */
+  projId?: string | null;
+  /**
+   * The held position, when opened from the Portfolio screen. Its ticker drives
+   * the catalog lookup; if no fund matches, the sheet falls back to the
+   * holding's own data instead of showing an error.
+   */
+  holding?: Holding | null;
+  /**
+   * When set (holding view only), renders an Edit affordance that hands off to
+   * the holding edit flow. Omit for the read-only Explore usage.
+   */
+  onEdit?: () => void;
   onClose: () => void;
 }
 
-export function FundDetailSheet({ projId, onClose }: FundDetailSheetProps) {
+export function FundDetailSheet({ projId, holding, onEdit, onClose }: FundDetailSheetProps) {
+  // A holding looks up the catalog by its ticker (= abbr_name); Explore passes a
+  // proj_id directly. One of the two is set when the sheet is open.
+  const lookupId = projId ?? holding?.ticker ?? null;
+  const open = lookupId != null;
   return (
-    <Modal open={projId != null} onClose={onClose} variant="detail" labelledBy="fund-detail-title">
-      <Modal.Header title="Fund detail" id="fund-detail-title" />
-      <Modal.Body>{projId != null && <FundDetailBody projId={projId} />}</Modal.Body>
+    <Modal open={open} onClose={onClose} variant="detail" labelledBy="fund-detail-title">
+      <Modal.Header title={holding ? "Holding detail" : "Fund detail"} id="fund-detail-title" />
+      <Modal.Body>
+        {open && (
+          <>
+            {onEdit && (
+              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
+                <button type="button" className="btn ghost sm" onClick={onEdit} style={{ gap: 4 }}>
+                  <Icon name="pencil" size={12} /> Edit
+                </button>
+              </div>
+            )}
+            <FundDetailBody projId={lookupId} holding={holding} />
+          </>
+        )}
+      </Modal.Body>
     </Modal>
   );
 }

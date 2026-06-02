@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { BrandMark } from "@/components/BrandMark";
 import { ModelDonut, ScoreCircle } from "@/components/charts";
 import { FeedbackRow } from "@/components/FeedbackRow";
+import { FundDetailSheet } from "@/components/FundDetailSheet";
 import { type HoldingFormValues, HoldingSheet } from "@/components/HoldingSheet";
 import { Icon } from "@/components/Icon";
 import { AllocationDonut, DriftBars, NavChart } from "@/components/InteractiveCharts";
@@ -100,7 +101,11 @@ export function PortfolioScreen({
   const [filter, setFilter] = useState<AssetClass | "all">("all");
   const [benchmark, setBenchmark] = useState<string>("none");
   const [feedback, setFeedback] = useState<Record<string, "up" | "down" | null>>({});
+  // Tapping a holding row opens a read-only detail view (detailHolding); the
+  // per-row Edit affordance opens the edit form (holdingSheet). Reading a
+  // holding no longer drops the user straight into an edit form.
   const [holdingSheet, setHoldingSheet] = useState<Holding | null>(null);
+  const [detailHolding, setDetailHolding] = useState<Holding | null>(null);
 
   // App owns the create/edit sheet; request it through the shared store.
   const openNewPortfolio = () => requestNew();
@@ -1286,41 +1291,76 @@ export function PortfolioScreen({
         )}
         {filtered.map((h) => {
           const pct = view.totalValue > 0 ? (h.value / view.totalValue) * 100 : 0;
+          // Any holding can be viewed; only DB-backed holdings (with an id) can
+          // be edited via the holdings API.
           const editable = h.id !== undefined;
           return (
             <div
               key={(h.id ?? h.ticker) + (h.source || "")}
               className="holding"
-              role={editable ? "button" : undefined}
-              tabIndex={editable ? 0 : undefined}
-              onClick={editable ? () => setHoldingSheet(h) : undefined}
-              onKeyDown={
-                editable
-                  ? (e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setHoldingSheet(h);
-                      }
-                    }
-                  : undefined
-              }
-              style={editable ? { cursor: "pointer" } : undefined}
+              style={{
+                // Override .holding's grid: the row is now a flex container for
+                // [view button, edit button]; the view button carries the
+                // original 3-column grid so the swatch/name/value layout is
+                // unchanged.
+                display: "flex",
+                gap: 4,
+              }}
             >
-              <div className="swatch" style={{ background: h.color }}>
-                {swatchAbbr(h.ticker)}
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <div className="name">{h.ticker}</div>
-                <div className="sub">
-                  {h.category} · {pct.toFixed(1)}%
+              {/* Main click target — opens the read-only detail view. A real
+                  <button> so it's keyboard-focusable; styled to inherit the
+                  row's chrome and carry the row's grid. Sibling of the Edit
+                  button (never nested) so the markup stays valid. Mirrors the
+                  FundSelect row pattern. */}
+              <button
+                type="button"
+                aria-label={`View details for ${h.ticker}`}
+                onClick={() => setDetailHolding(h)}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "32px 1fr auto",
+                  alignItems: "center",
+                  gap: 10,
+                  flex: 1,
+                  minWidth: 0,
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  margin: 0,
+                  textAlign: "left",
+                  font: "inherit",
+                  color: "inherit",
+                  cursor: "pointer",
+                }}
+              >
+                <div className="swatch" style={{ background: h.color }}>
+                  {swatchAbbr(h.ticker)}
                 </div>
-              </div>
-              <div className="stack-xs" style={{ alignItems: "flex-end" }}>
-                <div className="value">฿{Math.round(h.value).toLocaleString("en-US")}</div>
-                <div className={`pct ${h.d1 >= 0 ? "delta up" : "delta down"}`}>
-                  {fmtPct(h.d1, 2)}
+                <div style={{ minWidth: 0 }}>
+                  <div className="name">{h.ticker}</div>
+                  <div className="sub">
+                    {h.category} · {pct.toFixed(1)}%
+                  </div>
                 </div>
-              </div>
+                <div className="stack-xs" style={{ alignItems: "flex-end" }}>
+                  <div className="value">฿{Math.round(h.value).toLocaleString("en-US")}</div>
+                  <div className={`pct ${h.d1 >= 0 ? "delta up" : "delta down"}`}>
+                    {fmtPct(h.d1, 2)}
+                  </div>
+                </div>
+              </button>
+              {editable && (
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-label={`Edit ${h.ticker}`}
+                  title={`Edit ${h.ticker}`}
+                  onClick={() => setHoldingSheet(h)}
+                  style={{ flexShrink: 0, alignSelf: "center" }}
+                >
+                  <Icon name="pencil" size={12} />
+                </button>
+              )}
             </div>
           );
         })}
@@ -1375,6 +1415,21 @@ export function PortfolioScreen({
           ⓘ Educational analysis only. Not personalised financial advice.
         </div>
       </div>
+
+      <FundDetailSheet
+        holding={detailHolding}
+        onEdit={
+          detailHolding?.id !== undefined
+            ? () => {
+                // Hand off from view to edit: close the detail, open the form.
+                const h = detailHolding;
+                setDetailHolding(null);
+                setHoldingSheet(h);
+              }
+            : undefined
+        }
+        onClose={() => setDetailHolding(null)}
+      />
 
       <HoldingSheet
         open={!!holdingSheet}

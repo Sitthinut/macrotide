@@ -13,6 +13,17 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ## [Unreleased]
 
+### Added
+
+- **Tapping a holding now opens a read-only detail view instead of the edit
+  form.** The Portfolio screen's holding rows open a "Holding detail" sheet that
+  reuses the fund detail view — performance, allocation, top holdings, and feeder
+  look-through when the position is a catalog fund (matched by its ticker). A
+  holding that isn't in the catalog (a stock, index, or cash position) degrades
+  to showing its own stored details rather than an error. Editing is now an
+  explicit affordance: a pencil button on each editable row, and an Edit button
+  inside the detail view, both opening the existing holding edit flow.
+
 ### Fixed
 
 - **Performance-vs-index now converts foreign holdings to baht before summing.**
