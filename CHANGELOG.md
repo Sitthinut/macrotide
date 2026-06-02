@@ -15,6 +15,18 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **The demo portfolio chart now shows about five years of realistic history at
+  every zoom.** In demo mode the Portfolio chart plots a dense multi-year curve
+  for both the portfolio line and the benchmark overlay — daily detail for recent
+  months (so 1M/3M/6M/1Y look real) and weekly further back, instead of the few
+  months the live price crawl had warmed. The history is self-contained and
+  offline at runtime: a committed fixture is built from real public index data
+  (S&P 500, Nasdaq, Nikkei, SET, global equity, gold; Thai bonds and cash
+  modelled), then each demo fund's series is derived from the index it tracks by
+  applying its fee as a compounding drag plus a small deterministic tracking
+  wobble, so funds visibly trail their index and the blended portfolio diverges
+  from any single benchmark. Owner mode is unchanged — it still reads live market
+  data. Regenerate the fixture with `npm run refresh:demo-history`.
 - **Fee-creep flags can now be dismissed, snoozed, or disagreed with.** Each fee
   check card on the Portfolio screen carries Dismiss, Snooze (7 / 30 / 90 days),
   and Disagree controls, with an inline Undo. The choice is recorded per fund and

@@ -1,7 +1,8 @@
 import { and, gte, inArray } from "drizzle-orm";
 import { inferHoldingCurrency } from "@/lib/market/currency";
 import { buildFxConverter } from "@/lib/market/fx";
-import { getAppDb, getMarketDb } from "../context";
+import { demoHoldingSeries } from "@/lib/mock/demo-history-read";
+import { getAppDb, getMarketDb, isDemoRequest } from "../context";
 import { holdings, navHistory } from "../schema";
 
 export type SeriesRange = "1mo" | "3mo" | "6mo" | "1y" | "5y" | "max";
@@ -66,6 +67,32 @@ function rangeStartDate(range: SeriesRange): string {
  * Aggregate series is `sum(perBucket[i])` on each shared date. Async because FX
  * rates are fetched (cached) from the market layer.
  */
+/**
+ * Demo-mode replacement for the market.db `nav_history` read. Builds the same
+ * `{ ticker (cache key), date, nav }` rows the DB would, but from the committed
+ * fixture: fixture points are the holding's TOTAL THB value, so per-unit
+ * `nav = value / units` recovers what the downstream `units * nav * fx` math
+ * expects. Holdings with no fixture series (unmapped) are simply omitted —
+ * graceful degradation, identical to a market.db cache miss.
+ */
+function demoNavRows(
+  allHoldings: { quoteSource: string; ticker: string; units: number }[],
+  since: string,
+): { ticker: string; date: string; nav: number }[] {
+  const seen = new Set<string>();
+  const rows: { ticker: string; date: string; nav: number }[] = [];
+  for (const h of allHoldings) {
+    const key = `${h.quoteSource}:${h.ticker}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (!h.units) continue;
+    const series = demoHoldingSeries(key, since);
+    if (!series) continue;
+    for (const p of series) rows.push({ ticker: key, date: p.date, nav: p.value / h.units });
+  }
+  return rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
 export async function getPortfolioSeries(
   range: SeriesRange = "6mo",
 ): Promise<PortfolioSeriesResult> {
@@ -82,12 +109,21 @@ export async function getPortfolioSeries(
   }
 
   const cacheKeys = Array.from(new Set(allHoldings.map((h) => `${h.quoteSource}:${h.ticker}`)));
-  const navRows = marketDb
-    .select()
-    .from(navHistory)
-    .where(and(inArray(navHistory.ticker, cacheKeys), gte(navHistory.date, since)))
-    .orderBy(navHistory.date)
-    .all();
+
+  // DEMO MODE: source NAV history from the committed fixture instead of
+  // market.db. The fixture holds ~5y of monthly TOTAL value per holding (units ×
+  // NAV, already scaled to the seeded current value, in THB); we divide by the
+  // holding's units to recover a per-unit "nav" so the rest of this function —
+  // forward-fill, FX (THB→THB = 1), aggregation — runs unchanged. Owner mode is
+  // untouched and still reads market.db. See lib/mock/demo-history.ts.
+  const navRows = isDemoRequest()
+    ? demoNavRows(allHoldings, since)
+    : marketDb
+        .select()
+        .from(navHistory)
+        .where(and(inArray(navHistory.ticker, cacheKeys), gte(navHistory.date, since)))
+        .orderBy(navHistory.date)
+        .all();
 
   // ticker (cache key) → ordered [date, nav][]
   const navByKey = new Map<string, { date: string; nav: number }[]>();

@@ -84,9 +84,12 @@ function seedHolding(
     .run();
 }
 
+// Owner-mode context: these tests exercise the market.db read + FX path, which
+// is the owner path (demo mode now sources NAV history from the committed
+// fixture — covered separately in series.demo.test.ts).
 function run<T>(fn: () => T | Promise<T>): Promise<T> {
   return runWithDbContext(
-    { appDb, appSqlite, marketDb, marketSqlite, isDemo: true, sessionId: "test" },
+    { appDb, appSqlite, marketDb, marketSqlite, isDemo: false, sessionId: "owner" },
     fn,
   ) as Promise<T>;
 }
