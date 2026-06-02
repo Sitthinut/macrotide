@@ -3,6 +3,7 @@
 // hover + tooltips see components/InteractiveCharts.tsx (recharts).
 
 import { useId } from "react";
+import { rebaseBenchmark } from "@/lib/portfolio/rebase";
 import type { MixSlice, SeriesPoint } from "@/lib/static/types";
 
 // ===== Sparkline =====
@@ -100,12 +101,18 @@ export function PerfChart({
     );
   }
 
-  let benchSeries: SeriesPoint[] | null = null;
-  if (benchmarkData && benchmarkData.length === data.length) {
-    const portfolioStart = data[0].v;
-    const benchStart = benchmarkData[0].v;
-    benchSeries = benchmarkData.map((b) => ({ ...b, v: (b.v / benchStart) * portfolioStart }));
-  }
+  // Align + rebase the benchmark onto the portfolio's first common date so both
+  // lines share a scale. The old `length === length` gate dropped the line
+  // whenever the two series differed in length (almost always, given TH vs US
+  // trading calendars); intersecting by date renders it whenever data overlaps.
+  // The SVG path needs numbers, so pre-anchor nulls hold flat at the rebased
+  // start (the first non-null value) — that keeps them from distorting the scale.
+  const rebased = rebaseBenchmark(data, benchmarkData);
+  const benchAnchorV = rebased?.find((p) => p.v != null)?.v ?? null;
+  const benchSeries: SeriesPoint[] | null =
+    rebased && benchAnchorV != null
+      ? rebased.map((p) => ({ d: p.d, v: p.v ?? benchAnchorV }))
+      : null;
 
   const allVals = [...data.map((d) => d.v), ...(benchSeries ? benchSeries.map((d) => d.v) : [])];
   const min = Math.min(...allVals);

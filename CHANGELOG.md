@@ -15,6 +15,25 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Fixed
 
+- **Performance-vs-index now converts foreign holdings to baht before summing.**
+  The portfolio value/return series previously added each holding's `units × NAV`
+  across currencies (THB funds, USD ETFs, JPY indices) without conversion, then
+  compared the result to a THB index — so for any book holding a foreign asset
+  the return reflected the foreign price move, not the baht experience. Each
+  holding's native currency is now inferred from its routing key and its value
+  is converted to THB at that date's USD/THB (or cross) rate, using the existing
+  ECB-backed FX source. A holding whose rate is unavailable is dropped from the
+  total and flagged rather than mis-summed.
+- **The benchmark line on the performance chart no longer disappears across
+  trading calendars.** It was only drawn when the portfolio and benchmark series
+  had identical lengths, which Thai and foreign calendars almost never produce;
+  the two are now aligned by date and rebased to their first common point, so the
+  benchmark renders whenever the data overlaps.
+- **Added a method note to the performance-vs-index view** stating that values
+  are converted to baht, that the comparison assumes the current holdings were
+  held throughout the window (purchases and sales within it are not yet
+  accounted for), and that benchmarks use price-return indices, which exclude
+  dividends.
 - Fee-creep now only suggests cheaper funds with the same exposure (region + asset class), not just the same broad asset class — so a global-equity fund is no longer offered a Thai/domestic-equity "alternative".
 
 ### Added

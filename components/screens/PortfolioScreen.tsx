@@ -529,6 +529,23 @@ export function PortfolioScreen({
             </span>
           ))}
         </div>
+        {benchmark !== "none" && (
+          <p
+            style={{
+              fontSize: 11,
+              color: "var(--muted)",
+              lineHeight: 1.5,
+              padding: "8px 4px 0",
+              maxWidth: 560,
+            }}
+          >
+            How this is measured: holdings are converted to THB before they are summed, so a single
+            line spans your Thai and foreign positions. The comparison assumes your current holdings
+            were held throughout the window — it does not yet account for purchases or sales made
+            during it. Benchmarks use price-return indices, which exclude dividends and so may
+            understate an index's total return. Treat the gap as a guide, not a precise figure.
+          </p>
+        )}
       </div>
 
       {hasHoldings && (

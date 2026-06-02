@@ -12,5 +12,5 @@ function parseRange(value: string | null): SeriesRange {
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const range = parseRange(url.searchParams.get("range"));
-  return withDb(() => NextResponse.json(getPortfolioSeries(range)));
+  return withDb(async () => NextResponse.json(await getPortfolioSeries(range)));
 }
