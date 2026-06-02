@@ -1270,7 +1270,6 @@ export function PortfolioScreen({
               <div style={{ display: "flex", gap: 6 }}>
                 <button
                   className="btn sm primary"
-                  style={{ flex: 1 }}
                   onClick={() => {
                     const prompt = `My portfolio has drifted ${health.trackingGapPp.toFixed(1)}pp from my ${targetModel.name} target. Give me a step-by-step rebalance plan with specific amounts.`;
                     window.dispatchEvent(
