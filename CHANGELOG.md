@@ -55,12 +55,15 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   the window start), and the benchmark overlay does the same — so every range
   starts with the full book and a complete benchmark line. Applies to both real
   accounts and the demo.
-- **Navigating to another screen now opens scrolled to the top.** Screens are
+- **Switching screens now remembers where you were on each one.** Screens are
   swapped in place inside one persistent scroll container, which previously kept
-  its scroll offset across the swap — so opening the Templates view from the
-  Portfolio screen inherited the Portfolio scroll position and appeared partway
-  down. The scroll container is now reset to the top on every screen change, on
-  both the mobile (window) and tablet/desktop (in-pane) scroll roots.
+  a single shared scroll offset across the swap — so opening the Templates view
+  from the Portfolio screen inherited the Portfolio scroll position and appeared
+  partway down. Each screen now keeps its own scroll position for the session:
+  returning to a screen restores where you left it, and a screen not yet visited
+  opens at the top. The memory is per-session — a full page reload starts every
+  screen back at the top. Works on both the mobile (window) and tablet/desktop
+  (in-pane) scroll roots.
 - **Performance-vs-index now converts foreign holdings to baht before summing.**
   The portfolio value/return series previously added each holding's `units × NAV`
   across currencies (THB funds, USD ETFs, JPY indices) without conversion, then
