@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { BrandMark } from "@/components/BrandMark";
-import { ModelDonut, ScoreCircle } from "@/components/charts";
+import { ModelDonut } from "@/components/charts";
 import { FeedbackRow } from "@/components/FeedbackRow";
 import { FundDetailSheet } from "@/components/FundDetailSheet";
 import { type HoldingFormValues, HoldingSheet } from "@/components/HoldingSheet";
@@ -23,6 +23,7 @@ import {
   useBenchmarkSeries,
   useFeeCreep,
   useHiddenActionItems,
+  useLookThrough,
 } from "@/lib/fetchers/portfolio";
 import { invalidate } from "@/lib/fetchers/swr";
 import { fmtPct } from "@/lib/format";
@@ -31,6 +32,7 @@ import { DEFAULT_QUOTE_SOURCE, isQuoteSource } from "@/lib/market/sources";
 import { feeCreepKey } from "@/lib/portfolio/action-item-key";
 import { REASON_CHIPS, type ReasonChip } from "@/lib/portfolio/action-item-resurface";
 import { formatSeriesDate } from "@/lib/portfolio/adapter";
+import { buildNamedChecks, type NamedCheck } from "@/lib/portfolio/checks";
 import {
   feeCheckInlineIntro,
   feeChecksButtonLabel,
@@ -40,7 +42,6 @@ import {
 } from "@/lib/portfolio/fee-creep-presentation";
 import { computeHealth, rebalanceHint, summarizeHealth } from "@/lib/portfolio/health";
 import { performanceDisclaimer } from "@/lib/portfolio/performance-disclaimer";
-import { scorePortfolio } from "@/lib/portfolio/score";
 import type { AssetClass, Holding, Portfolio } from "@/lib/static/types";
 import { usePortfolioUi } from "@/lib/stores/portfolio-ui";
 
@@ -401,6 +402,62 @@ function FeeChecksPage({
   );
 }
 
+// The status pill for a named check. "none" is a not-yet-set-up state (e.g.
+// drift with no target) — a neutral CTA, never a failing grade.
+const CHECK_PILL: Record<NamedCheck["status"], { label: string; color: string }> = {
+  good: { label: "On track", color: "var(--gain)" },
+  watch: { label: "Watch", color: "var(--amber)" },
+  action: { label: "Act", color: "var(--loss)" },
+  none: { label: "Set up", color: "var(--muted)" },
+};
+
+// One named-check row: the certain VALUE up front, a status pill, and the reason
+// (where the look-through story lives, always hedged). Replaces the 0-100 grade.
+function NamedCheckRow({ check, last }: { check: NamedCheck; last: boolean }) {
+  const pill = CHECK_PILL[check.status];
+  return (
+    <div
+      style={{ padding: "9px 0", borderBottom: last ? undefined : "1px solid var(--line-soft)" }}
+    >
+      <div className="row between" style={{ gap: 8, alignItems: "baseline", marginBottom: 3 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em" }}>
+          {check.label}
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <span style={{ fontSize: 12, color: "var(--ink-soft)", whiteSpace: "nowrap" }}>
+            {check.value}
+          </span>
+          {/* Fixed-width, centred pill. One width across all statuses (sized to
+              the longest, "On track") gives the values a clean right-aligned
+              column and the pills a tidy column — they no longer ragged-edge. */}
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: "0.02em",
+              textTransform: "uppercase",
+              color: pill.color,
+              border: `1px solid ${pill.color}`,
+              borderRadius: 4,
+              padding: "1px 4px",
+              // Fixed (not min) width so every badge is the SAME length, sized to
+              // the longest label ("On track"). Shorter labels centre within it.
+              width: 60,
+              boxSizing: "border-box",
+              textAlign: "center",
+              flexShrink: 0,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {pill.label}
+          </span>
+        </span>
+      </div>
+      <div style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.45 }}>{check.reason}</div>
+    </div>
+  );
+}
+
 interface ViewPortfolio {
   name: string;
   notes: string | null;
@@ -660,8 +717,13 @@ export function PortfolioScreen({
     void restoreActionItem(itemKey).then(() => mutateFeeCreep());
   };
 
-  // Real, computed health signals — drift vs target, blended fee, concentration,
-  // cash drag. No mock fixtures.
+  // Underlying-exposure look-through for the active scope, fetched server-side
+  // (needs market.db) and injected into the client health computation so the
+  // diversification check reflects the real underlying concentration.
+  const { data: lookThroughData } = useLookThrough(activePfId);
+
+  // Real, computed health signals — drift vs target, blended fee, concentration
+  // (incl. look-through), cash drag. No mock fixtures.
   const health = useMemo(
     () =>
       view
@@ -670,16 +732,10 @@ export function PortfolioScreen({
             view.totalValue,
             targetModel?.mix ?? null,
             targetModel?.ter ?? null,
+            lookThroughData?.lookThrough ?? null,
           )
         : null,
-    [view, targetModel],
-  );
-
-  // Composite 0-100 score derived transparently from health signals.
-  // Each component rule is documented in lib/portfolio/score.ts.
-  const score = useMemo(
-    () => (health ? scorePortfolio(health, targetModel !== null) : null),
-    [health, targetModel],
+    [view, targetModel, lookThroughData],
   );
 
   if (isLoading || !view || !portfolios) {
@@ -776,29 +832,9 @@ export function PortfolioScreen({
     action: "var(--loss)",
   };
 
-  // Score display helpers
-  const scoreColor = score
-    ? score.total >= 80
-      ? "var(--gain)"
-      : score.total >= 60
-        ? "var(--amber)"
-        : "var(--loss)"
-    : "var(--muted)";
-  const scoreLabel = score
-    ? score.total >= 80
-      ? "Great shape"
-      : score.total >= 60
-        ? "Doing well"
-        : score.total >= 40
-          ? "Needs attention"
-          : "Action needed"
-    : "";
-  const COMPONENT_ICONS: Record<string, string> = {
-    drift: "◎",
-    fees: "€",
-    concentration: "◈",
-    cash: "⊙",
-  };
+  // The four named checks that replace the 0-100 grade (drift, fees,
+  // diversification, cash) — each a value + status pill + reason.
+  const checks = buildNamedChecks(health, targetModel?.name ?? null);
 
   return (
     <div className="screen">
@@ -964,6 +1000,98 @@ export function PortfolioScreen({
         })()}
       </div>
 
+      {/* ── Health: the plain-language headline + four named checks. This leads
+           the analysis instead of a 0-100 grade — a chase-able number nudges the
+           tinkering that hurts passive investors. The charts below are the
+           drill-down. See docs/explanation/portfolio-health.md. */}
+      {hasHoldings && (
+        <div className="section" style={{ marginTop: 8 }}>
+          <div className="section-header" style={{ padding: "0 4px" }}>
+            <h3>Health</h3>
+            <span className="link" onClick={onOpenModels} style={{ cursor: "pointer" }}>
+              {targetModel ? `Target: ${targetModel.name} →` : "Set a target →"}
+            </span>
+          </div>
+
+          {/* Level 0 — the one thing that matters now. */}
+          <div className="card" style={{ marginBottom: 10 }}>
+            <div
+              style={{
+                fontSize: 10,
+                fontFamily: "var(--font-mono)",
+                color: HEADLINE_TONE[headline.tone],
+                letterSpacing: "0.04em",
+                marginBottom: 4,
+              }}
+            >
+              ● TOP THING TO KNOW
+            </div>
+            <div
+              style={{ fontSize: 14, fontWeight: 500, marginBottom: 6, letterSpacing: "-0.01em" }}
+            >
+              {headline.title}
+            </div>
+            <div
+              style={{
+                fontSize: 12.5,
+                color: "var(--ink-soft)",
+                lineHeight: 1.5,
+                marginBottom: 10,
+              }}
+            >
+              {headline.body}
+            </div>
+            <button
+              className="btn sm primary"
+              onClick={() => {
+                window.dispatchEvent(
+                  new CustomEvent("ai-prompt", {
+                    detail: {
+                      display: headline.prompt,
+                      send: headline.prompt,
+                      context: { screen: "portfolio", intent: "score_review" },
+                    },
+                  }),
+                );
+              }}
+            >
+              <Icon name="chat" size={12} /> Discuss
+            </button>
+          </div>
+
+          {/* Level 1 — the four named checks (value · status · reason). */}
+          <div className="card">
+            <div
+              style={{
+                fontSize: 10,
+                fontFamily: "var(--font-mono)",
+                color: "var(--muted)",
+                letterSpacing: "0.04em",
+                marginBottom: 2,
+              }}
+            >
+              ● CHECKS
+            </div>
+            {checks.map((c, i) => (
+              <NamedCheckRow key={c.key} check={c} last={i === checks.length - 1} />
+            ))}
+            <div
+              style={{
+                fontSize: 10,
+                color: "var(--muted)",
+                marginTop: 8,
+                lineHeight: 1.4,
+                borderTop: "1px solid var(--line-soft)",
+                paddingTop: 6,
+              }}
+            >
+              Plain checks, not a grade — each maps to one action. Deterministic, no AI; the charts
+              below show the detail behind each.
+            </div>
+          </div>
+        </div>
+      )}
+
       {hasHoldings && (
         <div style={{ marginBottom: 14 }}>
           <div className="section-header" style={{ padding: "0 20px" }}>
@@ -1088,373 +1216,90 @@ export function PortfolioScreen({
         </div>
       )}
 
-      {/* ── Composite health score — always shown when there are holdings, ──
-           regardless of whether a target model is selected. With no target the
-           drift component is excluded and the remaining components renormalise
-           onto 0–100 (see lib/portfolio/score.ts). */}
-      {score && hasHoldings && (
+      {showAnalysis && targetModel && (trim || add) && (
         <div className="section" style={{ marginTop: 8 }}>
           <div className="section-header" style={{ padding: "0 4px" }}>
-            <h3>Portfolio score</h3>
-            {targetModel ? (
-              <span className="link" onClick={onOpenModels} style={{ cursor: "pointer" }}>
-                Target: {targetModel.name} →
-              </span>
-            ) : (
-              <span className="link" onClick={onOpenModels} style={{ cursor: "pointer" }}>
-                Set a target →
-              </span>
-            )}
-          </div>
-
-          <div
-            className="card"
-            style={{
-              marginBottom: 10,
-              padding: "12px 14px",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 10 }}>
-              <ScoreCircle value={score.total} max={100} size={58} color={scoreColor} />
-              <div style={{ flex: 1 }}>
-                <div
-                  style={{
-                    fontSize: 10,
-                    fontFamily: "var(--font-mono)",
-                    color: "var(--muted)",
-                    letterSpacing: "0.04em",
-                    marginBottom: 2,
-                  }}
-                >
-                  PORTFOLIO SCORE
-                </div>
-                <div
-                  style={{
-                    fontSize: 22,
-                    fontWeight: 700,
-                    color: scoreColor,
-                    letterSpacing: "-0.02em",
-                    lineHeight: 1,
-                  }}
-                >
-                  {score.total}
-                  <span
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 400,
-                      color: "var(--muted)",
-                      marginLeft: 2,
-                    }}
-                  >
-                    /100
-                  </span>
-                </div>
-                <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 3 }}>
-                  {scoreLabel}
-                </div>
-              </div>
-            </div>
-
-            {/* Score breakdown — why this score */}
-            <div
-              style={{
-                fontSize: 10,
-                fontFamily: "var(--font-mono)",
-                color: "var(--muted)",
-                letterSpacing: "0.04em",
-                marginBottom: 6,
-              }}
-            >
-              ● WHY THIS SCORE
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              {score.components.map((c) => {
-                // Drift with no target isn't scored — render it as a muted CTA row
-                // rather than a 0/30 bar that reads like a failing grade.
-                const notScored = c.key === "drift" && !score.hasTarget;
-                const pct = c.score / c.max;
-                const barColor = notScored
-                  ? "var(--muted)"
-                  : pct >= 0.8
-                    ? "var(--gain)"
-                    : pct >= 0.5
-                      ? "var(--amber)"
-                      : "var(--loss)";
-                return (
-                  <div key={c.key}>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        marginBottom: 2,
-                      }}
-                    >
-                      <span
-                        style={{
-                          width: 14,
-                          textAlign: "center",
-                          fontSize: 10,
-                          color: "var(--muted)",
-                        }}
-                      >
-                        {COMPONENT_ICONS[c.key]}
-                      </span>
-                      <span style={{ flex: 1, fontSize: 11.5, color: "var(--ink-soft)" }}>
-                        {c.label}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          fontFamily: "var(--font-mono)",
-                          color: notScored ? "var(--muted)" : barColor,
-                          minWidth: 36,
-                          textAlign: "right",
-                        }}
-                      >
-                        {notScored ? "—" : `${c.score}/${c.max}`}
-                      </span>
-                    </div>
-                    {/* Mini progress bar — hidden for the not-scored drift row */}
-                    {!notScored && (
-                      <div
-                        style={{
-                          marginLeft: 20,
-                          height: 3,
-                          background: "var(--line-soft)",
-                          borderRadius: 2,
-                          overflow: "hidden",
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: `${pct * 100}%`,
-                            height: "100%",
-                            background: barColor,
-                            borderRadius: 2,
-                          }}
-                        />
-                      </div>
-                    )}
-                    <div
-                      style={{
-                        marginLeft: 20,
-                        fontSize: 10.5,
-                        color: "var(--muted)",
-                        marginTop: 2,
-                        lineHeight: 1.35,
-                      }}
-                    >
-                      {c.detail}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div
-              style={{
-                fontSize: 10,
-                color: "var(--muted)",
-                marginTop: 8,
-                lineHeight: 1.4,
-                borderTop: "1px solid var(--line-soft)",
-                paddingTop: 6,
-              }}
-            >
-              {score.hasTarget
-                ? "Score = drift (30) + fees (25) + diversification (25) + cash (20). Deterministic, no AI — each rule is documented in lib/portfolio/score.ts."
-                : "Drift isn't scored without a target — score is fees, diversification, and cash, rescaled to 100. Set a target to include plan tracking. Deterministic, no AI — each rule is documented in lib/portfolio/score.ts."}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showAnalysis && targetModel && (
-        <div className="section" style={{ marginTop: 8 }}>
-          <div className="section-header" style={{ padding: "0 4px" }}>
-            <h3>Plan & health</h3>
+            <h3>Suggested rebalance</h3>
             <span className="link" onClick={onOpenModels} style={{ cursor: "pointer" }}>
               Target: {targetModel.name} →
             </span>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
-            {(
-              [
-                {
-                  lbl: "OFF TARGET",
-                  val: `${health.trackingGapPp.toFixed(1)}`,
-                  unit: "pp",
-                  color: health.trackingGapPp >= 5 ? "var(--amber)" : "var(--gain)",
-                },
-                {
-                  lbl: "BLENDED FEE",
-                  val: health.blendedTer.toFixed(2),
-                  unit: "%",
-                  color: health.blendedTer <= 0.75 ? "var(--gain)" : "var(--amber)",
-                },
-                {
-                  lbl: "TOP HOLDING",
-                  val: health.concentration.top ? health.concentration.top.pct.toFixed(0) : "0",
-                  unit: "%",
-                  color: (health.concentration.top?.pct ?? 0) >= 35 ? "var(--loss)" : "var(--info)",
-                },
-                {
-                  lbl: "CASH",
-                  val: health.cashPct.toFixed(0),
-                  unit: "%",
-                  color: health.cashPct >= 10 ? "var(--amber)" : "var(--accent)",
-                },
-              ] as { lbl: string; val: string; unit: string; color: string }[]
-            ).map((s) => (
-              <div
-                key={s.lbl}
-                className="card-soft"
-                style={{ padding: "8px 8px", textAlign: "center" }}
-              >
-                <div className="num" style={{ fontSize: 18, fontWeight: 500, color: s.color }}>
-                  {s.val}
-                  <span style={{ fontSize: 10, marginLeft: 1 }}>{s.unit}</span>
-                </div>
-                <div
-                  style={{
-                    fontSize: 8.5,
-                    fontFamily: "var(--font-mono)",
-                    color: "var(--muted)",
-                    letterSpacing: "0.04em",
-                    marginTop: 2,
-                  }}
-                >
-                  {s.lbl}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="card" style={{ marginTop: 10 }}>
+          <div
+            className="card"
+            style={{
+              marginTop: 4,
+              background: "var(--accent-soft)",
+              borderColor: "transparent",
+            }}
+          >
             <div
               style={{
                 fontSize: 10,
                 fontFamily: "var(--font-mono)",
-                color: HEADLINE_TONE[headline.tone],
+                color: "var(--accent-ink)",
                 letterSpacing: "0.04em",
-                marginBottom: 4,
+                marginBottom: 6,
               }}
             >
-              ● TOP THING TO KNOW
+              ● SUGGESTED REBALANCE
             </div>
-            <div
-              style={{ fontSize: 14, fontWeight: 500, marginBottom: 6, letterSpacing: "-0.01em" }}
-            >
-              {headline.title}
-            </div>
-            <div
-              style={{
-                fontSize: 12.5,
-                color: "var(--ink-soft)",
-                lineHeight: 1.5,
-                marginBottom: 10,
-              }}
-            >
-              {headline.body}
+            <div style={{ marginBottom: 10 }}>
+              {trim && (
+                <div className="row between" style={{ padding: "3px 0", fontSize: 12.5 }}>
+                  <span style={{ color: "var(--accent-ink)" }}>
+                    Trim <strong>{trim.ticker}</strong>
+                  </span>
+                  <span className="num" style={{ color: "var(--accent-ink)" }}>
+                    {trim.current.toFixed(0)}% → {trim.target.toFixed(0)}%
+                  </span>
+                </div>
+              )}
+              {add && (
+                <div className="row between" style={{ padding: "3px 0", fontSize: 12.5 }}>
+                  <span style={{ color: "var(--accent-ink)" }}>
+                    Add to <strong>{add.ticker}</strong>
+                  </span>
+                  <span className="num" style={{ color: "var(--accent-ink)" }}>
+                    {add.current.toFixed(0)}% → {add.target.toFixed(0)}%
+                  </span>
+                </div>
+              )}
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               <button
                 className="btn sm primary"
                 onClick={() => {
+                  const prompt = `My portfolio has drifted ${health.trackingGapPp.toFixed(1)}pp from my ${targetModel.name} target. Give me a step-by-step rebalance plan with specific amounts.`;
                   window.dispatchEvent(
                     new CustomEvent("ai-prompt", {
+                      // Carry the gap + target the screen already computed so the
+                      // Advisor can plan without re-deriving them via read_portfolio.
                       detail: {
-                        display: headline.prompt,
-                        send: headline.prompt,
-                        context: { screen: "portfolio", intent: "score_review" },
+                        display: prompt,
+                        send: prompt,
+                        context: {
+                          screen: "portfolio",
+                          intent: "rebalance",
+                          subject: targetModel.name,
+                          signals: { trackingGapPp: Number(health.trackingGapPp.toFixed(1)) },
+                        },
                       },
                     }),
                   );
                 }}
               >
-                <Icon name="chat" size={12} /> Discuss
+                Plan the rebalance <Icon name="arrowRight" size={12} />
               </button>
             </div>
+
+            <FeedbackRow
+              topic="rebalance"
+              label="HELPFUL?"
+              value={feedback.rebalance ?? null}
+              onChange={(rating) => setFeedback({ ...feedback, rebalance: rating })}
+            />
           </div>
-
-          {(trim || add) && (
-            <div
-              className="card"
-              style={{
-                marginTop: 12,
-                background: "var(--accent-soft)",
-                borderColor: "transparent",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 10,
-                  fontFamily: "var(--font-mono)",
-                  color: "var(--accent-ink)",
-                  letterSpacing: "0.04em",
-                  marginBottom: 6,
-                }}
-              >
-                ● SUGGESTED REBALANCE
-              </div>
-              <div style={{ marginBottom: 10 }}>
-                {trim && (
-                  <div className="row between" style={{ padding: "3px 0", fontSize: 12.5 }}>
-                    <span style={{ color: "var(--accent-ink)" }}>
-                      Trim <strong>{trim.ticker}</strong>
-                    </span>
-                    <span className="num" style={{ color: "var(--accent-ink)" }}>
-                      {trim.current.toFixed(0)}% → {trim.target.toFixed(0)}%
-                    </span>
-                  </div>
-                )}
-                {add && (
-                  <div className="row between" style={{ padding: "3px 0", fontSize: 12.5 }}>
-                    <span style={{ color: "var(--accent-ink)" }}>
-                      Add to <strong>{add.ticker}</strong>
-                    </span>
-                    <span className="num" style={{ color: "var(--accent-ink)" }}>
-                      {add.current.toFixed(0)}% → {add.target.toFixed(0)}%
-                    </span>
-                  </div>
-                )}
-              </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                <button
-                  className="btn sm primary"
-                  onClick={() => {
-                    const prompt = `My portfolio has drifted ${health.trackingGapPp.toFixed(1)}pp from my ${targetModel.name} target. Give me a step-by-step rebalance plan with specific amounts.`;
-                    window.dispatchEvent(
-                      new CustomEvent("ai-prompt", {
-                        // Carry the gap + target the screen already computed so the
-                        // Advisor can plan without re-deriving them via read_portfolio.
-                        detail: {
-                          display: prompt,
-                          send: prompt,
-                          context: {
-                            screen: "portfolio",
-                            intent: "rebalance",
-                            subject: targetModel.name,
-                            signals: { trackingGapPp: Number(health.trackingGapPp.toFixed(1)) },
-                          },
-                        },
-                      }),
-                    );
-                  }}
-                >
-                  Plan the rebalance <Icon name="arrowRight" size={12} />
-                </button>
-              </div>
-
-              <FeedbackRow
-                topic="rebalance"
-                label="HELPFUL?"
-                value={feedback.rebalance ?? null}
-                onChange={(rating) => setFeedback({ ...feedback, rebalance: rating })}
-              />
-            </div>
-          )}
         </div>
       )}
 

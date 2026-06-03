@@ -15,6 +15,27 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **The Portfolio screen leads with plain-language checks instead of a 0–100
+  grade.** The single composite health score is gone from the screen — a
+  chase-able grade nudges the checking-and-tinkering that measurably hurts
+  passive index investors. In its place: the "one thing that matters now"
+  headline, then four named checks (drift, fees, diversification, cash), each a
+  certain value + a status (on track / watch / act) + a one-line reason; the
+  charts are the drill-down. Drift with no target reads as a "set a target"
+  prompt rather than a failing mark, and holdings whose fee isn't published read
+  "not published" rather than a misleading 0%.
+- **The diversification check now sees through your funds.** Instead of a
+  fund-count diversification index — which punished a clean two-fund index book
+  and was fooled by several funds tracking the same index — diversification
+  measures *underlying* concentration: the largest single company across all
+  your funds (a lower bound, shown as "at least …", since most funds publish
+  only a top-5), plus detection of funds that are effectively the same exposure.
+  It is coverage-gated and asymmetric — it can flag concentration where holdings
+  data exists but never certifies diversification it can't see — and a large
+  single *alternative* position is flagged while a large broad-index equity fund
+  is not. The composite score is kept for the Advisor's internal use and
+  /api/analysis. Rationale + sources: docs/explanation/portfolio-health.md.
+
 - **The Portfolio performance caveat now reflects which lines actually exclude
   dividends.** The note under the total-balance graph adapts to whether a
   benchmark is selected and whether the book holds a dividend-paying fund,

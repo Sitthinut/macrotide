@@ -42,7 +42,7 @@ Take a moment to click through the screens in the navigation:
 
 | Screen | What it shows |
 |---|---|
-| **Portfolio** | Your holdings, allocation, fees, and a health score |
+| **Portfolio** | Your holdings, allocation, fees, and plain-language health checks |
 | **Markets** | SET and global index movements, market news |
 | **Explore** | The fund finder — search the SEC catalog by name, index, theme, or fee |
 | **Advisor** | Chat with structured access to your portfolio, plan, and journal |
@@ -85,7 +85,7 @@ npm run db:seed
 
 Go to **Connect** (or the Portfolio screen's add button) and add a holding —
 for example a ticker, the number of units, and your average cost. The Portfolio
-screen updates immediately: allocation, blended fees, and the health score all
+screen updates immediately: allocation, blended fees, and the health checks all
 recompute from your real numbers.
 
 > Use placeholder fund codes while learning — never commit real ones. See the

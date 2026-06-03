@@ -7,6 +7,7 @@ import type { ModelPortfolio as DbModelPortfolio } from "@/lib/db/queries/models
 import type { Plan } from "@/lib/db/queries/plan";
 import type { FundQuote } from "@/lib/db/queries/quotes";
 import type { IndicatorDef } from "@/lib/market/indicators";
+import type { LookThrough } from "@/lib/portfolio/health";
 import { invalidate, useResource } from "./swr";
 
 export type { Bucket, DbHolding, DbModelPortfolio, FundQuote, JournalEntry, Plan };
@@ -82,6 +83,23 @@ export function usePortfolioSeries(range: SeriesRange = "6mo") {
   return useResource<PortfolioSeriesResponse>(
     `/api/portfolios/series?range=${encodeURIComponent(range)}`,
   );
+}
+
+export interface LookThroughResponse {
+  lookThrough: LookThrough | null;
+}
+
+/**
+ * Underlying-exposure look-through for the active scope ("all" or a bucket id),
+ * fed into the client-side health computation so the diversification check
+ * reflects the real underlying concentration. Needs market.db, hence a fetch.
+ */
+export function useLookThrough(scope: string) {
+  const key =
+    scope && scope !== "all"
+      ? `/api/analysis/look-through?bucket=${encodeURIComponent(scope)}`
+      : "/api/analysis/look-through";
+  return useResource<LookThroughResponse>(key);
 }
 
 export interface MarketIndexResponse {

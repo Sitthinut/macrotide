@@ -60,8 +60,9 @@ advisor-connected is the pillar's open work.
 The portfolio view that tells you the truth: allocation by class/region, drift
 from your target model, **blended (value-weighted) fee**, concentration, cash
 drag, and performance **vs the index you're trying to match**. Honesty is the
-differentiator — a deterministic 0–100 health score with a per-component
-breakdown, real aligned benchmark series, and an explicit "unavailable" state
+differentiator — a plain-language headline plus deterministic named checks
+(drift, fees, look-through diversification, cash) instead of a single chase-able
+grade, real aligned benchmark series, and an explicit "unavailable" state
 instead of fabricated numbers. This pillar is **mostly shipped** (see the
 [README status board](../../README.md#status)); the advisor reads it through
 `read_portfolio` / `read_performance` ([lib/advisor/tools.ts](../../lib/advisor/tools.ts)).
