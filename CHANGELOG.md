@@ -15,6 +15,11 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **The Portfolio performance caveat now reflects which lines actually exclude
+  dividends.** The note under the total-balance graph adapts to whether a
+  benchmark is selected and whether the book holds a dividend-paying fund,
+  explaining that the index, the user's balance, or both understate real total
+  return — and showing nothing when neither applies.
 - **The demo portfolio chart now shows about five years of realistic history at
   every zoom.** In demo mode the Portfolio chart plots a dense multi-year curve
   for both the portfolio line and the benchmark overlay — daily detail for recent

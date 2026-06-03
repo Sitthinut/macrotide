@@ -11,6 +11,7 @@ import { demoIndexSeries } from "@/lib/mock/demo-history-read";
 import { seedDemoData } from "@/lib/mock/demo-seed";
 import { freshAppDb, freshMarketDb } from "@/tests/db-helpers";
 import { runWithDbContext } from "../context";
+import { fundCatalog, holdings } from "../schema";
 import { getPortfolioSeries } from "./series";
 
 // FX layer would hit the network for any key; in demo mode the book is THB-only
@@ -116,6 +117,29 @@ describe("getPortfolioSeries — demo mode (fixture-backed)", () => {
     const { aggregate, asOf } = await runOwner(() => getPortfolioSeries("max"));
     expect(aggregate).toEqual([]);
     expect(asOf).toBeNull();
+  });
+
+  it("hasDistributingHolding reflects the shared market.db catalog in demo mode", async () => {
+    // Default seeded demo catalog (empty) → no demo holding is dividend-paying.
+    const before = await runDemo(() => getPortfolioSeries("max"));
+    expect(before.hasDistributingHolding).toBe(false);
+
+    // Mark ONE real demo holding's catalog entry as dividend-paying. The held
+    // ticker is the catalog abbr_name, so the app-side join picks it up. We read
+    // the ticker from the seeded book rather than hardcoding a real fund code.
+    const heldTicker = appDb.select({ ticker: holdings.ticker }).from(holdings).get()?.ticker;
+    expect(heldTicker).toBeTruthy();
+    marketDb
+      .insert(fundCatalog)
+      .values({
+        projId: "proj-demo-div",
+        abbrName: heldTicker as string,
+        distributionPolicy: "dividend",
+      })
+      .run();
+
+    const after = await runDemo(() => getPortfolioSeries("max"));
+    expect(after.hasDistributingHolding).toBe(true);
   });
 });
 

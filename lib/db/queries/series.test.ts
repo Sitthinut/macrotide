@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { freshAppDb, freshMarketDb } from "@/tests/db-helpers";
 import { getMarketDb, runWithDbContext } from "../context";
-import { buckets, fundQuotes, holdings, navHistory } from "../schema";
+import { buckets, fundCatalog, fundQuotes, holdings, navHistory } from "../schema";
 import { getPortfolioSeries } from "./series";
 
 // The FX layer (lib/market/fx) calls getCachedSeries, which would otherwise
@@ -81,6 +81,19 @@ function seedHolding(
       units: h.units,
       quoteSource: h.quoteSource,
     })
+    .run();
+}
+
+// Seed a catalog row so the holdings→catalog join (held ticker = abbr_name) can
+// resolve a distribution policy. `policy` may be omitted to model an unknown
+// (NULL) policy fund.
+function seedCatalogFund(
+  db: MarketDb,
+  abbrName: string,
+  policy: "dividend" | "accumulating" | null = null,
+): void {
+  db.insert(fundCatalog)
+    .values({ projId: `proj-${abbrName}`, abbrName, distributionPolicy: policy })
     .run();
 }
 
@@ -231,5 +244,56 @@ describe("getPortfolioSeries — carry-in (owner mode left edge)", () => {
     const { aggregate } = await run(() => getPortfolioSeries("1mo"));
     // No plotted date precedes the window start; the carry-in is re-dated to it.
     expect(aggregate.every((p) => p.date >= since)).toBe(true);
+  });
+});
+
+describe("getPortfolioSeries — hasDistributingHolding flag", () => {
+  it("is true when a held fund's catalog distributionPolicy is 'dividend'", async () => {
+    seedBucket(appDb);
+    seedHolding(appDb, { ticker: "EXAMPLE-FUND-A", quoteSource: "thai_mutual_fund", units: 100 });
+    seedNav(marketDb, "thai_mutual_fund:EXAMPLE-FUND-A", [10, 11, 12]);
+    // Catalog row for the held ticker (held ticker == abbr_name) pays dividends.
+    seedCatalogFund(marketDb, "EXAMPLE-FUND-A", "dividend");
+
+    const { hasDistributingHolding } = await run(() => getPortfolioSeries("1mo"));
+    expect(hasDistributingHolding).toBe(true);
+  });
+
+  it("is false when held funds are accumulating or have an unknown policy", async () => {
+    seedBucket(appDb);
+    seedHolding(appDb, { ticker: "EXAMPLE-FUND-A", quoteSource: "thai_mutual_fund", units: 100 });
+    seedHolding(appDb, { ticker: "EXAMPLE-FUND-B", quoteSource: "thai_mutual_fund", units: 50 });
+    seedNav(marketDb, "thai_mutual_fund:EXAMPLE-FUND-A", [10, 11, 12]);
+    seedNav(marketDb, "thai_mutual_fund:EXAMPLE-FUND-B", [20, 20, 20]);
+    seedCatalogFund(marketDb, "EXAMPLE-FUND-A", "accumulating");
+    seedCatalogFund(marketDb, "EXAMPLE-FUND-B", null); // unknown policy
+
+    const { hasDistributingHolding } = await run(() => getPortfolioSeries("1mo"));
+    expect(hasDistributingHolding).toBe(false);
+  });
+
+  it("is false when a holding doesn't match any catalog fund (e.g. a US ETF)", async () => {
+    seedBucket(appDb);
+    seedHolding(appDb, { ticker: "VOO", quoteSource: "yahoo", units: 2 });
+    seedNav(marketDb, "yahoo:VOO", [100, 100, 100]);
+    seedNav(marketDb, "yahoo:THB=X", [30, 30, 30]);
+    // A dividend-paying catalog fund the user does NOT hold must not trigger it.
+    seedCatalogFund(marketDb, "EXAMPLE-FUND-A", "dividend");
+
+    const { hasDistributingHolding } = await run(() => getPortfolioSeries("1mo"));
+    expect(hasDistributingHolding).toBe(false);
+  });
+
+  it("is true if ANY held fund pays dividends, even alongside accumulating ones", async () => {
+    seedBucket(appDb);
+    seedHolding(appDb, { ticker: "EXAMPLE-FUND-A", quoteSource: "thai_mutual_fund", units: 100 });
+    seedHolding(appDb, { ticker: "EXAMPLE-FUND-B", quoteSource: "thai_mutual_fund", units: 50 });
+    seedNav(marketDb, "thai_mutual_fund:EXAMPLE-FUND-A", [10, 11, 12]);
+    seedNav(marketDb, "thai_mutual_fund:EXAMPLE-FUND-B", [20, 20, 20]);
+    seedCatalogFund(marketDb, "EXAMPLE-FUND-A", "accumulating");
+    seedCatalogFund(marketDb, "EXAMPLE-FUND-B", "dividend");
+
+    const { hasDistributingHolding } = await run(() => getPortfolioSeries("1mo"));
+    expect(hasDistributingHolding).toBe(true);
   });
 });

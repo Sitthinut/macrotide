@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { BrandMark } from "@/components/BrandMark";
 import { ModelDonut, ScoreCircle } from "@/components/charts";
 import { FeedbackRow } from "@/components/FeedbackRow";
@@ -39,6 +39,7 @@ import {
   presentFeeChecks,
 } from "@/lib/portfolio/fee-creep-presentation";
 import { computeHealth, rebalanceHint, summarizeHealth } from "@/lib/portfolio/health";
+import { performanceDisclaimer } from "@/lib/portfolio/performance-disclaimer";
 import { scorePortfolio } from "@/lib/portfolio/score";
 import type { AssetClass, Holding, Portfolio } from "@/lib/static/types";
 import { usePortfolioUi } from "@/lib/stores/portfolio-ui";
@@ -497,7 +498,8 @@ export function PortfolioScreen({
     }
   }, [range]);
 
-  const { portfolios, aggregate, isLoading } = usePortfolioView(seriesRange);
+  const { portfolios, aggregate, hasDistributingHolding, isLoading } =
+    usePortfolioView(seriesRange);
   const { models } = useModelPortfoliosView();
   const { data: feeCreepData, mutate: mutateFeeCreep } = useFeeCreep();
   const { data: hiddenData } = useHiddenActionItems();
@@ -943,19 +945,23 @@ export function PortfolioScreen({
             </span>
           ))}
         </div>
-        {benchmark !== "none" && (
-          <p
-            style={{
-              fontSize: 11,
-              color: "var(--muted)",
-              lineHeight: 1.5,
-              padding: "8px 4px 0",
-            }}
-          >
-            The benchmark excludes dividends, so the index's real return is slightly higher than the
-            line shown.
-          </p>
-        )}
+        {(() => {
+          // Caveat copy depends on which sources drop dividends: the benchmark
+          // overlay (when one is selected) and/or any held dividend-paying fund.
+          const disclaimer = performanceDisclaimer(benchmark !== "none", hasDistributingHolding);
+          return disclaimer ? (
+            <p
+              style={{
+                fontSize: 11,
+                color: "var(--muted)",
+                lineHeight: 1.5,
+                padding: "8px 4px 0",
+              }}
+            >
+              {disclaimer}
+            </p>
+          ) : null;
+        })()}
       </div>
 
       {hasHoldings && (

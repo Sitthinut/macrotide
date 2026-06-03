@@ -1,9 +1,9 @@
-import { and, gte, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { inferHoldingCurrency } from "@/lib/market/currency";
 import { buildFxConverter } from "@/lib/market/fx";
 import { demoHoldingSeries } from "@/lib/mock/demo-history-read";
 import { getAppDb, getMarketDb, isDemoRequest, type MarketDb } from "../context";
-import { holdings, navHistory } from "../schema";
+import { fundCatalog, holdings, navHistory } from "../schema";
 
 export type SeriesRange = "1mo" | "3mo" | "6mo" | "1y" | "5y" | "max";
 
@@ -25,6 +25,17 @@ export interface PortfolioSeriesResult {
    * undercount a mixed-currency book.
    */
   missingFx: string[];
+  /**
+   * True if any held holding is a fund whose `fund_catalog.distributionPolicy`
+   * is "dividend" — i.e. it pays distributions out rather than accumulating
+   * them. The balance line is price return (units × NAV) and never reinvests
+   * those payouts, so when this is set the user's real total return is higher
+   * than the line shown. Drives the performance-vs-index disclaimer copy.
+   * Only `thai_mutual_fund` holdings can match the catalog (joined app-side on
+   * the bare ticker = `fund_catalog.abbr_name`); non-Thai holdings never match
+   * and correctly don't trigger it.
+   */
+  hasDistributingHolding: boolean;
 }
 
 function rangeStartDate(range: SeriesRange): string {
@@ -140,6 +151,26 @@ function marketNavRows(
   return rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
+/**
+ * True if any of the given holding tickers is a catalog fund with a "dividend"
+ * distribution policy. The user-visible ticker is the fund's `abbr_name` in
+ * `fund_catalog` (same bare-ticker mapping the fund-detail route uses), so we
+ * match held tickers against `abbr_name` and ask whether any matched row pays
+ * dividends out. One indexed query over the held tickers; works in demo mode
+ * too since the catalog lives in the shared market.db. Empty input → false.
+ */
+function holdsDistributingFund(marketDb: MarketDb, tickers: string[]): boolean {
+  if (tickers.length === 0) return false;
+  const row = marketDb
+    .select({ n: sql<number>`count(*)` })
+    .from(fundCatalog)
+    .where(
+      and(inArray(fundCatalog.abbrName, tickers), eq(fundCatalog.distributionPolicy, "dividend")),
+    )
+    .get();
+  return (row?.n ?? 0) > 0;
+}
+
 export async function getPortfolioSeries(
   range: SeriesRange = "6mo",
 ): Promise<PortfolioSeriesResult> {
@@ -152,8 +183,20 @@ export async function getPortfolioSeries(
 
   const allHoldings = appDb.select().from(holdings).all();
   if (allHoldings.length === 0) {
-    return { aggregate: [], perBucket: {}, asOf: null, missingFx: [] };
+    return {
+      aggregate: [],
+      perBucket: {},
+      asOf: null,
+      missingFx: [],
+      hasDistributingHolding: false,
+    };
   }
+
+  // Does the book hold any dividend-paying fund? Joined app-side: held tickers
+  // are catalog `abbr_name`s. Independent of the NAV/date math below, so it's
+  // returned even when the series itself comes back empty.
+  const heldTickers = Array.from(new Set(allHoldings.map((h) => h.ticker)));
+  const hasDistributingHolding = holdsDistributingFund(marketDb, heldTickers);
 
   const cacheKeys = Array.from(new Set(allHoldings.map((h) => `${h.quoteSource}:${h.ticker}`)));
 
@@ -185,7 +228,7 @@ export async function getPortfolioSeries(
   for (const r of navRows) dateSet.add(r.date);
   const dates = Array.from(dateSet).sort();
   if (dates.length === 0) {
-    return { aggregate: [], perBucket: {}, asOf: null, missingFx: [] };
+    return { aggregate: [], perBucket: {}, asOf: null, missingFx: [], hasDistributingHolding };
   }
 
   // Native currency per holding (from quoteSource + ticker) and the per-date FX
@@ -271,5 +314,6 @@ export async function getPortfolioSeries(
     perBucket,
     asOf: dates[dates.length - 1] ?? null,
     missingFx: Array.from(fx.missing).sort(),
+    hasDistributingHolding,
   };
 }

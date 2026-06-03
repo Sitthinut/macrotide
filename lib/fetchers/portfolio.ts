@@ -74,6 +74,8 @@ export interface PortfolioSeriesResponse {
   aggregate: PortfolioSeriesPoint[];
   perBucket: Record<string, PortfolioSeriesPoint[]>;
   asOf: string | null;
+  /** True if the book holds a dividend-paying fund (price line drops payouts). */
+  hasDistributingHolding: boolean;
 }
 
 export function usePortfolioSeries(range: SeriesRange = "6mo") {
