@@ -296,6 +296,16 @@ body[data-topbar-hidden="true"] .portfolio-switch {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+/* Quiet variant: borderless, no fill, muted — recedes in a list (e.g. per-row edit). */
+.icon-btn.quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+.icon-btn.quiet:hover {
+  background: transparent;
+  color: var(--ink);
+}
 /* Footer icon actions (e.g. the destructive trash) size up to match the 40px
    footer button row so the row reads as one consistent height. */
 .modal-footer .icon-btn {

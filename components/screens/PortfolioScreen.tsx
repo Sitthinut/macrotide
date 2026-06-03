@@ -1757,7 +1757,7 @@ export function PortfolioScreen({
               {editable && (
                 <button
                   type="button"
-                  className="icon-btn"
+                  className="icon-btn quiet"
                   aria-label={`Edit ${h.ticker}`}
                   title={`Edit ${h.ticker}`}
                   onClick={() => setHoldingSheet(h)}
