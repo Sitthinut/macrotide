@@ -44,3 +44,12 @@ Rules that outlive any one decision above:
 - **`NULL` user_id was fail-open** (shared built-in vs. unowned-by-accident
   were indistinguishable). Resolved 2026-05-24 by making `ownedBy()`
   default-deny with explicit opt-in for genuinely-shared rows; keep it that way.
+- **Portfolio health = named checks, not a headline grade.** No single 0–100
+  "quality" score in the UI (a chase-able grade harms passive investors); lead
+  with the plain-language headline + four named checks, keep the composite math
+  internal for the Advisor. Diversification measures *underlying* concentration —
+  single-fund size + look-through (single-name overlap as a lower bound +
+  target-relative region), with independent flags / worst-status-wins and
+  coverage-gated look-through that can only escalate concern, never certify
+  health. Fund-count HHI dropped as the basis; component weights unchanged. Full
+  rationale + sources: [portfolio-health.md](../portfolio-health.md).
