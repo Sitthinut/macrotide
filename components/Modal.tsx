@@ -11,16 +11,12 @@
 //   • form    — 560px desktop / full-bleed bottom-sheet on mobile.
 //   • detail  — 640px desktop / full-bleed mobile, ✕ on, no footer.
 //
-// The body is the ONLY scroll region. The header pins on top; the footer is a
-// liquid-glass bar floating over the bottom of the body (position: absolute) so
-// content scrolls translucently behind it. The body reserves bottom padding
-// equal to the footer's measured height (a ResizeObserver in Modal.Footer writes
-// it to the panel as `--modal-footer-h`) so its last content/buttons clear the
-// bar. On the wide / pointer shell the body uses OverlayScrollbars (shared
-// `os-theme-macrotide`); mobile bottom-sheet bodies use native touch scroll. An
-// invisible 1px sentinel at the bottom of the body, watched by an
-// IntersectionObserver, toggles a soft upward shadow on the footer once content
-// scrolls beneath it (layered with the glass).
+// The body is the ONLY scroll region: a flex column pins the header on top and
+// the footer at the bottom while the body scrolls between them. On the wide /
+// pointer shell the body uses OverlayScrollbars (shared `os-theme-macrotide`);
+// mobile bottom-sheet bodies use native touch scroll. An invisible 1px sentinel
+// at the bottom of the body, watched by an IntersectionObserver, toggles a soft
+// upward shadow on the footer once content scrolls beneath it.
 
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -49,10 +45,6 @@ interface ModalContextValue {
   /** Set by Body's IntersectionObserver; read by Footer for the scroll shadow. */
   footerShadow: boolean;
   setFooterShadow: (v: boolean) => void;
-  /** Footer reports its measured height (px) here; the root writes it to the
-      panel as `--modal-footer-h` so the body can reserve matching bottom padding
-      and content scrolls behind the floating glass footer. */
-  setFooterHeight: (h: number) => void;
 }
 
 const ModalContext = createContext<ModalContextValue | null>(null);
@@ -102,7 +94,6 @@ export function Modal({ open, onClose, variant = "form", labelledBy, role, child
   const overlayRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const [footerShadow, setFooterShadow] = useState(false);
-  const [footerHeight, setFooterHeight] = useState(0);
   const [mounted, setMounted] = useState(false);
 
   // Portals need a DOM target; defer until mounted on the client.
@@ -194,14 +185,8 @@ export function Modal({ open, onClose, variant = "form", labelledBy, role, child
         aria-labelledby={labelledBy}
         tabIndex={-1}
         onKeyDown={onKeyDown}
-        // Footer's measured height, consumed by .modal-body as bottom padding so
-        // its last content clears the floating glass footer (0 until measured /
-        // when there's no footer, e.g. the `detail` variant).
-        style={{ "--modal-footer-h": `${footerHeight}px` } as React.CSSProperties}
       >
-        <ModalContext.Provider
-          value={{ variant, onClose, isWide, footerShadow, setFooterShadow, setFooterHeight }}
-        >
+        <ModalContext.Provider value={{ variant, onClose, isWide, footerShadow, setFooterShadow }}>
           {children}
         </ModalContext.Provider>
       </div>
@@ -349,30 +334,9 @@ export interface ModalFooterProps {
 }
 
 function ModalFooter({ start, children }: ModalFooterProps) {
-  const { footerShadow, setFooterHeight } = useModalContext();
-  const footerRef = useRef<HTMLDivElement>(null);
-
-  // The footer floats over the body (position: absolute), so the body can't
-  // learn its height from layout. Measure it with a ResizeObserver and report it
-  // up; the root writes it to the panel as `--modal-footer-h` for the body's
-  // bottom padding. Robust to 1- vs 2-row footers and the confirm variant, which
-  // differ in height. Reset to 0 + disconnect on unmount so a re-opened modal
-  // (or the footerless detail variant) doesn't keep stale padding.
-  useEffect(() => {
-    const el = footerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => {
-      setFooterHeight(el.getBoundingClientRect().height);
-    });
-    ro.observe(el);
-    return () => {
-      ro.disconnect();
-      setFooterHeight(0);
-    };
-  }, [setFooterHeight]);
-
+  const { footerShadow } = useModalContext();
   return (
-    <div ref={footerRef} className={`modal-footer${footerShadow ? " modal-footer--scrolled" : ""}`}>
+    <div className={`modal-footer${footerShadow ? " modal-footer--scrolled" : ""}`}>
       {start && <div className="modal-footer-start">{start}</div>}
       <div className="modal-footer-end">{children}</div>
     </div>

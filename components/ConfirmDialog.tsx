@@ -37,11 +37,11 @@ export function ConfirmDialog({
   return (
     <Modal open={open} onClose={onCancel} variant="confirm" labelledBy="confirm-dialog-title">
       <Modal.Header title={title} id="confirm-dialog-title" />
-      {/* Always render a Body (even with no message): the glass footer floats
-          over the body and the body reserves the footer's height as bottom
-          padding, so without a body the absolute footer would have nothing to
-          clear and would be clipped by the panel's overflow. */}
-      <Modal.Body>{message && <div className="modal-confirm-message">{message}</div>}</Modal.Body>
+      {message && (
+        <Modal.Body>
+          <div className="modal-confirm-message">{message}</div>
+        </Modal.Body>
+      )}
       <Modal.Footer>
         <button type="button" className="btn ghost" onClick={onCancel} disabled={busy}>
           {cancelLabel}
