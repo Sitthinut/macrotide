@@ -1761,7 +1761,7 @@ export function PortfolioScreen({
                   aria-label={`Edit ${h.ticker}`}
                   title={`Edit ${h.ticker}`}
                   onClick={() => setHoldingSheet(h)}
-                  style={{ flexShrink: 0, alignSelf: "center" }}
+                  style={{ flexShrink: 0, alignSelf: "center", marginLeft: 12 }}
                 >
                   <Icon name="pencil" size={12} />
                 </button>
