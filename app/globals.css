@@ -21,6 +21,12 @@
   --footer-scroll-shadow:
     0 -10px 24px -10px rgba(10, 10, 11, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.5);
   --footer-scrolled-bg: color-mix(in srgb, #000 4%, var(--paper));
+  /* Liquid-glass footer material (copied from .bottom-nav). The modal footer
+     floats over the scrolling body; these tokens flip per theme so the glass
+     reads correctly on either surface. Near-opaque (0.94) for legibility. */
+  --footer-glass-bg: rgba(255, 255, 255, 0.94);
+  --footer-glass-border: rgba(10, 10, 11, 0.06);
+  --footer-glass-highlight: rgba(255, 255, 255, 0.5);
   --card-soft: #f1f2f4;
   --ink: #0a0a0b;
   --ink-soft: #3a3d43;
@@ -68,6 +74,9 @@
   --scroll-edge: rgba(255, 255, 255, 0.1);
   --footer-scroll-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
   --footer-scrolled-bg: color-mix(in srgb, #fff 5%, var(--paper));
+  --footer-glass-bg: rgba(28, 30, 34, 0.94);
+  --footer-glass-border: rgba(255, 255, 255, 0.08);
+  --footer-glass-highlight: rgba(255, 255, 255, 0.08);
   --card-soft: #101215;
   --ink: #f4f5f7;
   --ink-soft: #c5c8cd;
@@ -106,6 +115,9 @@
     --scroll-edge: rgba(255, 255, 255, 0.1);
     --footer-scroll-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
     --footer-scrolled-bg: color-mix(in srgb, #fff 5%, var(--paper));
+    --footer-glass-bg: rgba(28, 30, 34, 0.94);
+    --footer-glass-border: rgba(255, 255, 255, 0.08);
+    --footer-glass-highlight: rgba(255, 255, 255, 0.08);
     --card-soft: #101215;
     --ink: #f4f5f7;
     --ink-soft: #c5c8cd;
@@ -951,6 +963,9 @@ textarea.sheet-input {
   animation: dialogIn 0.25s cubic-bezier(0.2, 0, 0, 1);
   outline: none;
   overflow: hidden; /* clip children to the rounded corners */
+  /* Positioning context for the absolutely-positioned glass footer (below),
+     which floats over the bottom of the scrolling body. */
+  position: relative;
 }
 .modal--confirm {
   max-width: 400px;
@@ -1000,7 +1015,11 @@ textarea.sheet-input {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 0 24px;
+  /* Reserve bottom space equal to the floating footer's measured height
+     (--modal-footer-h, set by Modal.tsx's ResizeObserver on the panel) so the
+     last content/buttons clear the glass and content scrolls BEHIND it. Falls
+     back to 0 before the footer is measured / when there is no footer. */
+  padding: 0 24px var(--modal-footer-h, 0px);
   overscroll-behavior: contain;
 }
 /* `detail` has no footer, so the body owns its own bottom breathing room
@@ -1015,10 +1034,16 @@ textarea.sheet-input {
   pointer-events: none;
 }
 
-/* Footer — pinned at the bottom; children auto right-aligned (no spacer hack).
-   `start` slot floats left for a destructive/tertiary action. */
+/* Footer — a liquid-glass bar floating over the bottom of the scrolling body
+   (the body reserves --modal-footer-h of bottom padding so its last content
+   clears the bar and the rest scrolls translucently behind it). Children auto
+   right-aligned (no spacer hack); `start` slot floats left for a
+   destructive/tertiary action. */
 .modal-footer {
-  flex: 0 0 auto;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1038,12 +1063,38 @@ textarea.sheet-input {
   gap: 8px;
   margin-left: auto;
 }
+/* Liquid-glass material (copied from .bottom-nav, ~L362): near-opaque tint +
+   backdrop blur/saturate, a top hairline border, and an inset white highlight.
+   Tokens flip per theme (:root / [data-theme="dark"] / system-dark). Gated on
+   @supports so unsupported engines fall through to the opaque elevation tokens
+   below. */
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .modal-footer {
+    background: var(--footer-glass-bg);
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    border-top: 1px solid var(--footer-glass-border);
+    box-shadow: inset 0 1px 0 var(--footer-glass-highlight);
+  }
+}
 /* Appear-on-scroll separator: a soft upward shadow + a hairline top highlight
    (echoing the floating-pill treatment, e.g. .bottom-nav) once the body's
-   bottom sentinel scrolls out of view. No hairline divider, no backdrop-filter. */
+   bottom sentinel scrolls out of view. Layered with the glass above; where
+   backdrop-filter is unsupported these opaque elevation tokens are the whole
+   treatment (legible, no glass). */
 .modal-footer--scrolled {
   background: var(--footer-scrolled-bg);
   box-shadow: var(--footer-scroll-shadow);
+}
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .modal-footer--scrolled {
+    /* Keep the glass material; add the scroll shadow + glass highlight so the
+       separation cue reads layered over the blur instead of replacing it. */
+    background: var(--footer-glass-bg);
+    box-shadow:
+      var(--footer-scroll-shadow),
+      inset 0 1px 0 var(--footer-glass-highlight);
+  }
 }
 
 /* Confirm message — the decision-critical "can't be undone" sentence. Larger
