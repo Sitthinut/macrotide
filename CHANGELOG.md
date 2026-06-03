@@ -32,9 +32,10 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   information cards — each held fund, its cheaper comparable alternative(s), and
   the annual saving — with exactly one section-level "Ask advisor" (a single
   fee-focused prompt scoped to the most material finding and its cheapest
-  alternative) and one "See details" beneath it. The tab shows only the top 3
-  findings by largest annual saving — with a calm note pointing at "See details"
-  for the full list when more exist — while "See details" still lists all of them.
+  alternative) and a primary "See details" beneath it. The tab shows only the
+  top 3 findings by largest annual saving — when more exist, the "See details"
+  button carries the true total ("See all N") — while "See details" still lists
+  all of them.
   There are no per-card actions on the tab. "See details" opens a full-screen page (a sub-view of Portfolio, not a
   new tab) that houses all the management UI: each fee check with its own Archive
   ("I've seen this; file it") and "Not for me" (reject, with an optional reason —

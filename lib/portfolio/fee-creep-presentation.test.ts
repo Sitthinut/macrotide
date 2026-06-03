@@ -6,9 +6,9 @@ import {
   FEE_CHECK_TOP_N,
   type FeeCheckCardLike,
   feeCheckCardSummary,
-  feeCheckInlineCapNote,
   feeCheckInlineIntro,
   feeCheckSummary,
+  feeChecksButtonLabel,
   feeSwitchPrompt,
   orderFeeChecks,
   presentFeeChecks,
@@ -112,22 +112,20 @@ describe("feeCheckInlineIntro", () => {
   });
 });
 
-describe("feeCheckInlineCapNote", () => {
-  it("is empty when nothing is hidden (total <= shown)", () => {
-    expect(feeCheckInlineCapNote(3, 3)).toBe("");
-    expect(feeCheckInlineCapNote(3, 2)).toBe("");
-    expect(feeCheckInlineCapNote(2, 2)).toBe("");
+describe("feeChecksButtonLabel", () => {
+  it("is the plain 'See details' when nothing is hidden (total <= shown)", () => {
+    expect(feeChecksButtonLabel(3, 3)).toBe("See details");
+    expect(feeChecksButtonLabel(2, 3)).toBe("See details");
+    expect(feeChecksButtonLabel(2, 2)).toBe("See details");
   });
 
-  it("names the shown count and the true total when capped", () => {
-    expect(feeCheckInlineCapNote(FEE_CHECK_TOP_N, 10)).toBe(
-      "Showing the 3 with the largest saving — See details for all 10.",
-    );
+  it("carries the true total when capped (e.g. 'See all 11')", () => {
+    expect(feeChecksButtonLabel(11, FEE_CHECK_TOP_N)).toBe("See all 11");
+    expect(feeChecksButtonLabel(10, 3)).toBe("See all 10");
   });
 
   it("has no nag or deadline language", () => {
-    const note = feeCheckInlineCapNote(3, 9);
-    expect(note).not.toMatch(/now|urgent|deadline|must|to-do/i);
+    expect(feeChecksButtonLabel(9, 3)).not.toMatch(/now|urgent|deadline|must|to-do/i);
   });
 });
 

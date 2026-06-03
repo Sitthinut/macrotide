@@ -75,14 +75,15 @@ export function feeCheckInlineIntro(total: number): string {
 }
 
 /**
- * A calm, quiet indicator shown beneath the inline cards when the section is
- * capped: it states how many are shown and points to See details for the full
- * list. `shown` is the number of cards rendered, `total` the true finding count.
- * Empty when nothing is hidden (`total <= shown`) — the caller renders no line.
+ * The "See details" button label for the inline fee-check section. When the
+ * section is capped — more findings exist than the `shown` cards — the label
+ * carries the true total so the count lives on the one action that reveals them
+ * (e.g. "See all 11"). When nothing is hidden (`total <= shown`) it is the plain
+ * "See details". Pure; the screen and its tests share this one source of truth.
  */
-export function feeCheckInlineCapNote(shown: number, total: number): string {
-  if (total <= shown) return "";
-  return `Showing the ${shown} with the largest saving — See details for all ${total}.`;
+export function feeChecksButtonLabel(total: number, shown: number): string {
+  if (total > shown) return `See all ${total}`;
+  return "See details";
 }
 
 /** The calm one-line summary for `n` fee checks. Empty when there are none. */

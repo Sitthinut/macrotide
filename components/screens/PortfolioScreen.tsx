@@ -32,8 +32,8 @@ import { feeCreepKey } from "@/lib/portfolio/action-item-key";
 import { REASON_CHIPS, type ReasonChip } from "@/lib/portfolio/action-item-resurface";
 import { formatSeriesDate } from "@/lib/portfolio/adapter";
 import {
-  feeCheckInlineCapNote,
   feeCheckInlineIntro,
+  feeChecksButtonLabel,
   feeSwitchPrompt,
   orderFeeChecks,
   presentFeeChecks,
@@ -1580,35 +1580,30 @@ export function PortfolioScreen({
                 </div>
               ))}
             </div>
-            {/* When the section is capped, a calm, quiet muted line states only
-                the top are shown and points at the "See details" button below for
-                the full list. Copy comes from the same pure helper the tests
-                cover, so inline + page agree. */}
-            {inlineFeeView.moreCount > 0 ? (
-              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8, lineHeight: 1.4 }}>
-                {feeCheckInlineCapNote(inlineFeeView.top.length, feeCreepFindings.length)}
-              </div>
-            ) : null}
-            {/* Exactly one section-level "Ask advisor" + one "See details" for the
-                whole section. Intrinsic width (no lone flex:1) so neither button
-                stretches full-width on a wide pane. */}
+            {/* One section-level "See details" (primary) + one "Ask advisor"
+                (secondary) for the whole section. When the section is capped the
+                primary button carries the true total ("See all N") — the count
+                lives on the one action that reveals the rest, so there's no
+                separate cap-note line. Copy comes from the same pure helper the
+                tests cover, so inline + page agree. Intrinsic width (no lone
+                flex:1) so neither button stretches full-width on a wide pane. */}
             <div style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
               <button
                 type="button"
                 className="btn sm primary"
+                onClick={() => setFeeDetailsOpen(true)}
+                aria-label="See fee-check details"
+              >
+                {feeChecksButtonLabel(feeCreepFindings.length, inlineFeeView.top.length)}
+              </button>
+              <button
+                type="button"
+                className="btn sm ghost"
                 style={{ gap: 4 }}
                 onClick={askAdvisorAboutFees}
                 aria-label="Ask Advisor about these fees"
               >
                 <Icon name="chat" size={12} /> Ask advisor
-              </button>
-              <button
-                type="button"
-                className="btn sm ghost"
-                onClick={() => setFeeDetailsOpen(true)}
-                aria-label="See fee-check details"
-              >
-                See details
               </button>
             </div>
             <div
