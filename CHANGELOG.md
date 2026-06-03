@@ -117,7 +117,14 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   both sides of the guard, so re-crawls are idempotent. A one-time cleanup script
   (`scripts/dedupe-fund-portfolio.mjs`) normalizes existing periods and removes
   the accumulated duplicate rows.
-- **The performance chart's left edge no longer jumps on shorter ranges.** When a
+- **A restated reporting period no longer shows its holdings twice.** When the
+  SEC re-publishes a fund's factsheet for a period it already reported (a
+  restatement, identifiable by a newer `last_upd_date`), the pre-fix ingest had
+  appended the whole second snapshot — so the period held two copies of every
+  holding and the detail view summed them (e.g. a single ~100%-NAV master fund
+  shown twice). The cleanup script now keeps only the latest snapshot per
+  reporting period, dropping superseded re-publications; the quarterly history
+  across distinct periods is preserved untouched.
   range window (1M/3M/6M/1Y) opened on a non-trading day, holdings with no price
   exactly on that date were missing from the first plotted point, so the chart
   started at a fraction of the real total and snapped up a day or two later. The
