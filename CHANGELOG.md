@@ -126,6 +126,18 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Fixed
 
+- **The login screen no longer shows a bot-check under the social sign-in
+  buttons.** OAuth sign-in starts a redirect to the provider, which authenticates
+  the user — so the Turnstile gate (which protects direct account creation) no
+  longer sits on or blocks the "Continue with Google / GitHub" buttons. It now
+  appears only on the email Create-account form, where an account is minted
+  without a third-party identity check.
+- **The Account screen's "Passkeys" status now reflects reality.** The status tag
+  was hardcoded to "active"; an account that signed in with a social provider and
+  skipped passkey setup has none, so it now reads "none" until a passkey is
+  registered (it previously contradicted the "No passkeys registered yet" list
+  directly below it).
+
 - **Fund portfolio holdings no longer duplicate across nightly crawls.** The SEC
   feed sends a holding's reporting `period` as a number, which the incremental
   ingest stored as `"202406.0"` and then compared, as a string, against the

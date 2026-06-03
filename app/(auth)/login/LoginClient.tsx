@@ -115,7 +115,7 @@ function LoginInner() {
     }
   }, [session, router, passkeyPrompt, pendingPasskey, busy]);
 
-  // Header sent on account-creation / OAuth POSTs so the server-side Turnstile
+  // Header sent on the email account-creation POST so the server-side Turnstile
   // gate can verify it. Empty when Turnstile isn't configured (dev bypass).
   function turnstileHeaders(): Record<string, string> {
     return turnstileToken ? { "x-turnstile-token": turnstileToken } : {};
@@ -133,7 +133,6 @@ function LoginInner() {
       const result = await signIn.social({
         provider,
         callbackURL: "/login?passkey=prompt",
-        fetchOptions: { headers: turnstileHeaders() },
       });
       if (result?.error) throw new Error(result.error.message ?? "sign in failed");
       // signIn.social triggers a redirect to the provider; nothing more to do.
@@ -248,7 +247,7 @@ function LoginInner() {
   }
 
   const hasOAuth = Boolean(config?.providers.google || config?.providers.github);
-  // Turnstile must be solved before account-creation / OAuth when it's
+  // Turnstile must be solved before email account-creation when it's
   // configured. In dev (not configured) this is always satisfied.
   const turnstileSatisfied = !config?.turnstile.enabled || Boolean(turnstileToken);
 
@@ -310,7 +309,7 @@ function LoginInner() {
                     type="button"
                     style={secondary}
                     onClick={() => signInSocial("google")}
-                    disabled={busy || !turnstileSatisfied}
+                    disabled={busy}
                   >
                     Continue with Google
                   </button>
@@ -320,14 +319,14 @@ function LoginInner() {
                     type="button"
                     style={secondary}
                     onClick={() => signInSocial("github")}
-                    disabled={busy || !turnstileSatisfied}
+                    disabled={busy}
                   >
                     Continue with GitHub
                   </button>
                 )}
-                {config?.turnstile.enabled && config.turnstile.siteKey && (
-                  <Turnstile siteKey={config.turnstile.siteKey} onToken={setTurnstileToken} />
-                )}
+                {/* No Turnstile here: OAuth-start mints no account (the provider
+                    authenticates the user), so the bot gate lives only on the
+                    email-signup form below. */}
                 <div style={divider}>or</div>
               </>
             )}
