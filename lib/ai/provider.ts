@@ -191,6 +191,54 @@ export function resolveDemoProvider(): ResolvedProvider {
   };
 }
 
+// Inline chat vision (a turn that carries one or more attached images). The
+// owner/free chat chains (`AI_MODELS` / `FREE_TIER_MODEL`) may resolve to
+// text-only models, so an image turn routes here instead — to a SINGLE
+// vision-capable model named by its OWN dedicated `VISION_CHAT_MODEL` var
+// (default `google/gemini-2.5-flash`, the same family the pinned OCR extractor
+// uses). Two deliberate consequences:
+//   - The free-tier cost invariant is preserved by construction: free-tier
+//     vision derives from `VISION_CHAT_MODEL`, NEVER from `AI_MODELS`, exactly
+//     like `FREE_TIER_MODEL`. Free image turns are bounded by the daily token +
+//     optional cents caps enforced in the route before this is reached.
+//   - Setting `VISION_CHAT_MODEL=off` (or empty) disables inline chat vision
+//     entirely — the resolver returns not-ready and the route serves a stub that
+//     points the user at the Add-holdings image importer.
+const VISION_DEFAULT = ["google/gemini-2.5-flash"];
+
+/** True when `VISION_CHAT_MODEL` explicitly disables inline chat vision. */
+function visionDisabled(value: string | undefined): boolean {
+  const v = value?.trim().toLowerCase();
+  return v === "off" || v === "false" || v === "none" || v === "0";
+}
+
+/**
+ * Resolve the provider for an image-bearing chat turn.
+ *
+ * - `demo: true` reads `DEMO_OPENROUTER_API_KEY` (falling back to the owner key)
+ *   so demo vision never silently bills the owner key — mirrors
+ *   {@link resolveDemoProvider}.
+ * - `VISION_CHAT_MODEL` set to `off`/empty → not-ready (vision disabled).
+ * - `reasoningEffort` is passed through; the route pins `"none"` for the free
+ *   and demo paths (cost) and forwards the intent-gated effort for owner/trusted.
+ */
+export function resolveVisionProvider(
+  opts: { reasoningEffort?: ReasoningEffort; demo?: boolean } = {},
+): ResolvedProvider {
+  const key = opts.demo
+    ? (process.env.DEMO_OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY)
+    : process.env.OPENROUTER_API_KEY;
+  if (!key) return { model: null, ready: false, label: "Vision (no key)" };
+  const raw = process.env.VISION_CHAT_MODEL;
+  if (visionDisabled(raw)) return { model: null, ready: false, label: "Vision (disabled)" };
+  const models = parseModels(raw) ?? VISION_DEFAULT;
+  return {
+    model: openrouter(key, models, { reasoningEffort: opts.reasoningEffort }),
+    ready: true,
+    label: chainLabel(opts.demo ? "Vision (demo)" : "Vision", models),
+  };
+}
+
 /**
  * Tiny model used for ancillary tasks where Claude/GPT capacity is overkill
  * — currently just auto-titling a chat after the first turn pair. Reads the

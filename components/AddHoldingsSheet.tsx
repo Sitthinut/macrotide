@@ -13,6 +13,7 @@ import { useBuckets, useHoldings } from "@/lib/fetchers/portfolio";
 import { invalidate } from "@/lib/fetchers/swr";
 import { inferQuoteSource } from "@/lib/market/infer-quote-source";
 import type { QuoteSource } from "@/lib/market/sources";
+import type { ImportSeedRow } from "@/lib/stores/import-seed";
 
 // Compact 2–3 char codes for the in-input price-source badge.
 const TYPE_BADGE_CODES: Record<QuoteSource, string> = {
@@ -49,20 +50,10 @@ interface Row {
 }
 
 // Shape returned by /api/import/image — one row per holding the vision model
-// read, with units/avgCost derived from NAV where possible. Mirrors
-// `DerivedRow` in lib/portfolio/ocr.ts.
-interface ImportedRow {
-  ticker: string;
-  englishName?: string;
-  units?: number;
-  nav?: number;
-  avgCost?: number;
-  value?: number;
-  pl?: number;
-  quoteSource?: QuoteSource;
-  estimated?: boolean;
-  needsUnits?: boolean;
-}
+// read, with units/avgCost derived from NAV where possible. Mirrors `DerivedRow`
+// in lib/portfolio/ocr.ts; identical to the in-chat importer's ImportSeedRow, so
+// the image path and the chat-seed path share one row→table mapping.
+type ImportedRow = ImportSeedRow;
 
 interface ImportApiResponse {
   rows: ImportedRow[];
@@ -91,9 +82,15 @@ export interface AddHoldingsSheetProps {
   open: boolean;
   onClose: () => void;
   onAdd: (rows: AddedHolding[]) => void;
+  /**
+   * Rows to pre-seed into the confirmation table when the sheet opens — used by
+   * the Advisor's in-chat holdings table (lib/stores/import-seed.ts). Merged in
+   * exactly like an image extract; consumed once per array identity.
+   */
+  seedRows?: ImportSeedRow[] | null;
 }
 
-export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps) {
+export function AddHoldingsSheet({ open, onClose, onAdd, seedRows }: AddHoldingsSheetProps) {
   const { data: buckets } = useBuckets();
   const { data: holdings } = useHoldings();
   const [method, setMethod] = useState<"paste" | "image">("paste");
@@ -279,6 +276,25 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
     return String(Math.round(n * 1e4) / 1e4);
   };
 
+  // Map a derived/extracted row (from the image API or the in-chat importer) to
+  // an editable table Row. Shared by the image-upload path and the chat-seed
+  // effect so both backfill units/avgCost and the estimated/needs-units flags
+  // identically. Keeps the server-derived quoteSource; falls back to a local
+  // inference. Not locked — editing the ticker re-infers.
+  const importedRowToRow = (ir: ImportedRow): Row => {
+    const ticker = ir.ticker.trim();
+    return {
+      ticker,
+      units: fmtNum(ir.units),
+      avgCost: fmtNum(ir.avgCost),
+      provenance: "image",
+      englishName: ir.englishName,
+      quoteSource: ir.quoteSource ?? inferQuoteSource(ticker),
+      estimated: ir.estimated,
+      needsUnits: ir.needsUnits,
+    };
+  };
+
   // Extract holdings from one or more screenshots. Each image hits the
   // structured endpoint independently; rows are merged (deduped by symbol —
   // a later image's row wins, since users often upload the detail view after
@@ -320,22 +336,9 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
         }
         const body = (await res.json()) as ImportApiResponse;
         for (const ir of body.rows ?? []) {
-          const ticker = ir.ticker.trim();
-          if (!ticker) continue;
+          if (!ir.ticker.trim()) continue;
           anyRow = true;
-          extracted.push({
-            ticker,
-            units: fmtNum(ir.units),
-            avgCost: fmtNum(ir.avgCost),
-            provenance: "image",
-            englishName: ir.englishName,
-            // Keep the server-derived source per row (it ran inferQuoteSource);
-            // fall back to a local inference if absent. Not locked — editing the
-            // ticker re-infers, but the per-row pill can still override.
-            quoteSource: ir.quoteSource ?? inferQuoteSource(ticker),
-            estimated: ir.estimated,
-            needsUnits: ir.needsUnits,
-          });
+          extracted.push(importedRowToRow(ir));
         }
       } catch (err) {
         setOcrError(err instanceof Error ? err.message : "Failed to reach the import endpoint.");
@@ -361,6 +364,24 @@ export function AddHoldingsSheet({ open, onClose, onAdd }: AddHoldingsSheetProps
     setOcrError(null);
     setImgProcessing(false);
   };
+
+  // Seed rows handed in by the Advisor's in-chat holdings table. Merge them into
+  // the shared confirmation table exactly like an image extract, switching to the
+  // Image tab so the estimated/needs-units affordances read naturally. Consumed
+  // once per array identity (App passes a fresh array per request), so unrelated
+  // re-renders don't re-append.
+  const seededRef = useRef<ImportSeedRow[] | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: appendRows/importedRowToRow
+  // are recreated each render; the ref guard makes them safe to omit (re-running
+  // on every render would otherwise re-append). Mirrors the consume-once pattern
+  // used for seedPrompt in ChatScreen.
+  useEffect(() => {
+    if (!open || !seedRows || seedRows.length === 0) return;
+    if (seededRef.current === seedRows) return;
+    seededRef.current = seedRows;
+    setMethod("image");
+    appendRows(seedRows.map(importedRowToRow), "image");
+  }, [open, seedRows]);
 
   const submit = async () => {
     if (!bucketId) {

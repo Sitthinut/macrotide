@@ -9,8 +9,10 @@ import { createBucket } from "../db/queries/buckets";
 import { createHolding, listHoldings } from "../db/queries/holdings";
 import { listJournalEntries } from "../db/queries/journal";
 import { getPlan, upsertPlan } from "../db/queries/plan";
+import { upsertFundQuote } from "../db/queries/quotes";
 import * as schema from "../db/schema";
 import { persistPlanEdit } from "../portfolio/apply-plan-edit";
+import { quoteCacheKey } from "../portfolio/derive-rows";
 import { createAdvisorTools } from "./tools";
 
 function freshDb() {
@@ -246,6 +248,79 @@ describe("advisor tools — propose_holding", () => {
     expect(out.holding.quoteSource).toBe("yahoo");
     expect(out.holding.avgCost).toBeNull();
     expect(out.holding.assetClass).toBeNull();
+  });
+});
+
+describe("advisor tools — propose_holdings_import", () => {
+  type ImportOut = {
+    ok: boolean;
+    holdingsImport: {
+      rows: Array<{
+        ticker: string;
+        units?: number;
+        avgCost?: number;
+        quoteSource: string;
+        estimated: boolean;
+        needsUnits: boolean;
+      }>;
+      source: string | null;
+      note: string | null;
+    };
+    message: string;
+  };
+
+  it("derives units from market NAV and returns the holdingsImport payload (no DB write)", async () => {
+    const result = await withFresh(async () => {
+      createBucket(BUCKET);
+      // NAV keyed by the composite source:TICKER, same as the importer.
+      upsertFundQuote({
+        ticker: quoteCacheKey("K-USA-A"),
+        nav: 20,
+        updatedAt: new Date().toISOString(),
+      });
+      const tools = createAdvisorTools({ userId: null });
+      const out = (await run(tools.propose_holdings_import, {
+        rows: [
+          { ticker: "k-usa-a", value: 1000, pl: 100 }, // 1000 ÷ 20 = 50 units
+          { ticker: "VOO", units: 10, avgCost: 5 },
+        ],
+        source: "Broker",
+        note: "Read from a portfolio screenshot.",
+      })) as ImportOut;
+      return { out, count: listHoldings().length };
+    });
+    expect(result.out.ok).toBe(true);
+    expect(result.out.holdingsImport.rows).toHaveLength(2);
+    const usa = result.out.holdingsImport.rows[0];
+    expect(usa.units).toBeCloseTo(50);
+    expect(usa.estimated).toBe(true);
+    expect(usa.quoteSource).toBe("thai_mutual_fund");
+    expect(result.out.holdingsImport.rows[1].units).toBe(10);
+    expect(result.out.holdingsImport.source).toBe("Broker");
+    // Proposing must not write a holding.
+    expect(result.count).toBe(0);
+  });
+
+  it("honors an explicit per-row quoteSource override", async () => {
+    const out = (await withFresh(async () => {
+      const tools = createAdvisorTools({ userId: null });
+      // 'K-USA-A' would infer thai_mutual_fund; override forces yahoo.
+      return run(tools.propose_holdings_import, {
+        rows: [{ ticker: "K-USA-A", units: 1, quoteSource: "yahoo" }],
+      });
+    })) as ImportOut;
+    expect(out.holdingsImport.rows[0].quoteSource).toBe("yahoo");
+  });
+
+  it("flags rows that still need a unit count in the message", async () => {
+    const out = (await withFresh(async () => {
+      const tools = createAdvisorTools({ userId: null });
+      return run(tools.propose_holdings_import, {
+        rows: [{ ticker: "K-NOPRICE-A", value: 500 }],
+      });
+    })) as ImportOut;
+    expect(out.holdingsImport.rows[0].needsUnits).toBe(true);
+    expect(out.message).toMatch(/need/i);
   });
 });
 

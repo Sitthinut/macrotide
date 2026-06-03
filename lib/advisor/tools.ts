@@ -21,8 +21,10 @@ import { getPortfolioSeries } from "../db/queries/series";
 import { BENCHMARK_OPTIONS, getBenchmarkReturnPct } from "../market/benchmarks";
 import { QUOTE_SOURCES } from "../market/sources";
 import { adaptModelPortfolio, adaptPortfolios } from "../portfolio/adapter";
+import { deriveRowsWithNav } from "../portfolio/derive-rows";
 import { assessConcentration, computeHealth, summarizeHealth } from "../portfolio/health";
 import { computeLookThrough } from "../portfolio/look-through";
+import type { ExtractedRow } from "../portfolio/ocr";
 import { parsePlan } from "../portfolio/plan-parser";
 import {
   type CheaperOutput,
@@ -461,6 +463,107 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
     },
   });
 
+  const propose_holdings_import = tool({
+    description:
+      "Propose adding MANY holdings at once by handing them to the portfolio " +
+      "importer. Use this — NOT repeated propose_holding calls — when you've read " +
+      "TWO OR MORE positions from attached image(s) (a brokerage statement, " +
+      "portfolio summary, or transaction history). It does NOT write anything: it " +
+      "shows the user a compact table in chat that opens the full import page, " +
+      "pre-filled with these rows, where they review/edit and bulk-save. Pass one " +
+      "entry per position. Read each value EXACTLY as printed — never invent a " +
+      "number; omit a field you can't read. If a row shows only a market value (no " +
+      "units), include `value` (and `pl` if shown) and the importer derives units " +
+      "from the latest NAV. For a SINGLE position, use propose_holding instead. " +
+      "After calling this, tell the user you've drafted the rows for them to review " +
+      "and import.",
+    inputSchema: z.object({
+      rows: z
+        .array(
+          z.object({
+            ticker: z
+              .string()
+              .min(1)
+              .max(40)
+              .describe("Fund/ETF/stock code exactly as printed (e.g. 'K-USA-A(A)', 'VOO')."),
+            englishName: z
+              .string()
+              .max(200)
+              .optional()
+              .describe("Human-readable fund/stock name if shown."),
+            units: z.number().positive().optional().describe("Units/shares held, if shown."),
+            avgCost: z.number().positive().optional().describe("Average cost per unit, if shown."),
+            nav: z.number().positive().optional().describe("NAV/price per unit, if shown."),
+            value: z
+              .number()
+              .positive()
+              .optional()
+              .describe("Market value of the position (the large baht amount), if shown."),
+            pl: z
+              .number()
+              .optional()
+              .describe("Unrealised profit/loss in baht (negative for a loss), if shown."),
+            quoteSource: z
+              .enum(QUOTE_SOURCES)
+              .optional()
+              .describe(
+                "Price source override: 'thai_mutual_fund' for SEC-registered Thai funds, " +
+                  "'yahoo' for stocks/ETFs. Omit to let the importer infer it from the ticker.",
+              ),
+          }),
+        )
+        .min(1)
+        .max(40)
+        .describe("One entry per extracted position."),
+      source: z
+        .string()
+        .max(80)
+        .optional()
+        .describe("Provenance label shown in the UI (e.g. brokerage name)."),
+      note: z
+        .string()
+        .max(300)
+        .optional()
+        .describe("One short line shown above the table (e.g. what was read from the image)."),
+    }),
+    execute: async ({ rows, source, note }) => {
+      // Derive units/avgCost from the latest NAV (shared with POST
+      // /api/import/image via lib/portfolio/derive-rows.ts), so the in-chat table
+      // and the importer agree. The `holdingsImport` field carries the shape
+      // ChatScreen's HoldingsImportCard expects; the client picks it off the
+      // stream and renders the table. No DB mutation here — saving happens in the
+      // importer the user opens.
+      const extracted: ExtractedRow[] = rows.map((r) => ({
+        ticker: r.ticker.trim(),
+        englishName: r.englishName?.trim(),
+        units: r.units,
+        avgCost: r.avgCost,
+        nav: r.nav,
+        value: r.value,
+        pl: r.pl,
+      }));
+      const derived = deriveRowsWithNav(extracted);
+      // Honor an explicit per-row quoteSource override; otherwise keep the
+      // ticker-inferred default deriveRow chose.
+      const out = derived.map((d, i) => {
+        const override = rows[i]?.quoteSource;
+        return override ? { ...d, quoteSource: override } : d;
+      });
+      const needs = out.filter((r) => r.needsUnits).length;
+      return {
+        ok: true as const,
+        holdingsImport: { rows: out, source: source?.trim() ?? null, note: note?.trim() ?? null },
+        message:
+          `Drafted ${out.length} holding${out.length === 1 ? "" : "s"} — review and import ` +
+          `them on the table below.${
+            needs > 0
+              ? ` ${needs} need${needs === 1 ? "s" : ""} a unit count you'll be asked to fill in.`
+              : ""
+          }`,
+      };
+    },
+  });
+
   // ─── fee-aware fund finder ─────────────────────────────────────────────────
   //
   // STANCE: Macrotide is an index-investing companion, not a stock picker. These
@@ -751,6 +854,7 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
     write_journal,
     propose_plan_edit,
     propose_holding,
+    propose_holdings_import,
     find_funds,
     find_cheaper_alternatives,
   };

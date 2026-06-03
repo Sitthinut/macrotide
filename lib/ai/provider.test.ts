@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveDemoProvider, resolveOwnerProvider, resolveTierProvider } from "./provider";
+import {
+  resolveDemoProvider,
+  resolveOwnerProvider,
+  resolveTierProvider,
+  resolveVisionProvider,
+} from "./provider";
 
 const ENV_KEYS = [
   "OPENROUTER_API_KEY",
@@ -7,6 +12,7 @@ const ENV_KEYS = [
   "AI_MODELS",
   "DEMO_AI_MODELS",
   "FREE_TIER_MODEL",
+  "VISION_CHAT_MODEL",
 ] as const;
 
 const saved: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
@@ -107,6 +113,79 @@ describe("resolveDemoProvider", () => {
     delete process.env.DEMO_OPENROUTER_API_KEY;
     const p = resolveDemoProvider();
     expect(p.ready).toBe(true);
+  });
+});
+
+describe("resolveVisionProvider", () => {
+  it("returns not-ready when key is missing", () => {
+    delete process.env.OPENROUTER_API_KEY;
+    delete process.env.DEMO_OPENROUTER_API_KEY;
+    const p = resolveVisionProvider();
+    expect(p.ready).toBe(false);
+    expect(p.model).toBeNull();
+  });
+
+  it("defaults to google/gemini-2.5-flash", () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    delete process.env.VISION_CHAT_MODEL;
+    const p = resolveVisionProvider();
+    expect(p.ready).toBe(true);
+    expect(p.label).toBe("Vision · google/gemini-2.5-flash");
+  });
+
+  it("honors VISION_CHAT_MODEL as a comma-separated chain", () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    process.env.VISION_CHAT_MODEL = "google/gemini-2.5-flash,google/gemini-2.0-flash-001";
+    const p = resolveVisionProvider();
+    expect(p.label).toBe("Vision · google/gemini-2.5-flash → google/gemini-2.0-flash-001");
+  });
+
+  it.each([
+    "off",
+    "OFF",
+    "none",
+    "false",
+    "0",
+    "  off  ",
+  ])("treats VISION_CHAT_MODEL=%j as disabled (not-ready)", (value) => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    process.env.VISION_CHAT_MODEL = value;
+    const p = resolveVisionProvider();
+    expect(p.ready).toBe(false);
+    expect(p.model).toBeNull();
+    expect(p.label).toBe("Vision (disabled)");
+  });
+
+  it("INVARIANT: vision model derives from VISION_CHAT_MODEL, never AI_MODELS", () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    process.env.AI_MODELS = "anthropic/claude-opus-4.1";
+    delete process.env.VISION_CHAT_MODEL;
+    const p = resolveVisionProvider();
+    expect(p.label).toBe("Vision · google/gemini-2.5-flash");
+    expect(p.label).not.toContain("anthropic");
+  });
+
+  describe("demo flavor", () => {
+    it("uses DEMO_OPENROUTER_API_KEY when demo:true", () => {
+      delete process.env.OPENROUTER_API_KEY;
+      process.env.DEMO_OPENROUTER_API_KEY = "sk-demo";
+      const p = resolveVisionProvider({ demo: true });
+      expect(p.ready).toBe(true);
+      expect(p.label).toBe("Vision (demo) · google/gemini-2.5-flash");
+    });
+
+    it("falls back to the owner key when DEMO_OPENROUTER_API_KEY unset", () => {
+      process.env.OPENROUTER_API_KEY = "sk-owner";
+      delete process.env.DEMO_OPENROUTER_API_KEY;
+      const p = resolveVisionProvider({ demo: true });
+      expect(p.ready).toBe(true);
+    });
+
+    it("is not-ready when neither demo nor owner key is set", () => {
+      delete process.env.OPENROUTER_API_KEY;
+      delete process.env.DEMO_OPENROUTER_API_KEY;
+      expect(resolveVisionProvider({ demo: true }).ready).toBe(false);
+    });
   });
 });
 

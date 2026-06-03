@@ -1,12 +1,9 @@
 import { NextResponse } from "next/server";
 import { clientIp, type RateLimitConfig, rateLimit } from "@/lib/api/rate-limit";
 import { withDb } from "@/lib/api/with-db";
-import { listFundQuotes } from "@/lib/db/queries/quotes";
+import { deriveRowsWithNav } from "@/lib/portfolio/derive-rows";
 import {
-  type DerivedRow,
-  deriveRow,
   extractStructuredHoldings,
-  inferQuoteSource,
   isAllowedMimeType,
   OcrProviderUnavailableError,
 } from "@/lib/portfolio/ocr";
@@ -95,21 +92,9 @@ export async function POST(req: Request) {
   return withDb(async () => {
     try {
       const extracted = await extractStructuredHoldings({ data: buffer, mimeType });
-
-      // fund_quotes is keyed by the composite "source:ticker" cache key
-      // (lib/market/cache.ts), not the bare symbol — build the same key per row
-      // (same inferQuoteSource deriveRow uses) so the NAV lookup actually hits.
-      const keyFor = (ticker: string) =>
-        `${inferQuoteSource(ticker)}:${ticker.trim().toUpperCase()}`;
-      const navByKey = new Map<string, number>();
-      const keys = extracted.map((r) => keyFor(r.ticker));
-      if (keys.length) {
-        for (const q of listFundQuotes(keys)) {
-          if (q.nav > 0) navByKey.set(q.ticker, q.nav);
-        }
-      }
-
-      const rows: DerivedRow[] = extracted.map((r) => deriveRow(r, navByKey.get(keyFor(r.ticker))));
+      // Derive units/avgCost from the latest NAV (shared with the advisor's
+      // propose_holdings_import tool — see lib/portfolio/derive-rows.ts).
+      const rows = deriveRowsWithNav(extracted);
 
       return NextResponse.json({ rows }, { status: 200 });
     } catch (err) {
