@@ -1196,21 +1196,18 @@ export function FundDetailSheet({ projId, holding, onEdit, onClose }: FundDetail
   const open = lookupId != null;
   return (
     <Modal open={open} onClose={onClose} variant="detail" labelledBy="fund-detail-title">
-      <Modal.Header title={holding ? "Holding detail" : "Fund detail"} id="fund-detail-title" />
-      <Modal.Body>
-        {open && (
-          <>
-            {onEdit && (
-              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
-                <button type="button" className="btn ghost sm" onClick={onEdit} style={{ gap: 4 }}>
-                  <Icon name="pencil" size={12} /> Edit
-                </button>
-              </div>
-            )}
-            <FundDetailBody projId={lookupId} holding={holding} />
-          </>
-        )}
-      </Modal.Body>
+      <Modal.Header
+        title={holding ? "Holding detail" : "Fund detail"}
+        id="fund-detail-title"
+        action={
+          onEdit ? (
+            <button type="button" className="btn ghost sm" onClick={onEdit} style={{ gap: 4 }}>
+              <Icon name="pencil" size={12} /> Edit
+            </button>
+          ) : undefined
+        }
+      />
+      <Modal.Body>{open && <FundDetailBody projId={lookupId} holding={holding} />}</Modal.Body>
     </Modal>
   );
 }

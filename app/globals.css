@@ -955,6 +955,12 @@ textarea.sheet-input {
   color: var(--muted);
   margin-top: 4px;
 }
+.modal-header-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .modal-close {
   flex: 0 0 auto;
   margin: -4px -4px 0 0;

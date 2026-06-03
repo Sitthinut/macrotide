@@ -204,10 +204,12 @@ export interface ModalHeaderProps {
   id?: string;
   /** Show the top-right ✕. Defaults ON for `detail`, off otherwise. */
   showClose?: boolean;
+  /** Optional right-side action (e.g. an Edit button) rendered left of the ✕. */
+  action?: React.ReactNode;
   children?: React.ReactNode;
 }
 
-function ModalHeader({ title, subtitle, id, showClose, children }: ModalHeaderProps) {
+function ModalHeader({ title, subtitle, id, showClose, action, children }: ModalHeaderProps) {
   const { variant, onClose } = useModalContext();
   const close = showClose ?? variant === "detail";
 
@@ -220,10 +222,20 @@ function ModalHeader({ title, subtitle, id, showClose, children }: ModalHeaderPr
         {subtitle && <div className="modal-subtitle">{subtitle}</div>}
         {children}
       </div>
-      {close && (
-        <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Close">
-          <Icon name="close" size={16} />
-        </button>
+      {(action || close) && (
+        <div className="modal-header-actions">
+          {action}
+          {close && (
+            <button
+              type="button"
+              className="icon-btn modal-close"
+              onClick={onClose}
+              aria-label="Close"
+            >
+              <Icon name="close" size={16} />
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
