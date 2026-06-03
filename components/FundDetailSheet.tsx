@@ -24,7 +24,11 @@ import type {
 import type { FundWithTer } from "@/lib/db/queries/funds";
 import { useResource } from "@/lib/fetchers/swr";
 import { buildHoldingDetailRows } from "@/lib/portfolio/holding-detail";
-import { buildPortfolioDisplayRows } from "@/lib/portfolio/portfolio-display";
+import {
+  buildPortfolioGroups,
+  type PortfolioDisplayRow,
+  type PortfolioGroup,
+} from "@/lib/portfolio/portfolio-display";
 import type { Holding } from "@/lib/static/types";
 import { useScrollFadeX } from "@/lib/useScrollFadeX";
 
@@ -379,190 +383,238 @@ function PortfolioSection({ rows }: { rows: FundPortfolioRow[] }) {
   const scrollRef = useScrollFadeX("Portfolio holdings table");
   if (rows.length === 0) return null;
 
-  // Collapse anonymous derivative rows (FX forwards) into net rows so the real
-  // holdings lead; the SEC feed lists each contract separately.
-  const display = buildPortfolioDisplayRows(rows);
-  const visible = expanded ? display : display.slice(0, PORTFOLIO_PREVIEW);
-  const hidden = display.length - PORTFOLIO_PREVIEW;
+  // Group holdings by SEC asset category (a subheader per category); within a
+  // group, anonymous derivative ladders (FX forwards) still collapse to net rows.
+  const groups = buildPortfolioGroups(rows);
+  const totalHoldings = groups.reduce((sum, g) => sum + g.rows.length, 0);
+
+  // Preview: the first PORTFOLIO_PREVIEW holdings across groups (each kept under
+  // its category header) until expanded.
+  let budget = expanded ? Number.POSITIVE_INFINITY : PORTFOLIO_PREVIEW;
+  // `multi` tracks the FULL group size (before the preview slice) so the group
+  // total %NAV shows whenever the category aggregates >1 holding, even if the
+  // preview only renders one of its rows.
+  const shownGroups: (PortfolioGroup & { multi: boolean })[] = [];
+  for (const g of groups) {
+    if (budget <= 0) break;
+    const groupRows = expanded ? g.rows : g.rows.slice(0, budget);
+    budget -= groupRows.length;
+    shownGroups.push({ ...g, rows: groupRows, multi: g.rows.length > 1 });
+  }
+  const hidden = totalHoldings - shownGroups.reduce((s, g) => s + g.rows.length, 0);
 
   // derive the period label from the first row
   const period = rows[0]?.period;
   const periodLabel = formatYearMonth(period);
 
+  const cellBorder = "1px solid var(--line-soft)";
+
+  // Column headers kept for screen readers but visually hidden — the ticker /
+  // ISIN / %NAV values are self-describing, so the visible header row was just
+  // chrome stacked under the section title.
+  const srOnly: React.CSSProperties = {
+    position: "absolute",
+    width: 1,
+    height: 1,
+    padding: 0,
+    margin: -1,
+    overflow: "hidden",
+    clip: "rect(0 0 0 0)",
+    whiteSpace: "nowrap",
+    border: 0,
+  };
+
+  // Render one holding row, plus its member rows when an expanded collapse group.
+  const renderRow = (row: PortfolioDisplayRow) => {
+    const isGroup = (row.members?.length ?? 0) > 0;
+    const isOpen = isGroup && openGroups.has(row.key);
+    const toggle = () =>
+      setOpenGroups((prev) => {
+        const next = new Set(prev);
+        if (next.has(row.key)) next.delete(row.key);
+        else next.add(row.key);
+        return next;
+      });
+    const main = (
+      <tr key={row.key}>
+        <td
+          style={{
+            // Label starts at 14px whether or not there's a toggle — the arrow
+            // sits in the indent gutter (fixed 12px slot) instead of pushing it.
+            padding: isGroup ? "4px 4px 4px 2px" : "4px 4px 4px 14px",
+            color: "var(--ink-soft)",
+            fontSize: 11.5,
+            borderBottom: cellBorder,
+            maxWidth: 200,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            cursor: isGroup ? "pointer" : undefined,
+          }}
+          title={[row.label, row.issuer, row.category].filter(Boolean).join(" · ") || undefined}
+          onClick={isGroup ? toggle : undefined}
+        >
+          <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {isGroup && (
+              <span
+                style={{
+                  display: "inline-block",
+                  width: 10,
+                  textAlign: "center",
+                  marginRight: 2,
+                  color: "var(--muted)",
+                }}
+              >
+                {isOpen ? "▾" : "▸"}
+              </span>
+            )}
+            {row.label}
+          </span>
+          {row.issuer && (
+            <span
+              style={{
+                fontSize: 10.5,
+                color: "var(--muted)",
+                fontFamily: "var(--font-mono)",
+                display: "block",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {row.issuer}
+            </span>
+          )}
+        </td>
+        <td
+          style={{
+            padding: "4px 4px",
+            fontFamily: "var(--font-mono)",
+            fontSize: 10.5,
+            color: "var(--muted)",
+            borderBottom: cellBorder,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {row.isin ?? "—"}
+        </td>
+        <td
+          style={{
+            padding: "4px 4px",
+            textAlign: "right",
+            fontFamily: "var(--font-mono)",
+            fontSize: 11.5,
+            fontWeight: 500,
+            color: "var(--ink)",
+            borderBottom: cellBorder,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {fmtNavPct(row.percentNav)}
+        </td>
+      </tr>
+    );
+    if (!isOpen || !row.members) return [main];
+    const memberRows = row.members.map((m) => (
+      <tr key={`${row.key}-${m.id}`} style={{ background: "var(--surface-2, transparent)" }}>
+        <td
+          style={{
+            padding: "3px 4px 3px 28px",
+            color: "var(--muted)",
+            fontSize: 10.5,
+            borderBottom: cellBorder,
+            maxWidth: 200,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {m.issueCode ?? m.issuer ?? m.assetliabDesc ?? "—"}
+        </td>
+        <td style={{ borderBottom: cellBorder }} />
+        <td
+          style={{
+            padding: "3px 4px",
+            textAlign: "right",
+            fontFamily: "var(--font-mono)",
+            fontSize: 10.5,
+            color: "var(--muted)",
+            borderBottom: cellBorder,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {fmtNavPct(m.percentNav)}
+        </td>
+      </tr>
+    ));
+    return [main, ...memberRows];
+  };
+
   return (
     <>
       <SectionHeader
-        title={`Portfolio${periodLabel ? ` (${periodLabel})` : ""} · ${display.length} holdings`}
+        title={`Portfolio${periodLabel ? ` (${periodLabel})` : ""} · ${totalHoldings} holdings`}
       />
       <div ref={scrollRef} style={{ overflowX: "auto", paddingBottom: 10 }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
           <thead>
             <tr>
-              <th
-                style={{
-                  textAlign: "left",
-                  padding: "3px 4px",
-                  fontSize: 10,
-                  fontFamily: "var(--font-mono)",
-                  fontWeight: 600,
-                  color: "var(--muted)",
-                  textTransform: "uppercase",
-                  borderBottom: "1px solid var(--line-soft)",
-                }}
-              >
+              <th scope="col" style={srOnly}>
                 Name / Issuer
               </th>
-              <th
-                style={{
-                  textAlign: "left",
-                  padding: "3px 4px",
-                  fontSize: 10,
-                  fontFamily: "var(--font-mono)",
-                  fontWeight: 600,
-                  color: "var(--muted)",
-                  textTransform: "uppercase",
-                  borderBottom: "1px solid var(--line-soft)",
-                  whiteSpace: "nowrap",
-                }}
-              >
+              <th scope="col" style={srOnly}>
                 ISIN
               </th>
-              <th
-                style={{
-                  textAlign: "right",
-                  padding: "3px 4px",
-                  fontSize: 10,
-                  fontFamily: "var(--font-mono)",
-                  fontWeight: 600,
-                  color: "var(--muted)",
-                  textTransform: "uppercase",
-                  borderBottom: "1px solid var(--line-soft)",
-                  whiteSpace: "nowrap",
-                }}
-              >
+              <th scope="col" style={srOnly}>
                 %NAV
               </th>
             </tr>
           </thead>
           <tbody>
-            {visible.flatMap((row) => {
-              const isGroup = (row.members?.length ?? 0) > 0;
-              const isOpen = isGroup && openGroups.has(row.key);
-              const toggle = () =>
-                setOpenGroups((prev) => {
-                  const next = new Set(prev);
-                  if (next.has(row.key)) next.delete(row.key);
-                  else next.add(row.key);
-                  return next;
-                });
-              const main = (
-                <tr key={row.key}>
-                  <td
-                    style={{
-                      padding: "4px 4px",
-                      color: "var(--ink-soft)",
-                      fontSize: 11.5,
-                      borderBottom: "1px solid var(--line-soft)",
-                      maxWidth: 200,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      cursor: isGroup ? "pointer" : undefined,
-                    }}
-                    title={[row.label, row.issuer].filter(Boolean).join(" · ") || undefined}
-                    onClick={isGroup ? toggle : undefined}
-                  >
-                    <span
-                      style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis" }}
-                    >
-                      {isGroup && (
-                        <span style={{ color: "var(--muted)", marginRight: 4 }}>
-                          {isOpen ? "▾" : "▸"}
-                        </span>
-                      )}
-                      {row.label}
-                    </span>
-                    {row.issuer && (
-                      <span
-                        style={{
-                          fontSize: 10.5,
-                          color: "var(--muted)",
-                          fontFamily: "var(--font-mono)",
-                          display: "block",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
-                      >
-                        {row.issuer}
-                      </span>
-                    )}
-                  </td>
-                  <td
-                    style={{
-                      padding: "4px 4px",
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 10.5,
-                      color: "var(--muted)",
-                      borderBottom: "1px solid var(--line-soft)",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {row.isin ?? "—"}
-                  </td>
-                  <td
-                    style={{
-                      padding: "4px 4px",
-                      textAlign: "right",
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 11.5,
-                      fontWeight: 500,
-                      color: "var(--ink)",
-                      borderBottom: "1px solid var(--line-soft)",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {fmtNavPct(row.percentNav)}
-                  </td>
-                </tr>
-              );
-              if (!isOpen || !row.members) return [main];
-              const memberRows = row.members.map((m) => (
-                <tr
-                  key={`${row.key}-${m.id}`}
-                  style={{ background: "var(--surface-2, transparent)" }}
+            {shownGroups.flatMap((g, gi) => [
+              // Category subheader — real columns so the label lines up with the
+              // holding names (left) and the group total with the %NAV column
+              // (right). Sans (inherited): var(--font-mono) has no Thai glyphs and
+              // falls back to an ugly serif. The total shows only when the category
+              // aggregates >1 holding (else it just repeats the single row's %NAV).
+              <tr key={`cat-${g.category}`}>
+                <td
+                  style={{
+                    padding: gi === 0 ? "4px 4px 4px" : "12px 4px 4px",
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    color: "var(--muted)",
+                    borderBottom: cellBorder,
+                    maxWidth: 200,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
                 >
-                  <td
-                    style={{
-                      padding: "3px 4px 3px 18px",
-                      color: "var(--muted)",
-                      fontSize: 10.5,
-                      borderBottom: "1px solid var(--line-soft)",
-                      maxWidth: 200,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {m.issueCode ?? m.issuer ?? m.assetliabDesc ?? "—"}
-                  </td>
-                  <td style={{ borderBottom: "1px solid var(--line-soft)" }} />
-                  <td
-                    style={{
-                      padding: "3px 4px",
-                      textAlign: "right",
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 10.5,
-                      color: "var(--muted)",
-                      borderBottom: "1px solid var(--line-soft)",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {fmtNavPct(m.percentNav)}
-                  </td>
-                </tr>
-              ));
-              return [main, ...memberRows];
-            })}
+                  {g.category}
+                </td>
+                <td
+                  style={{
+                    padding: gi === 0 ? "4px 4px 4px" : "12px 4px 4px",
+                    borderBottom: cellBorder,
+                  }}
+                />
+                <td
+                  style={{
+                    padding: gi === 0 ? "4px 4px 4px" : "12px 4px 4px",
+                    textAlign: "right",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 11.5,
+                    fontWeight: 500,
+                    color: "var(--muted)",
+                    borderBottom: cellBorder,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {g.multi ? fmtNavPct(g.totalPct) : ""}
+                </td>
+              </tr>,
+              ...g.rows.flatMap(renderRow),
+            ])}
           </tbody>
         </table>
       </div>
@@ -583,7 +635,7 @@ function PortfolioSection({ rows }: { rows: FundPortfolioRow[] }) {
             letterSpacing: "0.02em",
           }}
         >
-          Show all {display.length} holdings ↓
+          Show all {totalHoldings} holdings ↓
         </button>
       )}
       {expanded && (
