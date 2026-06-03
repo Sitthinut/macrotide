@@ -167,7 +167,7 @@ function PerformanceSection({ rows }: { rows: FundPerformanceRow[] }) {
   return (
     <>
       <SectionHeader title="Performance & Risk" />
-      <div ref={perfScrollRef} style={{ overflowX: "auto" }}>
+      <div ref={perfScrollRef} style={{ overflowX: "auto", paddingBottom: 10 }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
           <thead>
             <tr>
