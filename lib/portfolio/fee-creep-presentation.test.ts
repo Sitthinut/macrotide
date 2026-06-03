@@ -6,6 +6,8 @@ import {
   FEE_CHECK_TOP_N,
   type FeeCheckCardLike,
   feeCheckCardSummary,
+  feeCheckInlineCapNote,
+  feeCheckInlineIntro,
   feeCheckSummary,
   feeSwitchPrompt,
   orderFeeChecks,
@@ -87,6 +89,45 @@ describe("presentFeeChecks", () => {
     expect(view.rest).toEqual([]);
     expect(view.moreCount).toBe(0);
     expect(view.summary).toBe("");
+  });
+});
+
+describe("feeCheckInlineIntro", () => {
+  it("is empty when there are no findings", () => {
+    expect(feeCheckInlineIntro(0)).toBe("");
+    expect(feeCheckInlineIntro(-2)).toBe("");
+  });
+
+  it("is singular for one fund", () => {
+    expect(feeCheckInlineIntro(1)).toBe(
+      "One of your funds has a cheaper alternative offering comparable exposure.",
+    );
+  });
+
+  it("reflects the TRUE total when capped (not the shown count)", () => {
+    // 10 findings but only the top 3 render — the intro still says 10.
+    expect(feeCheckInlineIntro(10)).toBe(
+      "10 of your funds have cheaper alternatives offering comparable exposure.",
+    );
+  });
+});
+
+describe("feeCheckInlineCapNote", () => {
+  it("is empty when nothing is hidden (total <= shown)", () => {
+    expect(feeCheckInlineCapNote(3, 3)).toBe("");
+    expect(feeCheckInlineCapNote(3, 2)).toBe("");
+    expect(feeCheckInlineCapNote(2, 2)).toBe("");
+  });
+
+  it("names the shown count and the true total when capped", () => {
+    expect(feeCheckInlineCapNote(FEE_CHECK_TOP_N, 10)).toBe(
+      "Showing the 3 with the largest saving — See details for all 10.",
+    );
+  });
+
+  it("has no nag or deadline language", () => {
+    const note = feeCheckInlineCapNote(3, 9);
+    expect(note).not.toMatch(/now|urgent|deadline|must|to-do/i);
   });
 });
 

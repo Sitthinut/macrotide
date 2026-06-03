@@ -61,6 +61,30 @@ export function presentFeeChecks<T extends FeeCheckLike>(
   };
 }
 
+/**
+ * The honest intro line for the inline fee-check section: it always reflects the
+ * TRUE total (`total`), never the capped count shown. Singular/plural aware.
+ * Empty when there are none.
+ */
+export function feeCheckInlineIntro(total: number): string {
+  if (total <= 0) return "";
+  if (total === 1) {
+    return "One of your funds has a cheaper alternative offering comparable exposure.";
+  }
+  return `${total} of your funds have cheaper alternatives offering comparable exposure.`;
+}
+
+/**
+ * A calm, quiet indicator shown beneath the inline cards when the section is
+ * capped: it states how many are shown and points to See details for the full
+ * list. `shown` is the number of cards rendered, `total` the true finding count.
+ * Empty when nothing is hidden (`total <= shown`) — the caller renders no line.
+ */
+export function feeCheckInlineCapNote(shown: number, total: number): string {
+  if (total <= shown) return "";
+  return `Showing the ${shown} with the largest saving — See details for all ${total}.`;
+}
+
 /** The calm one-line summary for `n` fee checks. Empty when there are none. */
 export function feeCheckSummary(n: number): string {
   if (n <= 0) return "";

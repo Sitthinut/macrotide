@@ -32,6 +32,8 @@ import { feeCreepKey } from "@/lib/portfolio/action-item-key";
 import { REASON_CHIPS, type ReasonChip } from "@/lib/portfolio/action-item-resurface";
 import { formatSeriesDate } from "@/lib/portfolio/adapter";
 import {
+  feeCheckInlineCapNote,
+  feeCheckInlineIntro,
   feeSwitchPrompt,
   orderFeeChecks,
   presentFeeChecks,
@@ -586,6 +588,11 @@ export function PortfolioScreen({
     const activeTickers = new Set(view.holdings.map((h) => h.ticker));
     return feeCreepData.filter((f) => activeTickers.has(f.heldTicker));
   }, [feeCreepData, view]);
+
+  // Inline fee-check view: the SAME severity ordering + top-N split the
+  // See-details page uses (presentFeeChecks), so both agree on "most material".
+  // The tab renders only the top cards; the full list lives on See details.
+  const inlineFeeView = useMemo(() => presentFeeChecks(feeCreepFindings), [feeCreepFindings]);
 
   // Hidden (archived / rejected) fee-creep items — the "Hidden checks (N)" list.
   // Scoped to fee_creep so the surface stays about the section it sits under.
@@ -1486,12 +1493,10 @@ export function PortfolioScreen({
                 marginBottom: 10,
               }}
             >
-              {feeCreepFindings.length === 1
-                ? "One of your funds has a cheaper alternative offering comparable exposure."
-                : `${feeCreepFindings.length} of your funds have cheaper alternatives offering comparable exposure.`}
+              {feeCheckInlineIntro(feeCreepFindings.length)}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {feeCreepFindings.map((f) => (
+              {inlineFeeView.top.map((f) => (
                 <div
                   key={f.heldTicker}
                   style={{
@@ -1575,6 +1580,15 @@ export function PortfolioScreen({
                 </div>
               ))}
             </div>
+            {/* When the section is capped, a calm, quiet muted line states only
+                the top are shown and points at the "See details" button below for
+                the full list. Copy comes from the same pure helper the tests
+                cover, so inline + page agree. */}
+            {inlineFeeView.moreCount > 0 ? (
+              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8, lineHeight: 1.4 }}>
+                {feeCheckInlineCapNote(inlineFeeView.top.length, feeCreepFindings.length)}
+              </div>
+            ) : null}
             {/* Exactly one section-level "Ask advisor" + one "See details" for the
                 whole section. Intrinsic width (no lone flex:1) so neither button
                 stretches full-width on a wide pane. */}
