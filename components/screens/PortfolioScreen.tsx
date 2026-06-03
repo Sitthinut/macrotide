@@ -950,7 +950,6 @@ export function PortfolioScreen({
               color: "var(--muted)",
               lineHeight: 1.5,
               padding: "8px 4px 0",
-              maxWidth: 560,
             }}
           >
             The benchmark leaves out dividends, so it's drawn a little low — the index's real return
