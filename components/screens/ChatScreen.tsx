@@ -10,13 +10,63 @@ import {
   usePortfolioView,
   useSelectedModelId,
 } from "@/lib/fetchers/legacy";
-import { invalidate } from "@/lib/fetchers/swr";
+import { invalidate, useResource } from "@/lib/fetchers/swr";
 import { type AdvisorScreenContext, buildChatSuggestions } from "@/lib/portfolio/chat-suggestions";
 import { computeHealth } from "@/lib/portfolio/health";
 import { AI_PERSONALITIES } from "@/lib/static/personalities";
+import { type ChatImage, loadChatThreadImages, saveChatImages } from "@/lib/stores/chat-images";
 import { consumeLoadTarget, setActiveThreadId, useChatUi } from "@/lib/stores/chat-ui";
+import { type ImportSeedRow, requestImportWithRows } from "@/lib/stores/import-seed";
+
+// Image attachment caps — bound payload + vision token cost. Images are
+// downscaled client-side before send (see downscaleImage).
+const MAX_ATTACHMENTS = 4;
+const MAX_IMAGE_DIM = 1024;
+const IMAGE_JPEG_QUALITY = 0.7;
+
+// Downscale + re-encode an image File to a bounded JPEG data URL. Keeps the
+// longest side ≤ MAX_IMAGE_DIM so attachments stay small in the request, in
+// localStorage, and in the model's vision token budget. Falls back to the raw
+// data URL if canvas processing isn't available.
+async function downscaleImage(file: File): Promise<ChatImage> {
+  const rawDataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string) ?? "");
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new window.Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("decode failed"));
+      el.src = rawDataUrl;
+    });
+    const scale = Math.min(1, MAX_IMAGE_DIM / Math.max(img.width, img.height));
+    const w = Math.max(1, Math.round(img.width * scale));
+    const h = Math.max(1, Math.round(img.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("no 2d context");
+    ctx.drawImage(img, 0, 0, w, h);
+    const dataUrl = canvas.toDataURL("image/jpeg", IMAGE_JPEG_QUALITY);
+    return { id: makeId(), dataUrl, mime: "image/jpeg", name: file.name };
+  } catch {
+    // Couldn't downscale (SVG, decode failure) — send the original bytes.
+    return { id: makeId(), dataUrl: rawDataUrl, mime: file.type || "image/png", name: file.name };
+  }
+}
 
 const ACTIVE_THREAD_KEY = "macrotide_chat_active_thread";
+
+// Remove the trailing "[N image(s) attached]" marker the server stores in a
+// user message (images aren't persisted server-side). Used on reload when we
+// have the thumbnails to show, so the marker doesn't duplicate the preview.
+function stripImageMarker(text: string): string {
+  return text.replace(/\s*\[\d+ image(?:s)? attached\]\s*$/, "").trimEnd();
+}
 
 interface PlanProposal {
   section: string;
@@ -42,6 +92,14 @@ interface HoldingProposal {
   rationale: string;
 }
 
+// The advisor's propose_holdings_import tool output: a batch of extracted rows
+// rendered as a compact in-chat table that opens the full importer pre-seeded.
+interface HoldingsImport {
+  rows: ImportSeedRow[];
+  source: string | null;
+  note: string | null;
+}
+
 interface Message {
   role: "user" | "ai";
   text: string;
@@ -49,9 +107,14 @@ interface Message {
   // Stable identity for streaming updates. `ts` is for display only — two
   // messages can share a ms if they're queued in the same event-loop tick.
   id: string;
+  // Images the user attached to this turn (downscaled). Shown as thumbnails;
+  // kept in the browser only (localStorage), never persisted server-side.
+  images?: ChatImage[];
   proposal?: PlanProposal;
   applied?: boolean;
   rejected?: boolean;
+  // A batch holdings-import table (one per turn) from propose_holdings_import.
+  holdingsImport?: HoldingsImport;
   // A turn can yield MANY holding proposals (one per extracted statement row),
   // so unlike `proposal` these are a keyed list with per-card accept/reject
   // state tracked by index.
@@ -253,6 +316,56 @@ function HoldingProposalCard({
   );
 }
 
+// Compact, read-only summary of a batch of extracted holdings (from the
+// propose_holdings_import tool), with a button that opens the full importer
+// pre-seeded with these rows for review/edit/bulk-save (see lib/stores/import-seed).
+function HoldingsImportCard({ data, onOpen }: { data: HoldingsImport; onOpen: () => void }) {
+  const fmt = (n: number | undefined) =>
+    n === undefined || !Number.isFinite(n) ? "—" : String(Math.round(n * 1e4) / 1e4);
+  return (
+    <div className="plan-proposal">
+      <div className="label">
+        <Icon name="sparkle" size={12} />
+        <span>
+          REVIEW HOLDINGS · {data.rows.length} ROW{data.rows.length === 1 ? "" : "S"}
+        </span>
+      </div>
+      {data.note && (
+        <div style={{ fontSize: 11.5, color: "var(--ink-soft)", lineHeight: 1.45 }}>
+          {data.note}
+        </div>
+      )}
+      <table className="chat-import-table">
+        <thead>
+          <tr>
+            <th>Fund</th>
+            <th style={{ textAlign: "right" }}>Units</th>
+            <th style={{ textAlign: "right" }}>Avg cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.rows.map((r, i) => (
+            <tr key={`${r.ticker}-${i}`}>
+              <td>
+                <span className="t">{r.ticker.toUpperCase()}</span>
+                {r.needsUnits && <span className="flag">needs units</span>}
+                {!r.needsUnits && r.estimated && <span className="flag est">estimated</span>}
+              </td>
+              <td style={{ textAlign: "right" }}>{fmt(r.units)}</td>
+              <td style={{ textAlign: "right" }}>{fmt(r.avgCost)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="actions">
+        <button className="btn primary sm" onClick={onOpen} style={{ flex: 1 }}>
+          <Icon name="arrowRight" size={12} /> Review &amp; import
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function ChatScreen({
   persona = "advisor",
   seedPrompt,
@@ -278,6 +391,14 @@ export function ChatScreen({
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
+  // Pending image attachments for the next turn (downscaled), plus a click-to-
+  // enlarge lightbox. Whether the attach affordance shows at all is gated by the
+  // server-computed capability below (vision on + demo allows it).
+  const [attachments, setAttachments] = useState<ChatImage[]>([]);
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { data: caps } = useResource<{ imageUpload: boolean }>("/api/chat/capabilities");
+  const imageUploadEnabled = caps?.imageUpload === true;
   const [msgFeedback, setMsgFeedback] = useState<Record<number, MsgFeedback>>({});
   const [showThreads, setShowThreads] = useState(false);
   // Set when the server signals it crossed ~80% of the model context budget
@@ -353,16 +474,33 @@ export function ChatScreen({
         if (typeof window !== "undefined") {
           window.localStorage.setItem(ACTIVE_THREAD_KEY, id);
         }
+        // Re-attach any browser-cached images to their turns. Keyed by the
+        // 0-based index of the user message within the thread (deterministic and
+        // append-only), so the send path and this reload path agree without a
+        // server-side image id. See lib/stores/chat-images.ts.
+        const storedImages = loadChatThreadImages(id);
+        let userSeq = -1;
         setMessages(
           rows.length === 0
             ? initial
-            : rows.map((r) => ({
-                role: r.role === "assistant" ? "ai" : "user",
-                text: r.content,
-                ts: Date.parse(r.createdAt) || Date.now(),
-                id: `db-${r.id}`,
-                model: r.model ?? null,
-              })),
+            : rows.map((r) => {
+                const isUser = r.role !== "assistant";
+                if (isUser) userSeq += 1;
+                const imgs = isUser ? storedImages.get(userSeq) : undefined;
+                // The server stores a "[N image(s) attached]" marker since images
+                // aren't persisted server-side. When we DO have the thumbnails
+                // (from localStorage), drop the redundant marker — it's only a
+                // fallback for when the images can't be shown.
+                const text = imgs?.length ? stripImageMarker(r.content) : r.content;
+                return {
+                  role: r.role === "assistant" ? "ai" : "user",
+                  text,
+                  ts: Date.parse(r.createdAt) || Date.now(),
+                  id: `db-${r.id}`,
+                  model: r.model ?? null,
+                  images: imgs,
+                } as Message;
+              }),
         );
         setMsgFeedback({});
         setContextNotice(false);
@@ -404,7 +542,27 @@ export function ChatScreen({
     setMessages(initial);
     setMsgFeedback({});
     setContextNotice(false);
+    setAttachments([]);
   }, [initial, closeOutgoing]);
+
+  // ── Image attachments ────────────────────────────────────────────────────
+  // Downscale + stage image files (from the picker, drag-drop, or paste),
+  // capped at MAX_ATTACHMENTS. Non-image files are ignored.
+  const addFiles = useCallback(
+    async (files: File[]) => {
+      if (!imageUploadEnabled || loading) return;
+      const images = files.filter((f) => f.type.startsWith("image/"));
+      if (images.length === 0) return;
+      const room = MAX_ATTACHMENTS - attachments.length;
+      if (room <= 0) return;
+      const processed = await Promise.all(images.slice(0, room).map(downscaleImage));
+      setAttachments((prev) => [...prev, ...processed].slice(0, MAX_ATTACHMENTS));
+    },
+    [imageUploadEnabled, loading, attachments.length],
+  );
+
+  const removeAttachment = (idx: number) =>
+    setAttachments((prev) => prev.filter((_, i) => i !== idx));
 
   // Keyboard shortcut: ⌘/Ctrl+K opens a new chat. We swallow the event so the
   // browser's "search bar" default (Firefox) doesn't also fire. Disabled
@@ -487,22 +645,46 @@ export function ChatScreen({
     }
   }, [messages.length, lastText]);
 
-  const askLive = async (prompt: string, history: Message[], context?: EntryContext) => {
+  const askLive = async (
+    prompt: string,
+    history: Message[],
+    context?: EntryContext,
+    attached: ChatImage[] = [],
+  ) => {
     setLoading(true);
     // New user turn → this session now has content worth extracting when it
     // closes (gates the close beacon; see closeOutgoing).
     dirtyRef.current = true;
-    // Build the model conversation from prior turns + this new prompt.
-    const model = [
-      // Send each turn's text. The `proposal` field is UI-only metadata and is
-      // never forwarded (we only pass role + text), but the assistant prose that
-      // accompanied a proposal IS part of the conversation, so keep these turns.
-      ...history.map((m) => ({
-        role: m.role === "ai" ? "assistant" : "user",
-        content: m.text,
-      })),
+    const hasImages = attached.length > 0;
+    // Index of this user turn within the thread (for the image localStorage key).
+    const userSeq = history.filter((m) => m.role === "user").length;
+
+    // Text-only turns send the compact `{role, content:string}` shape — kept
+    // byte-identical to before so the model prefix cache stays warm. Image turns
+    // send the whole conversation as UIMessage `parts` (prior turns as one text
+    // part each; this turn's text + file parts) so the server's
+    // convertToModelMessages forwards the images to the vision model.
+    const stringPayload = [
+      // The `proposal` field is UI-only metadata and is never forwarded (we only
+      // pass role + text), but the assistant prose that accompanied a proposal IS
+      // part of the conversation, so keep these turns.
+      ...history.map((m) => ({ role: m.role === "ai" ? "assistant" : "user", content: m.text })),
       { role: "user" as const, content: prompt },
     ];
+    const uiPayload = [
+      ...history.map((m) => ({
+        role: m.role === "ai" ? "assistant" : "user",
+        parts: [{ type: "text", text: m.text }],
+      })),
+      {
+        role: "user" as const,
+        parts: [
+          ...(prompt ? [{ type: "text", text: prompt }] : []),
+          ...attached.map((a) => ({ type: "file", mediaType: a.mime, url: a.dataUrl })),
+        ],
+      },
+    ];
+    const payload = hasImages ? uiPayload : stringPayload;
 
     // Reserve the placeholder assistant message we'll stream into.
     const placeholderId = makeId();
@@ -513,7 +695,7 @@ export function ChatScreen({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: model,
+          messages: payload,
           threadId: threadId ?? undefined,
           // Structured entry context (screen/intent/signals) from an Ask-Advisor
           // button, when present — lets the server skip a tool round-trip. Omitted
@@ -537,6 +719,10 @@ export function ChatScreen({
           window.localStorage.setItem(ACTIVE_THREAD_KEY, returnedThread);
         }
       }
+      // Cache this turn's images in the browser (never server-side) so they
+      // survive a reload, keyed by the user-message index in this thread.
+      const tidForImages = returnedThread ?? threadId;
+      if (hasImages && tidForImages) saveChatImages(tidForImages, userSeq, attached);
       // Refresh the sidebar so the new/updated thread surfaces next time
       // the drawer opens.
       void invalidate("/api/chat/threads");
@@ -631,6 +817,22 @@ export function ChatScreen({
                 );
               }
             }
+            // propose_holdings_import emits a `holdingsImport` batch — attach it
+            // so HoldingsImportCard renders the compact table + open-importer CTA.
+            if (toolOut && typeof toolOut === "object" && "holdingsImport" in toolOut) {
+              const hi = (toolOut as { holdingsImport?: unknown }).holdingsImport;
+              if (hi && typeof hi === "object" && Array.isArray((hi as { rows?: unknown }).rows)) {
+                const raw = hi as { rows: ImportSeedRow[]; source?: unknown; note?: unknown };
+                const holdingsImport: HoldingsImport = {
+                  rows: raw.rows,
+                  source: typeof raw.source === "string" ? raw.source : null,
+                  note: typeof raw.note === "string" ? raw.note : null,
+                };
+                setMessages((prev) =>
+                  prev.map((m) => (m.id === placeholderId ? { ...m, holdingsImport } : m)),
+                );
+              }
+            }
           } catch {
             // Some events are not JSON (heartbeats, [DONE]); ignore.
           }
@@ -643,9 +845,14 @@ export function ChatScreen({
       // regardless of what the LLM did.
       if (!accumulated) {
         const hadTool = toolMessages.length > 0;
+        // Image turns that come back empty are usually a vision-model hiccup
+        // (provider error / a model that can't read the image) — say so and
+        // invite a retry, rather than the generic "no reply" line.
         const fallback = hadTool
           ? toolMessages.join("\n\n")
-          : "I didn't have a reply for that — your dashboard and notes are unaffected.";
+          : hasImages
+            ? "I couldn't read that image just now — please try again in a moment. Your dashboard and notes are unaffected."
+            : "I didn't have a reply for that — your dashboard and notes are unaffected.";
         setMessages((prev) =>
           prev.map((m) =>
             // Offer retry only on a genuinely empty turn (no tool ran). When a
@@ -687,19 +894,42 @@ export function ChatScreen({
   // `display` is the visible user bubble; `send` is what's actually sent to the
   // model. They differ only for the OCR handoff, where the raw transcription
   // rides along in `send` but stays out of the visible body. Default: identical.
-  const ask = (display: string, send: string = display, context?: EntryContext) => {
-    if (!display.trim() || loading) return;
-    const newUserMsg: Message = { role: "user", text: display, ts: Date.now(), id: makeId() };
+  // `attached` carries any image attachments for this turn (shown as thumbnails
+  // on the user bubble; forwarded to the vision model).
+  const ask = (
+    display: string,
+    send: string = display,
+    context?: EntryContext,
+    attached: ChatImage[] = [],
+  ) => {
+    // Allow an image-only turn (empty text) when attachments are present.
+    if ((!display.trim() && attached.length === 0) || loading) return;
+    const newUserMsg: Message = {
+      role: "user",
+      text: display,
+      ts: Date.now(),
+      id: makeId(),
+      images: attached.length ? attached : undefined,
+    };
     const nextHistory = [...messages, newUserMsg];
     setMessages(nextHistory);
     setInput("");
 
-    // Plan edits now flow through the advisor's propose_plan_edit tool, and
-    // holding extraction through propose_holding: the model emits proposals in
-    // the chat stream, which askLive picks up and renders as cards. No
-    // client-side heuristic / fake preview. `context`, when an Ask-Advisor button
-    // supplied it, rides along to the server (never into the visible bubble).
-    void askLive(send, messages, context);
+    // Plan edits flow through propose_plan_edit, holding extraction through
+    // propose_holding / propose_holdings_import: the model emits proposals in the
+    // chat stream, which askLive picks up and renders as cards/tables. `context`,
+    // when an Ask-Advisor button supplied it, rides along to the server (never
+    // into the visible bubble).
+    void askLive(send, messages, context, attached);
+  };
+
+  // Send the composer's current text + staged attachments, then clear them.
+  const sendComposer = () => {
+    if (loading) return;
+    const imgs = attachments;
+    if (!input.trim() && imgs.length === 0) return;
+    ask(input, input, undefined, imgs);
+    setAttachments([]);
   };
 
   // Re-send the user message that produced a failed/empty assistant turn.
@@ -907,6 +1137,20 @@ export function ChatScreen({
         // `min-height: 0` lets flex:1 shrink below content size so overflow-y
         // actually kicks in (otherwise long messages push the composer off-screen).
         style={{ flex: 1, paddingBottom: 8, minHeight: 0, overflowY: "auto" }}
+        onDragOver={imageUploadEnabled ? (e) => e.preventDefault() : undefined}
+        onDrop={
+          imageUploadEnabled
+            ? (e) => {
+                const files = Array.from(e.dataTransfer.files).filter((f) =>
+                  f.type.startsWith("image/"),
+                );
+                if (files.length > 0) {
+                  e.preventDefault();
+                  void addFiles(files);
+                }
+              }
+            : undefined
+        }
       >
         {messages.map((m, i) => (
           <div key={m.id} className={`msg ${m.role}`}>
@@ -927,7 +1171,24 @@ export function ChatScreen({
                 <span></span>
               </div>
             ) : (
-              <div style={{ whiteSpace: "pre-wrap" }}>{m.text}</div>
+              m.text && <div style={{ whiteSpace: "pre-wrap" }}>{m.text}</div>
+            )}
+            {m.images && m.images.length > 0 && (
+              <div className="chat-attachments">
+                {m.images.map((img) => (
+                  <button
+                    type="button"
+                    key={img.id}
+                    className="thumb"
+                    onClick={() => setLightbox(img.dataUrl)}
+                    title={img.name}
+                    aria-label={`View ${img.name}`}
+                  >
+                    {/* biome-ignore lint/performance/noImgElement: data-URL thumbnail, not a remote asset */}
+                    <img src={img.dataUrl} alt={img.name} />
+                  </button>
+                ))}
+              </div>
             )}
             {m.canRetry && (
               <button
@@ -963,25 +1224,35 @@ export function ChatScreen({
                 onReject={() => rejectHolding(i, hIdx)}
               />
             ))}
-            {m.role === "ai" && i > 0 && !m.proposal && !m.holdings?.length && (
-              <FeedbackRow
-                label="HELPFUL?"
-                value={msgFeedback[i]?.rating ?? null}
-                saved={msgFeedback[i]?.saved}
-                onChange={(rating) =>
-                  setMsgFeedback({
-                    ...msgFeedback,
-                    [i]: { ...msgFeedback[i], rating },
-                  })
-                }
-                onSave={() =>
-                  setMsgFeedback({
-                    ...msgFeedback,
-                    [i]: { ...msgFeedback[i], saved: !msgFeedback[i]?.saved },
-                  })
-                }
+            {m.holdingsImport && (
+              <HoldingsImportCard
+                data={m.holdingsImport}
+                onOpen={() => requestImportWithRows(m.holdingsImport!.rows)}
               />
             )}
+            {m.role === "ai" &&
+              i > 0 &&
+              !m.proposal &&
+              !m.holdings?.length &&
+              !m.holdingsImport && (
+                <FeedbackRow
+                  label="HELPFUL?"
+                  value={msgFeedback[i]?.rating ?? null}
+                  saved={msgFeedback[i]?.saved}
+                  onChange={(rating) =>
+                    setMsgFeedback({
+                      ...msgFeedback,
+                      [i]: { ...msgFeedback[i], rating },
+                    })
+                  }
+                  onSave={() =>
+                    setMsgFeedback({
+                      ...msgFeedback,
+                      [i]: { ...msgFeedback[i], saved: !msgFeedback[i]?.saved },
+                    })
+                  }
+                />
+              )}
           </div>
         ))}
         {/* Standalone "thinking" bubble only when there's no streaming
@@ -1076,29 +1347,93 @@ export function ChatScreen({
         </div>
       )}
 
-      <div className="suggested-chips">
-        {suggestions.map((s) => (
-          <button key={s} className="chip" onClick={() => ask(s)} disabled={loading}>
-            {s}
-          </button>
-        ))}
-      </div>
+      {attachments.length === 0 && (
+        <div className="suggested-chips">
+          {suggestions.map((s) => (
+            <button key={s} className="chip" onClick={() => ask(s)} disabled={loading}>
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {imageUploadEnabled && attachments.length > 0 && (
+        <div className="composer-attachments">
+          {attachments.map((a, idx) => (
+            <div className="thumb" key={a.id}>
+              {/* biome-ignore lint/performance/noImgElement: data-URL preview, not a remote asset */}
+              <img src={a.dataUrl} alt={a.name} />
+              <button
+                type="button"
+                onClick={() => removeAttachment(idx)}
+                aria-label={`Remove ${a.name}`}
+                title="Remove"
+              >
+                <Icon name="close" size={11} />
+              </button>
+            </div>
+          ))}
+          <span className="note">
+            Images stay in your browser and are sent to Advisor to answer — they are not stored on
+            our servers.
+          </span>
+        </div>
+      )}
 
       <form
         className="composer"
         onSubmit={(e) => {
           e.preventDefault();
-          ask(input);
+          sendComposer();
         }}
       >
+        {imageUploadEnabled && (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              style={{ display: "none" }}
+              onChange={(e) => {
+                void addFiles(Array.from(e.target.files ?? []));
+                e.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              className="attach-btn"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={loading || attachments.length >= MAX_ATTACHMENTS}
+              aria-label="Attach image"
+              title={
+                attachments.length >= MAX_ATTACHMENTS
+                  ? `Up to ${MAX_ATTACHMENTS} images`
+                  : "Attach image"
+              }
+            >
+              <Icon name="paperclip" size={16} />
+            </button>
+          </>
+        )}
         <input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          onPaste={(e) => {
+            if (!imageUploadEnabled) return;
+            const files = Array.from(e.clipboardData.files).filter((f) =>
+              f.type.startsWith("image/"),
+            );
+            if (files.length > 0) {
+              e.preventDefault();
+              void addFiles(files);
+            }
+          }}
           placeholder="Ask about your portfolio, target, or rebalancing…"
           disabled={loading}
         />
-        <button type="submit" disabled={!input.trim() || loading}>
+        <button type="submit" disabled={(!input.trim() && attachments.length === 0) || loading}>
           <Icon name="send" size={14} />
         </button>
       </form>
@@ -1120,6 +1455,18 @@ export function ChatScreen({
       >
         Advisor is AI and can make mistakes.
       </div>
+
+      {lightbox && (
+        <button
+          type="button"
+          className="chat-lightbox"
+          onClick={() => setLightbox(null)}
+          aria-label="Close image"
+        >
+          {/* biome-ignore lint/performance/noImgElement: data-URL preview, not a remote asset */}
+          <img src={lightbox} alt="Attached" />
+        </button>
+      )}
     </div>
   );
 }

@@ -31,6 +31,7 @@ import { invalidate, useResource } from "@/lib/fetchers/swr";
 import type { AdvisorScreenContext } from "@/lib/portfolio/chat-suggestions";
 import { restoreScreenScroll, saveScreenScroll } from "@/lib/screenScroll";
 import type { Portfolio } from "@/lib/static/types";
+import { type ImportSeedRow, useImportSeed } from "@/lib/stores/import-seed";
 import { setActiveId, usePortfolioUi } from "@/lib/stores/portfolio-ui";
 import { useScrollHide } from "@/lib/useScrollHide";
 import { useViewport } from "@/lib/useViewport";
@@ -192,6 +193,20 @@ export function App() {
   const [screen, setScreen] = useState<Screen>("portfolio");
   const [pendingPrompt, setPendingPrompt] = useState<SeedPrompt | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  // Rows the Advisor's in-chat holdings table hands to the importer (via the
+  // import-seed store), copied into local state so the sheet keeps them after
+  // the consumable store intent is cleared.
+  const [importSeed, setImportSeed] = useState<ImportSeedRow[] | null>(null);
+  const { seedRows: seedRequest, openNonce: seedNonce, consumeImportSeed } = useImportSeed();
+  const handledSeedNonce = useRef(0);
+  useEffect(() => {
+    if (seedNonce > 0 && seedNonce !== handledSeedNonce.current && seedRequest) {
+      handledSeedNonce.current = seedNonce;
+      setImportSeed(seedRequest);
+      setImportOpen(true);
+      consumeImportSeed();
+    }
+  }, [seedNonce, seedRequest, consumeImportSeed]);
   const [, setExtraHoldings] = useState<AddedHolding[]>([]);
   const [, setSavedReading] = useState<unknown[]>([]);
   const planSelectedModelId = useSelectedModelId();
@@ -567,7 +582,11 @@ export function App() {
       />
       <AddHoldingsSheet
         open={importOpen}
-        onClose={() => setImportOpen(false)}
+        seedRows={importSeed}
+        onClose={() => {
+          setImportOpen(false);
+          setImportSeed(null);
+        }}
         onAdd={(rows) => setExtraHoldings((prev) => [...prev, ...rows])}
       />
     </>

@@ -17,6 +17,7 @@ Macrotide follows the **secure-by-default** principle, one of [Saltzer & Schroed
 | Passkey auth | required | Dashboard refuses to render until a passkey login. Set `AUTH_DISABLED=1` to opt out (local dev only). |
 | Demo session | not started | Per-visit opt-in. Each session gets its own in-memory SQLite, swept after 1h idle. |
 | OpenRouter key | unset | Chat returns a stub message. A fresh checkout has no API credentials to leak. |
+| In-chat image upload (demo) | off | Demo sessions can't attach chat images unless `DEMO_VISION` is set. Owner/free use `VISION_CHAT_MODEL`; set it to `off` to disable inline chat vision entirely. |
 | Bind address | `0.0.0.0:3000` (Next.js dev default) | ⚠ Anyone on your LAN can hit dev. Use `next dev -H 127.0.0.1` for solo dev. |
 | Owner DB | `data/app.db`, unencrypted | SQLite file. Use disk encryption + filesystem permissions on a shared host. |
 
@@ -34,7 +35,7 @@ Macrotide follows the **secure-by-default** principle, one of [Saltzer & Schroed
 
 - **Shell access to the host.** Anyone who can read `data/app.db` can read all portfolios. SQLite is unencrypted. Mitigate with disk encryption and filesystem permissions (`chmod 600`).
 - **Compromised passkey device.** Possessing a passkey === being the user. Lose your laptop without a screen lock, lose access. Register passkeys on multiple devices as a recovery path.
-- **OpenRouter side.** Portfolio context is sent to OpenRouter for chat. If their infra is compromised, that data is exposed. Don't chat about info you wouldn't share with a cloud LLM.
+- **OpenRouter side.** Portfolio context is sent to OpenRouter for chat. If their infra is compromised, that data is exposed. Don't chat about info you wouldn't share with a cloud LLM. **This includes images you attach in chat** — they're sent to the configured vision provider (`VISION_CHAT_MODEL`) to answer the turn. Macrotide does **not** store attached images on the server: the saved chat message keeps only a `[N image(s) attached]` text marker, and the images themselves are cached **only in your browser** (localStorage, size-bounded, evicted oldest-first) so you can still see them within the session. Clearing site data removes them; they never reach `data/app.db`.
 - **Multi-tenant isolation at the DB level.** There is no row-level security — multi-user mode trusts the auth layer to attribute writes correctly. Audit before deploying to >10 users; consider a dedicated DB per user instead.
 - **Side-channel attacks on auth.** No timing-attack hardening on top of better-auth's internals. We don't add a custom layer.
 - **Supply-chain attacks on dependencies.** No SBOM, no signed releases yet. `npm audit` is your friend; Dependabot is on the roadmap.

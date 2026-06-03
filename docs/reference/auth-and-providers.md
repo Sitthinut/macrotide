@@ -84,6 +84,20 @@ tripping blocks the turn, both reset at UTC midnight):
 Owner / `AUTH_DISABLED` mode is never metered. Full var table:
 [configuration.md § Quotas + tier gating](./configuration.md#quotas--tier-gating).
 
+### In-chat vision
+
+An image-bearing chat turn (the Advisor reads images you attach) routes to its
+**own** `VISION_CHAT_MODEL` (default `google/gemini-2.5-flash`), not the text
+chains — for the same reason `FREE_TIER_MODEL` is separate: free-tier vision
+derives from a dedicated var and can't widen `AI_MODELS`/`FREE_TIER_MODEL`.
+Owner, trusted, and free all use it; free-tier image turns stay bounded by the
+same daily token + optional cents caps above. Set `VISION_CHAT_MODEL=off` to
+disable inline chat vision entirely (image turns then get a stub pointing at the
+Add-holdings importer). Demo image upload is **off** unless `DEMO_VISION` is set,
+and when on uses the demo key, bounded by the 10-turn demo cap. Attached images
+are sent to the vision provider to answer the turn and cached only in the user's
+browser for the session — never stored on the server (see [SECURITY.md](../../SECURITY.md)).
+
 The free, demo, and ancillary (title/extract) paths also send
 `reasoning: { effort: "none" }` so a reasoning-capable model the router picks
 doesn't spend hidden chain-of-thought (billed at the output rate, ~8–29s/turn

@@ -1659,12 +1659,18 @@ textarea.sheet-input {
   background: var(--paper);
   border-radius: var(--r-2xl);
   border: 1px solid var(--line);
-  padding: 5px 5px 5px 14px;
+  /* Symmetric inset so the attach button on the left lines up with the send
+     button on the right. When no attach button is rendered (vision disabled),
+     the text input gets its own left inset below so it isn't flush. */
+  padding: 5px;
   display: flex;
   align-items: center;
   gap: 6px;
   z-index: 20;
   flex-shrink: 0;
+}
+.composer:not(:has(.attach-btn)) input {
+  padding-left: 9px;
 }
 .composer input {
   flex: 1;
@@ -1692,6 +1698,139 @@ textarea.sheet-input {
 .composer button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+/* Attach (paperclip) button — ghost style, distinct from the dark send button. */
+.composer .attach-btn {
+  background: transparent;
+  color: var(--muted);
+}
+.composer .attach-btn:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+/* Pending image attachments shown above the composer. */
+.composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 16px 6px;
+}
+.composer-attachments .thumb {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  border-radius: 8px;
+  overflow: visible;
+  border: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.composer-attachments .thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 8px;
+  display: block;
+}
+.composer-attachments .thumb button {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.composer-attachments .note {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+/* Thumbnails of images attached to a sent message. */
+.chat-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.chat-attachments .thumb {
+  width: 72px;
+  height: 72px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  padding: 0;
+  cursor: zoom-in;
+  background: var(--card-soft);
+}
+.chat-attachments .thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Compact holdings table inside the in-chat import card. */
+.chat-import-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 4px 0 2px;
+}
+.chat-import-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--muted);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--line);
+}
+.chat-import-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+}
+.chat-import-table .t {
+  font-family: var(--font-mono);
+}
+.chat-import-table .flag {
+  margin-left: 6px;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--warn, #b45309);
+}
+.chat-import-table .flag.est {
+  color: var(--muted);
+}
+
+/* Full-image lightbox overlay. */
+.chat-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  border: 0;
+  background: rgba(0, 0, 0, 0.78);
+  cursor: zoom-out;
+}
+.chat-lightbox img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 10px;
+  object-fit: contain;
 }
 
 .typing {

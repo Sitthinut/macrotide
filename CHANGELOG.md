@@ -35,7 +35,21 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   single *alternative* position is flagged while a large broad-index equity fund
   is not. The composite score is kept for the Advisor's internal use and
   /api/analysis. Rationale + sources: docs/explanation/portfolio-health.md.
-
+- **The Advisor can now see images you attach in chat.** Drop or paste one or
+  more screenshots into the chat composer and the Advisor reasons over them
+  directly — reconciling a portfolio summary, a transaction history, and
+  per-holding detail screens into one set of positions, deriving missing
+  units/average cost where the data supports it and asking for anything it can't
+  read. When it extracts two or more holdings it shows a compact in-chat table
+  that opens the full importer pre-filled for bulk review and save; a single
+  position still uses the one-tap add card. You can also ask about a chart or
+  factsheet image and get a plain-language answer. Image turns route to a
+  dedicated vision model (`VISION_CHAT_MODEL`, default `google/gemini-2.5-flash`;
+  set it to `off` to disable); free-tier vision is bounded by the existing daily
+  token/cost caps, and demo image upload is off unless an operator sets
+  `DEMO_VISION`. Attached images are sent to the vision provider to answer the
+  turn and cached only in your browser for the session — never stored on the
+  server (the saved message keeps a "[N image(s) attached]" marker).
 - **The Portfolio performance caveat now reflects which lines actually exclude
   dividends.** The note under the total-balance graph adapts to whether a
   benchmark is selected and whether the book holds a dividend-paying fund,
