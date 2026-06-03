@@ -69,3 +69,79 @@ export function feeCheckSummary(n: number): string {
   }
   return `${n} funds have cheaper equivalents — review when you have time.`;
 }
+
+// ─── Per-card helpers (slim summary list + detail overlay) ──────────────────────
+// The list card shows only the held fund + a one-line saving summary and two
+// buttons (Ask advisor / See details). The fee comparison and the
+// Archive / "Not for me" controls live in the detail overlay. These pure helpers
+// build the card's summary string and the per-fund Advisor prompt so the screen
+// and its tests share one source of truth.
+
+/** Minimal shape the card summary + Advisor prompt read off a fee-creep finding. */
+export interface FeeCheckCardLike {
+  heldTicker: string;
+  heldName: string;
+  heldTer: number;
+  assetClass: string | null;
+  savingsPp: number;
+  alternatives: { abbrName: string; englishName: string | null; ter: number }[];
+}
+
+/**
+ * The card's one-line saving summary, e.g. "≈0.45pp/yr cheaper available". The
+ * magnitude is the `savingsPp` already on the finding (annual saving in
+ * percentage points). We do not quote a baht figure — a fee-creep finding
+ * carries no holding value, so a "฿N/yr" number would be invented; the pp/yr
+ * figure is the honest, available one. Empty when there is no cheaper peer.
+ */
+export function feeCheckCardSummary(finding: Pick<FeeCheckCardLike, "savingsPp">): string {
+  if (finding.savingsPp <= 0) return "";
+  return `≈${finding.savingsPp.toFixed(2)}pp/yr cheaper available`;
+}
+
+/** A per-fund Advisor prompt: the display text, the send text, and the carried context. */
+export interface FeeSwitchPrompt {
+  display: string;
+  send: string;
+  context: {
+    screen: "portfolio";
+    intent: "fee_switch";
+    subject: string;
+    signals: {
+      heldTer: number;
+      alternative: string;
+      altTer: number;
+      assetClass: string;
+    };
+  };
+}
+
+/**
+ * Build the per-fund "Ask advisor" prompt for one fee check, scoped to the held
+ * fund and its cheapest comparable alternative. The fee comparison is already on
+ * screen, so the carried `context.signals` lets the Advisor reason about the
+ * switch without re-reading holdings. Returns null when the finding has no
+ * alternative to switch into.
+ */
+export function feeSwitchPrompt(finding: FeeCheckCardLike): FeeSwitchPrompt | null {
+  const alt = finding.alternatives[0];
+  if (!alt) return null;
+  const altTer = alt.ter ?? 0;
+  const assetClass = finding.assetClass ?? "same-class";
+  const prompt = `I hold ${finding.heldTicker} at a ${finding.heldTer.toFixed(2)}% TER. ${alt.abbrName} offers comparable ${assetClass} exposure at ${altTer.toFixed(2)}%. Walk me through what it would take to switch, and whether the saving justifies the move.`;
+  return {
+    display: prompt,
+    send: prompt,
+    context: {
+      screen: "portfolio",
+      intent: "fee_switch",
+      subject: finding.heldTicker,
+      signals: {
+        heldTer: Number(finding.heldTer.toFixed(2)),
+        alternative: alt.abbrName,
+        altTer: Number(altTer.toFixed(2)),
+        assetClass,
+      },
+    },
+  };
+}

@@ -4,7 +4,10 @@
 import { describe, expect, it } from "vitest";
 import {
   FEE_CHECK_TOP_N,
+  type FeeCheckCardLike,
+  feeCheckCardSummary,
   feeCheckSummary,
+  feeSwitchPrompt,
   orderFeeChecks,
   presentFeeChecks,
 } from "./fee-creep-presentation";
@@ -84,5 +87,67 @@ describe("presentFeeChecks", () => {
     expect(view.rest).toEqual([]);
     expect(view.moreCount).toBe(0);
     expect(view.summary).toBe("");
+  });
+});
+
+// A full finding shape for the card-summary + Advisor-prompt helpers.
+function finding(overrides: Partial<FeeCheckCardLike> = {}): FeeCheckCardLike {
+  return {
+    heldTicker: "EXAMPLE-FUND-A",
+    heldName: "Example Fund A",
+    heldTer: 1.5,
+    assetClass: "equity",
+    savingsPp: 0.45,
+    alternatives: [
+      { abbrName: "EXAMPLE-FUND-B", englishName: "Example Fund B", ter: 1.05 },
+      { abbrName: "EXAMPLE-FUND-C", englishName: null, ter: 1.2 },
+    ],
+    ...overrides,
+  };
+}
+
+describe("feeCheckCardSummary", () => {
+  it("renders the saving as a pp/yr figure (no invented baht)", () => {
+    expect(feeCheckCardSummary(finding())).toBe("≈0.45pp/yr cheaper available");
+  });
+
+  it("is empty when there is no saving", () => {
+    expect(feeCheckCardSummary(finding({ savingsPp: 0 }))).toBe("");
+    expect(feeCheckCardSummary(finding({ savingsPp: -0.1 }))).toBe("");
+  });
+});
+
+describe("feeSwitchPrompt", () => {
+  it("scopes the prompt to the held fund + its cheapest alternative", () => {
+    const p = feeSwitchPrompt(finding());
+    expect(p).not.toBeNull();
+    if (!p) return;
+    expect(p.send).toBe(p.display);
+    expect(p.send).toContain("EXAMPLE-FUND-A");
+    expect(p.send).toContain("1.50% TER");
+    // The cheapest alternative (alternatives[0]) drives the comparison.
+    expect(p.send).toContain("EXAMPLE-FUND-B");
+    expect(p.send).toContain("1.05%");
+    expect(p.context).toEqual({
+      screen: "portfolio",
+      intent: "fee_switch",
+      subject: "EXAMPLE-FUND-A",
+      signals: {
+        heldTer: 1.5,
+        alternative: "EXAMPLE-FUND-B",
+        altTer: 1.05,
+        assetClass: "equity",
+      },
+    });
+  });
+
+  it("falls back to a generic asset class when none is set", () => {
+    const p = feeSwitchPrompt(finding({ assetClass: null }));
+    expect(p?.context.signals.assetClass).toBe("same-class");
+    expect(p?.send).toContain("comparable same-class exposure");
+  });
+
+  it("returns null when there is no alternative to switch into", () => {
+    expect(feeSwitchPrompt(finding({ alternatives: [] }))).toBeNull();
   });
 });

@@ -161,6 +161,16 @@ reason). There is no Snooze: a timed re-nag is the wrong default for a calm,
 anti-tinkering index app, so the only way an item comes back passively is a
 **material change** in the finding.
 
+In the fee-check UI these controls live in a **detail overlay**, not on the list
+card. Each fee check renders as a slim summary card — the held fund plus a
+one-line saving summary, with only two buttons: **Ask advisor** (a per-fund
+Advisor prompt scoped to that held fund and its cheapest comparable alternative)
+and **See details**. "See details" opens a detail `Modal` (the same dialog
+primitive as the fund detail sheet) carrying the fee comparison and the Archive /
+"Not for me" controls with room to breathe. This keeps the list calm rather than
+button-heavy; the actions and their backend wiring are unchanged — only *where*
+they are triggered moved.
+
 Each item is keyed by a deterministic `item_key`
 ([lib/portfolio/action-item-key.ts](../../lib/portfolio/action-item-key.ts)) —
 identity only (e.g. `fee_creep:{ticker}`), so a choice survives NAV ticks. A
