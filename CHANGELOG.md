@@ -106,6 +106,17 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Fixed
 
+- **Fund portfolio holdings no longer duplicate across nightly crawls.** The SEC
+  feed sends a holding's reporting `period` as a number, which the incremental
+  ingest stored as `"202406.0"` and then compared, as a string, against the
+  incoming number — so the de-duplication guard never matched and every crawl
+  re-inserted the entire portfolio. On the fund detail view this showed the same
+  holding repeated several times and, because the display collapses same-security
+  rows and sums their weight, inflated a holding's %NAV (e.g. a 19% position
+  summing past 100%). Periods are now normalized to a clean `YYYYMM` string on
+  both sides of the guard, so re-crawls are idempotent. A one-time cleanup script
+  (`scripts/dedupe-fund-portfolio.mjs`) normalizes existing periods and removes
+  the accumulated duplicate rows.
 - **The performance chart's left edge no longer jumps on shorter ranges.** When a
   range window (1M/3M/6M/1Y) opened on a non-trading day, holdings with no price
   exactly on that date were missing from the first plotted point, so the chart

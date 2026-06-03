@@ -257,8 +257,11 @@ export const fundPortfolio = sqliteTable(
   {
     // Surrogate key. A fund holds many securities that share an assetliab_id
     // (it is an asset/liability CATEGORY, not a per-security id), so there is no
-    // natural composite key — (proj_id, period, assetliab_id) collides. The
-    // delete-then-insert-by-proj_id upsert provides idempotency across crawls.
+    // natural composite key — (proj_id, period, assetliab_id) collides. Idempotency
+    // across crawls comes from upsertFundPortfolio's period guard: a period already
+    // present is skipped, so re-crawls don't duplicate. Periods are normalized to a
+    // clean "YYYYMM" string first — the feed sends a number, which previously
+    // defeated the guard and 6×-duplicated the table (see normalizePeriod).
     id: integer("id").primaryKey({ autoIncrement: true }),
     projId: text("proj_id")
       .notNull()
