@@ -11,8 +11,15 @@
   /* Light tokens (default) */
   --bg: #f8f8f9;
   --paper: #ffffff;
-  /* Soft scroll-shadow tint, matching .modal-footer--scrolled. */
-  --edge-shadow: rgba(10, 10, 11, 0.22);
+  /* Scroll-edge cues. One token per role so components never branch on theme;
+     the token's VALUE flips with the theme. In light a soft shadow reads on a
+     light surface; in dark a dark shadow vanishes (dark-on-dark), so dark uses
+     a light hairline/tint instead.
+     --scroll-edge          gradient tint for edge fades (e.g. overflow tables)
+     --footer-scroll-shadow box-shadow for .modal-footer--scrolled */
+  --scroll-edge: rgba(10, 10, 11, 0.14);
+  --footer-scroll-shadow:
+    0 -10px 24px -10px rgba(10, 10, 11, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.5);
   --card-soft: #f1f2f4;
   --ink: #0a0a0b;
   --ink-soft: #3a3d43;
@@ -57,7 +64,8 @@
 :root[data-theme="dark"] {
   --bg: #0c0d0f;
   --paper: #16181b;
-  --edge-shadow: rgba(0, 0, 0, 0.5);
+  --scroll-edge: rgba(255, 255, 255, 0.1);
+  --footer-scroll-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
   --card-soft: #101215;
   --ink: #f4f5f7;
   --ink-soft: #c5c8cd;
@@ -93,6 +101,8 @@
   :root[data-theme="system"] {
     --bg: #0c0d0f;
     --paper: #16181b;
+    --scroll-edge: rgba(255, 255, 255, 0.1);
+    --footer-scroll-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
     --card-soft: #101215;
     --ink: #f4f5f7;
     --ink-soft: #c5c8cd;
@@ -1027,14 +1037,7 @@ textarea.sheet-input {
    (echoing the floating-pill treatment, e.g. .bottom-nav) once the body's
    bottom sentinel scrolls out of view. No hairline divider, no backdrop-filter. */
 .modal-footer--scrolled {
-  box-shadow:
-    0 -10px 24px -10px rgba(10, 10, 11, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.5);
-}
-[data-theme="dark"] .modal-footer--scrolled {
-  box-shadow:
-    0 -10px 24px -10px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: var(--footer-scroll-shadow);
 }
 
 /* Confirm message — the decision-critical "can't be undone" sentence. Larger

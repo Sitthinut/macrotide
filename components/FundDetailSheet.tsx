@@ -130,9 +130,10 @@ function computeEdgeFades(
   };
 }
 
-// Shared geometry for the two fade overlays. ~28px gradient from the sheet
-// background (--paper) to transparent. `bottom` clears the scroller's 10px
-// padding band so the fade never sits over the OverlayScrollbars track.
+// Shared geometry for the two fade overlays. ~28px gradient from the
+// --scroll-edge separator tint (soft dark in light, soft light in dark) to
+// transparent. `bottom` clears the scroller's 10px padding band so the fade
+// never sits over the OverlayScrollbars track.
 const FADE_BASE: React.CSSProperties = {
   position: "absolute",
   top: 0,
@@ -266,7 +267,7 @@ function PerformanceSection({ rows }: { rows: FundPerformanceRow[] }) {
           style={{
             ...FADE_BASE,
             left: 0,
-            background: "linear-gradient(to right, var(--edge-shadow), transparent)",
+            background: "linear-gradient(to right, var(--scroll-edge), transparent)",
             opacity: fades.left ? 1 : 0,
           }}
         />
@@ -275,7 +276,7 @@ function PerformanceSection({ rows }: { rows: FundPerformanceRow[] }) {
           style={{
             ...FADE_BASE,
             right: 0,
-            background: "linear-gradient(to left, var(--edge-shadow), transparent)",
+            background: "linear-gradient(to left, var(--scroll-edge), transparent)",
             opacity: fades.right ? 1 : 0,
           }}
         />
