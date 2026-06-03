@@ -952,8 +952,8 @@ export function PortfolioScreen({
               padding: "8px 4px 0",
             }}
           >
-            The benchmark leaves out dividends, so it's drawn a little low — the index's real return
-            is slightly higher than the line shown.
+            The benchmark excludes dividends, so the index's real return is slightly higher than the
+            line shown.
           </p>
         )}
       </div>
