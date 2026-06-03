@@ -1581,6 +1581,13 @@ textarea.sheet-input {
 }
 .chat-stream {
   padding: 8px 16px 100px;
+}
+/* The message column+gap lives on a stable inner wrapper, not the host: the
+   desktop overlay scrollbar (useOverlayScrollbar) re-parents the host's single
+   child into a generated viewport, which would strip a flex-gap set on the host.
+   Carrying it here survives the restructure and matches native (mobile, no OS).
+   Mirrors `.ra-panel-body-content`. The host keeps its padding (OS preserves it). */
+.chat-stream-content {
   display: flex;
   flex-direction: column;
   gap: 12px;

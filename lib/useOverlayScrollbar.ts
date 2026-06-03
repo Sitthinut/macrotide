@@ -20,11 +20,12 @@ import { useViewport } from "@/lib/useViewport";
  * element changes — which also covers the panel unmounting as the user closes
  * it (the owning component, and this hook, unmount with it).
  *
- * The targeted scrollers (`.ra-panel-body`, `.ra-thread-panel`) live in
- * `.ra-panel`, a SIBLING of `.ra-main` — not inside `.ra-main`'s generated OS
- * viewport — so there's no nested-OverlayScrollbars hazard. The chat view's
- * real scroller is the inner `.chat-stream`, not `.ra-chat-body`, so the chat
- * body is intentionally left native (it never scrolls itself).
+ * The targeted scrollers (`.ra-panel-body`, `.ra-thread-panel`, `.chat-stream`)
+ * live in `.ra-panel`, a SIBLING of `.ra-main` — not inside `.ra-main`'s
+ * generated OS viewport — so there's no nested-OverlayScrollbars hazard. The
+ * chat view's real scroller is the inner `.chat-stream` (ChatScreen attaches
+ * this hook to it); the wrapping `.ra-chat-body` stays native since it never
+ * scrolls itself.
  */
 export function useOverlayScrollbar(enabled = true) {
   const viewport = useViewport();
