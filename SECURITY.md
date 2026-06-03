@@ -30,6 +30,7 @@ Macrotide follows the **secure-by-default** principle, one of [Saltzer & Schroed
 - **Brute-force on `/api/chat`.** IP-based rate limit, 20 req/min (per-IP, in-memory).
 - **Demo abuse.** 10 chat turns per session cap, separate AI provider key supported so demo can't burn owner quota.
 - **Common web vulns at framework level.** Next.js handles CSRF for App Router server actions, React escapes output by default, biome-lint flags `dangerouslySetInnerHTML` usage.
+- **Untrusted model output rendered as Markdown.** Advisor replies are rendered with `react-markdown` (+ `remark-gfm`) with no raw-HTML passthrough (no `rehype-raw`, no `dangerouslySetInnerHTML`) and react-markdown's `urlTransform` strips unsafe link protocols (`javascript:`, `data:`, …). So a model (or an image a user pastes that contains adversarial text) can't inject active content into the chat. User-typed text stays plain (never parsed as Markup).
 
 ### We do NOT defend against
 

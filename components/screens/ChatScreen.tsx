@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatThreadList } from "@/components/ChatThreadList";
 import { FeedbackRow } from "@/components/FeedbackRow";
 import { Icon } from "@/components/Icon";
+import { MarkdownMessage } from "@/components/MarkdownMessage";
 import type { EntryContext } from "@/lib/advisor/entry-context";
 import {
   useModelPortfoliosView,
@@ -17,6 +18,7 @@ import { AI_PERSONALITIES } from "@/lib/static/personalities";
 import { type ChatImage, loadChatThreadImages, saveChatImages } from "@/lib/stores/chat-images";
 import { consumeLoadTarget, setActiveThreadId, useChatUi } from "@/lib/stores/chat-ui";
 import { type ImportSeedRow, requestImportWithRows } from "@/lib/stores/import-seed";
+import { useOverlayScrollbar } from "@/lib/useOverlayScrollbar";
 
 // Image attachment caps — bound payload + vision token cost. Images are
 // downscaled client-side before send (see downscaleImage).
@@ -411,6 +413,20 @@ export function ChatScreen({
   // server-side; the banner just nudges the user to come back.
   const [limitNotice, setLimitNotice] = useState(false);
   const streamRef = useRef<HTMLDivElement>(null);
+  // Replace the chat stream's native scrollbar with the app-standard overlay
+  // scrollbar (os-theme-macrotide), same as the side panels and main column.
+  // Desktop/tablet only (the hook no-ops on mobile/touch, which keeps native).
+  // OverlayScrollbars re-parents the stream's children into a generated viewport,
+  // so the children live under one stable `.chat-stream-content` wrapper (below)
+  // and auto-scroll targets that viewport (see the scroll effect).
+  const streamOsRef = useOverlayScrollbar();
+  const setStreamRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      streamRef.current = node;
+      streamOsRef(node);
+    },
+    [streamOsRef],
+  );
   // Tracks which thread ids we've already tried to title in this session, so
   // a slow title-endpoint response doesn't get re-fired while the user keeps
   // chatting. The server is idempotent regardless, but this saves the round
@@ -640,9 +656,13 @@ export function ChatScreen({
   // the effect without re-rendering it on every keystroke in the composer.
   const lastText = messages[messages.length - 1]?.text ?? "";
   useEffect(() => {
-    if (streamRef.current) {
-      streamRef.current.scrollTop = streamRef.current.scrollHeight;
-    }
+    const host = streamRef.current;
+    if (!host) return;
+    // On desktop the overlay scrollbar moves the content into a generated
+    // viewport child, so the host itself no longer scrolls — scroll that. On
+    // mobile/native there's no viewport and the host scrolls directly.
+    const scroller = host.querySelector<HTMLElement>("[data-overlayscrollbars-viewport]") ?? host;
+    scroller.scrollTop = scroller.scrollHeight;
   }, [messages.length, lastText]);
 
   const askLive = async (
@@ -1133,7 +1153,7 @@ export function ChatScreen({
 
       <div
         className="chat-stream"
-        ref={streamRef}
+        ref={setStreamRef}
         // `min-height: 0` lets flex:1 shrink below content size so overflow-y
         // actually kicks in (otherwise long messages push the composer off-screen).
         style={{ flex: 1, paddingBottom: 8, minHeight: 0, overflowY: "auto" }}
@@ -1152,122 +1172,134 @@ export function ChatScreen({
             : undefined
         }
       >
-        {messages.map((m, i) => (
-          <div key={m.id} className={`msg ${m.role}`}>
-            {m.role === "ai" && (
-              <div className="meta">
-                Advisor ·{" "}
-                {new Date(m.ts).toLocaleTimeString("en-US", {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-                {m.model && <> · {m.model}</>}
-              </div>
-            )}
-            {m.role === "ai" && !m.text && loading ? (
+        {/* Single stable child: OverlayScrollbars re-parents the host's children
+            into a generated viewport, so React must reconcile the dynamic
+            messages INSIDE this wrapper, not directly under the OS host (else
+            `removeChild` throws). Carries the column+gap layout the OS host
+            would otherwise strip. Mirrors `.ra-panel-body-content`. */}
+        <div className="chat-stream-content">
+          {messages.map((m, i) => (
+            <div key={m.id} className={`msg ${m.role}`}>
+              {m.role === "ai" && (
+                <div className="meta">
+                  Advisor ·{" "}
+                  {new Date(m.ts).toLocaleTimeString("en-US", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                  {m.model && <> · {m.model}</>}
+                </div>
+              )}
+              {m.role === "ai" && !m.text && loading ? (
+                <div className="typing">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+              ) : m.role === "ai" ? (
+                // Advisor replies are Markdown — render them styled. User bubbles
+                // stay plain text (below) so nothing the user typed is reinterpreted
+                // as markup.
+                m.text && <MarkdownMessage text={m.text} />
+              ) : (
+                m.text && <div style={{ whiteSpace: "pre-wrap" }}>{m.text}</div>
+              )}
+              {m.images && m.images.length > 0 && (
+                <div className="chat-attachments">
+                  {m.images.map((img) => (
+                    <button
+                      type="button"
+                      key={img.id}
+                      className="thumb"
+                      onClick={() => setLightbox(img.dataUrl)}
+                      title={img.name}
+                      aria-label={`View ${img.name}`}
+                    >
+                      {/* biome-ignore lint/performance/noImgElement: data-URL thumbnail, not a remote asset */}
+                      <img src={img.dataUrl} alt={img.name} />
+                    </button>
+                  ))}
+                </div>
+              )}
+              {m.canRetry && (
+                <button
+                  type="button"
+                  className="btn ghost sm"
+                  onClick={() => retry(m.id)}
+                  disabled={loading}
+                  style={{ marginTop: 6 }}
+                >
+                  Try again
+                </button>
+              )}
+              {m.proposal && (
+                <PlanProposalCard
+                  proposal={m.proposal}
+                  applied={m.applied}
+                  onApply={() => applyProposal(i, m.proposal!)}
+                  onReject={() => {
+                    setMessages((prev) =>
+                      prev.map((x, idx) =>
+                        idx === i ? { ...x, applied: false, rejected: true } : x,
+                      ),
+                    );
+                  }}
+                />
+              )}
+              {m.holdings?.map((h, hIdx) => (
+                <HoldingProposalCard
+                  key={`${m.id}-holding-${hIdx}`}
+                  holding={h}
+                  status={m.holdingStatus?.[hIdx]}
+                  onApply={() => applyHolding(i, hIdx, h)}
+                  onReject={() => rejectHolding(i, hIdx)}
+                />
+              ))}
+              {m.holdingsImport && (
+                <HoldingsImportCard
+                  data={m.holdingsImport}
+                  onOpen={() => requestImportWithRows(m.holdingsImport!.rows)}
+                />
+              )}
+              {m.role === "ai" &&
+                i > 0 &&
+                !m.proposal &&
+                !m.holdings?.length &&
+                !m.holdingsImport && (
+                  <FeedbackRow
+                    label="HELPFUL?"
+                    value={msgFeedback[i]?.rating ?? null}
+                    saved={msgFeedback[i]?.saved}
+                    onChange={(rating) =>
+                      setMsgFeedback({
+                        ...msgFeedback,
+                        [i]: { ...msgFeedback[i], rating },
+                      })
+                    }
+                    onSave={() =>
+                      setMsgFeedback({
+                        ...msgFeedback,
+                        [i]: { ...msgFeedback[i], saved: !msgFeedback[i]?.saved },
+                      })
+                    }
+                  />
+                )}
+            </div>
+          ))}
+          {/* Standalone "thinking" bubble only when there's no streaming
+            placeholder yet — i.e. proposal flow with 700ms setTimeout. The
+            stream flow renders typing dots inline inside the empty AI msg. */}
+          {loading && messages[messages.length - 1]?.role !== "ai" && (
+            <div className="msg ai">
+              <div className="meta">Advisor · thinking</div>
               <div className="typing">
                 <span></span>
                 <span></span>
                 <span></span>
               </div>
-            ) : (
-              m.text && <div style={{ whiteSpace: "pre-wrap" }}>{m.text}</div>
-            )}
-            {m.images && m.images.length > 0 && (
-              <div className="chat-attachments">
-                {m.images.map((img) => (
-                  <button
-                    type="button"
-                    key={img.id}
-                    className="thumb"
-                    onClick={() => setLightbox(img.dataUrl)}
-                    title={img.name}
-                    aria-label={`View ${img.name}`}
-                  >
-                    {/* biome-ignore lint/performance/noImgElement: data-URL thumbnail, not a remote asset */}
-                    <img src={img.dataUrl} alt={img.name} />
-                  </button>
-                ))}
-              </div>
-            )}
-            {m.canRetry && (
-              <button
-                type="button"
-                className="btn ghost sm"
-                onClick={() => retry(m.id)}
-                disabled={loading}
-                style={{ marginTop: 6 }}
-              >
-                Try again
-              </button>
-            )}
-            {m.proposal && (
-              <PlanProposalCard
-                proposal={m.proposal}
-                applied={m.applied}
-                onApply={() => applyProposal(i, m.proposal!)}
-                onReject={() => {
-                  setMessages((prev) =>
-                    prev.map((x, idx) =>
-                      idx === i ? { ...x, applied: false, rejected: true } : x,
-                    ),
-                  );
-                }}
-              />
-            )}
-            {m.holdings?.map((h, hIdx) => (
-              <HoldingProposalCard
-                key={`${m.id}-holding-${hIdx}`}
-                holding={h}
-                status={m.holdingStatus?.[hIdx]}
-                onApply={() => applyHolding(i, hIdx, h)}
-                onReject={() => rejectHolding(i, hIdx)}
-              />
-            ))}
-            {m.holdingsImport && (
-              <HoldingsImportCard
-                data={m.holdingsImport}
-                onOpen={() => requestImportWithRows(m.holdingsImport!.rows)}
-              />
-            )}
-            {m.role === "ai" &&
-              i > 0 &&
-              !m.proposal &&
-              !m.holdings?.length &&
-              !m.holdingsImport && (
-                <FeedbackRow
-                  label="HELPFUL?"
-                  value={msgFeedback[i]?.rating ?? null}
-                  saved={msgFeedback[i]?.saved}
-                  onChange={(rating) =>
-                    setMsgFeedback({
-                      ...msgFeedback,
-                      [i]: { ...msgFeedback[i], rating },
-                    })
-                  }
-                  onSave={() =>
-                    setMsgFeedback({
-                      ...msgFeedback,
-                      [i]: { ...msgFeedback[i], saved: !msgFeedback[i]?.saved },
-                    })
-                  }
-                />
-              )}
-          </div>
-        ))}
-        {/* Standalone "thinking" bubble only when there's no streaming
-            placeholder yet — i.e. proposal flow with 700ms setTimeout. The
-            stream flow renders typing dots inline inside the empty AI msg. */}
-        {loading && messages[messages.length - 1]?.role !== "ai" && (
-          <div className="msg ai">
-            <div className="meta">Advisor · thinking</div>
-            <div className="typing">
-              <span></span>
-              <span></span>
-              <span></span>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {contextNotice && (

@@ -15,6 +15,18 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Advisor replies now render as Markdown.** The Advisor returns Markdown, and
+  the chat now renders it — headings, bold, lists, inline code, code blocks, and
+  GFM tables show as formatted text styled to the app's design tokens (tables
+  match the in-chat holdings table) instead of raw `**markup**`. Rendering streams
+  incrementally as the reply arrives. Only Advisor bubbles are rendered; what you
+  type stays plain text. The renderer is sanitized — no raw HTML passes through
+  and unsafe link protocols are stripped — so untrusted model output can't inject
+  active content.
+- **The chat now uses the app's overlay scrollbar.** The Advisor message stream
+  scrolls with the same thin, auto-hiding overlay scrollbar as the rest of the
+  app (main column, side panels, thread list) instead of the browser's native
+  bar, on desktop/tablet; touch keeps the native scrollbar.
 - **The Portfolio screen leads with plain-language checks instead of a 0–100
   grade.** The single composite health score is gone from the screen — a
   chase-able grade nudges the checking-and-tinkering that measurably hurts
