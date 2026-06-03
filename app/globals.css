@@ -11,6 +11,16 @@
   /* Light tokens (default) */
   --bg: #f8f8f9;
   --paper: #ffffff;
+  /* Scroll-edge cues. One token per role so components never branch on theme;
+     the token's VALUE flips with the theme. In light a soft shadow reads on a
+     light surface; in dark a dark shadow vanishes (dark-on-dark), so dark uses
+     a light hairline/tint instead.
+     --scroll-edge          gradient tint for edge fades (e.g. overflow tables)
+     --footer-scroll-shadow box-shadow for .modal-footer--scrolled */
+  --scroll-edge: rgba(10, 10, 11, 0.14);
+  --footer-scroll-shadow:
+    0 -10px 24px -10px rgba(10, 10, 11, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  --footer-scrolled-bg: color-mix(in srgb, #000 4%, var(--paper));
   --card-soft: #f1f2f4;
   --ink: #0a0a0b;
   --ink-soft: #3a3d43;
@@ -55,6 +65,9 @@
 :root[data-theme="dark"] {
   --bg: #0c0d0f;
   --paper: #16181b;
+  --scroll-edge: rgba(255, 255, 255, 0.1);
+  --footer-scroll-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  --footer-scrolled-bg: color-mix(in srgb, #fff 5%, var(--paper));
   --card-soft: #101215;
   --ink: #f4f5f7;
   --ink-soft: #c5c8cd;
@@ -90,6 +103,9 @@
   :root[data-theme="system"] {
     --bg: #0c0d0f;
     --paper: #16181b;
+    --scroll-edge: rgba(255, 255, 255, 0.1);
+    --footer-scroll-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+    --footer-scrolled-bg: color-mix(in srgb, #fff 5%, var(--paper));
     --card-soft: #101215;
     --ink: #f4f5f7;
     --ink-soft: #c5c8cd;
@@ -295,6 +311,16 @@ body[data-topbar-hidden="true"] .portfolio-switch {
 .icon-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+/* Quiet variant: borderless, no fill, muted — recedes in a list (e.g. per-row edit). */
+.icon-btn.quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+.icon-btn.quiet:hover {
+  background: transparent;
+  color: var(--ink);
 }
 /* Footer icon actions (e.g. the destructive trash) size up to match the 40px
    footer button row so the row reads as one consistent height. */
@@ -955,6 +981,12 @@ textarea.sheet-input {
   color: var(--muted);
   margin-top: 4px;
 }
+.modal-header-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .modal-close {
   flex: 0 0 auto;
   margin: -4px -4px 0 0;
@@ -991,7 +1023,9 @@ textarea.sheet-input {
   align-items: center;
   gap: 8px;
   padding: 16px 24px 24px;
-  transition: box-shadow 0.2s ease-out;
+  transition:
+    box-shadow 0.2s ease-out,
+    background 0.2s ease-out;
 }
 .modal-footer-start {
   display: flex;
@@ -1008,14 +1042,8 @@ textarea.sheet-input {
    (echoing the floating-pill treatment, e.g. .bottom-nav) once the body's
    bottom sentinel scrolls out of view. No hairline divider, no backdrop-filter. */
 .modal-footer--scrolled {
-  box-shadow:
-    0 -10px 24px -10px rgba(10, 10, 11, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.5);
-}
-[data-theme="dark"] .modal-footer--scrolled {
-  box-shadow:
-    0 -10px 24px -10px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  background: var(--footer-scrolled-bg);
+  box-shadow: var(--footer-scroll-shadow);
 }
 
 /* Confirm message — the decision-critical "can't be undone" sentence. Larger
@@ -1304,6 +1332,20 @@ textarea.sheet-input {
   padding: 7px 12px;
   font-size: 12.5px;
   border-radius: var(--r-sm);
+}
+/* Borderless, low-emphasis text affordance — a quiet link styled as a button so
+   it stays keyboard-focusable. For inline disclosures ("Show N more") and other
+   subtle in-context actions that shouldn't read as a chunky bordered block. */
+.btn.link {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  padding: 4px 6px;
+  font-weight: 400;
+}
+.btn.link:hover {
+  color: var(--ink);
+  background: transparent;
 }
 /* Uniform modal-footer button height. Placed AFTER the `.btn` rules so the
    descendant selector stays non-descending in specificity. Floors every footer

@@ -33,8 +33,9 @@ app.db but share the real market.db read-write (same warm cache as real users).
 | `buckets` | Portfolio slices (Core, SSF, experiment, …) | `target_allocation` (JSON), `target_model_id`, `position` (sidebar order), `user_id` |
 | `holdings` | Fund positions inside a bucket | `bucket_id` (FK, cascade), `units`, `avg_cost`, `ter`, `quote_source` (routing key) |
 | `plans` | The investment plan | Single-row in v1; `markdown`, `selected_model_id`, `user_id` |
-| `journal_entries` | Notes, decisions, questions, reading | `kind`, `tags` (JSON), `pinned`, `archived_at`, `user_id` |
+| `journal_entries` | Notes, decisions, questions, reading, and feedback (a `kind: "feedback"` entry records a 👍/👎 reaction — e.g. a Portfolio "Not for me" rejection — with its rating in a `rating:up\|down` tag) | `kind`, `tags` (JSON), `pinned`, `archived_at`, `user_id` |
 | `model_portfolios` | Built-in + custom model allocations | `built_in`, `allocation` (JSON slices), risk/return metadata, `user_id` |
+| `action_item_states` | Archive / "Not for me" suppression for generated Portfolio action items (fee-creep flags today) | one row per (`user_id`, `item_key`); `state` ∈ archived / not_for_me, optional `reason` (chip key or free text), `snapshot_savings_pp` (magnitude baseline for the resurface check), `item_type`. Keyed by a deterministic `item_key` (`lib/portfolio/action-item-key.ts`) since the items carry no row of their own. (`snooze_until` is a dormant legacy column — Snooze is dropped.) |
 | `settings` | Generic key-value app settings | `key` → `value` (JSON) |
 
 ### Market data (market.db — written by the market layer + the SEC crawl)

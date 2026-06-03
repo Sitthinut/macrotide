@@ -141,7 +141,7 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
     }),
     execute: async ({ range }) => {
       const r = range ?? "6mo";
-      const { aggregate, asOf } = getPortfolioSeries(r);
+      const { aggregate, asOf } = await getPortfolioSeries(r);
       if (aggregate.length < 2) {
         return {
           ok: true as const,

@@ -64,8 +64,9 @@ restate the issue list, colors, or IDs here; they'd go stale. The conventions:
   `parked` = revisit only on a real need.
 - **Lifecycle:** on "what's next", lead with Todo (by Priority) but scan all of
   Backlog first — surface anything relevant to the task or higher-impact than the
-  Todo items. Move to In Progress on start, Done on ship — closing the issue and
-  doing the ship-docs pass above. A Status nobody moves is worse than none.
+  Todo items. Move to In Progress on start. Move to Done when merged to `origin/main`, then
+  close the issue and do the ship-docs pass above. A Status nobody moves is worse
+  than none.
 
 A doc reference to a function, env var, or file path is a contract: when you
 rename/move/delete it, `grep -rn "thing" *.md docs/` and fix the references.

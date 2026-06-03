@@ -152,6 +152,60 @@ earlier ad-hoc `window`-event buses. The store is the single source of truth, is
 type-checked end to end, and integrates cleanly with React's concurrent
 rendering (no manual event wiring or stale-closure hazards).
 
+## Portfolio action items: suppress, resurface, and feedback
+
+Generated Portfolio findings (fee-creep flags today; the headline and rebalance
+suggestions can adopt the same model) carry two honest controls — **Archive**
+("I've seen this; file it") and **"Not for me"** (reject, with an optional
+reason). There is no Snooze: a timed re-nag is the wrong default for a calm,
+anti-tinkering index app, so the only way an item comes back passively is a
+**material change** in the finding.
+
+In the fee-check UI these controls live on a dedicated **"See details" page**,
+not on the Portfolio tab. On the tab the section is **information-only** — each
+held fund, its cheaper comparable alternative(s), and the annual saving — with
+exactly one section-level **Ask advisor** (a single fee-focused Advisor prompt
+scoped to the most material finding and its cheapest comparable alternative) and
+one **See details** button for the whole section. "See details" opens a
+full-height detail `Modal` (the same dialog primitive as the fund detail sheet,
+a sub-view of Portfolio rather than a new route) that houses all the management
+UI: each fee check with its own **Archive** / **"Not for me"** controls (the four
+reason chips + a free-text "Other…") and a **"Hidden checks (N)"** restore list.
+The Modal owns its own focus trap, Escape/close, and scroll region, so the
+Portfolio tab's per-screen scroll memory is untouched while it is open. This
+keeps the tab calm rather than button-heavy; the actions and their backend wiring
+are unchanged — only *where* they are triggered moved.
+
+Each item is keyed by a deterministic `item_key`
+([lib/portfolio/action-item-key.ts](../../lib/portfolio/action-item-key.ts)) —
+identity only (e.g. `fee_creep:{ticker}`), so a choice survives NAV ticks. A
+suppression is one row in `action_item_states` recording the `state`, an optional
+`reason`, and a `snapshot_savings_pp` (the finding's magnitude — annual saving in
+pp/yr — at the moment it was hidden).
+
+**Resurfacing is deterministic and pure**
+([lib/portfolio/action-item-resurface.ts](../../lib/portfolio/action-item-resurface.ts),
+no clock, no AI, no DB): a hidden item reappears only when the *current* saving is
+materially **worse** than the snapshot, by a bar the rejection reason selects —
+a magnitude reason ("Too small") takes the normal bar, a switch-cost reason
+("Tax & switching cost") takes a high bar, and a preference/structural reason
+("I prefer this fund" / "Already considered") or free-text-only reject stays
+hidden in this layer. A **ratchet** re-snapshots the new, higher value on each
+re-suppression, so anything fires at most once per material jump and never
+drip-nags. An improvement (the saving shrinking) never resurfaces. The query
+layer ([lib/db/queries/action-items.ts](../../lib/db/queries/action-items.ts))
+subtracts the still-hidden set from the live findings, and the route
+(`app/api/portfolio/action-items`) records the state inside `withDb`. A
+**"Hidden checks (N)"** list on the "See details" page restores anything filed
+or rejected.
+
+A **"Not for me"** also writes a **Journal ▸ Feedback** entry in the same
+`withDb` transaction — reusing `journal_entries` with `kind: "feedback"` (the
+rating rides in a `rating:up|down` tag) rather than a new table. The adapter
+([lib/portfolio/adapter.ts](../../lib/portfolio/adapter.ts)) reads those entries
+back into the Journal Feedback subtab, and the rejection (with its reason) is
+available to the Advisor's "don't repeat rejected advice" context.
+
 ## Where it lives
 
 A quick index from concept to code (reciprocates the `see docs/...` comments in

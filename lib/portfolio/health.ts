@@ -48,6 +48,8 @@ export interface HealthSignals {
   /** Sum of overweights = half the total absolute deviation. "How far off target." */
   trackingGapPp: number;
   blendedTer: number;
+  /** Number of holdings whose TER is unknown (null). Fee scoring ignores them. */
+  unknownTerCount: number;
   targetTer: number | null;
   concentration: ConcentrationSignal;
   cashPct: number;
@@ -165,11 +167,24 @@ export function trackingGap(drift: SleeveDrift[]): number {
   return Math.round(overweight * 10) / 10;
 }
 
-/** Value-weighted total expense ratio across holdings (in %). */
-export function blendedTer(holdings: Holding[], totalValue: number): number {
-  if (totalValue <= 0) return 0;
-  const weighted = holdings.reduce((s, h) => s + h.value * (h.ter ?? 0), 0);
-  return weighted / totalValue;
+/**
+ * Value-weighted total expense ratio (in %), computed over holdings with a
+ * KNOWN ter only. Holdings with `ter == null` are excluded from both the
+ * numerator and the denominator, so missing fee data neither inflates nor
+ * deflates the blended rate (vs. the old `ter ?? 0`, which scored unknowns as
+ * free). Returns 0 when no holding has a known ter.
+ */
+export function blendedTer(holdings: Holding[], _totalValue: number): number {
+  const known = holdings.filter((h) => h.ter != null);
+  const knownValue = known.reduce((s, h) => s + h.value, 0);
+  if (knownValue <= 0) return 0;
+  const weighted = known.reduce((s, h) => s + h.value * (h.ter as number), 0);
+  return weighted / knownValue;
+}
+
+/** Count of holdings whose TER is unknown (null) — excluded from fee scoring. */
+export function unknownTerCount(holdings: Holding[]): number {
+  return holdings.filter((h) => h.ter == null).length;
 }
 
 export function concentration(holdings: Holding[], totalValue: number): ConcentrationSignal {
@@ -299,6 +314,7 @@ export function computeHealth(
     drift,
     trackingGapPp: trackingGap(drift),
     blendedTer: blendedTer(holdings, totalValue),
+    unknownTerCount: unknownTerCount(holdings),
     targetTer,
     concentration: concentration(holdings, totalValue),
     cashPct: cashWeight(holdings, totalValue),

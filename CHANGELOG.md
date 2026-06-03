@@ -15,6 +15,116 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **The Portfolio performance caveat now reflects which lines actually exclude
+  dividends.** The note under the total-balance graph adapts to whether a
+  benchmark is selected and whether the book holds a dividend-paying fund,
+  explaining that the index, the user's balance, or both understate real total
+  return — and showing nothing when neither applies.
+- **The demo portfolio chart now shows about five years of realistic history at
+  every zoom.** In demo mode the Portfolio chart plots a dense multi-year curve
+  for both the portfolio line and the benchmark overlay — daily detail for recent
+  months (so 1M/3M/6M/1Y look real) and weekly further back, instead of the few
+  months the live price crawl had warmed. The history is self-contained and
+  offline at runtime: a committed fixture is built from real public index data
+  (S&P 500, Nasdaq, Nikkei, SET, global equity, gold; Thai bonds and cash
+  modelled), then each demo fund's series is derived from the index it tracks by
+  applying its fee as a compounding drag plus a small deterministic tracking
+  wobble, so funds visibly trail their index and the blended portfolio diverges
+  from any single benchmark. Owner mode is unchanged — it still reads live market
+  data. Regenerate the fixture with `npm run refresh:demo-history`.
+- **The Portfolio fee-check section is info-only, with management on a dedicated
+  "See details" page.** On the Portfolio tab the section reads as plain
+  information cards — each held fund, its cheaper comparable alternative(s), and
+  the annual saving — with exactly one section-level "Ask advisor" (a single
+  fee-focused prompt scoped to the most material finding and its cheapest
+  alternative) and a primary "See details" beneath it. The tab shows only the
+  top 3 findings by largest annual saving — when more exist, the "See details"
+  button carries the true total ("See all N") — while "See details" still lists
+  all of them.
+  There are no per-card actions on the tab. "See details" opens a full-screen page (a sub-view of Portfolio, not a
+  new tab) that houses all the management UI: each fee check with its own Archive
+  ("I've seen this; file it") and "Not for me" (reject, with an optional reason —
+  four chips plus a free-text "Other…"), plus a "Hidden checks (N)" list to
+  restore anything filed or rejected. Both choices are recorded per fund, survive
+  reloads, and resurface only when the finding materially worsens: the reason a
+  rejection carries selects how stubborn that is (a magnitude reason can return on
+  a bigger jump; a preference or structural reason stays hidden), and a ratchet
+  means nothing nags more than once per material jump. A "Not for me" also writes
+  a Journal ▸ Feedback entry so the rejection — and its reason — is reviewable and
+  feeds the Advisor's "don't repeat rejected advice" context. Suppression is
+  applied server-side and is per-user (ephemeral in the demo), built on a reusable
+  action-item layer the headline and rebalance suggestions can adopt later.
+- **Tapping a holding now opens a read-only detail view instead of the edit
+  form.** The Portfolio screen's holding rows open a "Holding detail" sheet that
+  reuses the fund detail view — performance, allocation, top holdings, and feeder
+  look-through when the position is a catalog fund (matched by its ticker). A
+  holding that isn't in the catalog (a stock, index, or cash position) degrades
+  to showing its own stored details rather than an error. Editing is now an
+  explicit affordance: a pencil button on each editable row, and an Edit button
+  inside the detail view, both opening the existing holding edit flow.
+
+### Fixed
+
+- **The performance chart's left edge no longer jumps on shorter ranges.** When a
+  range window (1M/3M/6M/1Y) opened on a non-trading day, holdings with no price
+  exactly on that date were missing from the first plotted point, so the chart
+  started at a fraction of the real total and snapped up a day or two later. The
+  value series now carries in each holding's most recent price from before the
+  window to seed the first in-window date (without plotting any date earlier than
+  the window start), and the benchmark overlay does the same — so every range
+  starts with the full book and a complete benchmark line. Applies to both real
+  accounts and the demo.
+- **Switching screens now remembers where you were on each one.** Screens are
+  swapped in place inside one persistent scroll container, which previously kept
+  a single shared scroll offset across the swap — so opening the Templates view
+  from the Portfolio screen inherited the Portfolio scroll position and appeared
+  partway down. Each screen now keeps its own scroll position for the session:
+  returning to a screen restores where you left it, and a screen not yet visited
+  opens at the top. The memory is per-session — a full page reload starts every
+  screen back at the top. The leaving screen's position is now tracked live while
+  you scroll rather than read at teardown, so it survives the in-pane viewport
+  clamping its offset when shorter content swaps in — fixing tablet/desktop, where
+  returning to a tab previously landed at the top. Works on both the mobile
+  (window) and tablet/desktop (in-pane) scroll roots.
+- **Performance-vs-index now converts foreign holdings to baht before summing.**
+  The portfolio value/return series previously added each holding's `units × NAV`
+  across currencies (THB funds, USD ETFs, JPY indices) without conversion, then
+  compared the result to a THB index — so for any book holding a foreign asset
+  the return reflected the foreign price move, not the baht experience. Each
+  holding's native currency is now inferred from its routing key and its value
+  is converted to THB at that date's USD/THB (or cross) rate, using the existing
+  ECB-backed FX source. A holding whose rate is unavailable is dropped from the
+  total and flagged rather than mis-summed.
+- **The benchmark line on the performance chart no longer disappears across
+  trading calendars.** It was only drawn when the portfolio and benchmark series
+  had identical lengths, which Thai and foreign calendars almost never produce;
+  the two are now aligned by date and rebased to their first common point, so the
+  benchmark renders whenever the data overlaps.
+- **Added a method note to the performance-vs-index view** stating that values
+  are converted to baht, that the comparison assumes the current holdings were
+  held throughout the window (purchases and sales within it are not yet
+  accounted for), and that benchmarks use price-return indices, which exclude
+  dividends.
+- Fee-creep now only suggests cheaper funds with the same exposure (region + asset class), not just the same broad asset class — so a global-equity fund is no longer offered a Thai/domestic-equity "alternative".
+- **The portfolio score and its "why this score" breakdown now show for any book
+  with holdings, even without a target model.** The breakdown card was previously
+  hidden unless a target model was selected, so users tracking no plan never saw
+  their score at all; it now renders whenever there are holdings and a score.
+- **A portfolio with no target model no longer has its score inflated by an
+  auto-awarded drift component.** Previously the drift component silently scored
+  full marks when no target was set, rewarding the absence of a plan. Drift is now
+  excluded from the composite when there's no target and the remaining components
+  (fees, diversification, cash) are rescaled onto 0–100; the breakdown shows the
+  drift row as "Not scored — set a target model" rather than a full mark.
+- **Holdings with an unpublished expense ratio no longer inflate the fee score.**
+  The blended fee was computed with unknown TERs treated as 0% (perfect), making a
+  book with missing fee data look cheaper than it is. The blended rate is now
+  weighted over holdings with a known TER only, and the fee component notes "fee
+  data incomplete for N holdings" when any are missing — missing data neither
+  helps nor hurts the score.
+
+### Added
+
 - **Advisor eval harness — a committed benchmark for the chat loop.**
   `scripts/eval/` promotes the throwaway model-trial script into a repeatable
   eval: a hermetic synthetic tool surface (`EXAMPLE-FUND-*`, never the live DB),

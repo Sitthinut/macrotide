@@ -1,8 +1,9 @@
 // Fee-creep analysis layer.
 //
-// For each fund the user holds, if the catalog contains a cheaper fund in the
-// same asset class, surface a finding. This is the product's headline promise:
-// "comparable exposure, lower fee." The analysis is deterministic — no AI calls.
+// For each fund the user holds, if the catalog contains a cheaper fund with the
+// same exposure (asset class + geographic region), surface a finding. This is
+// the product's headline promise: "comparable exposure, lower fee." The
+// analysis is deterministic — no AI calls.
 //
 // Data flow:
 //   holdings (listHoldings)
@@ -30,7 +31,7 @@ export interface FeeCreepFinding {
   heldTer: number;
   /** Asset class (equity / bond / alternative / cash). Null when catalog entry has no class. */
   assetClass: string | null;
-  /** Cheaper funds in the same class, sorted cheapest-first, capped at 3. */
+  /** Cheaper funds with the same exposure (asset class + region), sorted cheapest-first, capped at 3. */
   alternatives: FundWithTer[];
   /**
    * Potential annual fee saving in percentage-points against the cheapest
@@ -46,7 +47,8 @@ export interface FeeCreepFinding {
  * Returns one finding per held fund that has:
  *   - a catalog match (holdings.ticker === fund_catalog.abbrName)
  *   - a published TER
- *   - at least one strictly cheaper active peer in the same asset class
+ *   - at least one strictly cheaper active peer with the same exposure
+ *     (asset class + geographic region)
  *
  * Sorted by `savingsPp` descending so the biggest potential saving is first.
  */

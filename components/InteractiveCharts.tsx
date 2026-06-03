@@ -22,6 +22,7 @@ import {
   YAxis,
 } from "recharts";
 import type { AllocationSlice, SleeveDrift } from "@/lib/portfolio/health";
+import { rebaseBenchmark } from "@/lib/portfolio/rebase";
 import type { SeriesPoint } from "@/lib/static/types";
 
 const TOOLTIP_STYLE: React.CSSProperties = {
@@ -89,30 +90,17 @@ export function NavChart({
   }
 
   // Overlay the benchmark aligned to the portfolio's own date labels, then
-  // rebase it onto the portfolio's starting value so both lines share a scale.
-  // Tolerant of different lengths / non-overlapping trading days: we forward-
-  // fill the benchmark across the portfolio's points and rebase on the first
-  // available benchmark value (the old exact-length check silently dropped the
-  // line whenever the two series differed in length, which was always).
-  let merged = data.map((d) => ({ d: d.d, v: d.v, bench: null as number | null }));
-  if (benchmarkData && benchmarkData.length > 0) {
-    const byLabel = new Map(benchmarkData.map((b) => [b.d, b.v]));
-    const portfolioStart = data[0].v;
-    let lastBench: number | null = null;
-    const aligned = data.map((d) => {
-      const bv = byLabel.get(d.d);
-      if (bv !== undefined) lastBench = bv;
-      return lastBench;
-    });
-    const benchStart = aligned.find((v) => v != null) ?? null;
-    if (benchStart) {
-      merged = data.map((d, i) => ({
-        d: d.d,
-        v: d.v,
-        bench: aligned[i] != null ? ((aligned[i] as number) / benchStart) * portfolioStart : null,
-      }));
-    }
-  }
+  // rebase it onto the portfolio's value at their first common date so both
+  // lines share a scale. Tolerant of different lengths / non-overlapping trading
+  // days (an exact-length check would drop the line whenever the two series
+  // differed, which is almost always). Shared with PerfChart via rebaseBenchmark.
+  const rebased = rebaseBenchmark(data, benchmarkData);
+  const benchByLabel = rebased ? new Map(rebased.map((b) => [b.d, b.v])) : null;
+  const merged = data.map((d) => ({
+    d: d.d,
+    v: d.v,
+    bench: benchByLabel?.get(d.d) ?? null,
+  }));
 
   return (
     <ResponsiveContainer width="100%" height={height}>

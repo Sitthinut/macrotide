@@ -192,6 +192,34 @@ describe("computeFeeCreep", () => {
     });
   });
 
+  it("does not suggest a different-region fund as a cheaper alternative", () => {
+    withDb(() => {
+      // Held: a global/foreign-exposure equity fund. The catalog also holds a
+      // cheaper DOMESTIC equity fund (same broad asset class, wrong exposure)
+      // and a cheaper GLOBAL equity fund (genuinely equivalent). Only the
+      // genuinely-equivalent one may be offered.
+      upsertFund(fund("GLOBAL-EQUITY", { investRegion: "foreign" }));
+      upsertFund(
+        fund("DOMESTIC-EQUITY", { abbrName: "DOMESTIC-EQUITY", investRegion: "domestic" }),
+      );
+      upsertFund(
+        fund("GLOBAL-EQUITY-CHEAP", { abbrName: "GLOBAL-EQUITY-CHEAP", investRegion: "foreign" }),
+      );
+      upsertFundFees([
+        ter("GLOBAL-EQUITY", 1.2),
+        ter("DOMESTIC-EQUITY", 0.2), // cheaper but wrong region — must NOT appear
+        ter("GLOBAL-EQUITY-CHEAP", 0.5), // cheaper and same exposure — must appear
+      ]);
+      holding("GLOBAL-EQUITY");
+      const findings = computeFeeCreep();
+      expect(findings).toHaveLength(1);
+      const altIds = findings[0].alternatives.map((a) => a.projId);
+      expect(altIds).toEqual(["GLOBAL-EQUITY-CHEAP"]);
+      expect(altIds).not.toContain("DOMESTIC-EQUITY");
+      expect(findings[0].savingsPp).toBe(0.7); // 1.2 − 0.5, not 1.2 − 0.2
+    });
+  });
+
   it("caps alternatives at 3 per finding", () => {
     withDb(() => {
       upsertFund(fund("PRICEY2"));

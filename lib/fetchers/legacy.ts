@@ -99,6 +99,9 @@ export function usePortfolioView(range: SeriesRange = "6mo") {
   return {
     portfolios,
     aggregate,
+    // Portfolio-wide: does the book hold a dividend-paying fund? Used by the
+    // performance-vs-index disclaimer. Defaults false until the series loads.
+    hasDistributingHolding: series?.hasDistributingHolding ?? false,
     isLoading: !buckets || !holdings || !quotes,
     error: e1 ?? e2 ?? e3 ?? e4,
   };

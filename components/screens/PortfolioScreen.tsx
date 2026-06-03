@@ -4,9 +4,11 @@ import { useMemo, useState } from "react";
 import { BrandMark } from "@/components/BrandMark";
 import { ModelDonut, ScoreCircle } from "@/components/charts";
 import { FeedbackRow } from "@/components/FeedbackRow";
+import { FundDetailSheet } from "@/components/FundDetailSheet";
 import { type HoldingFormValues, HoldingSheet } from "@/components/HoldingSheet";
 import { Icon } from "@/components/Icon";
 import { AllocationDonut, DriftBars, NavChart } from "@/components/InteractiveCharts";
+import { Modal } from "@/components/Modal";
 import {
   useModelPortfoliosView,
   usePortfolioView,
@@ -14,16 +16,30 @@ import {
 } from "@/lib/fetchers/legacy";
 import {
   type FeeCreepFinding,
+  type HiddenActionItem,
+  mutateActionItemState,
+  restoreActionItem,
   type SeriesRange,
   useBenchmarkSeries,
   useFeeCreep,
+  useHiddenActionItems,
 } from "@/lib/fetchers/portfolio";
 import { invalidate } from "@/lib/fetchers/swr";
 import { fmtPct } from "@/lib/format";
 import { BENCHMARK_OPTIONS } from "@/lib/market/benchmark-options";
 import { DEFAULT_QUOTE_SOURCE, isQuoteSource } from "@/lib/market/sources";
+import { feeCreepKey } from "@/lib/portfolio/action-item-key";
+import { REASON_CHIPS, type ReasonChip } from "@/lib/portfolio/action-item-resurface";
 import { formatSeriesDate } from "@/lib/portfolio/adapter";
+import {
+  feeCheckInlineIntro,
+  feeChecksButtonLabel,
+  feeSwitchPrompt,
+  orderFeeChecks,
+  presentFeeChecks,
+} from "@/lib/portfolio/fee-creep-presentation";
 import { computeHealth, rebalanceHint, summarizeHealth } from "@/lib/portfolio/health";
+import { performanceDisclaimer } from "@/lib/portfolio/performance-disclaimer";
 import { scorePortfolio } from "@/lib/portfolio/score";
 import type { AssetClass, Holding, Portfolio } from "@/lib/static/types";
 import { usePortfolioUi } from "@/lib/stores/portfolio-ui";
@@ -39,7 +55,8 @@ function holdingToFormValues(h: Holding, fallbackBucketId: string): HoldingFormV
     region: h.region,
     units: h.units,
     avgCost: h.units > 0 ? h.cost / h.units : 0,
-    ter: h.ter,
+    // The edit form represents an unknown fee as 0 (the field starts blank).
+    ter: h.ter ?? 0,
     source: h.source,
     quoteSource: isQuoteSource(h.quoteSource) ? h.quoteSource : DEFAULT_QUOTE_SOURCE,
     color: h.color,
@@ -63,6 +80,325 @@ const SWATCH_ABBR: Record<string, string> = {
 
 function swatchAbbr(t: string) {
   return SWATCH_ABBR[t] || t.slice(0, 3);
+}
+
+// Human labels for the "Not for me" reason chips (keys from REASON_CHIPS).
+const REASON_CHIP_LABELS: Record<ReasonChip, string> = {
+  too_small: "Too small to matter",
+  tax_switching: "Tax & switching cost",
+  prefer_this_fund: "I prefer this fund",
+  already_considered: "Already considered",
+};
+
+// One fee check on the See-details page: the held fund + its TER, the cheaper
+// comparable alternatives and the annual saving, then the two honest #74
+// controls inline — Archive ("I've seen this; file it") and "Not for me"
+// (reject, with the four reason chips + an optional "Other…" free text). This is
+// where the user acts; the Portfolio tab's inline section is info-only. Wires to
+// the existing archive/reject handlers (unchanged backend); the parent drops the
+// card optimistically on either action.
+function FeeCheckPageCard({
+  finding,
+  onArchive,
+  onReject,
+}: {
+  finding: FeeCreepFinding;
+  onArchive: (finding: FeeCreepFinding) => void;
+  onReject: (finding: FeeCreepFinding, reason: ReasonChip | string | null) => void;
+}) {
+  const [reasonOpen, setReasonOpen] = useState(false);
+  const [reasonText, setReasonText] = useState("");
+
+  return (
+    <div
+      className="card"
+      style={{
+        borderColor: "var(--amber)",
+        background: "var(--amber-soft, color-mix(in srgb, var(--amber) 8%, transparent))",
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          gap: 8,
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: "-0.01em" }}>
+            {finding.heldTicker}
+          </span>
+          <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 2 }}>
+            {finding.heldName}
+          </div>
+        </div>
+        <span
+          className="num"
+          style={{
+            fontSize: 14,
+            fontWeight: 600,
+            color: "var(--amber)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {finding.heldTer.toFixed(2)}% TER
+        </span>
+      </div>
+
+      {/* The fee comparison — held fund vs cheaper alternatives. */}
+      <div>
+        <div
+          style={{
+            fontSize: 10,
+            fontFamily: "var(--font-mono)",
+            color: "var(--muted)",
+            letterSpacing: "0.04em",
+            marginBottom: 6,
+          }}
+        >
+          CHEAPER COMPARABLE EXPOSURE
+        </div>
+        {finding.alternatives.map((alt, i) => (
+          <div
+            key={alt.projId}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 8,
+              padding: "5px 0",
+              borderBottom:
+                i < finding.alternatives.length - 1 ? "1px solid var(--line-soft)" : undefined,
+            }}
+          >
+            <span style={{ fontSize: 12.5, color: "var(--ink-soft)", minWidth: 0 }}>
+              {alt.abbrName}
+              {alt.englishName ? (
+                <span style={{ color: "var(--muted)", marginLeft: 4 }}>· {alt.englishName}</span>
+              ) : null}
+            </span>
+            <span
+              className="num"
+              style={{
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: "var(--gain)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {alt.ter.toFixed(2)}%
+            </span>
+          </div>
+        ))}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>Potential annual saving:</span>
+          <span className="num" style={{ fontSize: 13, fontWeight: 600, color: "var(--gain)" }}>
+            −{finding.savingsPp.toFixed(2)}pp/yr
+          </span>
+        </div>
+      </div>
+
+      {/* The two honest actions. Intrinsic width (no flex:1). */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          flexWrap: "wrap",
+          paddingTop: 4,
+        }}
+      >
+        <button
+          type="button"
+          className="btn ghost sm"
+          style={{ gap: 4 }}
+          onClick={() => onArchive(finding)}
+          aria-label={`Archive the fee check for ${finding.heldTicker}`}
+          title="File this. It returns only if the saving grows materially."
+        >
+          <Icon name="archive" size={12} /> Archive
+        </button>
+        <button
+          type="button"
+          className="btn ghost sm"
+          style={{ gap: 4 }}
+          onClick={() => setReasonOpen((v) => !v)}
+          aria-expanded={reasonOpen}
+          aria-label={`Reject the fee check for ${finding.heldTicker}`}
+          title="This advice isn't right for me. Optionally tell us why."
+        >
+          <Icon name="thumbs-down" size={12} /> Not for me
+        </button>
+      </div>
+
+      {reasonOpen && (
+        <div>
+          <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 8 }}>
+            Why isn&apos;t this right for you? (optional)
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+            {REASON_CHIPS.map((chip) => (
+              <button
+                key={chip}
+                type="button"
+                className="btn ghost sm"
+                onClick={() => onReject(finding, chip)}
+              >
+                {REASON_CHIP_LABELS[chip]}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input
+              type="text"
+              value={reasonText}
+              onChange={(e) => setReasonText(e.target.value)}
+              placeholder="Other… (optional)"
+              aria-label="Other reason"
+              style={{
+                flex: 1,
+                fontSize: 12,
+                padding: "6px 9px",
+                borderRadius: 6,
+                border: "1px solid var(--line)",
+                background: "var(--bg)",
+                color: "var(--ink)",
+              }}
+            />
+            <button
+              type="button"
+              className="btn sm"
+              onClick={() => onReject(finding, reasonText.trim() || null)}
+            >
+              Confirm
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// The "See details" page — a full-height detail Modal that reads as a dedicated
+// sub-view of Portfolio (not a new tab/route). It houses ALL the fee-check
+// management UI moved off the Portfolio tab: a calm summary line, the fee checks
+// in severity order each WITH the per-item Archive / "Not for me" controls, and a
+// "Hidden checks (N)" list to restore anything filed or rejected. The Modal owns
+// its own focus trap, Escape/close, and scroll region, so the Portfolio tab's
+// per-screen scroll memory is untouched while it is open.
+function FeeChecksPage({
+  open,
+  onClose,
+  findings,
+  hidden,
+  onArchive,
+  onReject,
+  onRestore,
+}: {
+  open: boolean;
+  onClose: () => void;
+  findings: FeeCreepFinding[];
+  hidden: HiddenActionItem[];
+  onArchive: (finding: FeeCreepFinding) => void;
+  onReject: (finding: FeeCreepFinding, reason: ReasonChip | string | null) => void;
+  onRestore: (itemKey: string) => void;
+}) {
+  const view = useMemo(() => presentFeeChecks(findings), [findings]);
+  const ordered = useMemo(() => [...view.top, ...view.rest], [view]);
+
+  return (
+    <Modal open={open} onClose={onClose} variant="detail" labelledBy="fee-checks-page-title">
+      <Modal.Header
+        title="Fee check"
+        id="fee-checks-page-title"
+        subtitle="Comparable exposure, lower cost"
+      />
+      <Modal.Body gap={14}>
+        {ordered.length > 0 ? (
+          <>
+            {/* Calm, no-deadline summary line. */}
+            <div style={{ fontSize: 12.5, color: "var(--ink-soft)", lineHeight: 1.5 }}>
+              {view.summary}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {ordered.map((f) => (
+                <FeeCheckPageCard
+                  key={f.heldTicker}
+                  finding={f}
+                  onArchive={onArchive}
+                  onReject={onReject}
+                />
+              ))}
+            </div>
+          </>
+        ) : (
+          <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
+            No active fee checks. Anything you filed or rejected is listed below.
+          </div>
+        )}
+
+        {/* Hidden checks (N) — the single restore path for filed / rejected items. */}
+        {hidden.length > 0 && (
+          <div>
+            <div
+              style={{
+                fontSize: 10,
+                fontFamily: "var(--font-mono)",
+                color: "var(--muted)",
+                letterSpacing: "0.04em",
+                marginTop: 4,
+                marginBottom: 8,
+              }}
+            >
+              HIDDEN CHECKS ({hidden.length})
+            </div>
+            <div className="card" style={{ padding: "6px 12px" }}>
+              {hidden.map((h) => {
+                const ticker = h.itemKey.replace(/^fee_creep:/, "");
+                const label = h.state === "not_for_me" ? "Not for me" : "Archived";
+                const reasonLabel =
+                  h.reason && h.reason in REASON_CHIP_LABELS
+                    ? REASON_CHIP_LABELS[h.reason as ReasonChip]
+                    : h.reason;
+                return (
+                  <div
+                    key={h.itemKey}
+                    className="row between"
+                    style={{ padding: "6px 0", gap: 8, alignItems: "center" }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 500 }}>{ticker}</div>
+                      <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                        {label}
+                        {reasonLabel ? ` · ${reasonLabel}` : ""}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn ghost sm"
+                      onClick={() => onRestore(h.itemKey)}
+                      aria-label={`Restore the fee check for ${ticker}`}
+                    >
+                      Restore
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.45 }}>
+          Comparable exposure means same asset class. Lower fee, not necessarily better fund. Tax
+          implications and switching costs apply.
+        </div>
+      </Modal.Body>
+    </Modal>
+  );
 }
 
 interface ViewPortfolio {
@@ -99,7 +435,16 @@ export function PortfolioScreen({
   const [filter, setFilter] = useState<AssetClass | "all">("all");
   const [benchmark, setBenchmark] = useState<string>("none");
   const [feedback, setFeedback] = useState<Record<string, "up" | "down" | null>>({});
+  // Tapping a holding row opens a read-only detail view (detailHolding); the
+  // per-row Edit affordance opens the edit form (holdingSheet). Reading a
+  // holding no longer drops the user straight into an edit form.
   const [holdingSheet, setHoldingSheet] = useState<Holding | null>(null);
+  const [detailHolding, setDetailHolding] = useState<Holding | null>(null);
+  // Whether the "See details" page is open — the full-screen sub-view that
+  // houses the fee-check list with per-item Archive / "Not for me" and the
+  // Hidden-checks (N) restore list. The Portfolio tab's inline section is
+  // info-only; all management lives on this page.
+  const [feeDetailsOpen, setFeeDetailsOpen] = useState(false);
 
   // App owns the create/edit sheet; request it through the shared store.
   const openNewPortfolio = () => requestNew();
@@ -153,9 +498,11 @@ export function PortfolioScreen({
     }
   }, [range]);
 
-  const { portfolios, aggregate, isLoading } = usePortfolioView(seriesRange);
+  const { portfolios, aggregate, hasDistributingHolding, isLoading } =
+    usePortfolioView(seriesRange);
   const { models } = useModelPortfoliosView();
-  const { data: feeCreepData } = useFeeCreep();
+  const { data: feeCreepData, mutate: mutateFeeCreep } = useFeeCreep();
+  const { data: hiddenData } = useHiddenActionItems();
   const planSelectedModelId = useSelectedModelId();
 
   // Real benchmark overlay: fetch the selected index over the SAME range as the
@@ -243,6 +590,75 @@ export function PortfolioScreen({
     const activeTickers = new Set(view.holdings.map((h) => h.ticker));
     return feeCreepData.filter((f) => activeTickers.has(f.heldTicker));
   }, [feeCreepData, view]);
+
+  // Inline fee-check view: the SAME severity ordering + top-N split the
+  // See-details page uses (presentFeeChecks), so both agree on "most material".
+  // The tab renders only the top cards; the full list lives on See details.
+  const inlineFeeView = useMemo(() => presentFeeChecks(feeCreepFindings), [feeCreepFindings]);
+
+  // Hidden (archived / rejected) fee-creep items — the "Hidden checks (N)" list.
+  // Scoped to fee_creep so the surface stays about the section it sits under.
+  const hiddenFeeChecks = useMemo<HiddenActionItem[]>(
+    () => (hiddenData?.hidden ?? []).filter((h) => h.itemType === "fee_creep"),
+    [hiddenData],
+  );
+
+  // Optimistically drop one or more fee-creep cards from the SWR cache so they
+  // disappear at once, then record each server-side. Suppression is keyed by
+  // fee_creep:{heldTicker} (identity only), so a choice survives NAV ticks but a
+  // genuinely worse finding can resurface (lib/portfolio/action-item-resurface).
+  const dropCards = (tickers: string[]) => {
+    const drop = new Set(tickers);
+    mutateFeeCreep((curr) => (curr ?? []).filter((f) => !drop.has(f.heldTicker)), {
+      revalidate: false,
+    });
+  };
+
+  // Archive ("I've seen this; file it") — the soft action; resurfaces on a
+  // material jump in the saving. No reason, no feedback signal. Restore lives in
+  // the "Hidden checks (N)" list, the single restore path. Triggered from the
+  // See-details page; the page stays open so the user can file several in a row.
+  const archiveFeeCreep = (finding: FeeCreepFinding) => {
+    dropCards([finding.heldTicker]);
+    void mutateActionItemState({
+      itemType: "fee_creep",
+      itemKey: feeCreepKey(finding.heldTicker),
+      state: "archived",
+      savingsPp: finding.savingsPp,
+    });
+  };
+
+  // "Not for me" (reject) — optionally with a reason chip or free text. Writes a
+  // Journal feedback entry server-side and is stickier than Archive.
+  const rejectFeeCreep = (finding: FeeCreepFinding, reason: ReasonChip | string | null) => {
+    dropCards([finding.heldTicker]);
+    void mutateActionItemState({
+      itemType: "fee_creep",
+      itemKey: feeCreepKey(finding.heldTicker),
+      state: "not_for_me",
+      reason: reason || null,
+      savingsPp: finding.savingsPp,
+      topic: `Fee check — ${finding.heldTicker}`,
+    });
+  };
+
+  // Section-level "Ask advisor" — one fee-focused Advisor prompt for the whole
+  // section, scoped to the most material finding (biggest annual saving) and its
+  // cheapest comparable alternative, via the shared ai-prompt CustomEvent. No-op
+  // when there is no finding with an alternative to switch into.
+  const askAdvisorAboutFees = () => {
+    const top = orderFeeChecks(feeCreepFindings)[0];
+    if (!top) return;
+    const prompt = feeSwitchPrompt(top);
+    if (!prompt) return;
+    window.dispatchEvent(new CustomEvent("ai-prompt", { detail: prompt }));
+  };
+
+  // Restore a single hidden item from the Hidden-checks list — the single
+  // restore path now that the post-archive Undo toast is gone.
+  const restoreHidden = (itemKey: string) => {
+    void restoreActionItem(itemKey).then(() => mutateFeeCreep());
+  };
 
   // Real, computed health signals — drift vs target, blended fee, concentration,
   // cash drag. No mock fixtures.
@@ -529,6 +945,23 @@ export function PortfolioScreen({
             </span>
           ))}
         </div>
+        {(() => {
+          // Caveat copy depends on which sources drop dividends: the benchmark
+          // overlay (when one is selected) and/or any held dividend-paying fund.
+          const disclaimer = performanceDisclaimer(benchmark !== "none", hasDistributingHolding);
+          return disclaimer ? (
+            <p
+              style={{
+                fontSize: 11,
+                color: "var(--muted)",
+                lineHeight: 1.5,
+                padding: "8px 4px 0",
+              }}
+            >
+              {disclaimer}
+            </p>
+          ) : null;
+        })()}
       </div>
 
       {hasHoldings && (
@@ -655,118 +1088,135 @@ export function PortfolioScreen({
         </div>
       )}
 
-      {showAnalysis && targetModel && (
+      {/* ── Composite health score — always shown when there are holdings, ──
+           regardless of whether a target model is selected. With no target the
+           drift component is excluded and the remaining components renormalise
+           onto 0–100 (see lib/portfolio/score.ts). */}
+      {score && hasHoldings && (
         <div className="section" style={{ marginTop: 8 }}>
           <div className="section-header" style={{ padding: "0 4px" }}>
-            <h3>Plan & health</h3>
-            <span className="link" onClick={onOpenModels} style={{ cursor: "pointer" }}>
-              Target: {targetModel.name} →
-            </span>
+            <h3>Portfolio score</h3>
+            {targetModel ? (
+              <span className="link" onClick={onOpenModels} style={{ cursor: "pointer" }}>
+                Target: {targetModel.name} →
+              </span>
+            ) : (
+              <span className="link" onClick={onOpenModels} style={{ cursor: "pointer" }}>
+                Set a target →
+              </span>
+            )}
           </div>
 
-          {/* ── Composite health score ─────────────────────────────── */}
-          {score && hasHoldings && (
-            <div
-              className="card"
-              style={{
-                marginBottom: 10,
-                padding: "12px 14px",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 10 }}>
-                <ScoreCircle value={score.total} max={100} size={58} color={scoreColor} />
-                <div style={{ flex: 1 }}>
-                  <div
+          <div
+            className="card"
+            style={{
+              marginBottom: 10,
+              padding: "12px 14px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 10 }}>
+              <ScoreCircle value={score.total} max={100} size={58} color={scoreColor} />
+              <div style={{ flex: 1 }}>
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontFamily: "var(--font-mono)",
+                    color: "var(--muted)",
+                    letterSpacing: "0.04em",
+                    marginBottom: 2,
+                  }}
+                >
+                  PORTFOLIO SCORE
+                </div>
+                <div
+                  style={{
+                    fontSize: 22,
+                    fontWeight: 700,
+                    color: scoreColor,
+                    letterSpacing: "-0.02em",
+                    lineHeight: 1,
+                  }}
+                >
+                  {score.total}
+                  <span
                     style={{
-                      fontSize: 10,
-                      fontFamily: "var(--font-mono)",
+                      fontSize: 12,
+                      fontWeight: 400,
                       color: "var(--muted)",
-                      letterSpacing: "0.04em",
-                      marginBottom: 2,
+                      marginLeft: 2,
                     }}
                   >
-                    PORTFOLIO SCORE
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 22,
-                      fontWeight: 700,
-                      color: scoreColor,
-                      letterSpacing: "-0.02em",
-                      lineHeight: 1,
-                    }}
-                  >
-                    {score.total}
-                    <span
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 400,
-                        color: "var(--muted)",
-                        marginLeft: 2,
-                      }}
-                    >
-                      /100
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 3 }}>
-                    {scoreLabel}
-                  </div>
+                    /100
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 3 }}>
+                  {scoreLabel}
                 </div>
               </div>
+            </div>
 
-              {/* Score breakdown — why this score */}
-              <div
-                style={{
-                  fontSize: 10,
-                  fontFamily: "var(--font-mono)",
-                  color: "var(--muted)",
-                  letterSpacing: "0.04em",
-                  marginBottom: 6,
-                }}
-              >
-                ● WHY THIS SCORE
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                {score.components.map((c) => {
-                  const pct = c.score / c.max;
-                  const barColor =
-                    pct >= 0.8 ? "var(--gain)" : pct >= 0.5 ? "var(--amber)" : "var(--loss)";
-                  return (
-                    <div key={c.key}>
-                      <div
+            {/* Score breakdown — why this score */}
+            <div
+              style={{
+                fontSize: 10,
+                fontFamily: "var(--font-mono)",
+                color: "var(--muted)",
+                letterSpacing: "0.04em",
+                marginBottom: 6,
+              }}
+            >
+              ● WHY THIS SCORE
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              {score.components.map((c) => {
+                // Drift with no target isn't scored — render it as a muted CTA row
+                // rather than a 0/30 bar that reads like a failing grade.
+                const notScored = c.key === "drift" && !score.hasTarget;
+                const pct = c.score / c.max;
+                const barColor = notScored
+                  ? "var(--muted)"
+                  : pct >= 0.8
+                    ? "var(--gain)"
+                    : pct >= 0.5
+                      ? "var(--amber)"
+                      : "var(--loss)";
+                return (
+                  <div key={c.key}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        marginBottom: 2,
+                      }}
+                    >
+                      <span
                         style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 6,
-                          marginBottom: 2,
+                          width: 14,
+                          textAlign: "center",
+                          fontSize: 10,
+                          color: "var(--muted)",
                         }}
                       >
-                        <span
-                          style={{
-                            width: 14,
-                            textAlign: "center",
-                            fontSize: 10,
-                            color: "var(--muted)",
-                          }}
-                        >
-                          {COMPONENT_ICONS[c.key]}
-                        </span>
-                        <span style={{ flex: 1, fontSize: 11.5, color: "var(--ink-soft)" }}>
-                          {c.label}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 11,
-                            fontFamily: "var(--font-mono)",
-                            color: barColor,
-                            minWidth: 36,
-                            textAlign: "right",
-                          }}
-                        >
-                          {c.score}/{c.max}
-                        </span>
-                      </div>
-                      {/* Mini progress bar */}
+                        {COMPONENT_ICONS[c.key]}
+                      </span>
+                      <span style={{ flex: 1, fontSize: 11.5, color: "var(--ink-soft)" }}>
+                        {c.label}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontFamily: "var(--font-mono)",
+                          color: notScored ? "var(--muted)" : barColor,
+                          minWidth: 36,
+                          textAlign: "right",
+                        }}
+                      >
+                        {notScored ? "—" : `${c.score}/${c.max}`}
+                      </span>
+                    </div>
+                    {/* Mini progress bar — hidden for the not-scored drift row */}
+                    {!notScored && (
                       <div
                         style={{
                           marginLeft: 20,
@@ -785,36 +1235,48 @@ export function PortfolioScreen({
                           }}
                         />
                       </div>
-                      <div
-                        style={{
-                          marginLeft: 20,
-                          fontSize: 10.5,
-                          color: "var(--muted)",
-                          marginTop: 2,
-                          lineHeight: 1.35,
-                        }}
-                      >
-                        {c.detail}
-                      </div>
+                    )}
+                    <div
+                      style={{
+                        marginLeft: 20,
+                        fontSize: 10.5,
+                        color: "var(--muted)",
+                        marginTop: 2,
+                        lineHeight: 1.35,
+                      }}
+                    >
+                      {c.detail}
                     </div>
-                  );
-                })}
-              </div>
-              <div
-                style={{
-                  fontSize: 10,
-                  color: "var(--muted)",
-                  marginTop: 8,
-                  lineHeight: 1.4,
-                  borderTop: "1px solid var(--line-soft)",
-                  paddingTop: 6,
-                }}
-              >
-                Score = drift (30) + fees (25) + diversification (25) + cash (20). Deterministic, no
-                AI — each rule is documented in lib/portfolio/score.ts.
-              </div>
+                  </div>
+                );
+              })}
             </div>
-          )}
+            <div
+              style={{
+                fontSize: 10,
+                color: "var(--muted)",
+                marginTop: 8,
+                lineHeight: 1.4,
+                borderTop: "1px solid var(--line-soft)",
+                paddingTop: 6,
+              }}
+            >
+              {score.hasTarget
+                ? "Score = drift (30) + fees (25) + diversification (25) + cash (20). Deterministic, no AI — each rule is documented in lib/portfolio/score.ts."
+                : "Drift isn't scored without a target — score is fees, diversification, and cash, rescaled to 100. Set a target to include plan tracking. Deterministic, no AI — each rule is documented in lib/portfolio/score.ts."}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAnalysis && targetModel && (
+        <div className="section" style={{ marginTop: 8 }}>
+          <div className="section-header" style={{ padding: "0 4px" }}>
+            <h3>Plan & health</h3>
+            <span className="link" onClick={onOpenModels} style={{ cursor: "pointer" }}>
+              Target: {targetModel.name} →
+            </span>
+          </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
             {(
@@ -961,7 +1423,6 @@ export function PortfolioScreen({
               <div style={{ display: "flex", gap: 6 }}>
                 <button
                   className="btn sm primary"
-                  style={{ flex: 1 }}
                   onClick={() => {
                     const prompt = `My portfolio has drifted ${health.trackingGapPp.toFixed(1)}pp from my ${targetModel.name} target. Give me a step-by-step rebalance plan with specific amounts.`;
                     window.dispatchEvent(
@@ -1002,6 +1463,12 @@ export function PortfolioScreen({
           <div className="section-header" style={{ padding: "0 4px" }}>
             <h3>Fee check</h3>
           </div>
+          {/* Info-only on the Portfolio tab: the held fund, its cheaper comparable
+              alternative(s), and the saving — exactly as it read before the
+              action-item redesign. The honest Archive / "Not for me" controls and
+              the Hidden-checks restore list live on the "See details" page, so the
+              tab stays calm. Exactly one section-level "Ask advisor" + one "See
+              details" beneath; no per-card actions. */}
           <div
             className="card"
             style={{
@@ -1028,12 +1495,10 @@ export function PortfolioScreen({
                 marginBottom: 10,
               }}
             >
-              {feeCreepFindings.length === 1
-                ? "One of your funds has a cheaper alternative offering comparable exposure."
-                : `${feeCreepFindings.length} of your funds have cheaper alternatives offering comparable exposure.`}
+              {feeCheckInlineIntro(feeCreepFindings.length)}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {feeCreepFindings.map((f) => (
+              {inlineFeeView.top.map((f) => (
                 <div
                   key={f.heldTicker}
                   style={{
@@ -1117,36 +1582,28 @@ export function PortfolioScreen({
                 </div>
               ))}
             </div>
-            <div style={{ marginTop: 12, display: "flex", gap: 6 }}>
+            {/* One section-level "See details" (primary) + one "Ask advisor"
+                (secondary) for the whole section. When the section is capped the
+                primary button carries the true total ("See all N") — the count
+                lives on the one action that reveals the rest, so there's no
+                separate cap-note line. Copy comes from the same pure helper the
+                tests cover, so inline + page agree. Intrinsic width (no lone
+                flex:1) so neither button stretches full-width on a wide pane. */}
+            <div style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
               <button
+                type="button"
                 className="btn sm primary"
-                style={{ flex: 1 }}
-                onClick={() => {
-                  const top = feeCreepFindings[0];
-                  const alt = top.alternatives[0];
-                  const prompt = `I hold ${top.heldTicker} at a ${top.heldTer.toFixed(2)}% TER. ${alt.abbrName} offers comparable ${top.assetClass ?? "same-class"} exposure at ${(alt.ter ?? 0).toFixed(2)}%. Walk me through what it would take to switch, and whether the saving justifies the move.`;
-                  window.dispatchEvent(
-                    new CustomEvent("ai-prompt", {
-                      // The fee comparison is already on screen — pass it so the
-                      // Advisor reasons about the switch without re-reading holdings.
-                      detail: {
-                        display: prompt,
-                        send: prompt,
-                        context: {
-                          screen: "portfolio",
-                          intent: "fee_switch",
-                          subject: top.heldTicker,
-                          signals: {
-                            heldTer: Number(top.heldTer.toFixed(2)),
-                            alternative: alt.abbrName,
-                            altTer: Number((alt.ter ?? 0).toFixed(2)),
-                            assetClass: top.assetClass ?? "same-class",
-                          },
-                        },
-                      },
-                    }),
-                  );
-                }}
+                onClick={() => setFeeDetailsOpen(true)}
+                aria-label="See fee-check details"
+              >
+                {feeChecksButtonLabel(feeCreepFindings.length, inlineFeeView.top.length)}
+              </button>
+              <button
+                type="button"
+                className="btn sm ghost"
+                style={{ gap: 4 }}
+                onClick={askAdvisorAboutFees}
+                aria-label="Ask Advisor about these fees"
               >
                 <Icon name="chat" size={12} /> Ask advisor
               </button>
@@ -1239,41 +1696,76 @@ export function PortfolioScreen({
         )}
         {filtered.map((h) => {
           const pct = view.totalValue > 0 ? (h.value / view.totalValue) * 100 : 0;
+          // Any holding can be viewed; only DB-backed holdings (with an id) can
+          // be edited via the holdings API.
           const editable = h.id !== undefined;
           return (
             <div
               key={(h.id ?? h.ticker) + (h.source || "")}
               className="holding"
-              role={editable ? "button" : undefined}
-              tabIndex={editable ? 0 : undefined}
-              onClick={editable ? () => setHoldingSheet(h) : undefined}
-              onKeyDown={
-                editable
-                  ? (e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setHoldingSheet(h);
-                      }
-                    }
-                  : undefined
-              }
-              style={editable ? { cursor: "pointer" } : undefined}
+              style={{
+                // Override .holding's grid: the row is now a flex container for
+                // [view button, edit button]; the view button carries the
+                // original 3-column grid so the swatch/name/value layout is
+                // unchanged.
+                display: "flex",
+                gap: 4,
+              }}
             >
-              <div className="swatch" style={{ background: h.color }}>
-                {swatchAbbr(h.ticker)}
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <div className="name">{h.ticker}</div>
-                <div className="sub">
-                  {h.category} · {pct.toFixed(1)}%
+              {/* Main click target — opens the read-only detail view. A real
+                  <button> so it's keyboard-focusable; styled to inherit the
+                  row's chrome and carry the row's grid. Sibling of the Edit
+                  button (never nested) so the markup stays valid. Mirrors the
+                  FundSelect row pattern. */}
+              <button
+                type="button"
+                aria-label={`View details for ${h.ticker}`}
+                onClick={() => setDetailHolding(h)}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "32px 1fr auto",
+                  alignItems: "center",
+                  gap: 10,
+                  flex: 1,
+                  minWidth: 0,
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  margin: 0,
+                  textAlign: "left",
+                  font: "inherit",
+                  color: "inherit",
+                  cursor: "pointer",
+                }}
+              >
+                <div className="swatch" style={{ background: h.color }}>
+                  {swatchAbbr(h.ticker)}
                 </div>
-              </div>
-              <div className="stack-xs" style={{ alignItems: "flex-end" }}>
-                <div className="value">฿{Math.round(h.value).toLocaleString("en-US")}</div>
-                <div className={`pct ${h.d1 >= 0 ? "delta up" : "delta down"}`}>
-                  {fmtPct(h.d1, 2)}
+                <div style={{ minWidth: 0 }}>
+                  <div className="name">{h.ticker}</div>
+                  <div className="sub">
+                    {h.category} · {pct.toFixed(1)}%
+                  </div>
                 </div>
-              </div>
+                <div className="stack-xs" style={{ alignItems: "flex-end" }}>
+                  <div className="value">฿{Math.round(h.value).toLocaleString("en-US")}</div>
+                  <div className={`pct ${h.d1 >= 0 ? "delta up" : "delta down"}`}>
+                    {fmtPct(h.d1, 2)}
+                  </div>
+                </div>
+              </button>
+              {editable && (
+                <button
+                  type="button"
+                  className="icon-btn quiet"
+                  aria-label={`Edit ${h.ticker}`}
+                  title={`Edit ${h.ticker}`}
+                  onClick={() => setHoldingSheet(h)}
+                  style={{ flexShrink: 0, alignSelf: "center", marginLeft: 12 }}
+                >
+                  <Icon name="pencil" size={12} />
+                </button>
+              )}
             </div>
           );
         })}
@@ -1328,6 +1820,31 @@ export function PortfolioScreen({
           ⓘ Educational analysis only. Not personalised financial advice.
         </div>
       </div>
+
+      <FeeChecksPage
+        open={feeDetailsOpen}
+        onClose={() => setFeeDetailsOpen(false)}
+        findings={feeCreepFindings}
+        hidden={hiddenFeeChecks}
+        onArchive={archiveFeeCreep}
+        onReject={rejectFeeCreep}
+        onRestore={restoreHidden}
+      />
+
+      <FundDetailSheet
+        holding={detailHolding}
+        onEdit={
+          detailHolding?.id !== undefined
+            ? () => {
+                // Hand off from view to edit: close the detail, open the form.
+                const h = detailHolding;
+                setDetailHolding(null);
+                setHoldingSheet(h);
+              }
+            : undefined
+        }
+        onClose={() => setDetailHolding(null)}
+      />
 
       <HoldingSheet
         open={!!holdingSheet}

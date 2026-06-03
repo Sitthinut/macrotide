@@ -132,6 +132,13 @@ real-index source and intentionally stays an ETF proxy (`ACWI`); gold stays the
 canonical [configuration.md § Environment variables](./configuration.md#environment-variables)
 table.
 
+The same Frankfurter FX series doubles as the conversion source for the
+portfolio value/return chart: a holding's native currency is inferred from its
+routing key ([lib/market/currency.ts](../../lib/market/currency.ts)) and its
+value is converted to the base currency (THB) at each date's USD/THB — or cross
+— rate ([lib/market/fx.ts](../../lib/market/fx.ts)) before holdings in different
+currencies are summed.
+
 ### Cache freshness
 
 `getCachedSeries` ([lib/market/cache.ts](../../lib/market/cache.ts)) serves a

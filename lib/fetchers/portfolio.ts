@@ -7,7 +7,7 @@ import type { ModelPortfolio as DbModelPortfolio } from "@/lib/db/queries/models
 import type { Plan } from "@/lib/db/queries/plan";
 import type { FundQuote } from "@/lib/db/queries/quotes";
 import type { IndicatorDef } from "@/lib/market/indicators";
-import { useResource } from "./swr";
+import { invalidate, useResource } from "./swr";
 
 export type { Bucket, DbHolding, DbModelPortfolio, FundQuote, JournalEntry, Plan };
 
@@ -74,6 +74,8 @@ export interface PortfolioSeriesResponse {
   aggregate: PortfolioSeriesPoint[];
   perBucket: Record<string, PortfolioSeriesPoint[]>;
   asOf: string | null;
+  /** True if the book holds a dividend-paying fund (price line drops payouts). */
+  hasDistributingHolding: boolean;
 }
 
 export function usePortfolioSeries(range: SeriesRange = "6mo") {
@@ -162,8 +164,71 @@ export interface FeeCreepFinding {
   assetClass: string | null;
   alternatives: FeeCreepAlternative[];
   savingsPp: number;
+  /** Deterministic suppression key (fee_creep:{heldTicker}); the route adds it. */
+  key: string;
 }
 
 export function useFeeCreep() {
   return useResource<FeeCreepFinding[]>("/api/portfolio/fee-creep");
+}
+
+// ─── Action-item suppression (Archive / Not for me) ─────────────────────────────
+
+export type ActionItemStateValue = "archived" | "not_for_me";
+
+/** A hidden (archived / rejected) action item, as the Hidden-checks list shows it. */
+export interface HiddenActionItem {
+  id: number;
+  itemType: string;
+  itemKey: string;
+  state: ActionItemStateValue;
+  reason: string | null;
+  snapshotSavingsPp: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** The current owner's hidden set — the source for the "Hidden checks (N)" surface. */
+export function useHiddenActionItems() {
+  return useResource<{ hidden: HiddenActionItem[] }>("/api/portfolio/action-items");
+}
+
+/**
+ * Record an Archive / "Not for me" on a generated action item, then revalidate
+ * the consuming feeds so the card disappears. `reason` (a chip key or free text)
+ * and `savingsPp` (the magnitude the user saw, snapshotted server-side for the
+ * resurface check) apply to a "Not for me"; both are optional. `topic` is the
+ * human label used for the Journal feedback entry a rejection writes server-side.
+ */
+export async function mutateActionItemState(input: {
+  itemType: "fee_creep" | "headline" | "rebalance";
+  itemKey: string;
+  state: ActionItemStateValue;
+  reason?: string | null;
+  savingsPp?: number | null;
+  topic?: string | null;
+}): Promise<void> {
+  await fetch("/api/portfolio/action-items", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  // Revalidate the feeds the suppression affects: the fee-creep list, the Hidden
+  // set, and (for a rejection) the Journal feed the feedback entry lands in.
+  await Promise.all([
+    invalidate("/api/portfolio/fee-creep"),
+    invalidate("/api/portfolio/action-items"),
+    invalidate("/api/journal"),
+  ]);
+}
+
+/** Restore a previously archived / rejected item (un-suppress). */
+export async function restoreActionItem(itemKey: string): Promise<void> {
+  await fetch(`/api/portfolio/action-items?key=${encodeURIComponent(itemKey)}`, {
+    method: "DELETE",
+  });
+  await Promise.all([
+    invalidate("/api/portfolio/fee-creep"),
+    invalidate("/api/portfolio/action-items"),
+  ]);
 }
