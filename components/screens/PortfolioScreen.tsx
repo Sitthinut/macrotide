@@ -161,7 +161,7 @@ function FeeCheckPageCard({
         >
           CHEAPER COMPARABLE EXPOSURE
         </div>
-        {finding.alternatives.map((alt) => (
+        {finding.alternatives.map((alt, i) => (
           <div
             key={alt.projId}
             style={{
@@ -170,7 +170,8 @@ function FeeCheckPageCard({
               alignItems: "center",
               gap: 8,
               padding: "5px 0",
-              borderBottom: "1px solid var(--line-soft)",
+              borderBottom:
+                i < finding.alternatives.length - 1 ? "1px solid var(--line-soft)" : undefined,
             }}
           >
             <span style={{ fontSize: 12.5, color: "var(--ink-soft)", minWidth: 0 }}>
@@ -207,8 +208,7 @@ function FeeCheckPageCard({
           alignItems: "center",
           gap: 8,
           flexWrap: "wrap",
-          borderTop: "1px solid var(--line-soft)",
-          paddingTop: 12,
+          paddingTop: 4,
         }}
       >
         <button
