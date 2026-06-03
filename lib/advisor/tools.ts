@@ -21,7 +21,8 @@ import { getPortfolioSeries } from "../db/queries/series";
 import { BENCHMARK_OPTIONS, getBenchmarkReturnPct } from "../market/benchmarks";
 import { QUOTE_SOURCES } from "../market/sources";
 import { adaptModelPortfolio, adaptPortfolios } from "../portfolio/adapter";
-import { computeHealth, summarizeHealth } from "../portfolio/health";
+import { assessConcentration, computeHealth, summarizeHealth } from "../portfolio/health";
+import { computeLookThrough } from "../portfolio/look-through";
 import { parsePlan } from "../portfolio/plan-parser";
 import {
   type CheaperOutput,
@@ -74,13 +75,16 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
       const model = plan?.selectedModelId ? getModelPortfolio(plan.selectedModelId) : undefined;
       const target = model ? adaptModelPortfolio(model) : null;
 
+      const lookThrough = computeLookThrough(allHoldings);
       const health = computeHealth(
         allHoldings,
         totalValue,
         target?.mix ?? null,
         target?.ter ?? null,
+        lookThrough,
       );
       const headline = summarizeHealth(health, target?.name ?? null);
+      const concAssessment = assessConcentration(health.concentration);
 
       return {
         ok: true as const,
@@ -111,6 +115,23 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
           top3Pct: round(health.concentration.top3Pct, 1),
           hhi: round(health.concentration.hhi, 3),
           holdingCount: health.concentration.holdingCount,
+          // Named-check verdict + underlying look-through (lower bounds). Absence
+          // of a finding never certifies diversification — see portfolio-health.md.
+          status: concAssessment.status,
+          reason: concAssessment.reason,
+          lookThrough: health.concentration.lookThrough
+            ? {
+                topName: health.concentration.lookThrough.maxName
+                  ? {
+                      label: health.concentration.lookThrough.maxName.label,
+                      atLeastPct: round(health.concentration.lookThrough.maxName.pct, 1),
+                      fundCount: health.concentration.lookThrough.maxName.fundCount,
+                    }
+                  : null,
+                redundantPairs: health.concentration.lookThrough.redundantPairs,
+                equityCoverage: round(health.concentration.lookThrough.equityCoverage, 2),
+              }
+            : null,
         },
         cashPct: round(health.cashPct, 1),
         headline: { tone: headline.tone, title: headline.title, body: headline.body },
