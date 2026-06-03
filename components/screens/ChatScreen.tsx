@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatThreadList } from "@/components/ChatThreadList";
 import { FeedbackRow } from "@/components/FeedbackRow";
 import { Icon } from "@/components/Icon";
+import { MarkdownMessage } from "@/components/MarkdownMessage";
 import type { EntryContext } from "@/lib/advisor/entry-context";
 import {
   useModelPortfoliosView,
@@ -1170,6 +1171,11 @@ export function ChatScreen({
                 <span></span>
                 <span></span>
               </div>
+            ) : m.role === "ai" ? (
+              // Advisor replies are Markdown — render them styled. User bubbles
+              // stay plain text (below) so nothing the user typed is reinterpreted
+              // as markup.
+              m.text && <MarkdownMessage text={m.text} />
             ) : (
               m.text && <div style={{ whiteSpace: "pre-wrap" }}>{m.text}</div>
             )}
