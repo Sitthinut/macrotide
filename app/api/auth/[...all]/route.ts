@@ -5,16 +5,16 @@ import { verifyTurnstile } from "@/lib/auth/turnstile";
 
 const handlers = toNextJsHandler(auth);
 
-// Account-creation / OAuth entry paths that the Turnstile signup gate
-// protects. better-auth routes everything under /api/auth/*; we only gate the
-// paths that mint a new account or start an OAuth flow.
+// Account-creation paths that the Turnstile signup gate protects. better-auth
+// routes everything under /api/auth/*; we only gate the path that mints a new
+// account directly. OAuth (`/sign-in/social`) is deliberately NOT gated: that
+// POST only generates a redirect to the provider's consent screen — no account
+// is minted until the callback, after the provider has authenticated the user
+// (the provider's own bot defenses are the real gate). Redirect spam is covered
+// by the IP rate limit above.
 function isGatedSignupPath(url: string): boolean {
   const path = new URL(url).pathname;
-  return (
-    path.endsWith("/sign-up/email") ||
-    path.endsWith("/sign-in/social") ||
-    path.includes("/sign-in/social")
-  );
+  return path.endsWith("/sign-up/email");
 }
 
 export const GET = handlers.GET;
@@ -31,9 +31,9 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  // Signup gate: verify the Turnstile token on account-creation / OAuth
-  // start. The browser sends it via the `x-turnstile-token` header so we don't
-  // consume the request body the handler needs. Bypassed in dev (no secret).
+  // Signup gate: verify the Turnstile token on email account-creation. The
+  // browser sends it via the `x-turnstile-token` header so we don't consume the
+  // request body the handler needs. Bypassed in dev (no secret).
   if (isGatedSignupPath(req.url)) {
     const token = req.headers.get("x-turnstile-token");
     const ok = await verifyTurnstile(token, ip);

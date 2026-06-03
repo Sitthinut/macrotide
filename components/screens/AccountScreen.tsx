@@ -333,7 +333,19 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
               </svg>
               <span style={{ fontSize: 13, color: "var(--ink)" }}>Passkeys</span>
             </div>
-            <span className="tag green">active</span>
+            {/* Reflect the real credential count — an OAuth user who skipped the
+                passkey prompt has none, so "active" would be a lie. */}
+            {passkeyState.isPending ? (
+              <span className="tag" style={{ color: "var(--muted)" }}>
+                …
+              </span>
+            ) : passkeyList.length > 0 ? (
+              <span className="tag green">active</span>
+            ) : (
+              <span className="tag" style={{ color: "var(--muted)" }}>
+                none
+              </span>
+            )}
           </div>
 
           {/* OAuth providers */}
@@ -373,8 +385,8 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
             lineHeight: 1.5,
           }}
         >
-          OAuth sign-in (Google / GitHub) can be enabled by the operator. Passkey is the primary
-          method today.
+          Passkey is the primary sign-in method. Where the operator has configured Google or GitHub,
+          you can link it for one-tap sign-in.
         </div>
 
         {/* Your registered passkeys */}
