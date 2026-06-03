@@ -50,6 +50,19 @@ function fmtPct(val: string | number | null | undefined, showSign = true): strin
   return `${sign}${n.toFixed(2)}%`;
 }
 
+// Edge-fade visibility for the horizontally-scrolling Performance & Risk table.
+// Inline replica of the component helper — see PerformanceSection.
+function computeEdgeFades(
+  scrollLeft: number,
+  clientWidth: number,
+  scrollWidth: number,
+): { left: boolean; right: boolean } {
+  return {
+    left: scrollLeft > 0,
+    right: scrollLeft + clientWidth < scrollWidth - 1,
+  };
+}
+
 // ─── mock enrichment data ─────────────────────────────────────────────────────
 
 const MOCK_PERFORMANCE: FundPerformanceRow[] = [
@@ -213,6 +226,38 @@ describe("periodSortKey", () => {
   it("treats period lookup as case-insensitive", () => {
     expect(periodSortKey("3m")).toBe(periodSortKey("3M"));
     expect(periodSortKey("ytd")).toBe(periodSortKey("YTD"));
+  });
+});
+
+// ─── edge-fade scroll cue ─────────────────────────────────────────────────────
+
+describe("computeEdgeFades", () => {
+  // viewport 200px wide showing a 500px-wide table.
+  const CLIENT = 200;
+  const SCROLL = 500;
+
+  it("shows only the right fade at the start", () => {
+    expect(computeEdgeFades(0, CLIENT, SCROLL)).toEqual({ left: false, right: true });
+  });
+
+  it("shows both fades while scrolled in the middle", () => {
+    expect(computeEdgeFades(150, CLIENT, SCROLL)).toEqual({ left: true, right: true });
+  });
+
+  it("shows only the left fade at the end", () => {
+    // scrollLeft + clientWidth === scrollWidth ⇒ no more right content.
+    expect(computeEdgeFades(SCROLL - CLIENT, CLIENT, SCROLL)).toEqual({
+      left: true,
+      right: false,
+    });
+  });
+
+  it("clears the right fade within 1px of the end (sub-pixel slack)", () => {
+    expect(computeEdgeFades(SCROLL - CLIENT - 0.5, CLIENT, SCROLL).right).toBe(false);
+  });
+
+  it("shows no fade when content fits (no overflow)", () => {
+    expect(computeEdgeFades(0, SCROLL, SCROLL)).toEqual({ left: false, right: false });
   });
 });
 
