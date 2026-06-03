@@ -151,3 +151,21 @@ describe("feeSwitchPrompt", () => {
     expect(feeSwitchPrompt(finding({ alternatives: [] }))).toBeNull();
   });
 });
+
+// The Portfolio tab now carries ONE section-level "Ask advisor" for the whole
+// fee-check section: it scopes the single prompt to the most material finding
+// (biggest annual saving) and its cheapest alternative. These helpers compose to
+// that selection, so the screen and tests share one source of truth.
+describe("section-level Ask advisor selection", () => {
+  it("scopes the section prompt to the most material finding (biggest saving)", () => {
+    const findings = [
+      finding({ heldTicker: "SMALL", savingsPp: 0.1 }),
+      finding({ heldTicker: "BIG", savingsPp: 0.8 }),
+      finding({ heldTicker: "MID", savingsPp: 0.4 }),
+    ];
+    const top = orderFeeChecks(findings)[0];
+    expect(top.heldTicker).toBe("BIG");
+    const prompt = feeSwitchPrompt(top);
+    expect(prompt?.context.subject).toBe("BIG");
+  });
+});

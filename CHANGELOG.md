@@ -27,27 +27,25 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   wobble, so funds visibly trail their index and the blended portfolio diverges
   from any single benchmark. Owner mode is unchanged — it still reads live market
   data. Regenerate the fixture with `npm run refresh:demo-history`.
-- **The fee-check list is now a calm summary list with a detail overlay.** Each
-  fee check on the Portfolio screen shows the held fund and a one-line saving
-  summary, with exactly two buttons: "Ask advisor" (a per-fund prompt scoped to
-  that held fund and its cheapest comparable alternative) and "See details". The
-  fee comparison (held fund vs cheaper alternatives + the annual saving) and the
-  two honest actions — Archive ("I've seen this; file it") and "Not for me"
-  (reject, with an optional reason: four chips plus a free-text "Other…") — now
-  live in the "See details" overlay, so the list stays uncluttered rather than
-  button-heavy. Both choices are recorded per fund, survive reloads, and resurface
-  only when the finding materially worsens: the reason a rejection carries selects
-  how stubborn that is (a magnitude reason can return on a bigger jump; a
-  preference or structural reason stays hidden), and a ratchet means nothing nags
-  more than once per material jump. A "Not for me" also writes a Journal ▸
-  Feedback entry so the rejection — and its reason — is reviewable and feeds the
-  Advisor's "don't repeat rejected advice" context. A quiet, collapsed "Hidden
-  checks (N)" list under the section restores anything filed or rejected. The
-  section stays calm: findings in severity order, the top few with the rest behind
-  a "Show N more" expander, a no-deadline summary line, and a batch "Archive all".
-  Suppression is applied server-side and is per-user (ephemeral in the demo),
-  built on a reusable action-item layer the headline and rebalance suggestions can
-  adopt later.
+- **The Portfolio fee-check section is info-only, with management on a dedicated
+  "See details" page.** On the Portfolio tab the section reads as plain
+  information cards — each held fund, its cheaper comparable alternative(s), and
+  the annual saving — with exactly one section-level "Ask advisor" (a single
+  fee-focused prompt scoped to the most material finding and its cheapest
+  alternative) and one "See details" beneath it. There are no per-card actions on
+  the tab. "See details" opens a full-screen page (a sub-view of Portfolio, not a
+  new tab) that houses all the management UI: each fee check with its own Archive
+  ("I've seen this; file it") and "Not for me" (reject, with an optional reason —
+  four chips plus a free-text "Other…"), plus a "Hidden checks (N)" list to
+  restore anything filed or rejected. Both choices are recorded per fund, survive
+  reloads, and resurface only when the finding materially worsens: the reason a
+  rejection carries selects how stubborn that is (a magnitude reason can return on
+  a bigger jump; a preference or structural reason stays hidden), and a ratchet
+  means nothing nags more than once per material jump. A "Not for me" also writes
+  a Journal ▸ Feedback entry so the rejection — and its reason — is reviewable and
+  feeds the Advisor's "don't repeat rejected advice" context. Suppression is
+  applied server-side and is per-user (ephemeral in the demo), built on a reusable
+  action-item layer the headline and rebalance suggestions can adopt later.
 - **Tapping a holding now opens a read-only detail view instead of the edit
   form.** The Portfolio screen's holding rows open a "Holding detail" sheet that
   reuses the fund detail view — performance, allocation, top holdings, and feeder

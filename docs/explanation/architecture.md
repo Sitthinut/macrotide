@@ -161,15 +161,20 @@ reason). There is no Snooze: a timed re-nag is the wrong default for a calm,
 anti-tinkering index app, so the only way an item comes back passively is a
 **material change** in the finding.
 
-In the fee-check UI these controls live in a **detail overlay**, not on the list
-card. Each fee check renders as a slim summary card — the held fund plus a
-one-line saving summary, with only two buttons: **Ask advisor** (a per-fund
-Advisor prompt scoped to that held fund and its cheapest comparable alternative)
-and **See details**. "See details" opens a detail `Modal` (the same dialog
-primitive as the fund detail sheet) carrying the fee comparison and the Archive /
-"Not for me" controls with room to breathe. This keeps the list calm rather than
-button-heavy; the actions and their backend wiring are unchanged — only *where*
-they are triggered moved.
+In the fee-check UI these controls live on a dedicated **"See details" page**,
+not on the Portfolio tab. On the tab the section is **information-only** — each
+held fund, its cheaper comparable alternative(s), and the annual saving — with
+exactly one section-level **Ask advisor** (a single fee-focused Advisor prompt
+scoped to the most material finding and its cheapest comparable alternative) and
+one **See details** button for the whole section. "See details" opens a
+full-height detail `Modal` (the same dialog primitive as the fund detail sheet,
+a sub-view of Portfolio rather than a new route) that houses all the management
+UI: each fee check with its own **Archive** / **"Not for me"** controls (the four
+reason chips + a free-text "Other…") and a **"Hidden checks (N)"** restore list.
+The Modal owns its own focus trap, Escape/close, and scroll region, so the
+Portfolio tab's per-screen scroll memory is untouched while it is open. This
+keeps the tab calm rather than button-heavy; the actions and their backend wiring
+are unchanged — only *where* they are triggered moved.
 
 Each item is keyed by a deterministic `item_key`
 ([lib/portfolio/action-item-key.ts](../../lib/portfolio/action-item-key.ts)) —
@@ -191,8 +196,8 @@ drip-nags. An improvement (the saving shrinking) never resurfaces. The query
 layer ([lib/db/queries/action-items.ts](../../lib/db/queries/action-items.ts))
 subtracts the still-hidden set from the live findings, and the route
 (`app/api/portfolio/action-items`) records the state inside `withDb`. A
-collapsed **"Hidden checks (N)"** list on the Portfolio screen restores anything
-filed or rejected.
+**"Hidden checks (N)"** list on the "See details" page restores anything filed
+or rejected.
 
 A **"Not for me"** also writes a **Journal ▸ Feedback** entry in the same
 `withDb` transaction — reusing `journal_entries` with `kind: "feedback"` (the
