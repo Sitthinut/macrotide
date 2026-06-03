@@ -26,6 +26,7 @@ import { useResource } from "@/lib/fetchers/swr";
 import { buildHoldingDetailRows } from "@/lib/portfolio/holding-detail";
 import { buildPortfolioDisplayRows } from "@/lib/portfolio/portfolio-display";
 import type { Holding } from "@/lib/static/types";
+import { useOverlayScrollbar } from "@/lib/useOverlayScrollbar";
 
 // ─── API response type ────────────────────────────────────────────────────────
 
@@ -114,6 +115,14 @@ function SectionHeader({ title }: { title: string }) {
 // ─── 1. Performance & risk ────────────────────────────────────────────────────
 
 function PerformanceSection({ rows }: { rows: FundPerformanceRow[] }) {
+  // App-standard custom scrollbar (os-theme-macrotide) on the horizontal table
+  // scroller, replacing the native bar. OverlayScrollbars auto-detects which
+  // axis overflows, so the shared hook (oriented to overflow-Y panels) works
+  // unchanged for this overflow-X wrapper. The wrapper is a distinct element
+  // with its own overflow, nested well below the Modal.Body's own OS viewport —
+  // OverlayScrollbars supports that nesting, and the hook destroys its instance
+  // on unmount, so it doesn't double-init or fight the body's vertical scroller.
+  const perfScrollRef = useOverlayScrollbar();
   if (rows.length === 0) return null;
 
   // Pivot: group by performanceTypeDesc, columns are referencePeriod.
@@ -158,7 +167,7 @@ function PerformanceSection({ rows }: { rows: FundPerformanceRow[] }) {
   return (
     <>
       <SectionHeader title="Performance & Risk" />
-      <div style={{ overflowX: "auto" }}>
+      <div ref={perfScrollRef} style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
           <thead>
             <tr>
