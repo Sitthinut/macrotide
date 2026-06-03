@@ -266,7 +266,7 @@ function PerformanceSection({ rows }: { rows: FundPerformanceRow[] }) {
           style={{
             ...FADE_BASE,
             left: 0,
-            background: "linear-gradient(to right, var(--paper), transparent)",
+            background: "linear-gradient(to right, var(--edge-shadow), transparent)",
             opacity: fades.left ? 1 : 0,
           }}
         />
@@ -275,7 +275,7 @@ function PerformanceSection({ rows }: { rows: FundPerformanceRow[] }) {
           style={{
             ...FADE_BASE,
             right: 0,
-            background: "linear-gradient(to left, var(--paper), transparent)",
+            background: "linear-gradient(to left, var(--edge-shadow), transparent)",
             opacity: fades.right ? 1 : 0,
           }}
         />
