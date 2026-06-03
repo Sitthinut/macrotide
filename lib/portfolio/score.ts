@@ -7,7 +7,7 @@
 // Component weights (must sum to 100):
 //   drift         30 pts  — how closely the portfolio tracks its target mix
 //   fees          25 pts  — blended expense ratio vs. index-grade benchmarks
-//   concentration 25 pts  — Herfindahl–Hirschman diversification index
+//   concentration 25 pts  — underlying-exposure concentration (see assessConcentration)
 //   cash drag     20 pts  — uninvested cash as a % of portfolio
 //
 // Each component is scored independently and can be read in isolation.
@@ -17,8 +17,12 @@
 // full marks (which would inflate the headline by rewarding the absence of a
 // plan). The remaining 70 points (fees 25 + concentration 25 + cash 20) are
 // renormalised onto a 0–100 scale so the headline stays comparable.
+//
+// NOTE: this composite is no longer the user's headline (the Portfolio screen
+// leads with a plain-language headline + named checks). It is kept for the
+// Advisor's internal reasoning and /api/analysis. See portfolio-health.md.
 
-import type { HealthSignals } from "./health";
+import { assessConcentration, type HealthSignals } from "./health";
 
 export interface ScoreComponent {
   key: "drift" | "fees" | "concentration" | "cash";
@@ -124,31 +128,23 @@ function feeScore(ter: number, unknownCount: number): ScoreComponent {
 /**
  * Concentration sub-score (0–25 pts).
  *
- * Rule: uses the Herfindahl–Hirschman index (HHI, 0..1).
- *   HHI = 0     → 25 pts (theoretically infinite diversification)
- *   HHI = 0.25  → 12.5 pts (4 equal-weight funds)
- *   HHI ≥ 0.50  →  0 pts (≤ 2 equal funds — highly concentrated)
+ * Derived from the shared `assessConcentration` interpretation (the same one the
+ * named-check UI reads), so the composite can never disagree with what the user
+ * sees. Fund-count HHI is no longer the basis — it punished clean broad-index
+ * books (few funds) and was fooled by redundant funds (many funds, one
+ * exposure). Instead: a single-alternative-bet check plus coverage-gated
+ * look-through, where look-through can only SUBTRACT on a confident finding and
+ * missing data is neutral. Full rationale: docs/explanation/portfolio-health.md.
  *
- * Linear: score = max(0, 25 × (1 − HHI / 0.5))
+ *   good  → 25 pts    watch → ~13 pts    act → ~4 pts
  */
-function concentrationScore(
-  hhi: number,
-  top: { ticker: string; pct: number } | null,
-  top3Pct: number,
-  holdingCount: number,
-): ScoreComponent {
-  const score = Math.max(0, Math.round(CONC_MAX * (1 - hhi / 0.5)));
-  const detail =
-    holdingCount === 0
-      ? "No holdings."
-      : hhi <= 0.1
-        ? `Well diversified across ${holdingCount} fund${holdingCount !== 1 ? "s" : ""}.`
-        : top && top.pct >= 35
-          ? `${top.ticker} is ${top.pct.toFixed(0)}% of the book — heavily concentrated.`
-          : top
-            ? `${top.ticker} leads at ${top.pct.toFixed(0)}%; top-3 = ${top3Pct.toFixed(0)}%.`
-            : "Portfolio present.";
-  return { key: "concentration", label: "Diversification", score, max: CONC_MAX, detail };
+function concentrationScore(health: HealthSignals): ScoreComponent {
+  const { status, reason, fraction } = assessConcentration(health.concentration);
+  void status; // status drives the UI pill; the composite needs only the points
+  // An empty book assesses as "good" (nothing to penalise) → full marks, keeping
+  // the composite at 100 when there is nothing to score, like fees and cash.
+  const score = Math.round(CONC_MAX * fraction);
+  return { key: "concentration", label: "Diversification", score, max: CONC_MAX, detail: reason };
 }
 
 /**
@@ -199,12 +195,7 @@ export function scorePortfolio(health: HealthSignals, hasTarget: boolean): Portf
   const components: ScoreComponent[] = [
     driftScore(health.trackingGapPp, hasTarget),
     feeScore(health.blendedTer, health.unknownTerCount),
-    concentrationScore(
-      health.concentration.hhi,
-      health.concentration.top,
-      health.concentration.top3Pct,
-      health.concentration.holdingCount,
-    ),
+    concentrationScore(health),
     cashScore(health.cashPct),
   ];
 

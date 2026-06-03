@@ -3,11 +3,13 @@ import type { Holding, MixSlice } from "@/lib/static/types";
 import {
   allocationByClass,
   allocationByRegion,
+  assessConcentration,
   blendedTer,
   cashWeight,
   computeDrift,
   computeHealth,
   concentration,
+  type LookThrough,
   rebalanceHint,
   summarizeHealth,
   trackingGap,
@@ -186,6 +188,94 @@ describe("concentration", () => {
     const c = concentration([], 0);
     expect(c.top).toBeNull();
     expect(c.hhi).toBe(0);
+  });
+  it("reports the largest ALTERNATIVE holding as the single-bet, ignoring equity/bond", () => {
+    const book = [
+      holding({ ticker: "WORLD-EQ", class: "equity", value: 600 }),
+      holding({ ticker: "ONE-CRYPTO", class: "alternative", value: 400 }),
+    ];
+    const c = concentration(book, 1000);
+    expect(c.singleBet?.ticker).toBe("ONE-CRYPTO");
+    expect(c.singleBet?.pct).toBeCloseTo(40);
+  });
+  it("has no single-bet when there is no alternative holding", () => {
+    const book = [holding({ ticker: "WORLD-EQ", class: "equity", value: 1000 })];
+    expect(concentration(book, 1000).singleBet).toBeNull();
+  });
+  it("carries the injected look-through through computeHealth", () => {
+    const lt: LookThrough = {
+      maxName: { label: "Apple Inc.", pct: 8, fundCount: 2 },
+      redundantPairs: [],
+      equityCoverage: 0.7,
+      regionDivergencePp: null,
+    };
+    const h = computeHealth([holding({ ticker: "A", value: 100 })], 100, null, null, lt);
+    expect(h.concentration.lookThrough?.maxName?.label).toBe("Apple Inc.");
+  });
+});
+
+describe("assessConcentration", () => {
+  const sig = (over: Partial<LookThrough> | null, singleBetPct = 0) =>
+    concentration(
+      [
+        holding({ ticker: "EQ", class: "equity", value: 1000 - singleBetPct * 10 }),
+        ...(singleBetPct > 0
+          ? [holding({ ticker: "ALT", class: "alternative", value: singleBetPct * 10 })]
+          : []),
+      ],
+      1000,
+      over === null
+        ? null
+        : {
+            maxName: null,
+            redundantPairs: [],
+            equityCoverage: 0,
+            regionDivergencePp: null,
+            ...over,
+          },
+    );
+
+  it("is good for a clean book with no look-through", () => {
+    expect(assessConcentration(sig(null)).status).toBe("good");
+  });
+
+  it("flags a large single alternative position as act", () => {
+    expect(assessConcentration(sig(null, 40)).status).toBe("action");
+  });
+
+  it("escalates to act when high-coverage look-through finds a dominant name", () => {
+    const a = assessConcentration(
+      sig({ maxName: { label: "Apple", pct: 12, fundCount: 1 }, equityCoverage: 0.8 }),
+    );
+    expect(a.status).toBe("action");
+    expect(a.reason).toMatch(/at least 12%/i);
+  });
+
+  it("caps a partial-coverage finding at watch and says so", () => {
+    const a = assessConcentration(
+      sig({ maxName: { label: "Apple", pct: 25, fundCount: 1 }, equityCoverage: 0.45 }),
+    );
+    expect(a.status).toBe("watch");
+    expect(a.reason).toMatch(/we can see/i);
+  });
+
+  it("treats a low-coverage finding as disclosure only (stays good)", () => {
+    const a = assessConcentration(
+      sig({ maxName: { label: "Apple", pct: 30, fundCount: 1 }, equityCoverage: 0.2 }),
+    );
+    expect(a.status).toBe("good");
+  });
+
+  it("flags redundant funds at watch regardless of coverage", () => {
+    const a = assessConcentration(
+      sig({ redundantPairs: [{ a: "SP500-A", b: "SP500-B" }], equityCoverage: 0.1 }),
+    );
+    expect(a.status).toBe("watch");
+    expect(a.reason).toMatch(/same thing/i);
+  });
+
+  it("never certifies on absence — good reason stays hedged about unseen funds", () => {
+    expect(assessConcentration(sig(null)).reason).toMatch(/fund mix|see into|don't all publish/i);
   });
 });
 
