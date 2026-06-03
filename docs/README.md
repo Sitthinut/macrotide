@@ -59,6 +59,7 @@ Feature deep dives and the prior-art research behind them live under
 |---|---|
 | [architecture.md](./explanation/architecture.md) | The system shape, request lifecycle, and where everything lives |
 | [design-principles.md](./explanation/design-principles.md) | Secure-by-default, the "Advisor" voice, single-owner → multi-user |
+| [portfolio-health.md](./explanation/portfolio-health.md) | Why the Portfolio screen leads with named checks (not a 0–100 grade) and how the look-through diversification check stays honest on partial data |
 | [memory.md](./explanation/memory.md) | The long-term memory + chat-session design |
 | [advisor-context.md](./explanation/advisor-context.md) | What the Advisor knows per turn — context channels, entry-point contract, empty-turn recovery |
 | [inference-strategy.md](./explanation/inference-strategy.md) | How the Advisor stays smart/fast/token-efficient — model routing, caching, reasoning, context loading, tool-result shaping |

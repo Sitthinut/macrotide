@@ -32,12 +32,57 @@ export interface AllocationSlice {
   color: string;
 }
 
+/**
+ * Look-through into what the user's funds hold *underneath*, aggregated across
+ * funds. Computed server-side from the regenerable market.db (feeder
+ * look-through + top-5 holdings) and injected as a precomputed argument so the
+ * pure health/score layer stays DB- and network-free. `null` when no underlying
+ * data is available for any holding.
+ *
+ * The design rule is asymmetric — look-through may ESCALATE concern but never
+ * GRANT comfort: every figure here is a lower bound (most funds publish only
+ * their top-5), so absence of a finding never certifies diversification. Full
+ * rationale: docs/explanation/portfolio-health.md.
+ */
+export interface LookThrough {
+  /**
+   * Largest single underlying company as a % of the WHOLE book, summed across
+   * every fund that holds it. A LOWER BOUND (top-5 captures a minority of NAV) —
+   * present it as "at least". `null` when no underlying names resolved.
+   */
+  maxName: { label: string; pct: number; fundCount: number } | null;
+  /**
+   * Pairs of the user's funds whose published top holdings largely coincide —
+   * effectively the same exposure bought twice. High-confidence even on thin
+   * data, so it is not coverage-gated.
+   */
+  redundantPairs: { a: string; b: string }[];
+  /** 0..1 — share of EQUITY book value with usable underlying-holdings data. */
+  equityCoverage: number;
+  /**
+   * Equity region weight (pp) in excess of what the target plan implies, when
+   * honestly derivable; `null` otherwise (region then surfaces as disclosure,
+   * never a deduction). Coarse per-fund region data keeps this `null` today.
+   */
+  regionDivergencePp: number | null;
+}
+
 export interface ConcentrationSignal {
   top: { ticker: string; label: string; pct: number } | null;
   top3Pct: number;
   /** Herfindahl–Hirschman index over holding weights, 0..1 (1 = single fund). */
   hhi: number;
   holdingCount: number;
+  /**
+   * Largest single ALTERNATIVE holding as a % of the whole book (or `null`).
+   * A large alternative position (one stock, one crypto, one REIT) is genuine
+   * concentration; a large broad-index *equity* fund is not, so fund-level size
+   * flags only this class. Underlying equity concentration comes from
+   * `lookThrough`. See docs/explanation/portfolio-health.md § Diversification.
+   */
+  singleBet: { ticker: string; label: string; pct: number } | null;
+  /** Underlying-exposure look-through, injected by the server; `null` if absent. */
+  lookThrough: LookThrough | null;
 }
 
 export interface HealthSignals {
@@ -187,7 +232,11 @@ export function unknownTerCount(holdings: Holding[]): number {
   return holdings.filter((h) => h.ter == null).length;
 }
 
-export function concentration(holdings: Holding[], totalValue: number): ConcentrationSignal {
+export function concentration(
+  holdings: Holding[],
+  totalValue: number,
+  lookThrough: LookThrough | null = null,
+): ConcentrationSignal {
   const sorted = [...holdings].filter((h) => h.value > 0).sort((a, b) => b.value - a.value);
   const top = sorted[0]
     ? {
@@ -201,7 +250,141 @@ export function concentration(holdings: Holding[], totalValue: number): Concentr
     const w = totalValue > 0 ? h.value / totalValue : 0;
     return s + w * w;
   }, 0);
-  return { top, top3Pct, hhi, holdingCount: sorted.length };
+  // Fund-level size only flags single ALTERNATIVE bets — a large broad-index
+  // equity fund is not concentration risk (the underlying is diversified), so it
+  // is excluded here and judged by look-through instead.
+  const topAlt = sorted.find((h) => h.class === "alternative");
+  const singleBet = topAlt
+    ? {
+        ticker: topAlt.ticker,
+        label: topAlt.name || topAlt.ticker,
+        pct: safePct(topAlt.value, totalValue),
+      }
+    : null;
+  return { top, top3Pct, hhi, holdingCount: sorted.length, singleBet, lookThrough };
+}
+
+// ─── Concentration assessment ────────────────────────────────────────────────
+// Coverage gates: look-through may ESCALATE concern but never GRANT comfort, and
+// the louder a finding the more coverage it needs. See portfolio-health.md.
+const COVERAGE_TRUSTED = 0.6; // ≥ this → a confirmed finding may reach "act"
+const COVERAGE_PARTIAL = 0.4; // ≥ this (but < trusted) → "watch" at most, caveated
+const NAME_ACT_PCT = 10; // book-level single-name weight that warrants "act"
+const NAME_WATCH_PCT = 5; // …that warrants "watch"
+const SINGLE_BET_ACT_PCT = 35; // a single alternative holding this large is concentration
+const REGION_DIVERGENCE_WATCH_PP = 20; // equity region weight this far past plan → watch
+
+export interface ConcentrationAssessment {
+  status: HealthTone;
+  /** One-line, plain-English reason for the status (the named-check detail). */
+  reason: string;
+  /** Concentration sub-score as a 0..1 fraction (score.ts scales it to points). */
+  fraction: number;
+}
+
+const TONE_RANK: Record<HealthTone, number> = { good: 0, watch: 1, action: 2 };
+
+/** Round a 0..1 coverage to a friendly "~NN%" phrase. */
+function coveragePhrase(cov: number): string {
+  return `~${Math.round(cov * 20) * 5}%`;
+}
+
+/**
+ * Interpret the concentration signal into a single named-check status + reason,
+ * worst-status-wins across the fund-level single-bet check and the coverage-gated
+ * look-through checks. Pure — the look-through input is precomputed server-side.
+ *
+ * The fund-level value the UI shows (top fund %, top 3 %) is the certain fact;
+ * this reason carries the look-through story, always hedged ("at least", "the
+ * ~X% we can see") because underlying data is a lower bound.
+ */
+export function assessConcentration(c: ConcentrationSignal): ConcentrationAssessment {
+  let status: HealthTone = "good";
+  let reason = "";
+  const promote = (s: HealthTone, r: string) => {
+    if (TONE_RANK[s] > TONE_RANK[status] || (TONE_RANK[s] === TONE_RANK[status] && !reason)) {
+      status = s;
+      reason = r;
+    }
+  };
+
+  // B2 — a single large ALTERNATIVE position (one stock, crypto, REIT…).
+  const bet = c.singleBet;
+  if (bet && bet.pct >= SINGLE_BET_ACT_PCT) {
+    promote(
+      "action",
+      `${bet.ticker} is ${bet.pct.toFixed(0)}% of your book in a single alternative position — that concentrates risk in one bet.`,
+    );
+  }
+
+  // B1 — look-through (coverage-gated). A finding may only fire where we can see.
+  const lt = c.lookThrough;
+  if (lt?.maxName) {
+    const { label, pct, fundCount } = lt.maxName;
+    const cov = lt.equityCoverage;
+    const across = fundCount > 1 ? `, held across ${fundCount} funds` : "";
+    if (cov >= COVERAGE_TRUSTED) {
+      if (pct >= NAME_ACT_PCT) {
+        promote(
+          "action",
+          `At least ${pct.toFixed(0)}% of your portfolio is ${label}${across} — more concentrated underneath than your fund list suggests.`,
+        );
+      } else if (pct >= NAME_WATCH_PCT) {
+        promote(
+          "watch",
+          `At least ${pct.toFixed(0)}% of your portfolio is ${label}${across} — worth knowing your funds overlap here.`,
+        );
+      }
+    } else if (cov >= COVERAGE_PARTIAL && pct >= NAME_WATCH_PCT) {
+      // Partial sight: may reach "watch", never "act", and the copy says so.
+      promote(
+        "watch",
+        `Based on the ${coveragePhrase(cov)} of your stocks we can see, at least ${pct.toFixed(0)}% is ${label}. Worth understanding.`,
+      );
+    }
+    // cov < COVERAGE_PARTIAL → disclosure only; the pill stays on the fund-level fact.
+  }
+
+  // Redundant funds — high-confidence even on thin data, so not coverage-gated.
+  if (lt && lt.redundantPairs.length > 0) {
+    const p = lt.redundantPairs[0];
+    const extra =
+      lt.redundantPairs.length > 1 ? ` (and ${lt.redundantPairs.length - 1} more such pair)` : "";
+    promote(
+      "watch",
+      `${p.a} and ${p.b} hold much the same thing${extra} — together they add less diversification than separate funds suggest.`,
+    );
+  }
+
+  // Region — target-relative, capped at "watch". Dormant until region data deepens.
+  if (lt && lt.regionDivergencePp != null && lt.regionDivergencePp > REGION_DIVERGENCE_WATCH_PP) {
+    promote(
+      "watch",
+      `Your equity leans ${lt.regionDivergencePp.toFixed(0)}pp further into one region than your plan implies.`,
+    );
+  }
+
+  if (status === "good") {
+    reason = goodConcentrationReason(c);
+  }
+
+  const fraction = status === "good" ? 1 : status === "watch" ? 0.5 : 0.15;
+  return { status, reason, fraction };
+}
+
+/** The calm, honest "nothing dominates" copy, scoped to what we could see. */
+function goodConcentrationReason(c: ConcentrationSignal): string {
+  const n = c.holdingCount;
+  if (n === 0) return "No holdings yet.";
+  const lt = c.lookThrough;
+  const spread = n === 1 ? "Your book is a single fund" : `Spread across ${n} funds`;
+  if (lt && lt.equityCoverage >= COVERAGE_TRUSTED && lt.maxName) {
+    return `${spread}. Looking through the ${coveragePhrase(lt.equityCoverage)} we can see, no single company dominates.`;
+  }
+  if (lt?.maxName) {
+    return `${spread}; the funds we can see into don't lean on any one company.`;
+  }
+  return `${spread}. Based on your fund mix — the funds underneath don't all publish their holdings.`;
 }
 
 export function cashWeight(holdings: Holding[], totalValue: number): number {
@@ -305,6 +488,7 @@ export function computeHealth(
   totalValue: number,
   targetMix: MixSlice[] | null,
   targetTer: number | null = null,
+  lookThrough: LookThrough | null = null,
 ): HealthSignals {
   const drift = targetMix ? computeDrift(holdings, totalValue, targetMix) : [];
   return {
@@ -316,7 +500,7 @@ export function computeHealth(
     blendedTer: blendedTer(holdings, totalValue),
     unknownTerCount: unknownTerCount(holdings),
     targetTer,
-    concentration: concentration(holdings, totalValue),
+    concentration: concentration(holdings, totalValue, lookThrough),
     cashPct: cashWeight(holdings, totalValue),
   };
 }

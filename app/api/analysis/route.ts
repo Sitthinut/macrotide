@@ -15,6 +15,7 @@ import { getPlan } from "@/lib/db/queries/plan";
 import { listFundQuotes } from "@/lib/db/queries/quotes";
 import { adaptAggregate, adaptModelPortfolios, adaptPortfolios } from "@/lib/portfolio/adapter";
 import { computeHealth } from "@/lib/portfolio/health";
+import { computeLookThrough } from "@/lib/portfolio/look-through";
 import { scorePortfolio } from "@/lib/portfolio/score";
 
 export async function GET() {
@@ -35,12 +36,14 @@ export async function GET() {
     const targetModelId = plan?.selectedModelId ?? null;
     const targetModel = targetModelId ? (models.find((m) => m.id === targetModelId) ?? null) : null;
 
-    // ── 4. Compute health signals ─────────────────────────────────────────
+    // ── 4. Compute health signals (with underlying-exposure look-through) ──
+    const lookThrough = computeLookThrough(aggregate.holdings);
     const health = computeHealth(
       aggregate.holdings,
       aggregate.totalValue,
       targetModel?.mix ?? null,
       targetModel?.ter ?? null,
+      lookThrough,
     );
 
     // ── 5. Derive composite score ─────────────────────────────────────────

@@ -44,6 +44,13 @@ export interface PortfolioOutput {
     top3Pct: number;
     hhi: number;
     holdingCount: number;
+    status?: string;
+    reason?: string;
+    lookThrough?: {
+      topName: { label: string; atLeastPct: number; fundCount: number } | null;
+      redundantPairs: { a: string; b: string }[];
+      equityCoverage: number;
+    } | null;
   };
   cashPct: number;
   headline: { tone: string; title: string; body: string };
@@ -67,8 +74,31 @@ export function portfolioModelText(o: PortfolioOutput): string {
       o.trackingGapPp != null ? `; tracking gap ${o.trackingGapPp}pp` : ""
     }.`,
     `Concentration: ${top ? `largest ${top.ticker} ${top.pct}%` : "n/a"}, top-3 ${o.concentration.top3Pct}%, ${o.concentration.holdingCount} holdings; cash ${o.cashPct}%.`,
+    concentrationLine(o.concentration),
     `${o.headline.title} — ${o.headline.body}`,
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Underlying-exposure look-through line for the model — omitted when absent. */
+function concentrationLine(c: PortfolioOutput["concentration"]): string | null {
+  const lt = c.lookThrough;
+  if (!c.reason && !lt) return null;
+  const parts: string[] = [];
+  if (c.status && c.reason) parts.push(`Diversification (${c.status}): ${c.reason}`);
+  if (lt) {
+    if (lt.topName) {
+      parts.push(
+        `look-through: ≥${lt.topName.atLeastPct}% in ${lt.topName.label} across ${lt.topName.fundCount} fund(s)`,
+      );
+    }
+    if (lt.redundantPairs.length) {
+      parts.push(`redundant: ${lt.redundantPairs.map((p) => `${p.a}≈${p.b}`).join(", ")}`);
+    }
+    parts.push(`equity look-through coverage ~${Math.round(lt.equityCoverage * 100)}%`);
+  }
+  return parts.join("; ") || null;
 }
 
 // ─── read_performance ───────────────────────────────────────────────────────

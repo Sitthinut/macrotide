@@ -24,6 +24,7 @@ root so they resolve when browsing the source.
 - [Import a portfolio](./docs/how-to/import-a-portfolio.md): CSV, image OCR, and manual entry.
 - [Architecture](./docs/explanation/architecture.md): System shape, request lifecycle, demo/owner DB routing, where everything lives.
 - [Design principles](./docs/explanation/design-principles.md): Secure-by-default, the "Advisor" voice, single-owner → multi-user.
+- [Portfolio health](./docs/explanation/portfolio-health.md): Why the Portfolio screen leads with a plain-language headline + named checks instead of a 0–100 grade, and how the diversification check measures underlying concentration (single-name overlap + target-relative region) honestly on partial look-through data.
 - [Memory feature](./docs/explanation/memory.md): Long-term memory + chat-session lifecycle design.
 - [Advisor context model](./docs/explanation/advisor-context.md): What the Advisor knows per turn — the three context channels, the entry-point contract, and the empty-turn recovery (#21).
 - [Inference strategy](./docs/explanation/inference-strategy.md): How the Advisor stays smart/fast/token-efficient — model routing & tiers, prompt-cache strategy, reasoning-token policy, context loading, tool-result shaping; each lever mapped to the backlog.

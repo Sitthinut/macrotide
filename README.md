@@ -21,7 +21,7 @@ responsive across mobile / tablet / desktop with light/dark/system themes.
 | Capability | Status |
 | --- | --- |
 | Persistence — SQLite + Drizzle, daily backups | ✅ Shipped |
-| AI advisor — streaming chat, tool-calls, proposal cards, transparent health score, performance-vs-index + plan-anchored rebalancing guidance | ✅ Shipped |
+| AI advisor — streaming chat, tool-calls, proposal cards, plain-language health checks (incl. look-through diversification), performance-vs-index + plan-anchored rebalancing guidance | ✅ Shipped |
 | Passkey auth + isolated per-session demo mode | ✅ Shipped |
 | Market data — real index levels (EODHD/FMP, with ETF-proxy + Yahoo fallback) + FX, Thai fund NAVs + history (Thai SEC), RSS news | ✅ Shipped |
 | Instant fund finder — fuzzy + feeder-aware search, fee-annotated | ✅ Shipped |

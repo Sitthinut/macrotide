@@ -48,7 +48,7 @@ describe("scorePortfolio — empty portfolio", () => {
     const cash = score.components.find((c) => c.key === "cash");
     expect(cash?.score).toBe(20);
 
-    // Concentration: HHI = 0 for empty → full marks (25)
+    // Concentration: empty book has nothing to penalise → full marks (25)
     const conc = score.components.find((c) => c.key === "concentration");
     expect(conc?.score).toBe(25);
 
@@ -89,8 +89,8 @@ describe("scorePortfolio — perfect alignment", () => {
     // Cash: 0% → 20/20
     expect(score.components.find((c) => c.key === "cash")?.score).toBe(20);
 
-    // 3 funds at 50/30/20 → HHI = 0.38 → concentration = 6/25, total = 81
-    // (drift 30 + fees 25 + conc 6 + cash 20)
+    // 3 diversified equity/bond funds, no alt bet, no look-through → concentration
+    // reads good (25). drift 30 + fees 25 + conc 25 + cash 20 = 100.
     expect(score.total).toBeGreaterThanOrEqual(80);
   });
 });
@@ -252,25 +252,91 @@ describe("scorePortfolio — fee component", () => {
 // ─── Concentration component rules ───────────────────────────────────────────
 
 describe("scorePortfolio — concentration component", () => {
-  it("awards full marks for a well-spread portfolio (many equal-weight funds)", () => {
-    // 10 equal funds → HHI = 0.1, score = max(0, 25 * (1 - 0.1/0.5)) = 25*0.8 = 20
+  const conc = (h: ReturnType<typeof computeHealth>) =>
+    scorePortfolio(h, false).components.find((c) => c.key === "concentration");
+
+  it("awards full marks for a well-spread portfolio", () => {
     const tenFunds = Array.from({ length: 10 }, (_, i) =>
       holding({ ticker: `FUND${i}`, value: 100 }),
     );
-    const health = computeHealth(tenFunds, 1000, null);
-    const score = scorePortfolio(health, false);
-    const conc = score.components.find((c) => c.key === "concentration");
-    // HHI = 10 * (0.1^2) = 0.1 → score = 25 * (1 - 0.2) = 20
-    expect(conc?.score).toBe(20);
+    expect(conc(computeHealth(tenFunds, 1000, null))?.score).toBe(25);
   });
 
-  it("awards near-0 pts for a single-fund portfolio (maximum concentration)", () => {
-    // Single fund → HHI = 1.0, score = max(0, 25 * (1 - 2)) = 0
-    const single = [holding({ ticker: "SCBS&P500", value: 1000 })];
-    const health = computeHealth(single, 1000, null);
-    const score = scorePortfolio(health, false);
-    const conc = score.components.find((c) => c.key === "concentration");
-    expect(conc?.score).toBe(0);
+  it("does NOT punish a single broad-index equity fund (the acid test)", () => {
+    // The old HHI scored this 0; the new metric treats a single diversified
+    // equity fund as fine when there's no look-through to say otherwise.
+    const single = [holding({ ticker: "WORLD-EQ", value: 1000 })];
+    expect(conc(computeHealth(single, 1000, null))?.score).toBe(25);
+  });
+
+  it("reads a clean world-equity + bond book as good", () => {
+    const book = [
+      holding({ ticker: "WORLD-EQ", class: "equity", value: 600 }),
+      holding({ ticker: "BOND-FUND", class: "bond", value: 400 }),
+    ];
+    expect(conc(computeHealth(book, 1000, null))?.score).toBe(25);
+  });
+
+  it("flags a large single ALTERNATIVE position (act → ~4 pts)", () => {
+    const book = [
+      holding({ ticker: "WORLD-EQ", class: "equity", value: 600 }),
+      holding({ ticker: "ONE-CRYPTO", class: "alternative", value: 400 }),
+    ];
+    // 40% in one alternative → act → round(25 * 0.15) = 4
+    expect(conc(computeHealth(book, 1000, null))?.score).toBe(4);
+  });
+
+  it("subtracts to act when high-coverage look-through finds a dominant name", () => {
+    const book = [holding({ ticker: "WORLD-EQ", value: 1000 })];
+    const lookThrough = {
+      maxName: { label: "Apple Inc.", pct: 12, fundCount: 1 },
+      redundantPairs: [],
+      equityCoverage: 0.85,
+      regionDivergencePp: null,
+    };
+    // ≥10% at ≥0.6 coverage → act → 4
+    expect(conc(computeHealth(book, 1000, null, null, lookThrough))?.score).toBe(4);
+  });
+
+  it("caps a partial-coverage finding at watch (~13 pts), never act", () => {
+    const book = [holding({ ticker: "WORLD-EQ", value: 1000 })];
+    const lookThrough = {
+      maxName: { label: "Apple Inc.", pct: 18, fundCount: 1 },
+      redundantPairs: [],
+      equityCoverage: 0.45, // partial
+      regionDivergencePp: null,
+    };
+    // even an 18% name caps at watch on partial coverage → round(25 * 0.5) = 13
+    expect(conc(computeHealth(book, 1000, null, null, lookThrough))?.score).toBe(13);
+  });
+
+  it("ignores a low-coverage finding (stays good — absence never certifies, but neither does a sliver)", () => {
+    const book = [holding({ ticker: "WORLD-EQ", value: 1000 })];
+    const lookThrough = {
+      maxName: { label: "Apple Inc.", pct: 30, fundCount: 1 },
+      redundantPairs: [],
+      equityCoverage: 0.2, // below the partial floor
+      regionDivergencePp: null,
+    };
+    expect(conc(computeHealth(book, 1000, null, null, lookThrough))?.score).toBe(25);
+  });
+
+  it("flags redundant funds at watch regardless of coverage", () => {
+    const book = [
+      holding({ ticker: "SP500-A", value: 500 }),
+      holding({ ticker: "SP500-B", value: 500 }),
+    ];
+    const lookThrough = {
+      maxName: null,
+      redundantPairs: [{ a: "SP500-A", b: "SP500-B" }],
+      equityCoverage: 0.3,
+      regionDivergencePp: null,
+    };
+    expect(conc(computeHealth(book, 1000, null, null, lookThrough))?.score).toBe(13);
+  });
+
+  it("scores an empty portfolio's concentration at full marks (nothing to penalise)", () => {
+    expect(conc(computeHealth([], 0, null))?.score).toBe(25);
   });
 });
 

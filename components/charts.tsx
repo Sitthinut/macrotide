@@ -279,48 +279,6 @@ export function Donut({
   );
 }
 
-// ===== Score circle =====
-export function ScoreCircle({
-  value,
-  max = 100,
-  color = "var(--accent)",
-  size = 64,
-}: {
-  value: number;
-  max?: number;
-  color?: string;
-  size?: number;
-}) {
-  const r = (size - 10) / 2;
-  const c = 2 * Math.PI * r;
-  const dash = (value / max) * c;
-  return (
-    <div className="score-circle" style={{ width: size, height: size }}>
-      <svg width={size} height={size}>
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          fill="none"
-          stroke="var(--line-soft)"
-          strokeWidth="6"
-        ></circle>
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          fill="none"
-          stroke={color}
-          strokeWidth="6"
-          strokeDasharray={`${dash} ${c}`}
-          strokeLinecap="round"
-        ></circle>
-      </svg>
-      <div className="val">{value}</div>
-    </div>
-  );
-}
-
 // ===== Mini line (no axes — for small chart cards) =====
 export function MiniLine({
   data,
