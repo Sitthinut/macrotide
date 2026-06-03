@@ -76,8 +76,11 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   partway down. Each screen now keeps its own scroll position for the session:
   returning to a screen restores where you left it, and a screen not yet visited
   opens at the top. The memory is per-session — a full page reload starts every
-  screen back at the top. Works on both the mobile (window) and tablet/desktop
-  (in-pane) scroll roots.
+  screen back at the top. The leaving screen's position is now tracked live while
+  you scroll rather than read at teardown, so it survives the in-pane viewport
+  clamping its offset when shorter content swaps in — fixing tablet/desktop, where
+  returning to a tab previously landed at the top. Works on both the mobile
+  (window) and tablet/desktop (in-pane) scroll roots.
 - **Performance-vs-index now converts foreign holdings to baht before summing.**
   The portfolio value/return series previously added each holding's `units × NAV`
   across currencies (THB funds, USD ETFs, JPY indices) without conversion, then

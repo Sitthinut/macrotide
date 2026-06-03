@@ -288,18 +288,51 @@ export function App() {
   // keeps its scrollTop across a swap. We turn that into per-screen scroll
   // memory: on entering a screen, restore where the user last left it (top for a
   // screen not yet visited this session — which is what stops Templates, opened
-  // from Portfolio, inheriting the Portfolio offset); on leaving, save the
-  // outgoing screen's position. The map is in-memory, so a full reload resets
-  // every screen to the top. Layout effect so the restore lands before paint —
-  // no flash of the scrolled position.
+  // from Portfolio, inheriting the Portfolio offset). The map is in-memory, so a
+  // full reload resets every screen to the top.
   const scrollMemory = useRef<Map<string, number>>(new Map());
+
+  // Track the position LIVE rather than reading it once when a screen tears
+  // down. A cleanup-time read is the original desktop bug: when the new (often
+  // shorter) screen's content commits, the OverlayScrollbars viewport CLAMPS its
+  // scrollTop before the cleanup could read it, so we saved a wrong/0 offset for
+  // the screen being left and returning landed at the top. The capture-phase
+  // scroll listener below writes the current screen's scrollTop into the map
+  // continuously, BEFORE any swap — so the saved value is never the post-swap
+  // clamped one. (Mobile scrolls the window, which isn't clamped this way, which
+  // is why the old code happened to work there.) Mirrors useScrollHide's setup:
+  // scroll events don't bubble, so we listen capture-phase on `document` to
+  // catch both the window and the viewport; rAF-throttled to one read a frame.
+  const currentScreenRef = useRef(screen);
+  currentScreenRef.current = screen;
+  useEffect(() => {
+    let rafId = 0;
+    const update = () => {
+      rafId = 0;
+      saveScreenScroll(scrollMemory.current, currentScreenRef.current);
+    };
+    const onScroll = () => {
+      if (rafId !== 0) return;
+      rafId = window.requestAnimationFrame(update);
+    };
+    document.addEventListener("scroll", onScroll, { capture: true, passive: true });
+    return () => {
+      if (rafId !== 0) window.cancelAnimationFrame(rafId);
+      document.removeEventListener("scroll", onScroll, { capture: true });
+    };
+  }, []);
+
+  // On entering a screen, restore its remembered position. Layout effect so the
+  // restore lands before paint — no flash of the scrolled position. On desktop
+  // the OverlayScrollbars viewport may not be measured yet at layout time, so we
+  // ALSO restore on the next animation frame; restoreScreenScroll is idempotent,
+  // so restoring the same value twice is harmless.
   useLayoutEffect(() => {
     restoreScreenScroll(scrollMemory.current, screen);
-    // Cleanup runs on the next screen change, saving THIS screen's position
-    // before the next effect restores the entering one's.
-    return () => {
-      saveScreenScroll(scrollMemory.current, screen);
-    };
+    const rafId = window.requestAnimationFrame(() => {
+      restoreScreenScroll(scrollMemory.current, screen);
+    });
+    return () => window.cancelAnimationFrame(rafId);
   }, [screen]);
 
   // Portfolio sheet intents come from the shared store (PortfolioScreen and

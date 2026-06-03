@@ -85,7 +85,15 @@ export function restoreScrollPosition(memory: Map<string, number>, screen: strin
 
 /**
  * Read the live scroll root and remember `screen`'s current position. No-op if
- * there's no root (SSR). Used by the leaving-screen cleanup in App.tsx.
+ * there's no root (SSR).
+ *
+ * Called continuously from App.tsx's capture-phase scroll listener (rAF
+ * throttled), keyed by the *current* screen. Tracking the position live — rather
+ * than reading it once when the screen is torn down — is what fixes the desktop
+ * bug: on a screen swap the new (often shorter) content makes the
+ * OverlayScrollbars viewport CLAMP its scrollTop before any teardown code could
+ * read it, so a cleanup-time read saved a wrong/0 offset for the screen being
+ * left. The live value is captured before the swap, so it's always correct.
  */
 export function saveScreenScroll(
   memory: Map<string, number>,
@@ -103,6 +111,11 @@ export function saveScreenScroll(
  * defaulting to the top for a never-visited screen. Clamps gracefully: if the
  * entering screen is shorter than the saved offset, the browser/element pins
  * scrollTop to its own max, so we never scroll past the content.
+ *
+ * Idempotent: restoring the same value twice is harmless, so App.tsx can call
+ * this both pre-paint (useLayoutEffect) and on a requestAnimationFrame fallback
+ * for the desktop case where the OverlayScrollbars viewport isn't measured yet
+ * at layout time.
  */
 export function restoreScreenScroll(
   memory: Map<string, number>,
