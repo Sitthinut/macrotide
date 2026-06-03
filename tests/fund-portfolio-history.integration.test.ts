@@ -17,6 +17,7 @@ import { getMarketDb, runWithDbContext } from "../lib/db/context";
 import {
   getFundPortfolio,
   getFundPortfolioAssetType,
+  normalizePeriod,
   upsertFundPortfolio,
   upsertFundPortfolioAssetType,
 } from "../lib/db/queries/fund-enrichment";
@@ -102,6 +103,46 @@ describe("fund portfolio history (incremental ingest + latest-period display)", 
     });
   });
 
+  it("dedupes across crawls when the feed sends `period` as a NUMBER (the real wire type)", () => {
+    withFresh(() => {
+      getMarketDb().insert(fundCatalog).values({ projId: "P3" }).run();
+
+      // The SEC /outstanding feed types `period` as a string but sends a JSON
+      // NUMBER at runtime. Binding that to the TEXT column stored "202509.0",
+      // and the Set-of-strings guard never matched the incoming number — so
+      // every nightly crawl re-inserted the whole portfolio (the 6× bug).
+      const numericPeriod = 202509 as unknown as string;
+      const crawl = [
+        {
+          projId: "P3",
+          period: numericPeriod,
+          assetliabId: "108",
+          issuer: "iShares",
+          percentNav: 50,
+        },
+        {
+          projId: "P3",
+          period: numericPeriod,
+          assetliabId: "139",
+          issuer: "BlackRock",
+          percentNav: 50,
+        },
+      ];
+
+      // Six nightly crawls of the identical snapshot.
+      for (let i = 0; i < 6; i++) upsertFundPortfolio("P3", crawl);
+
+      const raw = getMarketDb()
+        .select()
+        .from(fundPortfolio)
+        .where(eq(fundPortfolio.projId, "P3"))
+        .all();
+      expect(raw).toHaveLength(2); // not 12 — no duplication
+      // Stored clean ("202509"), not the legacy "202509.0" float artifact.
+      expect(raw.every((r) => r.period === "202509")).toBe(true);
+    });
+  });
+
   it("an empty re-fetch never wipes stored asset-type history", () => {
     withFresh(() => {
       getMarketDb().insert(fundCatalog).values({ projId: "P2" }).run();
@@ -118,5 +159,21 @@ describe("fund portfolio history (incremental ingest + latest-period display)", 
       expect(shown[0].period).toBe("202601");
       expect(shown[0].assetliabCode).toBe("108");
     });
+  });
+});
+
+describe("normalizePeriod", () => {
+  it("coerces the feed's numeric period to a clean YYYYMM string", () => {
+    expect(normalizePeriod(202509 as unknown as string)).toBe("202509");
+  });
+  it("strips the legacy float artifact left by number→TEXT coercion", () => {
+    expect(normalizePeriod("202509.0")).toBe("202509");
+  });
+  it("passes a clean string through unchanged", () => {
+    expect(normalizePeriod("202509")).toBe("202509");
+  });
+  it("returns an empty string for nullish input", () => {
+    expect(normalizePeriod(null)).toBe("");
+    expect(normalizePeriod(undefined)).toBe("");
   });
 });

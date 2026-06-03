@@ -20,6 +20,24 @@ import {
 // not a holding — both /outstanding endpoints emit it, and no consumer wants it.
 const TOTAL_ASSETLIAB_CODE = "903";
 
+/**
+ * Canonicalize a reporting period to a clean "YYYYMM" string.
+ *
+ * The SEC /outstanding endpoints return `period` as a JSON NUMBER (e.g. 202406)
+ * even though our row type calls it a string. Binding that number to the TEXT
+ * `period` column stores it as "202406.0", and the incremental guards below
+ * compare a Set of stored STRINGS against the incoming NUMBER — `set.has(202406)`
+ * is always false against "202406.0", so every crawl re-inserted the entire
+ * portfolio (the 6× duplication bug). Normalizing both sides to an integer
+ * string makes the comparison correct, keeps the stored value tidy ("202406"),
+ * and heals legacy "202406.0" rows already on disk (they normalize identically).
+ */
+export function normalizePeriod(period: string | number | null | undefined): string {
+  if (period == null) return "";
+  const n = typeof period === "number" ? period : Number.parseFloat(period);
+  return Number.isFinite(n) ? String(Math.trunc(n)) : String(period).trim();
+}
+
 // ─── Inferred row types ───────────────────────────────────────────────────────
 
 export type FundPerformanceRow = typeof fundPerformance.$inferSelect;
@@ -93,6 +111,10 @@ export function upsertFundTopHoldings(projId: string, rows: FundTopHoldingInsert
  * so we accumulate them as a time series rather than rewriting nightly — and a
  * flaky or empty (HTTP 204) response can't wipe what we already have. The read
  * side (getFundPortfolio) surfaces only the latest period for display.
+ *
+ * Periods are normalized on BOTH sides of the guard (see {@link normalizePeriod})
+ * — the feed sends `period` as a number, so without this the guard never matched
+ * and every crawl duplicated the whole portfolio.
  */
 export function upsertFundPortfolio(projId: string, rows: FundPortfolioInsert[]): void {
   if (rows.length === 0) return;
@@ -104,18 +126,24 @@ export function upsertFundPortfolio(projId: string, rows: FundPortfolioInsert[])
         .from(fundPortfolio)
         .where(eq(fundPortfolio.projId, projId))
         .all()
-        .map((r) => r.period),
+        .map((r) => normalizePeriod(r.period)),
     );
     for (const row of rows) {
-      if (!existing.has(row.period)) tx.insert(fundPortfolio).values(row).run();
+      const period = normalizePeriod(row.period);
+      if (existing.has(period)) continue;
+      tx.insert(fundPortfolio)
+        .values({ ...row, period })
+        .run();
     }
   });
 }
 
 /**
- * Incrementally store portfolio-asset-type rows — same additive strategy as
- * upsertFundPortfolio: insert only new periods, never delete the monthly
- * history (it backs asset-mix-over-time).
+ * Incrementally store portfolio-asset-type rows — same additive, period-
+ * normalized strategy as upsertFundPortfolio: insert only new periods, never
+ * delete the monthly history (it backs asset-mix-over-time). The composite PK
+ * (projId, period, assetliabCode) guards against exact dupes, but the period is
+ * still normalized so the stored value stays clean and the guard matches.
  */
 export function upsertFundPortfolioAssetType(
   projId: string,
@@ -130,10 +158,14 @@ export function upsertFundPortfolioAssetType(
         .from(fundPortfolioAssetType)
         .where(eq(fundPortfolioAssetType.projId, projId))
         .all()
-        .map((r) => r.period),
+        .map((r) => normalizePeriod(r.period)),
     );
     for (const row of rows) {
-      if (!existing.has(row.period)) tx.insert(fundPortfolioAssetType).values(row).run();
+      const period = normalizePeriod(row.period);
+      if (existing.has(period)) continue;
+      tx.insert(fundPortfolioAssetType)
+        .values({ ...row, period })
+        .run();
     }
   });
 }
