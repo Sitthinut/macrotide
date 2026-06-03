@@ -15,6 +15,14 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **The fund portfolio table now reads by security and groups by asset type.**
+  Each holding leads with its own identifier — the ticker for listed securities
+  (e.g. "EWT US"), the issuer for a bank deposit — instead of the SEC's generic
+  category text, so distinct ETFs no longer look like duplicate rows. The
+  holdings are grouped under a per-category subheader (with the category's summed
+  weight) shown once, rather than repeating the category on every row; the
+  biggest exposure leads. FX-forward ladders and bond tranches still collapse to
+  an expandable net row within their group.
 - **Advisor replies now render as Markdown.** The Advisor returns Markdown, and
   the chat now renders it — headings, bold, lists, inline code, code blocks, and
   GFM tables show as formatted text styled to the app's design tokens (tables

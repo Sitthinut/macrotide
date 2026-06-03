@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FundPortfolioRow } from "@/lib/db/queries/fund-enrichment";
-import { buildPortfolioDisplayRows } from "./portfolio-display";
+import { buildPortfolioDisplayRows, buildPortfolioGroups } from "./portfolio-display";
 
 // Minimal row factory — only the fields the transform reads matter.
 function row(p: Partial<FundPortfolioRow> & { id: number }): FundPortfolioRow {
@@ -20,167 +20,117 @@ function row(p: Partial<FundPortfolioRow> & { id: number }): FundPortfolioRow {
   };
 }
 
-describe("buildPortfolioDisplayRows", () => {
-  it("collapses anonymous (no issuer/ISIN) rows into one net row, keeps named individual", () => {
-    const rows = [
+describe("buildPortfolioDisplayRows — label leads with the security identity", () => {
+  it("uses the ticker (issue_code) when the row has an ISIN — not the generic category", () => {
+    const [r] = buildPortfolioDisplayRows([
       row({
         id: 1,
-        assetliabId: "108",
-        assetliabDesc: "หน่วยลงทุน",
-        issuer: "iShares Trust",
-        percentNav: 100.98,
+        assetliabDesc: "หน่วยลงทุนของกองทุนแบบอื่นๆ",
+        issueCode: "EWT US",
+        isinCode: "US46434G7723",
+        issuer: "BlackRock Fund Advisors",
+        percentNav: 19.14,
       }),
+    ]);
+    expect(r.label).toBe("EWT US"); // ticker, not "หน่วยลงทุน…"
+    expect(r.issuer).toBe("BlackRock Fund Advisors"); // secondary line
+    expect(r.category).toBe("หน่วยลงทุนของกองทุนแบบอื่นๆ"); // category for the group header
+    expect(r.isin).toBe("US46434G7723");
+  });
+
+  it("uses the issuer when there's no ISIN (a deposit reads as its bank), and drops the duplicate secondary", () => {
+    const [r] = buildPortfolioDisplayRows([
       row({
-        id: 2,
+        id: 1,
         assetliabId: "216",
-        assetliabDesc: "เงินฝาก",
-        issuer: "Siam Commercial Bank",
-        percentNav: 2.29,
-      }),
-      row({
-        id: 3,
-        assetliabId: "217",
-        assetliabDesc: "เงินฝาก",
-        issuer: "Kasikorn Bank",
-        percentNav: 0.81,
-      }),
-      row({
-        id: 4,
-        assetliabId: "402",
-        assetliabDesc: "สัญญาฟอร์เวิร์ด",
-        issueCode: "CFX1",
-        percentNav: -0.32,
-      }),
-      row({
-        id: 5,
-        assetliabId: "402",
-        assetliabDesc: "สัญญาฟอร์เวิร์ด",
-        issueCode: "CFX2",
-        percentNav: -0.31,
-      }),
-      row({
-        id: 6,
-        assetliabId: "402",
-        assetliabDesc: "สัญญาฟอร์เวิร์ด",
-        issueCode: "CFX3",
-        percentNav: 0.12,
-      }),
-    ];
-
-    const out = buildPortfolioDisplayRows(rows);
-
-    // 3 named (iShares + 2 banks) + 1 collapsed forward group = 4 display rows.
-    expect(out).toHaveLength(4);
-
-    // Largest weight leads.
-    expect(out[0].label).toBe("หน่วยลงทุน");
-    expect(out[0].percentNav).toBeCloseTo(100.98);
-
-    // The forwards collapse into one net row, sorted last (negative net), and
-    // expose their members for inline expansion.
-    const group = out.at(-1);
-    expect(group?.label).toBe("สัญญาฟอร์เวิร์ด (net · 3)");
-    expect(group?.percentNav).toBeCloseTo(-0.51); // -0.32 - 0.31 + 0.12
-    expect(group?.members).toHaveLength(3);
-    expect(group?.issuer).toBeNull();
-  });
-
-  it("does not collapse a single anonymous row into a group label", () => {
-    const out = buildPortfolioDisplayRows([
-      row({
-        id: 1,
-        assetliabId: "402",
-        assetliabDesc: "สัญญาฟอร์เวิร์ด",
-        issueCode: "CFX1",
-        percentNav: -0.1,
+        assetliabDesc: "เงินฝากธนาคารประเภทออมทรัพย์",
+        issueCode: "C277874086_AO", // internal code — not a good name
+        issuer: "KASIKORNBANK PCL.",
+        percentNav: 1.63,
       }),
     ]);
-    expect(out).toHaveLength(1);
-    expect(out[0].label).toBe("สัญญาฟอร์เวิร์ด"); // no "(net · N)" suffix
-    expect(out[0].members).toBeUndefined();
+    expect(r.label).toBe("KASIKORNBANK PCL.");
+    expect(r.issuer).toBeNull(); // would just repeat the label
+    expect(r.category).toBe("เงินฝากธนาคารประเภทออมทรัพย์");
   });
 
-  it("collapses NAMED rows sharing an identity (issuer + desc) into one net row", () => {
-    // Reproduces TCMF-M / M0035_2543: dozens of PN-term notes from one issuer,
-    // each a separate named row, that previously rendered as a wall of dupes.
-    const rows = [
-      row({ id: 1, assetliabDesc: "พันธบัตร", issuer: "BANK OF THAILAND", percentNav: 61.7 }),
-      row({ id: 2, assetliabDesc: "PN Term", issuer: "UNIQUE ENGINEERING", percentNav: 0.8 }),
-      row({ id: 3, assetliabDesc: "PN Term", issuer: "UNIQUE ENGINEERING", percentNav: 0.9 }),
-      row({ id: 4, assetliabDesc: "PN Term", issuer: "UNIQUE ENGINEERING", percentNav: 0.67 }),
-    ];
-
-    const out = buildPortfolioDisplayRows(rows);
-
-    // 1 standalone bond + 1 collapsed PN-Term group = 2 display rows.
-    expect(out).toHaveLength(2);
-    expect(out[0].label).toBe("พันธบัตร"); // largest weight leads
-    expect(out[0].percentNav).toBeCloseTo(61.7);
-
-    const group = out.at(-1);
-    expect(group?.label).toBe("PN Term (net · 3)");
-    expect(group?.percentNav).toBeCloseTo(2.37);
-    expect(group?.members).toHaveLength(3);
-    expect(group?.issuer).toBe("UNIQUE ENGINEERING"); // shared issuer surfaced
+  it("falls back to the issue_code for an anonymous single row (no issuer/ISIN)", () => {
+    const [r] = buildPortfolioDisplayRows([
+      row({ id: 1, assetliabDesc: "สัญญาฟอร์เวิร์ด", issueCode: "FWTHBUSD26N20C", percentNav: -0.1 }),
+    ]);
+    expect(r.label).toBe("FWTHBUSD26N20C");
+    expect(r.category).toBe("สัญญาฟอร์เวิร์ด");
+    expect(r.members).toBeUndefined();
   });
+});
 
-  it("collapses named rows sharing an ISIN even with differing issuer text", () => {
+describe("buildPortfolioDisplayRows — collapse still folds near-identical rows", () => {
+  it("collapses an anonymous FX-forward ladder into one net row (no category in the label)", () => {
     const out = buildPortfolioDisplayRows([
-      row({
-        id: 1,
-        assetliabDesc: "หน่วยลงทุน",
-        issuer: "JPMorgan",
-        isinCode: "IE00ABC",
-        percentNav: 50,
-      }),
-      row({
-        id: 2,
-        assetliabDesc: "หน่วยลงทุน",
-        issuer: "JP Morgan AM",
-        isinCode: "IE00ABC",
-        percentNav: 30,
-      }),
+      row({ id: 1, assetliabDesc: "สัญญาฟอร์เวิร์ด", issueCode: "CFX1", percentNav: -0.32 }),
+      row({ id: 2, assetliabDesc: "สัญญาฟอร์เวิร์ด", issueCode: "CFX2", percentNav: -0.31 }),
+      row({ id: 3, assetliabDesc: "สัญญาฟอร์เวิร์ด", issueCode: "CFX3", percentNav: 0.12 }),
     ]);
     expect(out).toHaveLength(1);
-    expect(out[0].label).toBe("หน่วยลงทุน (net · 2)");
-    expect(out[0].percentNav).toBeCloseTo(80);
-    expect(out[0].isin).toBe("IE00ABC");
+    expect(out[0].label).toBe("Net · 3"); // category lives in the group header
+    expect(out[0].percentNav).toBeCloseTo(-0.51);
+    expect(out[0].members).toHaveLength(3);
   });
 
-  it("keeps a feeder's single master ETF as one normal (non-collapsed) row", () => {
+  it("collapses NAMED rows sharing an issuer + desc, labelling by the shared issuer", () => {
+    const out = buildPortfolioDisplayRows([
+      row({ id: 1, assetliabDesc: "PN Term", issuer: "UNIQUE ENGINEERING", percentNav: 0.8 }),
+      row({ id: 2, assetliabDesc: "PN Term", issuer: "UNIQUE ENGINEERING", percentNav: 0.9 }),
+      row({ id: 3, assetliabDesc: "PN Term", issuer: "UNIQUE ENGINEERING", percentNav: 0.67 }),
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].label).toBe("UNIQUE ENGINEERING (net · 3)");
+    expect(out[0].percentNav).toBeCloseTo(2.37);
+    expect(out[0].members).toHaveLength(3);
+  });
+
+  it("keeps a feeder's single master ETF as one non-collapsed row", () => {
     const out = buildPortfolioDisplayRows([
       row({
         id: 1,
         assetliabDesc: "หน่วยลงทุน",
-        issuer: "iShares Trust",
-        isinCode: "US123",
+        issueCode: "MSAIOPZLX",
+        isinCode: "LU1378878604",
+        issuer: "Morgan Stanley",
         percentNav: 99.5,
       }),
     ]);
     expect(out).toHaveLength(1);
-    expect(out[0].label).toBe("หน่วยลงทุน"); // no "(net · N)" suffix
+    expect(out[0].label).toBe("MSAIOPZLX");
     expect(out[0].members).toBeUndefined();
-    expect(out[0].isin).toBe("US123");
   });
+});
 
-  it("keeps an equity fund's stocks individual (each has an issuer)", () => {
-    const out = buildPortfolioDisplayRows([
-      row({
-        id: 1,
-        assetliabDesc: "หุ้นสามัญ",
-        issuer: "PTT PCL",
-        isinCode: "TH0646010006",
-        percentNav: 8.1,
-      }),
+describe("buildPortfolioGroups — buckets by category, biggest exposure first", () => {
+  it("groups holdings under their category with a summed weight, sorted by total", () => {
+    const groups = buildPortfolioGroups([
+      row({ id: 1, assetliabDesc: "เงินฝากธนาคาร", issuer: "Kasikornbank", percentNav: 1.63 }),
       row({
         id: 2,
-        assetliabDesc: "หุ้นสามัญ",
-        issuer: "CP All PCL",
-        isinCode: "TH0737010004",
-        percentNav: 6.4,
+        assetliabDesc: "หน่วยลงทุน",
+        issueCode: "EWT US",
+        isinCode: "US46434G7723",
+        issuer: "BlackRock",
+        percentNav: 19.14,
+      }),
+      row({
+        id: 3,
+        assetliabDesc: "หน่วยลงทุน",
+        issueCode: "EWY US",
+        isinCode: "US4642867729",
+        issuer: "BlackRock",
+        percentNav: 17.77,
       }),
     ]);
-    expect(out).toHaveLength(2);
-    expect(out.every((r) => r.members === undefined)).toBe(true);
+
+    expect(groups.map((g) => g.category)).toEqual(["หน่วยลงทุน", "เงินฝากธนาคาร"]);
+    expect(groups[0].totalPct).toBeCloseTo(36.91); // 19.14 + 17.77
+    expect(groups[0].rows.map((r) => r.label)).toEqual(["EWT US", "EWY US"]); // tickers, weight desc
+    expect(groups[1].rows[0].label).toBe("Kasikornbank");
   });
 });
