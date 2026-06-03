@@ -15,9 +15,7 @@
      the token's VALUE flips with the theme. In light a soft shadow reads on a
      light surface; in dark a dark shadow vanishes (dark-on-dark), so dark uses
      a light hairline/tint instead.
-     --scroll-edge          gradient tint for edge fades (e.g. overflow tables)
      --footer-scroll-shadow box-shadow for .modal-footer--scrolled */
-  --scroll-edge: rgba(10, 10, 11, 0.14);
   --footer-scroll-shadow:
     0 -10px 24px -10px rgba(10, 10, 11, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.5);
   --footer-scrolled-bg: color-mix(in srgb, #000 4%, var(--paper));
@@ -65,7 +63,6 @@
 :root[data-theme="dark"] {
   --bg: #0c0d0f;
   --paper: #16181b;
-  --scroll-edge: rgba(255, 255, 255, 0.1);
   --footer-scroll-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
   --footer-scrolled-bg: color-mix(in srgb, #fff 5%, var(--paper));
   --card-soft: #101215;
@@ -103,7 +100,6 @@
   :root[data-theme="system"] {
     --bg: #0c0d0f;
     --paper: #16181b;
-    --scroll-edge: rgba(255, 255, 255, 0.1);
     --footer-scroll-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
     --footer-scrolled-bg: color-mix(in srgb, #fff 5%, var(--paper));
     --card-soft: #101215;

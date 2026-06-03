@@ -50,6 +50,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   `DEMO_VISION`. Attached images are sent to the vision provider to answer the
   turn and cached only in your browser for the session — never stored on the
   server (the saved message keeps a "[N image(s) attached]" marker).
+- **The fund detail tables now cue when they scroll sideways.** The
+  horizontally-scrollable tables (Performance & Risk, Portfolio, Look-Through)
+  fade their content out at whichever edge still hides columns — a subtle
+  "more to scroll" hint that reads identically in light and dark (a pure
+  opacity mask, no theme tint), and clears at each end. The scroll regions are
+  also keyboard-focusable now.
 - **The Portfolio performance caveat now reflects which lines actually exclude
   dividends.** The note under the total-balance graph adapts to whether a
   benchmark is selected and whether the book holds a dividend-paying fund,

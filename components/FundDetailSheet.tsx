@@ -7,8 +7,7 @@
 // All five enrichment sections gracefully no-op when their arrays are empty,
 // so the sheet looks clean in dev before the SEC ingest job has run.
 
-import { useOverlayScrollbars } from "overlayscrollbars-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import type {
@@ -27,7 +26,7 @@ import { useResource } from "@/lib/fetchers/swr";
 import { buildHoldingDetailRows } from "@/lib/portfolio/holding-detail";
 import { buildPortfolioDisplayRows } from "@/lib/portfolio/portfolio-display";
 import type { Holding } from "@/lib/static/types";
-import { useViewport } from "@/lib/useViewport";
+import { useScrollFadeX } from "@/lib/useScrollFadeX";
 
 // ─── API response type ────────────────────────────────────────────────────────
 
@@ -115,105 +114,11 @@ function SectionHeader({ title }: { title: string }) {
 
 // ─── 1. Performance & risk ────────────────────────────────────────────────────
 
-// Edge-fade visibility for the horizontally-scrolling perf table. Pure so it's
-// unit-testable. `left` once scrolled away from the start; `right` while more
-// content remains to the right. The −1px slack on the right absorbs sub-pixel
-// rounding so the fade fully clears at the true end.
-function computeEdgeFades(
-  scrollLeft: number,
-  clientWidth: number,
-  scrollWidth: number,
-): { left: boolean; right: boolean } {
-  return {
-    left: scrollLeft > 0,
-    right: scrollLeft + clientWidth < scrollWidth - 1,
-  };
-}
-
-// Shared geometry for the two fade overlays. ~28px gradient from the
-// --scroll-edge separator tint (soft dark in light, soft light in dark) to
-// transparent. `bottom` clears the scroller's 10px padding band so the fade
-// never sits over the OverlayScrollbars track.
-const FADE_BASE: React.CSSProperties = {
-  position: "absolute",
-  top: 0,
-  bottom: 10,
-  width: 28,
-  pointerEvents: "none",
-  zIndex: 1,
-  transition: "opacity 0.18s ease",
-};
-
 function PerformanceSection({ rows }: { rows: FundPerformanceRow[] }) {
-  // App-standard custom scrollbar (os-theme-macrotide) on this horizontal table
-  // scroller, replacing the native bar. This table drives OverlayScrollbars
-  // directly (rather than the shared `useOverlayScrollbar` hook) so we can
-  // subscribe to its `scroll`/`updated`/`initialized` events and read
-  // scrollLeft/clientWidth/scrollWidth off the OS-generated viewport — the host
-  // element itself never scrolls once OS re-parents its content, so a listener
-  // on the host wouldn't fire. We keep the same theme/autoHide/defer options as
-  // the shared hook so it looks identical. From those reads we toggle soft edge
-  // fades that cue more content to scroll. Desktop/tablet only (matches the
-  // hook); mobile keeps native scroll and shows no fade.
-  //
-  // SCOPE: only this Performance & Risk table gets the fade. The other two
-  // overflow-X tables here (Portfolio, Look-Through) are left as plain native
-  // scrollers — unchanged.
-  const viewport = useViewport();
-  const isWide = viewport !== "mobile";
-
-  const [hostEl, setHostEl] = useState<HTMLElement | null>(null);
-  const [fades, setFades] = useState<{ left: boolean; right: boolean }>({
-    left: false,
-    right: false,
-  });
-
-  // Recompute fade state from the live OS viewport geometry.
-  const recompute = useCallback((osViewport: HTMLElement | null | undefined) => {
-    if (!osViewport) return;
-    setFades(
-      computeEdgeFades(osViewport.scrollLeft, osViewport.clientWidth, osViewport.scrollWidth),
-    );
-  }, []);
-
-  const recomputeRef = useRef(recompute);
-  recomputeRef.current = recompute;
-
-  const [initOverlayScrollbars, getInstance] = useOverlayScrollbars({
-    defer: true,
-    options: {
-      scrollbars: {
-        autoHide: "leave",
-        autoHideDelay: 600,
-        theme: "os-theme-macrotide",
-      },
-    },
-    events: {
-      // Fires on user scroll; `initialized`/`updated` cover first paint and any
-      // content/size change (rows arriving, viewport resize) without a separate
-      // ResizeObserver. Read the ref so the listeners always see the latest fn.
-      scroll: (instance) => recomputeRef.current(instance.elements().viewport),
-      initialized: (instance) => recomputeRef.current(instance.elements().viewport),
-      updated: (instance) => recomputeRef.current(instance.elements().viewport),
-    },
-  });
-
-  // OS lifecycle: init on the host once it mounts and the shell is wide; destroy
-  // on unmount, on a wide→mobile swap, or when the host element swaps (the sheet
-  // re-renders "Loading…" → real content). The callback ref tracks the element
-  // as state so this effect re-binds on that swap.
-  useEffect(() => {
-    if (!hostEl || !isWide) {
-      setFades({ left: false, right: false });
-      return;
-    }
-    initOverlayScrollbars(hostEl);
-    return () => {
-      getInstance()?.destroy();
-    };
-  }, [hostEl, isWide, initOverlayScrollbars, getInstance]);
-
-  const setHostRef = useCallback((node: HTMLElement | null) => setHostEl(node), []);
+  // Custom scrollbar (os-theme-macrotide) + a subtle opacity-fade cue on the
+  // horizontal table scroller. See useScrollFadeX: the OS instance nests fine
+  // below the Modal.Body's own OS viewport and tears down on unmount.
+  const perfScrollRef = useScrollFadeX("Performance and risk table");
 
   if (rows.length === 0) return null;
 
@@ -259,86 +164,64 @@ function PerformanceSection({ rows }: { rows: FundPerformanceRow[] }) {
   return (
     <>
       <SectionHeader title="Performance & Risk" />
-      <div style={{ position: "relative" }}>
-        {/* Soft edge fades — purely a "more to scroll" cue. pointer-events:none
-            so they never intercept scroll/clicks; each fades out at its end. */}
-        <div
-          aria-hidden
-          style={{
-            ...FADE_BASE,
-            left: 0,
-            background: "linear-gradient(to right, var(--scroll-edge), transparent)",
-            opacity: fades.left ? 1 : 0,
-          }}
-        />
-        <div
-          aria-hidden
-          style={{
-            ...FADE_BASE,
-            right: 0,
-            background: "linear-gradient(to left, var(--scroll-edge), transparent)",
-            opacity: fades.right ? 1 : 0,
-          }}
-        />
-        <div ref={setHostRef} style={{ overflowX: "auto", paddingBottom: 10 }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
-            <thead>
-              <tr>
-                <th
-                  style={{
-                    ...headerCellStyle,
-                    textAlign: "left",
-                    minWidth: 140,
-                  }}
-                >
-                  Metric
+      <div ref={perfScrollRef} style={{ overflowX: "auto", paddingBottom: 10 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+          <thead>
+            <tr>
+              <th
+                style={{
+                  ...headerCellStyle,
+                  textAlign: "left",
+                  minWidth: 140,
+                }}
+              >
+                Metric
+              </th>
+              {sortedPeriods.map((p) => (
+                <th key={p} style={headerCellStyle}>
+                  {p}
                 </th>
-                {sortedPeriods.map((p) => (
-                  <th key={p} style={headerCellStyle}>
-                    {p}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {sortedTypes.map((typeDesc) => {
-                const periodVals = typeMap.get(typeDesc) ?? new Map<string, string | null>();
-                const label = perfTypeLabel(typeDesc);
-                const isVol = typeDesc.includes("ความผันผวน");
-                return (
-                  <tr key={typeDesc}>
-                    <td
-                      style={{
-                        ...cellStyle,
-                        textAlign: "left",
-                        color: "var(--ink-soft)",
-                        fontFamily: "var(--font-sans)",
-                        fontSize: 11.5,
-                      }}
-                    >
-                      {label}
-                    </td>
-                    {sortedPeriods.map((p) => {
-                      const raw = periodVals.get(p) ?? null;
-                      const n = raw != null ? parseFloat(raw) : null;
-                      const color =
-                        isVol || n == null
-                          ? "var(--ink-soft)"
-                          : n >= 0
-                            ? "var(--gain)"
-                            : "var(--loss)";
-                      return (
-                        <td key={p} style={{ ...cellStyle, color }}>
-                          {fmtPct(raw, !isVol)}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {sortedTypes.map((typeDesc) => {
+              const periodVals = typeMap.get(typeDesc) ?? new Map<string, string | null>();
+              const label = perfTypeLabel(typeDesc);
+              const isVol = typeDesc.includes("ความผันผวน");
+              return (
+                <tr key={typeDesc}>
+                  <td
+                    style={{
+                      ...cellStyle,
+                      textAlign: "left",
+                      color: "var(--ink-soft)",
+                      fontFamily: "var(--font-sans)",
+                      fontSize: 11.5,
+                    }}
+                  >
+                    {label}
+                  </td>
+                  {sortedPeriods.map((p) => {
+                    const raw = periodVals.get(p) ?? null;
+                    const n = raw != null ? parseFloat(raw) : null;
+                    const color =
+                      isVol || n == null
+                        ? "var(--ink-soft)"
+                        : n >= 0
+                          ? "var(--gain)"
+                          : "var(--loss)";
+                    return (
+                      <td key={p} style={{ ...cellStyle, color }}>
+                        {fmtPct(raw, !isVol)}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </>
   );
@@ -493,6 +376,7 @@ const PORTFOLIO_PREVIEW = 10;
 function PortfolioSection({ rows }: { rows: FundPortfolioRow[] }) {
   const [expanded, setExpanded] = useState(false);
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set());
+  const scrollRef = useScrollFadeX("Portfolio holdings table");
   if (rows.length === 0) return null;
 
   // Collapse anonymous derivative rows (FX forwards) into net rows so the real
@@ -510,7 +394,7 @@ function PortfolioSection({ rows }: { rows: FundPortfolioRow[] }) {
       <SectionHeader
         title={`Portfolio${periodLabel ? ` (${periodLabel})` : ""} · ${display.length} holdings`}
       />
-      <div style={{ overflowX: "auto" }}>
+      <div ref={scrollRef} style={{ overflowX: "auto", paddingBottom: 10 }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
           <thead>
             <tr>
@@ -805,6 +689,7 @@ function LookThroughSection({
   rows: FeederLookThroughHoldingRow[];
 }) {
   const [expanded, setExpanded] = useState(false);
+  const scrollRef = useScrollFadeX("Look-through holdings table");
   if (!masterMap && rows.length === 0) return null;
 
   const visible = expanded ? rows : rows.slice(0, LOOK_THROUGH_PREVIEW);
@@ -860,7 +745,7 @@ function LookThroughSection({
         </div>
       ) : (
         <>
-          <div style={{ overflowX: "auto" }}>
+          <div ref={scrollRef} style={{ overflowX: "auto", paddingBottom: 10 }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
               <thead>
                 <tr>
