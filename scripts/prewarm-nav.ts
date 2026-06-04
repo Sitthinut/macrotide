@@ -22,12 +22,14 @@ import type { SeriesRange } from "../lib/market/providers/types";
 
 const RANGES: SeriesRange[] = ["1mo", "3mo", "6mo", "1y", "5y", "max"];
 
-// A slice of Registered funds genuinely publish no NAV history (newly launched,
-// or feeder/term funds the SEC NAV feed doesn't cover), so they throw and count
-// as failed. Tolerate a larger fraction than the catalog crawl before treating a
-// run as a real outage: both the floor and the rate must be exceeded.
+// A large slice of registered retail share classes genuinely publish no NAV
+// (newly-launched or never-funded class variants — e.g. dividend/electronic/SSF
+// classes an AMC pre-registers but hasn't seeded), so they throw and count as
+// failed. Measured ~25-27% on the live retail universe, so tolerate up to ~35%
+// before treating a run as a real outage; both the floor and the rate must be
+// exceeded so a tiny dev run isn't tripped by a handful of errors.
 export const ERROR_FLOOR = 50;
-export const ERROR_RATE = 0.2;
+export const ERROR_RATE = 0.35;
 
 export function exceedsErrorThreshold(errorCount: number, seen: number): boolean {
   if (seen <= 0) return false;

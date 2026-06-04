@@ -19,8 +19,11 @@ export interface RankableClass extends ClassLike {
  * Order the share classes of ONE fund for the screener list (decision: most
  * popular first, with a deterministic fallback). The tiers, in order:
  *
- *  1. **retail before non-retail** — a tiny institutional class never outranks a
- *     retail one (institutional/insurance are usually hidden anyway).
+ *  1. **audience tier** — explicit retail first, then unknown (likely retail —
+ *     differs only by distribution/channel), then `restricted` (provident /
+ *     private / special-group) and any other non-retail. A provident-only class
+ *     never outranks a retail one. (institutional/insurance are hidden upstream,
+ *     so they surface here only under the includeNonRetail toggle.)
  *  2. **AUM (net_asset) descending** — the genuinely-popular class first. This is
  *     a no-op when AUM is missing (not yet warmed) OR identical across siblings
  *     (i.e. if the SEC reports net_asset per-fund rather than per-class), so the
@@ -35,11 +38,13 @@ export interface RankableClass extends ClassLike {
 export function compareClassesForList<T extends RankableClass>(
   abbr?: string | null,
 ): (a: T, b: T) => number {
-  const retailRank = (c: T) => (c.investorType === "retail" ? 0 : 1);
+  // Lower tier = shown higher: explicit retail → unknown (likely retail) →
+  // restricted / other non-retail.
+  const audienceTier = (c: T) => (c.investorType === "retail" ? 0 : c.investorType == null ? 1 : 2);
   const abbrRank = (c: T) => (abbr && c.ticker === abbr ? 0 : 1);
   const accRank = (c: T) => (c.distributionPolicy === "accumulating" ? 0 : 1);
   return (a, b) => {
-    if (retailRank(a) !== retailRank(b)) return retailRank(a) - retailRank(b);
+    if (audienceTier(a) !== audienceTier(b)) return audienceTier(a) - audienceTier(b);
     const aa = a.aum ?? null;
     const ba = b.aum ?? null;
     if (aa !== ba) {

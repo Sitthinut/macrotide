@@ -180,8 +180,10 @@ export const fundShareClasses = sqliteTable(
     classDetailTh: text("class_detail_th"),
     // Parsed from classDetailTh: 'accumulating' | 'dividend' | NULL.
     distributionPolicy: text("distribution_policy"),
-    // Parsed audience: 'retail' | 'institutional' | 'insurance' | NULL. Only
-    // retail classes are buyable by individuals; the screener defaults to these.
+    // Parsed audience: 'retail' | 'restricted' | 'institutional' | 'insurance' |
+    // NULL. The screener hides institutional + insurance (uninvestable directly),
+    // keeps retail/null, and down-ranks 'restricted' (provident/private/
+    // special-group classes — investable in principle but not sold to the public).
     investorType: text("investor_type"),
     // Per-class tax wrapper: 'SSF' | 'RMF' | 'ThaiESG' | NULL.
     taxIncentiveType: text("tax_incentive_type"),
