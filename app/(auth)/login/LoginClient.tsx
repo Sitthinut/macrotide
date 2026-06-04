@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { BrandMark } from "@/components/BrandMark";
+import { PasskeyIcon, ProviderIcon } from "@/components/ProviderIcon";
 import { clearDemoSession } from "@/lib/auth/clear-demo";
 import { authClient, signIn, useSession } from "@/lib/auth/client";
 import { placeholderEmail } from "@/lib/auth/placeholder-email";
@@ -392,38 +393,35 @@ function LoginInner() {
 
         {mode === "intro" && (
           <>
+            {/* Two peer sign-in methods, each as a "Continue with…" button with
+                its icon. Google only shows when configured. "Create account" (the
+                name-only passkey signup) sits below as a text link; the demo is a
+                ghost action under a divider. */}
             {hasOAuth && (
-              <>
-                <button
-                  type="button"
-                  style={secondary}
-                  onClick={() => signInSocial("google")}
-                  disabled={busy}
-                >
-                  Continue with Google
-                </button>
-                {/* No Turnstile here: OAuth-start mints no account (the provider
-                    authenticates the user), so the bot gate lives only on the
-                    passkey-signup form below. */}
-                <div style={divider}>or</div>
-              </>
+              <button
+                type="button"
+                style={methodBtn}
+                onClick={() => signInSocial("google")}
+                disabled={busy}
+              >
+                <ProviderIcon id="google" size={18} />
+                Continue with Google
+              </button>
             )}
-            {/* Passkey + OAuth are peers: a user can start with either method and
-                link the other later (passkey → link OAuth in Account; OAuth →
-                add a passkey). So both "Sign in with passkey" and "Create
-                account" are always offered, alongside any OAuth buttons. */}
-            <button type="button" style={primary} onClick={signInPasskey} disabled={busy}>
-              Sign in with passkey
+            <button type="button" style={methodBtn} onClick={signInPasskey} disabled={busy}>
+              <PasskeyIcon size={21} color="var(--ink)" />
+              Continue with passkey
             </button>
             <button
               type="button"
-              style={secondary}
+              style={textLink}
               onClick={() => setMode("signup")}
               disabled={busy}
             >
               Create account
             </button>
-            <button type="button" style={ghost} onClick={startDemo} disabled={busy}>
+            <div style={rule} />
+            <button type="button" style={demoBtn} onClick={startDemo} disabled={busy}>
               {busy ? "Loading the demo…" : "Explore the demo"}
             </button>
             <div style={hint}>
@@ -461,8 +459,25 @@ function LoginInner() {
               </div>
             )}
             {fieldErrors.turnstile && <div style={fieldError}>{fieldErrors.turnstile}</div>}
-            <button type="submit" style={primary} disabled={busy}>
-              {busy ? "Setting up…" : "Create passkey & continue"}
+            <button
+              type="submit"
+              style={{
+                ...primary,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 9,
+              }}
+              disabled={busy}
+            >
+              {busy ? (
+                "Setting up…"
+              ) : (
+                <>
+                  <PasskeyIcon size={18} color="currentColor" />
+                  Create passkey and continue
+                </>
+              )}
             </button>
             <p style={consentNote}>
               By continuing, you agree to the{" "}
@@ -562,18 +577,54 @@ const primary: React.CSSProperties = {
   color: "white",
 };
 
-const secondary: React.CSSProperties = {
+const ghost: React.CSSProperties = {
   ...baseBtn,
-  // Mirrors the app's `.btn.ghost`: outlined, neutral — for OAuth + Create account.
+  background: "transparent",
+  color: "var(--muted)",
+};
+
+// "Continue with …" sign-in buttons: outlined, with the method's icon.
+const methodBtn: React.CSSProperties = {
+  ...baseBtn,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 9,
   background: "transparent",
   color: "var(--ink)",
   borderColor: "var(--line)",
 };
 
-const ghost: React.CSSProperties = {
+// "Create account" — a quiet, muted text link under the sign-in buttons (not a
+// button), with a little breathing room above it.
+const textLink: React.CSSProperties = {
+  width: "100%",
+  background: "transparent",
+  border: 0,
+  color: "var(--muted)",
+  fontSize: 13.5,
+  fontWeight: 500,
+  fontFamily: "var(--font-sans)",
+  letterSpacing: "-0.01em",
+  cursor: "pointer",
+  padding: "2px 0",
+  marginTop: 6,
+  textAlign: "center",
+};
+
+// "Explore the demo" — accent-green so the no-commitment entry stands out.
+const demoBtn: React.CSSProperties = {
   ...baseBtn,
   background: "transparent",
-  color: "var(--muted)",
+  color: "var(--accent)",
+};
+
+// Plain horizontal rule separating the sign-in block from the demo.
+const rule: React.CSSProperties = {
+  width: "100%",
+  height: 1,
+  background: "var(--line)",
+  margin: "6px 0",
 };
 
 const input: React.CSSProperties = {
@@ -605,14 +656,6 @@ const errBanner: React.CSSProperties = {
   borderRadius: 8,
   padding: "8px 12px",
   textAlign: "left",
-};
-
-const divider: React.CSSProperties = {
-  fontSize: 11,
-  color: "var(--muted-2)",
-  textTransform: "uppercase",
-  letterSpacing: "0.08em",
-  margin: "4px 0",
 };
 
 const consentNote: React.CSSProperties = {

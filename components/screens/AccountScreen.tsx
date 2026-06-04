@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { PasskeyIcon, ProviderIcon } from "@/components/ProviderIcon";
 import { aaguidName } from "@/lib/auth/aaguid";
 import { clearDemoSession } from "@/lib/auth/clear-demo";
 import { authClient } from "@/lib/auth/client";
@@ -79,9 +80,11 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
     confirmLabel: string;
     run: () => Promise<void>;
   } | null>(null);
-  // Inline name edit.
+  // Inline name edit. `demoName` holds an edited name for demo / AUTH_DISABLED
+  // sessions (no backend user to persist to) — session-local, like demo itself.
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
+  const [demoName, setDemoName] = useState<string | null>(null);
 
   const refreshLinkedAccounts = useCallback(async () => {
     try {
@@ -101,6 +104,13 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
   // ── Derived ─────────────────────────────────────────────────────────────────
 
   const user = session.data?.user;
+  // Demo / AUTH_DISABLED sessions have no better-auth user — show the same
+  // "Demo user" label the rail uses (App.tsx). Real accounts always have a name
+  // (signup collects it), so an absent name means a non-real session.
+  const displayName = user?.name?.trim() || demoName || "Demo user";
+  // The account's real email, if it has adopted one (placeholder = none yet).
+  const realEmail = user?.email && !isPlaceholderEmail(user.email) ? user.email : null;
+  const googleEnabled = authConfig?.providers?.google ?? false;
   const passkeyList = passkeyState.data ?? [];
   // Lockout guard: a user's only sign-in path is their passkey(s) unless they've
   // linked an OAuth provider (the email/password record is a hidden bootstrap,
@@ -140,7 +150,7 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
   }
 
   function startEditName() {
-    setNameDraft(user?.name ?? "");
+    setNameDraft(displayName);
     setActionError(null);
     setEditingName(true);
   }
@@ -151,7 +161,13 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
       setActionError("Name can't be empty.");
       return;
     }
-    if (next === user?.name) {
+    // Demo / AUTH_DISABLED: no backend user — keep the edit session-local.
+    if (!user) {
+      setDemoName(next);
+      setEditingName(false);
+      return;
+    }
+    if (next === user.name) {
       setEditingName(false);
       return;
     }
@@ -360,13 +376,17 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              padding: "12px 14px",
+              padding: "0 14px",
+              // Fixed height so the row doesn't grow when the edit input appears.
+              height: 50,
+              boxSizing: "border-box",
             }}
           >
             <span style={{ fontSize: 12.5, color: "var(--muted)", fontWeight: 500 }}>Name</span>
             {editingName ? (
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <input
+                  className="sheet-input"
                   type="text"
                   autoComplete="name"
                   value={nameDraft}
@@ -377,14 +397,15 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
                     if (e.key === "Enter") handleSaveName();
                     if (e.key === "Escape") setEditingName(false);
                   }}
+                  // Use the app's input class for the accent focus border; override
+                  // only size to fit inline next to the buttons. (Don't set `border`
+                  // inline — it would beat the class's :focus rule.)
                   style={{
-                    fontSize: 13,
-                    padding: "4px 8px",
-                    borderRadius: "var(--r-sm)",
-                    border: "1px solid var(--line)",
-                    background: "var(--paper)",
-                    color: "var(--ink)",
                     width: 150,
+                    height: 32,
+                    padding: "0 10px",
+                    fontSize: 13,
+                    boxSizing: "border-box",
                   }}
                 />
                 <button
@@ -392,7 +413,7 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
                   className="btn ghost sm"
                   onClick={handleSaveName}
                   disabled={busy}
-                  style={{ opacity: busy ? 0.6 : 1 }}
+                  style={{ height: 32, boxSizing: "border-box", opacity: busy ? 0.6 : 1 }}
                 >
                   Save
                 </button>
@@ -423,7 +444,7 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
                     letterSpacing: "-0.01em",
                   }}
                 >
-                  {user?.name ?? "—"}
+                  {displayName}
                 </span>
                 <button
                   type="button"
@@ -445,28 +466,50 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
               </div>
             )}
           </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              padding: "12px 14px",
-              borderTop: "1px solid var(--line-soft)",
-            }}
-          >
-            <span style={{ fontSize: 12.5, color: "var(--muted)", fontWeight: 500 }}>Email</span>
-            <span
+          {/* Email row. The account's email is its verified identity (adopted
+              from a linked provider), shown only when there's a real one. With a
+              placeholder (passkey-only) account we don't show a bare "—": if
+              Google is configured we offer to link it (which adopts an email),
+              otherwise the row is hidden. Demo has no row. */}
+          {(realEmail || (user && googleEnabled)) && (
+            <div
               style={{
-                fontSize: 12.5,
-                color: "var(--ink-soft, var(--muted))",
-                fontFamily: "var(--font-mono)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "0 14px",
+                height: 50,
+                boxSizing: "border-box",
+                borderTop: "1px solid var(--line-soft)",
               }}
             >
-              {/* Passkey-only accounts carry a synthetic placeholder email — never
-                  show it. Linking an OAuth provider adopts a real one. */}
-              {isPlaceholderEmail(user?.email) ? "—" : (user?.email ?? "—")}
-            </span>
-          </div>
+              <span style={{ fontSize: 12.5, color: "var(--muted)", fontWeight: 500 }}>Email</span>
+              {realEmail ? (
+                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span
+                    style={{
+                      fontSize: 12.5,
+                      color: "var(--ink-soft, var(--muted))",
+                      fontFamily: "var(--font-mono)",
+                    }}
+                  >
+                    {realEmail}
+                  </span>
+                  <span className="tag green">verified</span>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="btn ghost sm"
+                  disabled={busy}
+                  onClick={() => handleLinkProvider("google")}
+                  style={{ opacity: busy ? 0.6 : 1 }}
+                >
+                  Link Google
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -478,7 +521,7 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
 
         {/* Methods linked to this account */}
         <div className="card" style={{ padding: 0 }}>
-          {/* Passkey — the native method (bootstrapped at sign-up) */}
+          {/* Passkeys group — header (with Add) over each registered credential */}
           <div
             style={{
               display: "flex",
@@ -488,36 +531,135 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <PasskeyIcon size={16} color="var(--muted)" />
+              <span style={{ fontSize: 13, color: "var(--ink)" }}>Passkeys</span>
+            </div>
+            <button
+              type="button"
+              className="btn ghost sm"
+              onClick={handleAddPasskey}
+              disabled={busy}
+              style={{ display: "flex", alignItems: "center", gap: 5, opacity: busy ? 0.6 : 1 }}
+            >
               <svg
-                width="15"
-                height="15"
+                width="13"
+                height="13"
                 viewBox="0 0 24 24"
                 fill="none"
-                stroke="var(--muted)"
+                stroke="currentColor"
                 strokeWidth="1.5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                style={{ flexShrink: 0 }}
               >
-                <circle cx="8" cy="15" r="4" />
-                <path d="M12 15h8M19 15v2M16 15v2" />
+                <path d="M12 5v14M5 12h14" />
               </svg>
-              <span style={{ fontSize: 13, color: "var(--ink)" }}>Passkeys</span>
-            </div>
-            {/* Reflect the real credential count — an OAuth user who skipped the
-                passkey prompt has none, so "active" would be a lie. */}
-            {passkeyState.isPending ? (
-              <span className="tag" style={{ color: "var(--muted)" }}>
-                …
-              </span>
-            ) : passkeyList.length > 0 ? (
-              <span className="tag green">active</span>
-            ) : (
-              <span className="tag" style={{ color: "var(--muted)" }}>
-                none
-              </span>
-            )}
+              Add
+            </button>
           </div>
+
+          {/* Each registered passkey, indented under the Passkeys header. */}
+          {passkeyState.isPending && (
+            <div
+              style={{
+                padding: "10px 14px 10px 40px",
+                borderTop: "1px solid var(--line-soft)",
+                fontSize: 12.5,
+                color: "var(--muted)",
+              }}
+            >
+              Loading…
+            </div>
+          )}
+          {!passkeyState.isPending && passkeyList.length === 0 && (
+            <div
+              style={{
+                padding: "10px 14px 10px 40px",
+                borderTop: "1px solid var(--line-soft)",
+                fontSize: 12.5,
+                color: "var(--muted)",
+                lineHeight: 1.5,
+              }}
+            >
+              No passkeys yet — add one for faster sign-in.
+            </div>
+          )}
+          {!passkeyState.isPending &&
+            passkeyList.map((pk) => {
+              const resolvedName = aaguidName(pk.aaguid);
+              const label =
+                resolvedName ??
+                (pk.deviceType === "multiDevice" ? "Synced passkey" : "This device");
+              const showSyncedBadge = resolvedName != null && pk.backedUp === true;
+              return (
+                <div
+                  key={pk.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "10px 14px 10px 40px",
+                    borderTop: "1px solid var(--line-soft)",
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                      <span
+                        style={{
+                          fontSize: 12.5,
+                          fontWeight: 500,
+                          letterSpacing: "-0.01em",
+                          color: "var(--ink)",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {label}
+                      </span>
+                      {showSyncedBadge && (
+                        <span className="tag" style={{ flexShrink: 0 }}>
+                          Synced
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      style={{
+                        marginTop: 2,
+                        fontSize: 11,
+                        color: "var(--muted)",
+                        fontFamily: "var(--font-mono)",
+                      }}
+                    >
+                      Created on {fmtDate(pk.createdAt)}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy || cannotRevokeLast}
+                    onClick={() => handleDeletePasskey(pk.id, label)}
+                    aria-label={`Remove passkey ${label}`}
+                    title={
+                      cannotRevokeLast
+                        ? "Register another passkey before removing your last sign-in method"
+                        : "Revoke"
+                    }
+                    style={{
+                      background: "transparent",
+                      border: 0,
+                      color: "var(--muted)",
+                      cursor: busy || cannotRevokeLast ? "not-allowed" : "pointer",
+                      padding: "4px 8px",
+                      fontSize: 12.5,
+                      borderRadius: "var(--r-sm)",
+                      flexShrink: 0,
+                      opacity: busy || cannotRevokeLast ? 0.5 : 1,
+                    }}
+                  >
+                    Revoke
+                  </button>
+                </div>
+              );
+            })}
 
           {/* OAuth providers — a row appears only when the provider is configured
               or already linked. Link/Unlink act on THIS account. */}
@@ -591,179 +733,7 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
             lineHeight: 1.5,
           }}
         >
-          Passkeys and Google are peer sign-in methods — link or unlink anytime. You'll always keep
-          at least one way to sign in.
-        </div>
-
-        {/* Your registered passkeys */}
-        <div
-          style={{
-            fontSize: 12,
-            fontWeight: 600,
-            color: "var(--muted)",
-            letterSpacing: "0.02em",
-            padding: "18px 4px 6px",
-          }}
-        >
-          Your passkeys
-        </div>
-
-        {passkeyState.isPending && (
-          <div className="card" style={{ fontSize: 12.5, color: "var(--muted)" }}>
-            Loading passkeys…
-          </div>
-        )}
-
-        {!passkeyState.isPending && passkeyList.length === 0 && (
-          <div className="card" style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
-            No passkeys registered yet.
-          </div>
-        )}
-
-        {!passkeyState.isPending && passkeyList.length > 0 && (
-          <div className="card" style={{ padding: 0 }}>
-            {passkeyList.map((pk, idx) => {
-              // Primary label: prefer the resolved authenticator/provider name;
-              // otherwise fall back to a device-type-based label that still
-              // conveys whether the credential is synced across devices.
-              const resolvedName = aaguidName(pk.aaguid);
-              const label =
-                resolvedName ??
-                (pk.deviceType === "multiDevice" ? "Synced passkey" : "This device");
-              // Only show the "Synced" badge alongside a named authenticator —
-              // when we fell back to a device-type label it would be redundant.
-              const showSyncedBadge = resolvedName != null && pk.backedUp === true;
-              return (
-                <div
-                  key={pk.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    padding: "11px 14px",
-                    borderTop: idx === 0 ? "none" : "1px solid var(--line-soft)",
-                  }}
-                >
-                  {/* Key icon */}
-                  <svg
-                    width="15"
-                    height="15"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="var(--muted)"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    style={{ flexShrink: 0 }}
-                  >
-                    <circle cx="8" cy="15" r="4" />
-                    <path d="M12 15h8M19 15v2M16 15v2" />
-                  </svg>
-
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        minWidth: 0,
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 13,
-                          fontWeight: 500,
-                          letterSpacing: "-0.01em",
-                          color: "var(--ink)",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {label}
-                      </span>
-                      {showSyncedBadge && (
-                        <span className="tag" style={{ flexShrink: 0 }}>
-                          Synced
-                        </span>
-                      )}
-                    </div>
-                    <div
-                      style={{
-                        marginTop: 2,
-                        fontSize: 11,
-                        color: "var(--muted)",
-                        fontFamily: "var(--font-mono)",
-                      }}
-                    >
-                      Created on {fmtDate(pk.createdAt)}
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    disabled={busy || cannotRevokeLast}
-                    onClick={() => handleDeletePasskey(pk.id, label)}
-                    aria-label={`Remove passkey ${label}`}
-                    style={{
-                      background: "transparent",
-                      border: 0,
-                      color: "var(--muted)",
-                      cursor: busy || cannotRevokeLast ? "not-allowed" : "pointer",
-                      padding: "4px 8px",
-                      fontSize: 12.5,
-                      borderRadius: "var(--r-sm)",
-                      flexShrink: 0,
-                      opacity: busy || cannotRevokeLast ? 0.5 : 1,
-                      transition: "color 0.15s",
-                    }}
-                    title={
-                      cannotRevokeLast
-                        ? "Register another passkey before removing your last sign-in method"
-                        : "Revoke"
-                    }
-                  >
-                    Revoke
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Add passkey button */}
-        <div style={{ marginTop: 8 }}>
-          <button
-            type="button"
-            className="btn ghost full sm"
-            onClick={handleAddPasskey}
-            disabled={busy}
-            style={{ opacity: busy ? 0.6 : 1 }}
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            Register passkey on this device
-          </button>
-        </div>
-        <div
-          style={{
-            fontSize: 11.5,
-            color: "var(--muted)",
-            padding: "8px 4px 0",
-            lineHeight: 1.5,
-          }}
-        >
-          Use this device's biometrics or PIN to sign in. Register on each device you use.
+          Passkeys use this device's biometrics or PIN; register one on each device you use.
         </div>
       </div>
 
@@ -913,42 +883,5 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
         onCancel={() => setConfirm(null)}
       />
     </div>
-  );
-}
-
-// ─── Provider icon helper ──────────────────────────────────────────────────────
-
-function ProviderIcon({ id }: { id: string }) {
-  if (id === "google") {
-    return (
-      <svg
-        width="15"
-        height="15"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="var(--muted)"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <circle cx="12" cy="12" r="10" />
-        <path d="M17.5 12H12v3h3.2A5 5 0 0112 17a5 5 0 010-10c1.35 0 2.57.51 3.48 1.34L17.41 6.4A8 8 0 1012 20a8 8 0 007.5-10.84H17.5z" />
-      </svg>
-    );
-  }
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="var(--muted)"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <circle cx="12" cy="12" r="10" />
-      <path d="M12 8v8M8 12h8" />
-    </svg>
   );
 }

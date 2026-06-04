@@ -23,9 +23,9 @@ the other later. The `/login` screen shows:
 
 - **Continue with Google** — env-gated (hidden unless its keys are set). Creates
   a verified account for new users, or signs in returning ones.
-- **Sign in with passkey** — for returning users whose device has a passkey.
-- **Create account** — registers a passkey. Collects **only a name** (no email),
-  guarded by a **Turnstile** gate when configured.
+- **Continue with passkey** — sign in with a passkey on this device.
+- **Create account** (a quiet text link) — registers a passkey. Collects **only a
+  name** (no email), guarded by a **Turnstile** gate when configured.
 - **Try the demo** — spins an isolated, in-memory SQLite with capped chat.
 
 Setup commands live in [local development](../how-to/local-development.md) and
