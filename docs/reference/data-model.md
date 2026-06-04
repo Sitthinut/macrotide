@@ -45,7 +45,7 @@ app.db but share the real market.db read-write (same warm cache as real users).
 |---|---|---|
 | `fund_quotes` | Latest NAV + performance per ticker | `ticker` PK, `nav`, `d1_pct`, `ytd_pct`, `y1_pct`, `deepest_range` (widest series range fetched — lets a wider request deepen a fresh-but-shallow cache) |
 | `nav_history` | Daily NAV (+ fund AUM) history — **append/update only, never time-pruned** | Composite PK (`ticker`, `date`); `nav`, `net_asset` (fund total net assets / AUM, when the source reports it) |
-| `fund_catalog` | SEC-sourced fund universe (parent-level: one row per `proj_id`) | keyed by `proj_id`; `current_ter` is a **derived cache** of the latest TER (maintained by `upsertFundFees`; source of truth stays `fund_fees`) so the finder can sort/annotate fees without a fee-history query |
+| `fund_catalog` | SEC-sourced fund universe (parent-level: one row per `proj_id`) | keyed by `proj_id`; `current_ter` is a **derived cache** of the latest TER (maintained by `upsertFundFees`; source of truth stays `fund_fees`) so the finder can sort/annotate fees without a fee-history query; `proj_retail_type` (`R` = retail, else not-for-retail) is the screener's fund-level retail gate |
 | `fund_share_classes` | The **priceable units** of each fund (one row per SEC share class) | composite PK (`proj_id`, `class_name`); `ticker` is `UNIQUE` and is the holdable/cache-key id — see below |
 | `fund_fees` | Fee history per fund class | source of truth for TER |
 | `fund_performance`, `fund_asset_allocation`, `fund_top_holdings`, `fund_portfolio`, `fund_portfolio_asset_type` | Per-fund enrichment depth | ingested behind default-off crawl flags; composite `(proj_id, period)` indexes |

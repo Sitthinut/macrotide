@@ -367,3 +367,44 @@ describe("findShareClasses (search + popularity ranking)", () => {
     });
   });
 });
+
+describe("retail-availability gate + zero-TER sort (#117)", () => {
+  it("treats a zero/negative TER as no-fee — sorts it last, not as cheapest", () => {
+    withDb(() => {
+      upsertFund(fund("ZERO", { currentTer: 0 }));
+      upsertFund(fund("CHEAP", { currentTer: 0.3 }));
+      upsertFund(fund("MID", { currentTer: 1.0 }));
+      upsertFund(fund("NULLTER", { currentTer: null }));
+      const ids = findFunds({}).map((f) => f.projId);
+      expect(ids.slice(0, 2)).toEqual(["CHEAP", "MID"]); // positive TER, cheapest first
+      expect(ids.slice(2)).toEqual(expect.arrayContaining(["ZERO", "NULLTER"])); // 0 + null last
+    });
+  });
+
+  it("hides funds the SEC marks not-for-retail (proj_retail_type != 'R'); keeps R + unknown", () => {
+    withDb(() => {
+      upsertFund(fund("RETAILF", { abbrName: "RTL", projRetailType: "R" }));
+      upsertFund(fund("PRIVF", { abbrName: "PRV", projRetailType: "X" })); // not for retail
+      upsertFund(fund("UNKNOWNF", { abbrName: "UNK", projRetailType: null })); // pre-crawl
+      upsertShareClasses([
+        { projId: "RETAILF", className: "RTL", ticker: "RTL", investorType: "retail" },
+        { projId: "PRIVF", className: "PRV", ticker: "PRV", investorType: "retail" },
+        { projId: "UNKNOWNF", className: "UNK", ticker: "UNK", investorType: "retail" },
+      ]);
+      const tickers = findShareClasses({}).map((c) => c.ticker);
+      expect(tickers).toContain("RTL"); // retail kept
+      expect(tickers).toContain("UNK"); // null = unknown (pre-crawl) → kept (safe no-op)
+      expect(tickers).not.toContain("PRV"); // proj_retail_type=X → whole fund hidden
+    });
+  });
+
+  it("includeNonRetail surfaces a not-for-retail fund", () => {
+    withDb(() => {
+      upsertFund(fund("PRIVF", { abbrName: "PRV", projRetailType: "X" }));
+      upsertShareClasses([
+        { projId: "PRIVF", className: "PRV", ticker: "PRV", investorType: "retail" },
+      ]);
+      expect(findShareClasses({ includeNonRetail: true }).map((c) => c.ticker)).toContain("PRV");
+    });
+  });
+});

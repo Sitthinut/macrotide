@@ -124,6 +124,12 @@ export const fundCatalog = sqliteTable(
     // Raw SEC `fund_status`: 'Registered' | 'IPO' | 'Liquidated' | 'Expired' |
     // 'Canceled'. `status` below is derived from this.
     secStatus: text("sec_status"),
+    // Raw SEC `proj_retail_type`: 'R' = available to retail; anything else (e.g.
+    // 'X') = not for retail — accredited / institutional-only private funds
+    // (infrastructure, private credit) whose retail-availability isn't in the
+    // class detail. A fund-level retail gate for the screener. NULL until
+    // (re)crawled — treated as retail (don't hide) so it's a safe no-op pre-crawl.
+    projRetailType: text("proj_retail_type"),
     // Derived from `secStatus`: 'active' (Registered/IPO) = currently offered;
     // 'inactive' = liquidated/expired/canceled (kept for history). Drives the
     // fund finder's active-only default.
