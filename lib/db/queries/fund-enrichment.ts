@@ -163,8 +163,24 @@ export function upsertFundPortfolioAssetType(
     for (const row of rows) {
       const period = normalizePeriod(row.period);
       if (existing.has(period)) continue;
+      // The period-skip above guards already-stored periods, but the SEC can
+      // return two rows with the SAME (period, assetliab_code) within one
+      // response — a plain insert then trips the composite PK. Upsert so an
+      // intra-response duplicate updates rather than aborting the whole fund.
       tx.insert(fundPortfolioAssetType)
         .values({ ...row, period })
+        .onConflictDoUpdate({
+          target: [
+            fundPortfolioAssetType.projId,
+            fundPortfolioAssetType.period,
+            fundPortfolioAssetType.assetliabCode,
+          ],
+          set: {
+            assetliabDesc: row.assetliabDesc,
+            marketValue: row.marketValue,
+            percentNav: row.percentNav,
+          },
+        })
         .run();
     }
   });

@@ -11,7 +11,10 @@ vi.mock("../context", () => ({
   getMarketDb: vi.fn(),
 }));
 
+import { eq } from "drizzle-orm";
+import { freshMarketDb } from "@/tests/db-helpers";
 import { getMarketDb } from "../context";
+import { fundCatalog, fundPortfolioAssetType } from "../schema";
 import type { FundPerformanceInsert, FundPortfolioInsert } from "./fund-enrichment";
 import {
   getFundAssetAllocation,
@@ -36,7 +39,9 @@ function makeMockDb(rows: unknown[] = []) {
   const get = vi.fn().mockReturnValue(rows[0] ?? null);
   const orderBy = vi.fn().mockReturnValue({ all });
   const where = vi.fn().mockReturnValue({ all, orderBy, run });
-  const values = vi.fn().mockReturnValue({ run });
+  const values = vi
+    .fn()
+    .mockReturnValue({ run, onConflictDoUpdate: vi.fn().mockReturnValue({ run }) });
   const insert = vi.fn().mockReturnValue({ values });
   const deleteFrom = vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ run }) });
   const txFn = vi.fn((cb: (tx: typeof mockDb) => void) => cb(mockDb));
@@ -189,6 +194,43 @@ describe("fund-enrichment queries", () => {
         },
       ]);
       expect(mockDb.transaction).toHaveBeenCalledOnce();
+    });
+
+    it("upserts duplicate (period, assetliab_code) rows in one call without throwing (real DB)", () => {
+      // The SEC can return two rows with the same (period, code); the composite
+      // PK would trip a plain insert. Exercise the real onConflictDoUpdate path.
+      const { db } = freshMarketDb();
+      vi.mocked(getMarketDb).mockReturnValue(db as unknown as ReturnType<typeof getMarketDb>);
+      db.insert(fundCatalog).values({ projId: "P1", abbrName: "X" }).run();
+
+      expect(() =>
+        upsertFundPortfolioAssetType("P1", [
+          {
+            projId: "P1",
+            period: "202412",
+            assetliabCode: "101",
+            assetliabDesc: "a",
+            marketValue: 1,
+            percentNav: 50,
+          },
+          {
+            projId: "P1",
+            period: "202412",
+            assetliabCode: "101",
+            assetliabDesc: "b",
+            marketValue: 2,
+            percentNav: 60,
+          },
+        ]),
+      ).not.toThrow();
+
+      const rows = db
+        .select()
+        .from(fundPortfolioAssetType)
+        .where(eq(fundPortfolioAssetType.projId, "P1"))
+        .all();
+      expect(rows).toHaveLength(1); // deduped to the one key
+      expect(rows[0].marketValue).toBe(2); // last write wins
     });
   });
 
