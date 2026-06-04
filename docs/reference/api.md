@@ -45,7 +45,7 @@ themselves are the source of truth for exact request/response shapes.
 | Route | Methods | Purpose |
 |---|---|---|
 | `/api/funds` | GET | Parent fund catalog, filtered + cheapest-TER first (the advisor `find_funds` view) |
-| `/api/fund-classes` | GET | Priceable **share classes** for the Explore screener (per-class fee / tax / NAV + 1Y return; hides institutional/insurance by default) |
+| `/api/fund-classes` | GET | Priceable **share classes** for the Explore screener (per-class fee / tax / NAV / 1Y return / fund size; searchable by class ticker; ranked most-popular-first; hides institutional/insurance by default) |
 | `/api/fund-classes/resolve` | GET | Validate a ticker — is it a priceable class, or a parent with multiple classes |
 | `/api/funds/[projId]` | GET | Fund detail + enrichment + share classes (accepts a proj_id, parent abbr, or class ticker) |
 | `/api/funds/[projId]/series` | GET | Daily NAV + AUM history for one share class (`range` param) |

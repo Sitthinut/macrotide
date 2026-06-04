@@ -12,9 +12,10 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { isIndexStyle } from "../../market/fund-classify";
 import { type FeeType, TER_FEE_TYPE } from "../../market/fund-fees";
+import { compareClassesForList } from "../../market/share-class-select";
 import { searchFundIds } from "../../search/fund-index";
 import { getMarketDb } from "../context";
-import { fundCatalog, fundFees, fundQuotes } from "../schema";
+import { fundCatalog, fundFees, fundQuotes, navHistory } from "../schema";
 import { listShareClassesByProj } from "./share-classes";
 
 export type Fund = typeof fundCatalog.$inferSelect;
@@ -310,6 +311,8 @@ export interface ShareClassListItem {
   navAsOf: string | null;
   /** Trailing 1-year return %, if cached. */
   y1Pct: number | null;
+  /** Latest cached fund size (AUM, THB), if any — drives popularity ordering. */
+  aum: number | null;
 }
 
 /**
@@ -330,14 +333,25 @@ export function findShareClasses(
   // class-level filtering still fills ~limit rows. Tax is applied per class below.
   const parents = findFunds({ ...rest, taxIncentive: undefined, limit: Math.max(limit * 4, 200) });
 
+  // Gather filtered classes; parents are already in relevance→TER order. Don't
+  // cap mid-family — a family must be whole to rank it — so stop once we've
+  // collected at least `limit` candidates (the final family is kept entire, then
+  // trimmed to `limit` after ranking below).
   const out: ShareClassListItem[] = [];
+  const parentOrder = new Map<string, number>();
+  let order = 0;
   for (const p of parents) {
     if (out.length >= limit) break;
-    for (const c of listShareClassesByProj(p.projId)) {
+    const classes = listShareClassesByProj(p.projId).filter((c) => {
       // Hide institutional/insurance classes by default; null (special/unknown)
       // audiences are kept so nothing is silently dropped.
-      if (!includeNonRetail && c.investorType && c.investorType !== "retail") continue;
-      if (taxIncentive && c.taxIncentiveType !== taxIncentive) continue;
+      if (!includeNonRetail && c.investorType && c.investorType !== "retail") return false;
+      if (taxIncentive && c.taxIncentiveType !== taxIncentive) return false;
+      return true;
+    });
+    if (classes.length === 0) continue;
+    parentOrder.set(p.projId, order++);
+    for (const c of classes) {
       out.push({
         ticker: c.ticker,
         className: c.className,
@@ -358,41 +372,76 @@ export function findShareClasses(
         nav: null,
         navAsOf: null,
         y1Pct: null,
+        aum: null,
       });
-      if (out.length >= limit) break;
     }
   }
 
-  // Batch-attach the latest cached NAV per class (cache key = source:ticker).
-  if (out.length > 0) {
-    const keyOf = (t: string) => `thai_mutual_fund:${t}`;
-    const quotes = getMarketDb()
-      .select({
-        ticker: fundQuotes.ticker,
-        nav: fundQuotes.nav,
-        updatedAt: fundQuotes.updatedAt,
-        y1Pct: fundQuotes.y1Pct,
-      })
-      .from(fundQuotes)
-      .where(
-        inArray(
-          fundQuotes.ticker,
-          out.map((x) => keyOf(x.ticker)),
-        ),
-      )
-      .all();
-    const qmap = new Map(quotes.map((q) => [q.ticker, q]));
-    for (const x of out) {
-      const q = qmap.get(keyOf(x.ticker));
-      if (q) {
-        x.nav = q.nav;
-        x.navAsOf = q.updatedAt;
-        x.y1Pct = q.y1Pct ?? null;
-      }
-    }
+  if (out.length === 0) return out;
+
+  attachQuotesAndAum(out);
+
+  // Parent blocks stay in relevance→TER order; within a family, rank by
+  // popularity (compareClassesForList — retail → AUM → flagship heuristic).
+  out.sort((a, b) => {
+    const pa = parentOrder.get(a.projId) ?? Number.MAX_SAFE_INTEGER;
+    const pb = parentOrder.get(b.projId) ?? Number.MAX_SAFE_INTEGER;
+    if (pa !== pb) return pa - pb;
+    // Same parent → same abbr, so a.abbrName drives the flagship-ticker check.
+    return compareClassesForList(a.abbrName)(a, b);
+  });
+
+  // The user typed a specific class code (e.g. "SCBGOLDP") → float that exact
+  // ticker to the very top, ahead of its siblings and every other family.
+  const q = filter.query?.trim().toLowerCase();
+  if (q) {
+    const idx = out.findIndex((x) => x.ticker.toLowerCase() === q);
+    if (idx > 0) out.unshift(out.splice(idx, 1)[0]);
   }
 
-  return out;
+  return out.slice(0, limit);
+}
+
+/** Batch-attach latest NAV/quote (fund_quotes) + latest AUM (nav_history) per class. */
+function attachQuotesAndAum(items: ShareClassListItem[]): void {
+  const db = getMarketDb();
+  const keyOf = (t: string) => `thai_mutual_fund:${t}`;
+  const keys = items.map((x) => keyOf(x.ticker));
+
+  const quotes = db
+    .select({
+      ticker: fundQuotes.ticker,
+      nav: fundQuotes.nav,
+      updatedAt: fundQuotes.updatedAt,
+      y1Pct: fundQuotes.y1Pct,
+    })
+    .from(fundQuotes)
+    .where(inArray(fundQuotes.ticker, keys))
+    .all();
+  const qmap = new Map(quotes.map((q) => [q.ticker, q]));
+
+  // Latest non-null net_asset per ticker: the row on each ticker's most recent
+  // date that actually carries an AUM (some NAV rows have a NULL net_asset).
+  const aumRows = db.all(
+    sql`SELECT nh.ticker AS ticker, nh.net_asset AS aum
+        FROM ${navHistory} nh
+        JOIN (
+          SELECT ticker, MAX(date) AS d FROM ${navHistory}
+          WHERE ${inArray(navHistory.ticker, keys)} AND net_asset IS NOT NULL
+          GROUP BY ticker
+        ) m ON m.ticker = nh.ticker AND m.d = nh.date`,
+  ) as Array<{ ticker: string; aum: number }>;
+  const amap = new Map(aumRows.map((r) => [r.ticker, r.aum]));
+
+  for (const x of items) {
+    const qrow = qmap.get(keyOf(x.ticker));
+    if (qrow) {
+      x.nav = qrow.nav;
+      x.navAsOf = qrow.updatedAt;
+      x.y1Pct = qrow.y1Pct ?? null;
+    }
+    x.aum = amap.get(keyOf(x.ticker)) ?? null;
+  }
 }
 
 /**

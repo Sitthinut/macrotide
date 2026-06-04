@@ -9,18 +9,20 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { freshMarketDb } from "@/tests/db-helpers";
-import { type DbContext, runWithDbContext } from "../context";
+import { type DbContext, getMarketDb, runWithDbContext } from "../context";
 import * as schema from "../schema";
 import {
   type FundFeeInsert,
   type FundInsert,
   findFunds,
+  findShareClasses,
   getCheaperAlternatives,
   getCurrentFees,
   getCurrentTer,
   upsertFund,
   upsertFundFees,
 } from "./funds";
+import { upsertShareClasses } from "./share-classes";
 
 function freshDb() {
   const sqlite = new Database(":memory:");
@@ -304,6 +306,48 @@ describe("getCheaperAlternatives", () => {
       upsertFundFees([ter("NOREGION", 1.0), ter("FOREIGN-CHEAP", 0.2), ter("NOREGION-CHEAP", 0.5)]);
       const alts = getCheaperAlternatives("NOREGION").map((f) => f.projId);
       expect(alts).toEqual(["NOREGION-CHEAP"]);
+    });
+  });
+});
+
+describe("findShareClasses (search + popularity ranking)", () => {
+  const seedAum = (ticker: string, aum: number) => {
+    getMarketDb()
+      .insert(schema.navHistory)
+      .values({ ticker: `thai_mutual_fund:${ticker}`, date: "2026-06-01", nav: 10, netAsset: aum })
+      .run();
+  };
+
+  // Parent abbr SCBGOLD; classes are SCBGOLD{A,RA,P} — none is the bare abbr, so
+  // "SCBGOLD" has no exact class match and ranks purely by AUM.
+  const seedGoldFamily = () => {
+    upsertFund(fund("GOLD", { abbrName: "SCBGOLD", englishName: "SCB Gold" }));
+    upsertShareClasses([
+      { projId: "GOLD", className: "SCBGOLDA", ticker: "SCBGOLDA", investorType: "retail" },
+      { projId: "GOLD", className: "SCBGOLDRA", ticker: "SCBGOLDRA", investorType: "retail" },
+      { projId: "GOLD", className: "SCBGOLDP", ticker: "SCBGOLDP", investorType: "retail" },
+    ]);
+    seedAum("SCBGOLDA", 500);
+    seedAum("SCBGOLDRA", 300);
+    seedAum("SCBGOLDP", 100);
+  };
+
+  it("finds the family by a class ticker and ranks it by AUM (most popular first)", () => {
+    withDb(() => {
+      seedGoldFamily();
+      // The parent-abbr search was already working; the point is the order.
+      const tickers = findShareClasses({ query: "SCBGOLD" }).map((c) => c.ticker);
+      expect(tickers).toEqual(["SCBGOLDA", "SCBGOLDRA", "SCBGOLDP"]); // 500 > 300 > 100
+    });
+  });
+
+  it("hoists an exact class-ticker match to #1, siblings following by AUM", () => {
+    withDb(() => {
+      seedGoldFamily();
+      // The bug: this query used to return nothing. Now SCBGOLDP is found AND first.
+      const tickers = findShareClasses({ query: "SCBGOLDP" }).map((c) => c.ticker);
+      expect(tickers[0]).toBe("SCBGOLDP"); // exact match wins despite lowest AUM
+      expect(tickers).toEqual(["SCBGOLDP", "SCBGOLDA", "SCBGOLDRA"]);
     });
   });
 });

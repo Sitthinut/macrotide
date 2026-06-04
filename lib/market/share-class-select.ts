@@ -9,6 +9,50 @@ export interface ClassLike {
   distributionPolicy: string | null;
 }
 
+/** A class plus its latest AUM (net_asset), for popularity-ranked list ordering. */
+export interface RankableClass extends ClassLike {
+  /** Latest cached fund size (THB). Null when not yet warmed. */
+  aum?: number | null;
+}
+
+/**
+ * Order the share classes of ONE fund for the screener list (decision: most
+ * popular first, with a deterministic fallback). The tiers, in order:
+ *
+ *  1. **retail before non-retail** — a tiny institutional class never outranks a
+ *     retail one (institutional/insurance are usually hidden anyway).
+ *  2. **AUM (net_asset) descending** — the genuinely-popular class first. This is
+ *     a no-op when AUM is missing (not yet warmed) OR identical across siblings
+ *     (i.e. if the SEC reports net_asset per-fund rather than per-class), so the
+ *     next tiers govern and the ordering stays sensible regardless.
+ *  3. **flagship heuristic** — the class whose ticker is the parent abbr (usually
+ *     the primary/oldest), then an accumulating class.
+ *  4. **ticker** — stable, deterministic final tiebreak.
+ *
+ * Exact-query-match hoisting is handled by the caller (it spans the whole result
+ * set, not one family), so this comparator does not see the query.
+ */
+export function compareClassesForList<T extends RankableClass>(
+  abbr?: string | null,
+): (a: T, b: T) => number {
+  const retailRank = (c: T) => (c.investorType === "retail" ? 0 : 1);
+  const abbrRank = (c: T) => (abbr && c.ticker === abbr ? 0 : 1);
+  const accRank = (c: T) => (c.distributionPolicy === "accumulating" ? 0 : 1);
+  return (a, b) => {
+    if (retailRank(a) !== retailRank(b)) return retailRank(a) - retailRank(b);
+    const aa = a.aum ?? null;
+    const ba = b.aum ?? null;
+    if (aa !== ba) {
+      if (aa == null) return 1; // nulls last
+      if (ba == null) return -1;
+      if (aa !== ba) return ba - aa; // larger AUM first
+    }
+    if (abbrRank(a) !== abbrRank(b)) return abbrRank(a) - abbrRank(b);
+    if (accRank(a) !== accRank(b)) return accRank(a) - accRank(b);
+    return a.ticker.localeCompare(b.ticker);
+  };
+}
+
 /**
  * The default class to show when none is specified (decision D6). Per-class AUM
  * isn't pre-cached, so we approximate "flagship" with a retail-first heuristic:
