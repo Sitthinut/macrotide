@@ -15,6 +15,27 @@
       "when": 1779925286904,
       "tag": "0001_groovy_natasha_romanoff",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1780549554785,
+      "tag": "0002_illegal_sugar_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1780551542462,
+      "tag": "0003_amazing_ultimates",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1780562606825,
+      "tag": "0004_secret_ultragirl",
+      "breakpoints": true
     }
   ]
 }

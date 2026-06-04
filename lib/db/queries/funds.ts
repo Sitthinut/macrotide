@@ -14,7 +14,8 @@ import { isIndexStyle } from "../../market/fund-classify";
 import { type FeeType, TER_FEE_TYPE } from "../../market/fund-fees";
 import { searchFundIds } from "../../search/fund-index";
 import { getMarketDb } from "../context";
-import { fundCatalog, fundFees } from "../schema";
+import { fundCatalog, fundFees, fundQuotes } from "../schema";
+import { listShareClassesByProj } from "./share-classes";
 
 export type Fund = typeof fundCatalog.$inferSelect;
 export type FundInsert = typeof fundCatalog.$inferInsert;
@@ -278,6 +279,120 @@ export function findFunds(filter: FindFundsFilter = {}): FundWithTer[] {
   }
 
   return withTer.slice(0, limit);
+}
+
+/** A priceable share class for the Explore screener — class facts + parent metadata + NAV. */
+export interface ShareClassListItem {
+  /** Priceable ticker (the class code, or the abbr for single-class funds). */
+  ticker: string;
+  className: string;
+  projId: string;
+  abbrName: string | null;
+  thaiName: string | null;
+  englishName: string | null;
+  amcName: string | null;
+  assetClass: string | null;
+  managementStyle: string | null;
+  investRegion: string | null;
+  isFeederFund: boolean;
+  /** Master fund name when this is a feeder fund; null otherwise. */
+  feederMasterFund: string | null;
+  /** 'accumulating' | 'dividend' | null. */
+  distributionPolicy: string | null;
+  /** 'retail' | 'institutional' | 'insurance' | null. */
+  investorType: string | null;
+  /** 'SSF' | 'RMF' | 'ThaiESG' | null (per class). */
+  taxIncentiveType: string | null;
+  /** Per-class TER (falls back to the parent's derived TER). */
+  ter: number | null;
+  /** Latest cached NAV for this class, if any. */
+  nav: number | null;
+  navAsOf: string | null;
+  /** Trailing 1-year return %, if cached. */
+  y1Pct: number | null;
+}
+
+/**
+ * Screener variant of {@link findFunds} that returns priceable SHARE CLASSES
+ * rather than parent funds (decision D2b — NAV/fees/tax are per class). Reuses
+ * findFunds for parent matching/ordering (relevance or cheapest-TER), then
+ * expands each parent to its classes and applies class-level filters: the tax
+ * wrapper is matched per class, and institutional/insurance classes are hidden
+ * unless `includeNonRetail` is set (individuals can't subscribe to them).
+ *
+ * findFunds is left untouched — the advisor `find_funds` tool still gets parents.
+ */
+export function findShareClasses(
+  filter: FindFundsFilter & { includeNonRetail?: boolean } = {},
+): ShareClassListItem[] {
+  const { limit = 50, taxIncentive, includeNonRetail = false, ...rest } = filter;
+  // Pull parents generously (each yields several classes, most filtered out) so
+  // class-level filtering still fills ~limit rows. Tax is applied per class below.
+  const parents = findFunds({ ...rest, taxIncentive: undefined, limit: Math.max(limit * 4, 200) });
+
+  const out: ShareClassListItem[] = [];
+  for (const p of parents) {
+    if (out.length >= limit) break;
+    for (const c of listShareClassesByProj(p.projId)) {
+      // Hide institutional/insurance classes by default; null (special/unknown)
+      // audiences are kept so nothing is silently dropped.
+      if (!includeNonRetail && c.investorType && c.investorType !== "retail") continue;
+      if (taxIncentive && c.taxIncentiveType !== taxIncentive) continue;
+      out.push({
+        ticker: c.ticker,
+        className: c.className,
+        projId: p.projId,
+        abbrName: p.abbrName,
+        thaiName: p.thaiName,
+        englishName: p.englishName,
+        amcName: p.amcName,
+        assetClass: p.assetClass,
+        managementStyle: p.managementStyle,
+        investRegion: p.investRegion,
+        isFeederFund: p.isFeederFund,
+        feederMasterFund: p.feederMasterFund,
+        distributionPolicy: c.distributionPolicy,
+        investorType: c.investorType,
+        taxIncentiveType: c.taxIncentiveType,
+        ter: c.currentTer ?? p.ter ?? null,
+        nav: null,
+        navAsOf: null,
+        y1Pct: null,
+      });
+      if (out.length >= limit) break;
+    }
+  }
+
+  // Batch-attach the latest cached NAV per class (cache key = source:ticker).
+  if (out.length > 0) {
+    const keyOf = (t: string) => `thai_mutual_fund:${t}`;
+    const quotes = getMarketDb()
+      .select({
+        ticker: fundQuotes.ticker,
+        nav: fundQuotes.nav,
+        updatedAt: fundQuotes.updatedAt,
+        y1Pct: fundQuotes.y1Pct,
+      })
+      .from(fundQuotes)
+      .where(
+        inArray(
+          fundQuotes.ticker,
+          out.map((x) => keyOf(x.ticker)),
+        ),
+      )
+      .all();
+    const qmap = new Map(quotes.map((q) => [q.ticker, q]));
+    for (const x of out) {
+      const q = qmap.get(keyOf(x.ticker));
+      if (q) {
+        x.nav = q.nav;
+        x.navAsOf = q.updatedAt;
+        x.y1Pct = q.y1Pct ?? null;
+      }
+    }
+  }
+
+  return out;
 }
 
 /**

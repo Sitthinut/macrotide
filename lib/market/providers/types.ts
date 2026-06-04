@@ -30,6 +30,12 @@ export interface SeriesPoint {
   /** UNIX seconds. */
   t: number;
   close: number;
+  /**
+   * Fund total net assets (AUM) on this date, when the source reports it. The
+   * Thai SEC daily-NAV row carries it (`net_asset`) alongside the per-unit NAV;
+   * index/stock providers leave it undefined.
+   */
+  netAsset?: number | null;
 }
 
 export interface Provider {

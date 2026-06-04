@@ -25,7 +25,8 @@ responsive across mobile / tablet / desktop with light/dark/system themes.
 | In-chat vision — attach images for the Advisor to read; multi-image holdings reconciliation → in-chat table + importer, chart/factsheet Q&A | ✅ Shipped |
 | Passkey auth + isolated per-session demo mode | ✅ Shipped |
 | Market data — real index levels (EODHD/FMP, with ETF-proxy + Yahoo fallback) + FX, Thai fund NAVs + history (Thai SEC), RSS news | ✅ Shipped |
-| Instant fund finder — fuzzy + feeder-aware search, fee-annotated | ✅ Shipped |
+| Fund finder & screener — fuzzy + feeder-aware search over priceable **share classes**, with per-class fee / tax wrapper / 1-year return | ✅ Shipped |
+| Fund detail — per-share-class price & fund-size (AUM) history chart with class selector | ✅ Shipped |
 | Portfolio import — Paste/CSV, editable table entry with autocomplete, image OCR review | ✅ Shipped |
 | Long-term memory + chat archival — recall, FTS, session lifecycle | ✅ Shipped |
 | Multi-user — per-user isolation, tiers/quotas (token + optional cost caps, configurable cheap-paid free tier), owner admin | 🟡 Code shipped; launch prep open |

@@ -28,7 +28,9 @@ import { withDb } from "@/lib/api/with-db";
 import { getMarketDb } from "@/lib/db/context";
 import { getFeederEnrichment } from "@/lib/db/queries/feeder-enrichment";
 import { getFundEnrichment } from "@/lib/db/queries/fund-enrichment";
+import { getShareClassByTicker, listShareClassesByProj } from "@/lib/db/queries/share-classes";
 import { fundCatalog } from "@/lib/db/schema";
+import { pickDefaultClass } from "@/lib/market/share-class-select";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,12 +42,18 @@ export async function GET(_req: Request, { params }: { params: Promise<{ projId:
   }
 
   return withDb(() => {
-    // Match on proj_id (Explore passes this) OR abbr_name (a holding passes its
-    // bare ticker). proj_id wins when both could match.
-    const fund = getMarketDb()
+    // Resolve the path segment to a catalog fund. It may be a proj_id, a parent
+    // abbr_name, or a share-class ticker (the screener/search now pass a class).
+    const db = getMarketDb();
+    const classMatch = getShareClassByTicker(projId);
+    const fund = db
       .select()
       .from(fundCatalog)
-      .where(or(eq(fundCatalog.projId, projId), eq(fundCatalog.abbrName, projId)))
+      .where(
+        classMatch
+          ? eq(fundCatalog.projId, classMatch.projId)
+          : or(eq(fundCatalog.projId, projId), eq(fundCatalog.abbrName, projId)),
+      )
       .get();
 
     if (!fund) {
@@ -56,10 +64,21 @@ export async function GET(_req: Request, { params }: { params: Promise<{ projId:
     const enrichment = getFundEnrichment(fund.projId);
     const feederEnrichment = getFeederEnrichment(fund.projId);
 
+    // Share classes (priceable units) + which one to show first: the class the
+    // caller opened (a ticker click) wins; otherwise the heuristic default.
+    const shareClasses = listShareClassesByProj(fund.projId);
+    const selectedClassTicker =
+      classMatch?.ticker ??
+      pickDefaultClass(shareClasses, fund.abbrName)?.ticker ??
+      fund.abbrName ??
+      null;
+
     return NextResponse.json({
       ...fund,
       ...enrichment,
       ...feederEnrichment,
+      shareClasses,
+      selectedClassTicker,
     });
   });
 }

@@ -32,6 +32,26 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   adopts its verified address, and unlinking your last provider clears it back to
   emailless. The post-sign-in "add a passkey" offer appears only when you don't
   have one yet, and not again once dismissed. Rationale: ADR 0001.
+- **Explore and fund detail now work at the share-class level.** A fund's
+  priceable share classes are catalogued separately from the parent fund, so
+  fees, tax wrapper, distribution policy, ISIN, and NAV are tracked per class.
+  Explore lists priceable classes (hiding institutional/insurance classes by
+  default), each showing its per-class fee and trailing 1-year return; the fund
+  detail offers a class selector that defaults to the retail, accumulating class.
+  The classes are gathered in the same SEC crawl as the catalog, with no extra
+  API calls.
+- **Fund detail now charts its history.** Opening a fund in Explore shows a
+  history chart sourced from the cached daily series, with a range selector
+  (1M / 3M / 6M / 1Y / All) and a Price / Fund-size (AUM) toggle — read how a
+  fund has moved and grown before adding it; the price tooltip also reads the
+  cumulative return since the window start. The fund's net assets ride along in
+  the same SEC NAV row, so AUM costs no extra fetch. Funds with no cached history
+  yet show a graceful empty state.
+- **Charts now deepen their own history on demand.** Asking for a longer range
+  than the cache holds (e.g. "All" on a fund only ever fetched at six months)
+  now re-fetches the full series even while the quote is still fresh, instead of
+  showing a truncated window. The market cache records the deepest range fetched
+  per symbol and never prunes stored history by age.
 - **The fund portfolio table now reads by security and groups by asset type.**
   Each holding leads with its own identifier — the ticker for listed securities
   (e.g. "EWT US"), the issuer for a bank deposit — instead of the SEC's generic

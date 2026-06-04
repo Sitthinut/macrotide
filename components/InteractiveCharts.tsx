@@ -75,6 +75,9 @@ export function NavChart({
   benchmarkData = null,
   benchmarkLabel = null,
   emptyHint = null,
+  valueFormatter = fmtBaht,
+  seriesLabel = "Portfolio",
+  showReturnInTooltip = false,
 }: {
   data: SeriesPoint[];
   height?: number;
@@ -82,12 +85,25 @@ export function NavChart({
   benchmarkData?: SeriesPoint[] | null;
   benchmarkLabel?: string | null;
   emptyHint?: string | null;
+  /** Formats the main line's value in the tooltip. Defaults to whole-baht. */
+  valueFormatter?: (n: number) => string;
+  /** Tooltip label for the main series. Defaults to "Portfolio". */
+  seriesLabel?: string;
+  /**
+   * Append the cumulative % change since the window's first point to the main
+   * series' tooltip — so a single line reads as both an absolute value and a
+   * return (the two are the same curve, just rescaled). Off for the portfolio.
+   */
+  showReturnInTooltip?: boolean;
 }) {
   const gradId = `nav-grad-${useId().replace(/:/g, "")}`;
 
   if (!data || data.length === 0) {
     return <EmptyState height={height} emptyHint={emptyHint} />;
   }
+
+  // First finite value, for the "% since start" reading in the tooltip.
+  const baseline = data.find((d) => Number.isFinite(d.v))?.v;
 
   // Overlay the benchmark aligned to the portfolio's own date labels, then
   // rebase it onto the portfolio's value at their first common date so both
@@ -124,10 +140,16 @@ export function NavChart({
           cursor={{ stroke: "var(--line)", strokeWidth: 1 }}
           contentStyle={TOOLTIP_STYLE}
           labelStyle={TOOLTIP_LABEL}
-          formatter={(value, name) => [
-            fmtBaht(Number(value)),
-            name === "bench" ? (benchmarkLabel ?? "Benchmark") : "Portfolio",
-          ]}
+          formatter={(value, name) => {
+            if (name === "bench") return [fmtBaht(Number(value)), benchmarkLabel ?? "Benchmark"];
+            const v = Number(value);
+            let text = valueFormatter(v);
+            if (showReturnInTooltip && baseline) {
+              const pct = (v / baseline - 1) * 100;
+              text = `${text} · ${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
+            }
+            return [text, seriesLabel];
+          }}
         />
         <Area
           type="monotone"

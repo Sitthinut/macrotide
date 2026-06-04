@@ -42,9 +42,10 @@ app.db but share the real market.db read-write (same warm cache as real users).
 
 | Table | Holds | Key columns / notes |
 |---|---|---|
-| `fund_quotes` | Latest NAV + performance per ticker | `ticker` PK, `nav`, `d1_pct`, `ytd_pct`, `y1_pct` |
-| `nav_history` | Daily NAV history | Composite PK (`ticker`, `date`) |
-| `fund_catalog` | SEC-sourced fund universe | keyed by `proj_id`; `current_ter` is a **derived cache** of the latest TER (maintained by `upsertFundFees`; source of truth stays `fund_fees`) so the finder can sort/annotate fees without a fee-history query |
+| `fund_quotes` | Latest NAV + performance per ticker | `ticker` PK, `nav`, `d1_pct`, `ytd_pct`, `y1_pct`, `deepest_range` (widest series range fetched — lets a wider request deepen a fresh-but-shallow cache) |
+| `nav_history` | Daily NAV (+ fund AUM) history — **append/update only, never time-pruned** | Composite PK (`ticker`, `date`); `nav`, `net_asset` (fund total net assets / AUM, when the source reports it) |
+| `fund_catalog` | SEC-sourced fund universe (parent-level: one row per `proj_id`) | keyed by `proj_id`; `current_ter` is a **derived cache** of the latest TER (maintained by `upsertFundFees`; source of truth stays `fund_fees`) so the finder can sort/annotate fees without a fee-history query |
+| `fund_share_classes` | The **priceable units** of each fund (one row per SEC share class) | composite PK (`proj_id`, `class_name`); `ticker` is `UNIQUE` and is the holdable/cache-key id — see below |
 | `fund_fees` | Fee history per fund class | source of truth for TER |
 | `fund_performance`, `fund_asset_allocation`, `fund_top_holdings`, `fund_portfolio`, `fund_portfolio_asset_type` | Per-fund enrichment depth | ingested behind default-off crawl flags; composite `(proj_id, period)` indexes |
 | `feeder_master_map`, `feeder_look_through_holdings` | Feeder-fund → US master look-through | from SEC EDGAR N-PORT |
@@ -52,6 +53,41 @@ app.db but share the real market.db read-write (same warm cache as real users).
 > Cache keys in `fund_quotes`/`nav_history` are the combined `${source}:${ticker}`
 > so one table holds quotes from different providers without a schema change.
 > See [AGENTS.md § Provider routing](../../AGENTS.md#provider-routing-via-holdingsquote_source).
+
+#### Parent fund vs. share classes
+
+`fund_catalog` is **parent-level** — one row per `proj_id` carries fund-level
+metadata (name, AMC, policy, region, feeder relationship). But NAV, fees, tax
+wrapper, and distribution policy differ **per share class**, so each priceable
+class gets its own row in **`fund_share_classes`**:
+
+| Column | Holds |
+|---|---|
+| `proj_id` | Parent fund (FK → `fund_catalog`, cascade delete) |
+| `class_name` | Raw SEC `fund_class_name` (`"main"` for single-class funds, e.g. `"MDIVA-A"` for multi-class) |
+| `ticker` | The **priceable id** — holdable identifier + NAV cache-key tail |
+| `class_detail_th` | Raw Thai class detail string |
+| `distribution_policy` | `accumulating` \| `dividend` \| NULL (parsed from `class_detail_th`) |
+| `investor_type` | `retail` \| `institutional` \| `insurance` \| NULL — only retail is buyable by individuals |
+| `tax_incentive_type` | Per-class wrapper: `SSF` \| `RMF` \| `ThaiESG` \| NULL |
+| `isin_code` | Per-class ISIN |
+| `current_ter` | Per-class total expense ratio %, derived from `fund_fees` (NULL when unpublished) |
+
+The **PK is composite `(proj_id, class_name)`** because `class_name` `"main"` is
+not unique across funds. The **`ticker` carries the `UNIQUE` index** and is the
+single id that `holdings`, search, and the NAV chart key on. It is **derived**:
+the parent's `abbr_name` when the SEC class is `"main"` (single-class funds), else
+the class code itself (e.g. `MDIVA-A`). Because `ticker` is the cache-key tail of
+`${source}:${ticker}`, each share class resolves to its own NAV/quote rows in
+`fund_quotes`/`nav_history`.
+
+Rows are populated by the same SEC general-info/profiles enumeration that builds
+the catalog, de-duped per class — **no extra API calls**. Queries live in
+[lib/db/queries/share-classes.ts](../../lib/db/queries/share-classes.ts)
+(`upsertShareClasses`, `listShareClassesByProj`, `getShareClassByTicker`);
+[lib/market/share-class-select.ts](../../lib/market/share-class-select.ts)'s
+`pickDefaultClass` chooses the default class (retail-first, then accumulating).
+Why parent and class are split: [explanation/architecture.md § Market data](../explanation/architecture.md#market-data).
 
 ### Chat & memory
 

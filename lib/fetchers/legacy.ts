@@ -78,6 +78,7 @@ export function usePortfolioView(range: SeriesRange = "6mo") {
         ytdPct: prev?.ytdPct ?? null,
         y1Pct: prev?.y1Pct ?? null,
         updatedAt: r.asOf ?? new Date().toISOString(),
+        deepestRange: prev?.deepestRange ?? null,
       });
     }
     return [...map.values()];

@@ -45,6 +45,7 @@ const sampleQuote = {
   ytdPct: 8.5,
   y1Pct: 12.0,
   updatedAt: "2026-05-21",
+  deepestRange: null,
 };
 
 describe("adaptPortfolios", () => {
