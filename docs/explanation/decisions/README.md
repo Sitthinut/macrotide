@@ -6,9 +6,20 @@ the [GitHub Project board](https://github.com/users/Sitthinut/projects/2), shipp
 history in [CHANGELOG.md](../../../CHANGELOG.md).
 
 Lightweight by design — a table for the one-line picks, prose for the rules that
-outlive any single decision. A genuinely contentious decision can graduate to
-its own numbered ADR file in this folder when it needs the full
-context/options/consequences treatment.
+outlive any single decision.
+
+## What goes here
+
+Two questions, in order:
+
+1. **Is it worth recording?** The litmus test: *will someone six months from now
+   look at the codebase or setup, think "this is weird, why didn't they just do
+   X," and need an answer to avoid undoing it?* If no — it's the obvious choice,
+   or a code comment covers it — skip it. This log is for the non-obvious calls
+   where the obvious-looking alternative was **deliberately rejected**.
+2. **How heavy?** Default to a one-line row in [Picks](#picks). Reserve a
+   numbered ADR file for a genuinely contentious decision that needs the full
+   context/options/consequences treatment (settled-by-precedent ≠ ADR-worthy).
 
 ## Picks
 

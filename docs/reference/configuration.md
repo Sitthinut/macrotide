@@ -147,4 +147,4 @@ Update these together, in the same commit — never one without the others:
 3. [auth-and-providers.md](./auth-and-providers.md) and/or [deploy.md](../how-to/deploy.md) where they
    reference the specific variable.
 
-This rule is also recorded in the [AGENTS.md doc-stewardship table](../../AGENTS.md#source-of-truth-for-whats-done).
+This rule is also recorded in the [AGENTS.md doc-stewardship table](../../AGENTS.md#sources-of-truth--what-to-update).
