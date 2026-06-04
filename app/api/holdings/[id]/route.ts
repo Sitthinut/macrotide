@@ -1,12 +1,22 @@
 import { NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
-import { deleteHolding, getHolding, updateHolding } from "@/lib/db/queries/holdings";
+import { getBucket } from "@/lib/db/queries/buckets";
+import { getHolding } from "@/lib/db/queries/holdings";
+import { deleteHoldingViaLedger, editHoldingViaLedger } from "@/lib/db/queries/project-holdings";
+
+/** A holding is owned iff its parent bucket resolves under the user-scoped getBucket. */
+function ownsHolding(id: number): boolean {
+  const row = getHolding(id);
+  return !!row && !!getBucket(row.bucketId);
+}
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   return withDb(() => {
     const row = getHolding(Number(id));
-    if (!row) return NextResponse.json({ error: "not_found" }, { status: 404 });
+    if (!row || !getBucket(row.bucketId)) {
+      return NextResponse.json({ error: "not_found" }, { status: 404 });
+    }
     return NextResponse.json(row);
   });
 }
@@ -15,7 +25,26 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { id } = await params;
   const body = await req.json();
   return withDb(() => {
-    const row = updateHolding(Number(id), body);
+    if (!ownsHolding(Number(id))) {
+      return NextResponse.json({ error: "not_found" }, { status: 404 });
+    }
+    // Editing a holding is sugar over the ledger: position changes write events,
+    // metadata updates the row (ADR 0004).
+    const row = editHoldingViaLedger(Number(id), {
+      ticker: body.ticker,
+      englishName: body.englishName,
+      quoteSource: body.quoteSource,
+      units: body.units == null ? undefined : Number(body.units),
+      avgCost:
+        body.avgCost === undefined ? undefined : body.avgCost == null ? null : Number(body.avgCost),
+      source: body.source,
+      thaiName: body.thaiName,
+      category: body.category,
+      assetClass: body.assetClass,
+      region: body.region,
+      ter: body.ter === undefined ? undefined : body.ter == null ? null : Number(body.ter),
+      color: body.color,
+    });
     if (!row) return NextResponse.json({ error: "not_found" }, { status: 404 });
     return NextResponse.json(row);
   });
@@ -24,7 +53,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   return withDb(() => {
-    deleteHolding(Number(id));
+    if (!ownsHolding(Number(id))) {
+      return NextResponse.json({ error: "not_found" }, { status: 404 });
+    }
+    deleteHoldingViaLedger(Number(id));
     return new NextResponse(null, { status: 204 });
   });
 }

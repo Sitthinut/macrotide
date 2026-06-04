@@ -696,6 +696,12 @@ body[data-topbar-hidden="true"] .portfolio-switch {
   color: var(--ink);
   box-shadow: var(--chip-shadow);
 }
+/* The Holdings ↔ Activity mode toggle sits in the modal header, under the
+   subtitle — space it from the text above, no bottom margin (header pads it). */
+.add-mode-tabs {
+  margin-top: 12px;
+  margin-bottom: 0;
+}
 
 /* Unified sheet input styling so <input> and <textarea> match. Radius matches
    the add-holdings symbol field (.manual-row input) for one input look app-wide. */
@@ -909,6 +915,159 @@ textarea.sheet-input {
   .manual-row {
     grid-template-columns: minmax(0, 1.4fr) minmax(66px, 1fr) minmax(66px, 1fr) 22px;
     gap: 5px;
+  }
+}
+
+/* Transaction confirmation row (see AddTransactionsSheet). One CSS grid whose
+   cells are placed by class, so the SAME markup is a single line on wide screens
+   (desktop / landscape) and a stacked card on narrow ones — DOM order is fixed,
+   only the placement changes. Reuses the .manual-row input chrome. */
+.txn-row {
+  display: grid;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: var(--card-soft);
+  /* Wide (default): date | type | symbol | units | price | fee | amount | remove. */
+  grid-template-columns:
+    124px 98px minmax(110px, 1.4fr) minmax(60px, 0.8fr) minmax(60px, 0.8fr)
+    minmax(56px, 0.7fr) minmax(82px, 1fr) 28px;
+}
+.txn-row input,
+.txn-row select {
+  background: var(--paper);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  color: var(--ink);
+  outline: none;
+  min-width: 0;
+  width: 100%;
+}
+.txn-row input:focus,
+.txn-row select:focus {
+  border-color: var(--accent);
+}
+.txn-row__remove {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 6px;
+  justify-self: center;
+  padding: 4px;
+}
+/* Stacked (narrow / portrait): a 12-col grid placed as
+   row1 date|type|remove · row2 symbol · row3 units|price · row4 fee|amount.
+   Grid placement ignores DOM order, so remove still reads top-right. */
+@media (max-width: 760px) {
+  .txn-row {
+    grid-template-columns: repeat(12, 1fr);
+    gap: 5px;
+  }
+  .txn-c-date {
+    grid-area: 1 / 1 / 2 / 7;
+  }
+  .txn-c-type {
+    grid-area: 1 / 7 / 2 / 12;
+  }
+  .txn-c-remove {
+    grid-area: 1 / 12 / 2 / 13;
+  }
+  .txn-c-symbol {
+    grid-area: 2 / 1 / 3 / 13;
+  }
+  .txn-c-units {
+    grid-area: 3 / 1 / 4 / 7;
+  }
+  .txn-c-price {
+    grid-area: 3 / 7 / 4 / 13;
+  }
+  .txn-c-fee {
+    grid-area: 4 / 1 / 5 / 7;
+  }
+  .txn-c-amount {
+    grid-area: 4 / 7 / 5 / 13;
+  }
+}
+
+/* Inline editor for a single Activity-ledger row (edit-in-place + add-row).
+   Distinct from .txn-row (the bulk importer) — fewer columns, its own action
+   row, and an anchor variant that hides the trade-type/fee/amount cells. */
+.ledger-edit {
+  display: grid;
+  gap: 6px;
+  align-items: center;
+  grid-template-columns: 116px 100px minmax(90px, 1fr) 68px 68px 62px 88px;
+}
+.ledger-edit.is-anchor {
+  grid-template-columns: 116px minmax(110px, 1fr) 90px 90px;
+}
+.ledger-edit.has-bucket {
+  grid-template-columns: 120px 116px 100px minmax(80px, 1fr) 64px 64px 60px 84px;
+}
+.ledger-edit input,
+.ledger-edit select {
+  background: var(--paper);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  color: var(--ink);
+  outline: none;
+  min-width: 0;
+  width: 100%;
+}
+.ledger-edit input:focus,
+.ledger-edit select:focus {
+  border-color: var(--accent);
+}
+/* The pinned anchor type — a plain label, never a trade-type the user can pick. */
+.ledger-edit__pin {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  border: 1px dashed var(--line-soft);
+  border-radius: 6px;
+  padding: 6px 8px;
+  text-align: center;
+  white-space: nowrap;
+}
+.ledger-edit-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 8px;
+}
+.ledger-edit-card {
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 10px;
+  margin-bottom: 8px;
+  background: var(--card-soft);
+}
+@media (max-width: 760px) {
+  .ledger-edit,
+  .ledger-edit.is-anchor,
+  .ledger-edit.has-bucket {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* Wider form modal for the transaction importer — its row needs ≥7 columns on
+   one line. `.modal.modal--txnwide` (specificity 0,2,0) so it beats the base
+   `.modal` max-width regardless of source order. Desktop/landscape only; mobile
+   stays the full-bleed bottom sheet. */
+@media (min-width: 600px) {
+  .modal.modal--txnwide {
+    max-width: 880px;
   }
 }
 

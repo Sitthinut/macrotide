@@ -15,6 +15,14 @@ export interface Holding {
   region: string;
   value: number;
   cost: number;
+  /**
+   * Whether the cost basis is known. False when the position is held but its
+   * avg cost is unknown (an uncosted opening/snapshot — ADR 0004): `cost` is
+   * then 0 and gain-based figures must degrade gracefully, never show a bogus
+   * gain. Optional/defaults true for the many places that build a Holding from
+   * fully-costed mock data.
+   */
+  costKnown?: boolean;
   units: number;
   nav: number;
   d1: number;

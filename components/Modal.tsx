@@ -85,10 +85,20 @@ export interface ModalProps {
   labelledBy?: string;
   /** Override the inferred role (`dialog`, or `alertdialog` for confirm). */
   role?: "dialog" | "alertdialog";
+  /** Extra class on the panel (e.g. a width modifier like `modal--txnwide`). */
+  className?: string;
   children: React.ReactNode;
 }
 
-export function Modal({ open, onClose, variant = "form", labelledBy, role, children }: ModalProps) {
+export function Modal({
+  open,
+  onClose,
+  variant = "form",
+  labelledBy,
+  role,
+  className,
+  children,
+}: ModalProps) {
   const viewport = useViewport();
   const isWide = viewport !== "mobile";
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -179,7 +189,7 @@ export function Modal({ open, onClose, variant = "form", labelledBy, role, child
       {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: role is dialog|alertdialog (dynamic), both support aria-modal */}
       <div
         ref={panelRef}
-        className={`modal modal--${variant}`}
+        className={`modal modal--${variant}${className ? ` ${className}` : ""}`}
         role={resolvedRole}
         aria-modal="true"
         aria-labelledby={labelledBy}

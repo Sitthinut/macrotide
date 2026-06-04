@@ -1,6 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "../context";
-import { holdings } from "../schema";
+import { holdings, transactions } from "../schema";
 
 export type Holding = typeof holdings.$inferSelect;
 export type HoldingInsert = typeof holdings.$inferInsert;
@@ -40,7 +40,15 @@ export function deleteHolding(id: number): void {
  */
 export function renameHoldingSource(bucketIds: string[], from: string, to: string): number {
   if (bucketIds.length === 0) return 0;
-  const res = getDb()
+  const db = getDb();
+  // `source` is ledger-carried identity (ADR 0004): rename it on the ledger too,
+  // or the next projection rebuild would revert the holding rows. Both are kept
+  // in step so they never disagree.
+  db.update(transactions)
+    .set({ source: to || null })
+    .where(and(eq(transactions.source, from), inArray(transactions.bucketId, bucketIds)))
+    .run();
+  const res = db
     .update(holdings)
     .set({ source: to || null, updatedAt: new Date().toISOString() })
     .where(and(eq(holdings.source, from), inArray(holdings.bucketId, bucketIds)))

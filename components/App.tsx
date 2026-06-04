@@ -4,7 +4,9 @@ import "overlayscrollbars/overlayscrollbars.css";
 import { useOverlayScrollbars } from "overlayscrollbars-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { type AddedHolding, AddHoldingsSheet } from "@/components/AddHoldingsSheet";
+import { ActivityModal } from "@/components/ActivityModal";
+import type { AddedHolding } from "@/components/AddHoldingsSheet";
+import { type AddMode, AddToPortfolioSheet } from "@/components/AddToPortfolioSheet";
 import {
   type AppId,
   ChatPanel,
@@ -29,6 +31,7 @@ import { usePortfolioView, useSelectedModelId } from "@/lib/fetchers/legacy";
 import { usePlan } from "@/lib/fetchers/portfolio";
 import { invalidate, useResource } from "@/lib/fetchers/swr";
 import type { AdvisorScreenContext } from "@/lib/portfolio/chat-suggestions";
+import type { ExtractedTxnRow } from "@/lib/portfolio/ocr";
 import { restoreScreenScroll, saveScreenScroll } from "@/lib/screenScroll";
 import type { Portfolio } from "@/lib/static/types";
 import { type ImportSeedRow, useImportSeed } from "@/lib/stores/import-seed";
@@ -192,18 +195,28 @@ export function App() {
   });
   const [screen, setScreen] = useState<Screen>("portfolio");
   const [pendingPrompt, setPendingPrompt] = useState<SeedPrompt | null>(null);
-  const [importOpen, setImportOpen] = useState(false);
+  // One "Add to portfolio" sheet with a Holdings (snapshot) / Activity (ledger)
+  // toggle — both write to the same ledger (ADR 0004). `addMode` picks the entry
+  // form; the seeds carry rows handed in by the Advisor importer or the
+  // scope-guard so the user needn't re-enter them.
+  const [addOpen, setAddOpen] = useState(false);
+  const [addMode, setAddMode] = useState<AddMode>("snapshot");
   // Rows the Advisor's in-chat holdings table hands to the importer (via the
   // import-seed store), copied into local state so the sheet keeps them after
   // the consumable store intent is cleared.
   const [importSeed, setImportSeed] = useState<ImportSeedRow[] | null>(null);
+  // The Activity modal (the ledger view, scoped to a bucket or all). `txnSeed`
+  // carries rows handed off from the holdings importer's scope-guard.
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [txnSeed, setTxnSeed] = useState<ExtractedTxnRow[] | null>(null);
   const { seedRows: seedRequest, openNonce: seedNonce, consumeImportSeed } = useImportSeed();
   const handledSeedNonce = useRef(0);
   useEffect(() => {
     if (seedNonce > 0 && seedNonce !== handledSeedNonce.current && seedRequest) {
       handledSeedNonce.current = seedNonce;
       setImportSeed(seedRequest);
-      setImportOpen(true);
+      setAddMode("snapshot");
+      setAddOpen(true);
       consumeImportSeed();
     }
   }, [seedNonce, seedRequest, consumeImportSeed]);
@@ -489,7 +502,11 @@ export function App() {
           showMenu={!isWide}
           onOpenModels={() => setScreen("models")}
           onOpenChat={openChat}
-          onOpenImport={() => setImportOpen(true)}
+          onOpenImport={() => {
+            setAddMode("snapshot");
+            setAddOpen(true);
+          }}
+          onOpenActivity={() => setActivityOpen(true)}
         />
       );
     }
@@ -580,14 +597,31 @@ export function App() {
             : undefined
         }
       />
-      <AddHoldingsSheet
-        open={importOpen}
-        seedRows={importSeed}
+      <AddToPortfolioSheet
+        open={addOpen}
+        mode={addMode}
+        onModeChange={setAddMode}
+        holdingsSeed={importSeed}
+        txnSeed={txnSeed}
         onClose={() => {
-          setImportOpen(false);
+          setAddOpen(false);
           setImportSeed(null);
+          setTxnSeed(null);
         }}
         onAdd={(rows) => setExtraHoldings((prev) => [...prev, ...rows])}
+        onHandoffToActivity={(seed) => setTxnSeed(seed)}
+        onSaved={() => setActivityOpen(true)}
+      />
+      <ActivityModal
+        open={activityOpen}
+        onClose={() => setActivityOpen(false)}
+        onAddTransactions={() => {
+          // Don't stack modals — close Activity, then open the unified Add sheet
+          // straight into Activity mode.
+          setActivityOpen(false);
+          setAddMode("activity");
+          setAddOpen(true);
+        }}
       />
     </>
   );

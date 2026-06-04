@@ -308,6 +308,159 @@ async function extractWith(
 }
 
 /**
+ * A single transaction the vision model read off a tall buy/sell-log screenshot,
+ * BEFORE any normalization. Like {@link ExtractedRow}, every numeric field is
+ * optional — the extractor reports only what it actually saw and the editable
+ * confirmation table is the human gate. `kind`/`tradeDate` are free-text as
+ * printed; the client normalizes them (see lib/portfolio/txn-import.ts).
+ */
+export interface ExtractedTxnRow {
+  ticker: string;
+  englishName?: string;
+  /** "buy" / "sell" / "dividend" / … as printed; normalized client-side. */
+  kind?: string;
+  /** Trade date as printed; normalized to ISO client-side. */
+  tradeDate?: string;
+  units?: number;
+  pricePerUnit?: number;
+  /** The baht amount of the transaction (unsigned magnitude). */
+  amount?: number;
+  fee?: number;
+}
+
+const EXTRACT_TXN_PROMPT = `You are reading a screenshot of a Thai mutual-fund / brokerage TRANSACTION HISTORY — a log of buys, sells and dividends over time (many rows, often the SAME fund repeated, each row belonging to a date). Extract EVERY transaction row as a JSON array — output ONLY the array, no prose, no markdown code fences.
+
+DATES ARE GROUP HEADERS. Thai transaction logs print the date ONCE as a bold header (e.g. "16 มีนาคม 2569", "22 ธันวาคม 2568") above a GROUP of transactions, then list several transactions under it with no date of their own. You MUST give every transaction the date of the nearest header ABOVE it. Do not leave tradeDate blank just because the row itself has no date printed.
+
+Each element has these keys (include a key ONLY if that value is visible or inheritable; omit keys you genuinely cannot determine — never invent numbers):
+- "tradeDate": ALWAYS fill this, inherited from the group header. Output ISO "YYYY-MM-DD".
+  - Thai month names: มกราคม=01 กุมภาพันธ์=02 มีนาคม=03 เมษายน=04 พฤษภาคม=05 มิถุนายน=06 กรกฎาคม=07 สิงหาคม=08 กันยายน=09 ตุลาคม=10 พฤศจิกายน=11 ธันวาคม=12.
+  - Years are usually BUDDHIST ERA (พ.ศ., ~2560s). Convert to Gregorian by SUBTRACTING 543: 2569 → 2026, 2568 → 2025. (If a year is already < 2200 assume it is Gregorian.)
+  - So "16 มีนาคม 2569" → "2026-03-16"; "22 ธันวาคม 2568" → "2025-12-22".
+- "kind": one of "buy", "sell", "dividend", "fee", "split", "reinvest". Map the Thai/English label on the row:
+  - ซื้อ / subscribe / purchase → "buy"
+  - ขาย / redeem / sell → "sell"
+  - เงินปันผล / dividend → "dividend"
+  - A สับเปลี่ยน (switch/exchange) splits into TWO rows: the ออก (out) leg → "sell", the เข้า (in) leg → "buy". Emit them as two separate transactions with their own ticker, units and amount.
+- "ticker": the fund code exactly as printed (e.g. "TLFVMR-ASIAX", "K-US500X-A(A)", "SCBCOMP").
+- "units": units bought/sold on this row (often labelled "หน่วย").
+- "pricePerUnit": the NAV / price per unit on this row, if shown.
+- "amount": the baht (฿) amount of this transaction (the total value moved).
+- "fee": any fee / front-end charge on this row, in baht.
+
+CRITICAL number rules — read every digit and decimal EXACTLY as printed:
+- The ฿ symbol is a CURRENCY MARKER, never a digit. "฿18.4521" is 18.4521, NOT 818.4521. Strip it.
+- Remove thousands-separator commas: "719,193.85" → 719193.85.
+- Never round, pad, or normalise. Output plain JSON numbers (no quotes, no ฿, no commas, no % sign).
+- "amount" is always a POSITIVE magnitude — do NOT make sells negative; the "kind" carries the direction.
+- Ignore channel badges (e.g. "AMC"), status checkmarks, running balances, and section headers — they are not transactions.
+
+If the image shows no transaction history at all, return [].`;
+
+/**
+ * Read a transaction-history screenshot into structured rows. Same provider +
+ * fallback policy as {@link extractStructuredHoldings}. Returns `[]` when a model
+ * runs but reads nothing. Rows come back raw — the client normalizes kind/date
+ * and the route signs the amount.
+ */
+export async function extractTransactionRows(input: OcrInput): Promise<ExtractedTxnRow[]> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENROUTER_API_KEY is not set");
+  }
+
+  const primary = process.env.OCR_MODEL?.trim() || DEFAULT_OCR_MODEL;
+  const fallbackEnv = process.env.OCR_FALLBACK_MODEL?.trim();
+  const fallback = fallbackEnv ?? (process.env.OCR_MODEL ? null : DEFAULT_OCR_FALLBACK_MODEL);
+
+  try {
+    return await extractTxnWith(apiKey, primary, input);
+  } catch (err) {
+    if (err instanceof OcrProviderUnavailableError && fallback && fallback !== primary) {
+      return await extractTxnWith(apiKey, fallback, input);
+    }
+    throw err;
+  }
+}
+
+async function extractTxnWith(
+  apiKey: string,
+  modelId: string,
+  input: OcrInput,
+): Promise<ExtractedTxnRow[]> {
+  const model = openrouterVisionModel(apiKey, modelId);
+  try {
+    const result = await generateText({
+      model,
+      temperature: 0,
+      maxOutputTokens: 4096,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: EXTRACT_TXN_PROMPT },
+            { type: "image", image: input.data, mediaType: input.mimeType },
+          ],
+        },
+      ],
+    });
+    return parseExtractedTxnRows(result.text ?? "");
+  } catch (err) {
+    if (isProviderError(err)) {
+      throw new OcrProviderUnavailableError(extractProviderMessage(err));
+    }
+    return [];
+  }
+}
+
+/** Tolerant parser for the transaction-extraction reply (see {@link parseExtractedRows}). */
+export function parseExtractedTxnRows(text: string): ExtractedTxnRow[] {
+  const raw = parseJsonArray(text);
+  if (!raw) return [];
+  const rows: ExtractedTxnRow[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const ticker = typeof o.ticker === "string" ? o.ticker.trim() : "";
+    if (!ticker) continue;
+    const row: ExtractedTxnRow = { ticker };
+    if (typeof o.englishName === "string" && o.englishName.trim())
+      row.englishName = o.englishName.trim();
+    if (typeof o.kind === "string" && o.kind.trim()) row.kind = o.kind.trim();
+    if (typeof o.tradeDate === "string" && o.tradeDate.trim()) row.tradeDate = o.tradeDate.trim();
+    const units = coerceNumber(o.units);
+    const price = coerceNumber(o.pricePerUnit);
+    const amount = coerceNumber(o.amount);
+    const fee = coerceNumber(o.fee);
+    if (units !== null) row.units = units;
+    if (price !== null) row.pricePerUnit = price;
+    if (amount !== null) row.amount = amount;
+    if (fee !== null) row.fee = fee;
+    rows.push(row);
+  }
+  return rows;
+}
+
+/** Narrow a model reply to the outermost JSON array, tolerating fences/prose. */
+function parseJsonArray(text: string): unknown[] | null {
+  if (!text) return null;
+  let s = text.trim();
+  s = s
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```$/, "")
+    .trim();
+  const a = s.indexOf("[");
+  const b = s.lastIndexOf("]");
+  if (a < 0 || b <= a) return null;
+  try {
+    const parsed = JSON.parse(s.slice(a, b + 1));
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Tolerant parser for the model's JSON-array reply. Handles markdown fences,
  * leading prose, and stray ฿/comma residue the prompt should have removed but
  * a weaker model might leave in. Drops rows without a usable ticker.

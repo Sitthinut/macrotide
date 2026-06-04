@@ -83,10 +83,13 @@ npm run db:seed
 
 ## 4. Add your first holding
 
-Go to **Connect** (or the Portfolio screen's add button) and add a holding —
-for example a ticker, the number of units, and your average cost. The Portfolio
-screen updates immediately: allocation, blended fees, and the health checks all
-recompute from your real numbers.
+Go to **Connect** (or the Portfolio screen's add button) to open the **Add to
+portfolio** sheet, and on the **Holdings** tab add a position — for example a
+ticker, the number of units, and your average cost. The Portfolio screen updates
+immediately: allocation, blended fees, and the health checks all recompute from
+your real numbers. (Flip to the **Activity** tab to log a buy/sell history
+instead, or open **Activity** from the Holdings header to edit any entry later —
+your holdings are just a projection of that ledger.)
 
 > Use placeholder fund codes while learning — never commit real ones. See the
 > personal-data rule in [AGENTS.md](../../AGENTS.md#personal-data--never-commit).

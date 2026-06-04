@@ -52,6 +52,9 @@ function holdingFromDb(
   const q = quotes.get(`${h.quoteSource}:${h.ticker}`) ?? quotes.get(h.ticker);
   const nav = q?.nav ?? h.avgCost ?? 0;
   const value = h.units * nav;
+  // Cost basis is unknown for an uncosted opening/snapshot (ADR 0004). Keep
+  // `cost` at 0 then, but flag it so gain figures degrade rather than mislead.
+  const costKnown = h.avgCost != null;
   const cost = (h.avgCost ?? 0) * h.units;
   return {
     id: h.id,
@@ -64,6 +67,7 @@ function holdingFromDb(
     region: h.region ?? "",
     value,
     cost,
+    costKnown,
     units: h.units,
     nav,
     d1: q?.d1Pct ?? 0,
