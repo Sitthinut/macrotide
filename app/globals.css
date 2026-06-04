@@ -697,12 +697,13 @@ body[data-topbar-hidden="true"] .portfolio-switch {
   box-shadow: var(--chip-shadow);
 }
 
-/* Unified sheet input styling so <input> and <textarea> match. */
+/* Unified sheet input styling so <input> and <textarea> match. Radius matches
+   the add-holdings symbol field (.manual-row input) for one input look app-wide. */
 .sheet-input {
   width: 100%;
   background: var(--card-soft);
   border: 1px solid var(--line-soft);
-  border-radius: 12px;
+  border-radius: 8px;
   padding: 10px 14px;
   font-family: var(--font-sans);
   font-size: 13.5px;

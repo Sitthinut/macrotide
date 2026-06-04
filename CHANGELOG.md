@@ -15,6 +15,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Refreshed sign-in & Account UI.** The login screen leads with "Continue with
+  Google" / "Continue with passkey" (each with its provider icon), a quiet
+  "Create account" link, and the demo below a divider. Account settings shows all
+  sign-in methods in one section (passkeys with per-credential add/remove over
+  the linked-provider row), an editable name, and an account email that appears
+  only when verified. One shared input radius app-wide.
 - **Passkey and Google are now peer sign-in methods, and accounts can't be
   pre-hijacked.** Creating an account with a passkey asks only for your name — no
   email — so no one can register an account at an address they don't control
