@@ -45,14 +45,16 @@ path ever lets someone claim an address they haven't proven. Full rationale:
 
 ### Adding / changing methods (Account settings)
 
-- **passkey → add OAuth:** Account → **Link** a provider. Adopts its verified
-  email into the account.
-- **OAuth → add passkey:** the post-sign-in prompt, or Account → register a
-  passkey.
-- **Unlink / revoke:** providers and passkeys can be removed, but the UI always
-  keeps at least one *usable* sign-in method (you can't revoke your last passkey
-  or unlink your last provider if it would lock you out). A removed passkey can't
-  sign in again — its server credential is gone.
+- **Edit your name** inline from the Profile card.
+- **passkey → add OAuth:** Account → **Link** a provider. The account email then
+  mirrors that provider's verified address.
+- **OAuth → add passkey:** the post-sign-in prompt (shown once, only if you have
+  no passkey yet), or Account → register a passkey.
+- **Unlink / revoke:** providers and passkeys can be removed, but at least one
+  *usable* sign-in method is always kept (you can't revoke your last passkey or
+  unlink your last provider if it would lock you out — enforced in the UI *and*
+  server-side). Unlinking your **last** provider clears the account email back to
+  emailless. A removed passkey can't sign in again — its server credential is gone.
 - **Ended up with two accounts** (signed up separately with each method)? They
   don't auto-merge; add a passkey to the OAuth account and abandon the spare.
   (Deleting the spare account is [planned](https://github.com/Sitthinut/macrotide/issues/105).)

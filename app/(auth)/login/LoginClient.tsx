@@ -86,10 +86,17 @@ export default function LoginClient() {
   );
 }
 
+// localStorage flag: once the user dismisses the post-OAuth "add a passkey"
+// offer, don't nag them again on this device.
+const PASSKEY_PROMPT_DISMISSED = "mt_passkey_prompt_dismissed";
+
 function LoginInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { data: session } = useSession();
+  // Reactive passkey list — used to skip the post-OAuth passkey offer for users
+  // who already have one.
+  const passkeyState = authClient.useListPasskeys();
   const [mode, setMode] = useState<Mode>("intro");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -107,6 +114,11 @@ function LoginInner() {
   const [error, setError] = useState<string | null>(null);
   const [config, setConfig] = useState<AuthConfig | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  // Decision for the optional post-OAuth passkey offer: false until the effect
+  // below confirms the user has no passkey and hasn't dismissed it. Keeps the
+  // localStorage read out of render (hydration-safe) and avoids flashing the
+  // offer to users who'll be skipped past it.
+  const [showOptionalOffer, setShowOptionalOffer] = useState(false);
 
   // After OAuth sign-in we redirect back to /login?passkey=prompt to offer
   // registering a passkey on this device. Detect that here.
@@ -142,6 +154,33 @@ function LoginInner() {
     }
   }, [session, router, passkeyPrompt, pendingPasskey, busy]);
 
+  // Post-OAuth passkey offer: show it only when the user has NO passkey yet and
+  // hasn't dismissed it before — otherwise it nags on every OAuth sign-in. Skip
+  // straight into the app in those cases. (pendingPasskey is the mandatory
+  // post-signup path and is never skipped here.)
+  useEffect(() => {
+    if (!passkeyPrompt || pendingPasskey || !session?.user || busy) return;
+    if (passkeyState.isPending) return; // wait for the list before deciding
+    const hasPasskey = (passkeyState.data?.length ?? 0) > 0;
+    const dismissed =
+      typeof window !== "undefined" &&
+      window.localStorage.getItem(PASSKEY_PROMPT_DISMISSED) === "1";
+    if (hasPasskey || dismissed) {
+      clearDemoSession();
+      router.replace("/");
+    } else {
+      setShowOptionalOffer(true);
+    }
+  }, [
+    passkeyPrompt,
+    pendingPasskey,
+    session,
+    busy,
+    passkeyState.isPending,
+    passkeyState.data,
+    router,
+  ]);
+
   // Header sent on the email account-creation POST so the server-side Turnstile
   // gate can verify it. Empty when Turnstile isn't configured (dev bypass).
   function turnstileHeaders(): Record<string, string> {
@@ -151,6 +190,17 @@ function LoginInner() {
   async function continueToApp() {
     await clearDemoSession();
     router.replace("/");
+  }
+
+  // "Skip for now" on the optional post-OAuth passkey offer: remember the
+  // dismissal so it doesn't reappear on the next OAuth sign-in.
+  async function dismissPasskeyPrompt() {
+    try {
+      window.localStorage.setItem(PASSKEY_PROMPT_DISMISSED, "1");
+    } catch {
+      // localStorage unavailable (private mode / blocked) — proceed anyway.
+    }
+    await continueToApp();
   }
 
   async function signInSocial(provider: "google" | "github") {
@@ -283,13 +333,21 @@ function LoginInner() {
   // configured. In dev (not configured) this is always satisfied.
   const turnstileSatisfied = !config?.turnstile.enabled || Boolean(turnstileToken);
 
+  // While deciding whether to show the optional post-OAuth offer (passkey list
+  // still loading, or about to redirect a user who already has one), render a
+  // quiet shell rather than flashing the offer or the logged-out login screen.
+  if (passkeyPrompt && !pendingPasskey && session?.user && !showOptionalOffer) {
+    return <div className="mt-landing-root" style={shell} />;
+  }
+
   // Passkey registration prompt. Two cases:
-  //  - Post-OAuth (6b): optional convenience — offer "Skip for now" since OAuth
-  //    is already a usable sign-in method.
+  //  - Post-OAuth: optional convenience — only shown when the user has no
+  //    passkey yet and hasn't dismissed it (see showOptionalOffer); offers
+  //    "Skip for now".
   //  - Post-email-signup (pendingPasskey): MANDATORY — the account has no
   //    password and no OAuth, so a passkey is the only way back in. No skip;
   //    a cancelled prompt stays here to retry.
-  if ((passkeyPrompt || pendingPasskey) && session?.user) {
+  if ((showOptionalOffer || pendingPasskey) && session?.user) {
     return (
       <div className="mt-landing-root" style={shell}>
         <div style={card}>
@@ -303,7 +361,7 @@ function LoginInner() {
             {busy ? "Setting up…" : pendingPasskey ? "Create passkey" : "Add a passkey"}
           </button>
           {!pendingPasskey && (
-            <button type="button" style={ghost} onClick={continueToApp} disabled={busy}>
+            <button type="button" style={ghost} onClick={dismissPasskeyPrompt} disabled={busy}>
               Skip for now
             </button>
           )}
