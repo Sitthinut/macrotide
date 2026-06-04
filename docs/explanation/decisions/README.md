@@ -18,7 +18,7 @@ context/options/consequences treatment.
 | Client data layer | SWR | React Query overkill at this scale |
 | AI provider | Vercel AI SDK + OpenRouter | Direct Anthropic SDK locks to one provider |
 | Chat model | `AI_MODELS` env (fallback chain), `openrouter/auto` default | Hardcoding one model = a one-string change every model bump |
-| Auth | better-auth + passkey + (env-gated) Google/GitHub | NextAuth heavier, Clerk/Auth0 vendor cost + lock-in |
+| Auth | better-auth + passkey + (env-gated) Google | NextAuth heavier, Clerk/Auth0 vendor cost + lock-in |
 | Signup + account linking | Emailless passkey accounts + OAuth as peer methods; link on demand, adopt the verified email on link — [ADR 0001](./0001-account-model-passkey-and-oauth.md) | Verifying a passkey-signup email needs a sender we don't run; keeping an email on passkey accounts leaves it squat-able |
 | Email transport | **Skip entirely** — SSO + passkeys only | DNS + spam-folder UX is friction for a soft-public launch |
 | Thai fund data | Thai SEC Open API — official, free w/ key | Scraping fund supermarkets = TOS/legal exposure |

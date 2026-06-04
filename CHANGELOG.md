@@ -15,7 +15,7 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
-- **Passkey and Google/GitHub are now peer sign-in methods, and accounts can't be
+- **Passkey and Google are now peer sign-in methods, and accounts can't be
   pre-hijacked.** Creating an account with a passkey asks only for your name — no
   email — so no one can register an account at an address they don't control
   (closing both account-takeover and email-squatting). You can start with either
@@ -140,9 +140,9 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 - **The login screen no longer shows a bot-check under the social sign-in
   buttons.** OAuth sign-in starts a redirect to the provider, which authenticates
   the user — so the Turnstile gate (which protects direct account creation) no
-  longer sits on or blocks the "Continue with Google / GitHub" buttons. It now
-  appears only on the email Create-account form, where an account is minted
-  without a third-party identity check.
+  longer sits on or blocks the "Continue with Google" button. It now appears only
+  on the passkey Create-account form, where an account is minted without a
+  third-party identity check.
 - **The Account screen's "Passkeys" status now reflects reality.** The status tag
   was hardcoded to "active"; an account that signed in with a social provider and
   skipped passkey setup has none, so it now reads "none" until a passkey is
@@ -471,8 +471,8 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   in explicitly), per-user investment plans, owner backfill from `OWNER_EMAIL`,
   `requireUser()` on API routes; holdings are scoped through their owning bucket
   (ownership validated on read + write).
-- **Identity providers** — Google + GitHub OAuth (env-gated; boots passkey-only
-  with nothing set), post-OAuth passkey-registration prompt.
+- **Identity providers** — Google OAuth (env-gated; boots passkey-only with
+  nothing set), post-OAuth passkey-registration prompt.
 - **Quotas + tier gating** — `free` (free-model router only) vs `trusted`
   (owner model chain), daily token cap, per-user usage logging, limit UI.
 - **Owner admin** — an owner-only screen (gated on `OWNER_EMAIL`, enforced

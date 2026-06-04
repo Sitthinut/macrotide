@@ -1,7 +1,7 @@
 # ADR 0001 — Account model: emailless passkey + OAuth, linked on demand
 
 **Status:** Accepted.
-**Context:** the app offers passkeys and (env-gated) Google / GitHub OAuth. We
+**Context:** the app offers passkeys and (env-gated) Google OAuth. We
 need a signup + account-linking model that (a) can't be pre-hijacked, (b) lets a
 user start with *either* method and add the other, and (c) needs no transactional
 email (the project [deliberately runs none](./README.md#picks)).
@@ -65,10 +65,12 @@ victim's identity to be merged into.
   with two providers, unlinking the one that supplied the email leaves it on the
   old address until a re-link — account rows don't store the email to recompute.)
 - **Linking is explicit + session-scoped.** `authClient.linkSocial()` links into
-  the caller's *own* account. Implicit (sign-in) linking still merges two
-  *verified* OAuth identities that share an email (e.g. Google then GitHub) — both
+  the caller's *own* account. Implicit (sign-in) linking only merges onto an
+  *already-verified* account from a provider asserting a verified email — both
   sides proven — guarded by no `trustedProviders` and better-auth's
-  `requireLocalEmailVerified` (default true). Passkey accounts can't be touched
+  `requireLocalEmailVerified` (default true). (Google is the only provider today,
+  so this is the takeover guard on a Google sign-in matching an existing account;
+  it generalizes if another provider is added.) Passkey accounts can't be touched
   by implicit linking at all: their placeholder email matches nothing.
 
 ### The two journeys, and reconciliation

@@ -35,7 +35,7 @@ function BrandLockup({ asLink }: { asLink: boolean }) {
 type Mode = "intro" | "signup";
 
 interface AuthConfig {
-  providers: { google: boolean; github: boolean };
+  providers: { google: boolean };
   turnstile: { enabled: boolean; siteKey: string | null };
 }
 
@@ -203,7 +203,7 @@ function LoginInner() {
     await continueToApp();
   }
 
-  async function signInSocial(provider: "google" | "github") {
+  async function signInSocial(provider: "google") {
     setBusy(true);
     setError(null);
     try {
@@ -328,7 +328,7 @@ function LoginInner() {
     }
   }
 
-  const hasOAuth = Boolean(config?.providers.google || config?.providers.github);
+  const hasOAuth = Boolean(config?.providers.google);
   // Turnstile must be solved before email account-creation when it's
   // configured. In dev (not configured) this is always satisfied.
   const turnstileSatisfied = !config?.turnstile.enabled || Boolean(turnstileToken);
@@ -394,26 +394,14 @@ function LoginInner() {
           <>
             {hasOAuth && (
               <>
-                {config?.providers.google && (
-                  <button
-                    type="button"
-                    style={secondary}
-                    onClick={() => signInSocial("google")}
-                    disabled={busy}
-                  >
-                    Continue with Google
-                  </button>
-                )}
-                {config?.providers.github && (
-                  <button
-                    type="button"
-                    style={secondary}
-                    onClick={() => signInSocial("github")}
-                    disabled={busy}
-                  >
-                    Continue with GitHub
-                  </button>
-                )}
+                <button
+                  type="button"
+                  style={secondary}
+                  onClick={() => signInSocial("google")}
+                  disabled={busy}
+                >
+                  Continue with Google
+                </button>
                 {/* No Turnstile here: OAuth-start mints no account (the provider
                     authenticates the user), so the bot gate lives only on the
                     passkey-signup form below. */}

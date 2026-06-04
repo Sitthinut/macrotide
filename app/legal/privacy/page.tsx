@@ -75,9 +75,9 @@ export default function PrivacyPage() {
           <strong>Cloudflare Turnstile:</strong> used at sign-up for bot protection.
         </li>
         <li>
-          <strong>OAuth providers (Google / GitHub), if enabled:</strong> used only to authenticate
-          you; the operator would receive your basic profile (name, email) from them. OAuth is not
-          enabled at launch.
+          <strong>Google sign-in, if enabled:</strong> used only to authenticate you; the operator
+          would receive your basic profile (name, email) from Google. OAuth is not enabled at
+          launch.
         </li>
       </ul>
       <p>

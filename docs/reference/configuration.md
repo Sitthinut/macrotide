@@ -68,10 +68,8 @@ All optional and **env-gated**: with none set, the app runs passkey-only and the
 | --- | --- | --- | --- |
 | `GOOGLE_CLIENT_ID` | unset | [lib/auth/providers.ts](../../lib/auth/providers.ts) | Enables "Continue with Google" (needs `GOOGLE_CLIENT_SECRET` too). |
 | `GOOGLE_CLIENT_SECRET` | unset | [lib/auth/providers.ts](../../lib/auth/providers.ts) | Server-only. |
-| `GITHUB_CLIENT_ID` | unset | [lib/auth/providers.ts](../../lib/auth/providers.ts) | Enables "Continue with GitHub" (needs `GITHUB_CLIENT_SECRET` too). |
-| `GITHUB_CLIENT_SECRET` | unset | [lib/auth/providers.ts](../../lib/auth/providers.ts) | Server-only. |
 | `TURNSTILE_SITE_KEY` | unset | [lib/auth/turnstile.ts](../../lib/auth/turnstile.ts), [/api/auth-config](../../app/api/auth-config/route.ts) | **PUBLIC** — shipped to the browser to render the widget. |
-| `TURNSTILE_SECRET_KEY` | unset | [lib/auth/turnstile.ts](../../lib/auth/turnstile.ts) | Server verifies the email-signup token here (OAuth sign-in is not gated — the provider authenticates the user). **When unset, verification is BYPASSED (dev pass).** OAuth callback URIs for both providers must point at `<PUBLIC_APP_URL>/api/auth/callback/{google,github}`. |
+| `TURNSTILE_SECRET_KEY` | unset | [lib/auth/turnstile.ts](../../lib/auth/turnstile.ts) | Server verifies the email-signup token here (OAuth sign-in is not gated — the provider authenticates the user). **When unset, verification is BYPASSED (dev pass).** The Google OAuth callback URI must point at `<PUBLIC_APP_URL>/api/auth/callback/google`. |
 
 Rate limiting: `/api/auth/*` POSTs are IP-limited via `AUTH_RATE_LIMIT`
 (10/min/IP — [lib/api/rate-limit.ts](../../lib/api/rate-limit.ts)), wired in

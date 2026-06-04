@@ -64,7 +64,7 @@ rewrite. The mechanism: most app tables carry a nullable `user_id`. In
 single-owner mode it's `NULL` and the owner sees everything; multi-user mode
 scopes every query by `user_id` (`requireUser()`, an `ownedBy()` filter that
 collapses to "no user" when there's no session). Identity (passkey + optional
-Google/GitHub), quotas, and tier gating are all **env-gated** — set nothing and
+Google), quotas, and tier gating are all **env-gated** — set nothing and
 the app runs exactly as the single-owner version did.
 
 This lets each capability ship and be tested behind a default-off switch rather

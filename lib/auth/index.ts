@@ -16,7 +16,7 @@ import { isPlaceholderEmail, placeholderEmail } from "./placeholder-email";
 import { socialProvidersConfig } from "./providers";
 import { provisionNewUser } from "./provision";
 
-const SOCIAL_PROVIDERS = ["google", "github"];
+const SOCIAL_PROVIDERS = ["google"];
 
 /** Count the user's linked OAuth accounts (excludes the `credential` bootstrap row). */
 function socialAccountCount(userId: string): number {
@@ -194,24 +194,23 @@ export const auth = betterAuth({
   // This is a bootstrap stopgap: OAuth will eventually replace this
   // mechanism, at which point emailAndPassword can be disabled.
   emailAndPassword: { enabled: true },
-  // OAuth. Only providers whose env vars are fully present are
-  // registered; with none set this is `{}` and the app runs passkey-only.
-  // GOOGLE_CLIENT_ID/SECRET, GITHUB_CLIENT_ID/SECRET enable the respective btns.
+  // OAuth. Registered only when GOOGLE_CLIENT_ID/SECRET are both present;
+  // otherwise this is `{}` and the app runs passkey-only.
   socialProviders: socialProvidersConfig(),
   account: {
     // Account linking, hardened against pre-registration takeover (#98).
     //
     // Implicit linking stays ON: a sign-in that matches an existing account by
     // email is auto-merged — but ONLY when BOTH sides are proven. So two
-    // *verified* methods on the same address (Google then GitHub, or a future
-    // magic link) unify into one account with no manual step.
+    // *verified* methods on the same address (e.g. Google and a future magic
+    // link) unify into one account with no manual step.
     //
     // Two guards make "both sides proven" hold, and they are the whole security
     // story here:
     //   1. No `trustedProviders`. That list would bypass the *incoming*
-    //      provider's `email_verified` requirement. We don't need it (Google and
-    //      GitHub both assert it) and omitting it means a future non-verifying
-    //      IdP can never auto-link on an unproven email claim.
+    //      provider's `email_verified` requirement. We don't need it (Google
+    //      asserts it) and omitting it means a future non-verifying IdP can
+    //      never auto-link on an unproven email claim.
     //   2. better-auth's `requireLocalEmailVerified` guards the *local* side: a
     //      social sign-in is refused if it would link onto an existing
     //      UNVERIFIED account — exactly the pre-registration takeover vector
