@@ -119,6 +119,9 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
     (p) => linkedAccounts?.some((a) => a.providerId === p.id) ?? false,
   ).length;
   const hasLinkedOAuth = linkedOAuthCount > 0;
+  // Whether the OAuth provider row renders (it leads the card when present, so
+  // the Passkeys group below it gets the divider instead).
+  const googleRowVisible = googleEnabled || hasLinkedOAuth;
   const cannotRevokeLast = passkeyList.length <= 1 && !hasLinkedOAuth;
   // Symmetric lockout guard for unlinking an OAuth provider. The phantom
   // `credential` bootstrap row (random password, no sign-in UI) is NOT a usable
@@ -137,7 +140,11 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
     setActionError(null);
     try {
       const res = await authClient.passkey.addPasskey({
-        name: `Device · ${new Date().toLocaleDateString()}`,
+        // This becomes the WebAuthn user name shown in the OS / password
+        // manager — use the person's name (matching the /login signup), not a
+        // device/date string. The in-app passkey list labels by authenticator
+        // (aaguid), so it doesn't rely on this value.
+        name: user?.name ?? user?.email ?? "Passkey",
       });
       if (res?.error) {
         throw new Error(res.error.message ?? "Passkey registration failed");
@@ -521,13 +528,80 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
 
         {/* Methods linked to this account */}
         <div className="card" style={{ padding: 0 }}>
-          {/* Passkeys group — header (with Add) over each registered credential */}
+          {/* OAuth providers lead the card. A row shows only when configured or
+              already linked; fixed height so the linked and unlinked states are
+              the same height. */}
+          {OAUTH_PROVIDERS.map((provider) => {
+            const linked = linkedAccounts?.some((a) => a.providerId === provider.id) ?? false;
+            const enabled = authConfig?.providers?.[provider.id as "google"] ?? false;
+            if (!linked && !enabled) return null;
+            return (
+              <div
+                key={provider.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "0 14px",
+                  height: 48,
+                  boxSizing: "border-box",
+                  opacity: linkedLoading ? 0.5 : 1,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <ProviderIcon id={provider.id} />
+                  <span style={{ fontSize: 13, color: "var(--ink)" }}>{provider.label}</span>
+                </div>
+                {linked ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span className="tag green">linked</span>
+                    <button
+                      type="button"
+                      disabled={busy || cannotUnlinkLastOAuth}
+                      onClick={() => handleUnlinkProvider(provider.id, provider.label)}
+                      aria-label={`Unlink ${provider.label}`}
+                      title={
+                        cannotUnlinkLastOAuth
+                          ? "Register a passkey before unlinking your only sign-in method"
+                          : "Unlink"
+                      }
+                      style={{
+                        background: "transparent",
+                        border: 0,
+                        color: "var(--muted)",
+                        cursor: busy || cannotUnlinkLastOAuth ? "not-allowed" : "pointer",
+                        padding: "4px 8px",
+                        fontSize: 12.5,
+                        borderRadius: "var(--r-sm)",
+                        opacity: busy || cannotUnlinkLastOAuth ? 0.5 : 1,
+                      }}
+                    >
+                      Unlink
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn ghost sm"
+                    disabled={busy}
+                    onClick={() => handleLinkProvider(provider.id)}
+                    style={{ opacity: busy ? 0.6 : 1 }}
+                  >
+                    Link
+                  </button>
+                )}
+              </div>
+            );
+          })}
+          {/* Passkeys group — header (with Add) over each registered credential.
+              Divider above only when the Google row leads. */}
           <div
             style={{
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
               padding: "11px 14px",
+              borderTop: googleRowVisible ? "1px solid var(--line-soft)" : undefined,
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -660,70 +734,6 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
                 </div>
               );
             })}
-
-          {/* OAuth providers — a row appears only when the provider is configured
-              or already linked. Link/Unlink act on THIS account. */}
-          {OAUTH_PROVIDERS.map((provider) => {
-            const linked = linkedAccounts?.some((a) => a.providerId === provider.id) ?? false;
-            const enabled = authConfig?.providers?.[provider.id as "google"] ?? false;
-            if (!linked && !enabled) return null;
-            return (
-              <div
-                key={provider.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "11px 14px",
-                  borderTop: "1px solid var(--line-soft)",
-                  opacity: linkedLoading ? 0.5 : 1,
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <ProviderIcon id={provider.id} />
-                  <span style={{ fontSize: 13, color: "var(--ink)" }}>{provider.label}</span>
-                </div>
-                {linked ? (
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span className="tag green">linked</span>
-                    <button
-                      type="button"
-                      disabled={busy || cannotUnlinkLastOAuth}
-                      onClick={() => handleUnlinkProvider(provider.id, provider.label)}
-                      aria-label={`Unlink ${provider.label}`}
-                      title={
-                        cannotUnlinkLastOAuth
-                          ? "Register a passkey before unlinking your only sign-in method"
-                          : "Unlink"
-                      }
-                      style={{
-                        background: "transparent",
-                        border: 0,
-                        color: "var(--muted)",
-                        cursor: busy || cannotUnlinkLastOAuth ? "not-allowed" : "pointer",
-                        padding: "4px 8px",
-                        fontSize: 12.5,
-                        borderRadius: "var(--r-sm)",
-                        opacity: busy || cannotUnlinkLastOAuth ? 0.5 : 1,
-                      }}
-                    >
-                      Unlink
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn ghost sm"
-                    disabled={busy}
-                    onClick={() => handleLinkProvider(provider.id)}
-                    style={{ opacity: busy ? 0.6 : 1 }}
-                  >
-                    Link
-                  </button>
-                )}
-              </div>
-            );
-          })}
         </div>
         <div
           style={{

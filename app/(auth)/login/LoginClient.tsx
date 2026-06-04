@@ -101,6 +101,9 @@ function LoginInner() {
   const [mode, setMode] = useState<Mode>("intro");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  // Demo-specific loading, so the "Explore the demo" label doesn't flip to
+  // "Loading the demo…" when another action (Google, passkey) sets `busy`.
+  const [demoLoading, setDemoLoading] = useState(false);
   // Set after email signup creates the account+session but before its passkey
   // exists. Blocks the redirect-on-session effect (the account is unusable
   // without a passkey — random password, no OAuth) so a cancelled WebAuthn
@@ -231,8 +234,8 @@ function LoginInner() {
     try {
       const addPk = await authClient.passkey.addPasskey({
         // WebAuthn user.name — the account identifier password managers display.
-        // Convention is the email (stable, recognizable across devices).
-        name: session?.user?.email ?? session?.user?.name ?? "Passkey",
+        // Use the person's name (matching signup); fall back to email.
+        name: session?.user?.name ?? session?.user?.email ?? "Passkey",
       });
       if (addPk?.error) throw new Error(addPk.error.message ?? "passkey registration failed");
       setPendingPasskey(false);
@@ -247,6 +250,7 @@ function LoginInner() {
 
   async function startDemo() {
     setBusy(true);
+    setDemoLoading(true);
     setError(null);
     try {
       const res = await fetch("/api/demo", { method: "POST" });
@@ -255,6 +259,7 @@ function LoginInner() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "demo start failed");
       setBusy(false);
+      setDemoLoading(false);
     }
   }
 
@@ -422,7 +427,7 @@ function LoginInner() {
             </button>
             <div style={rule} />
             <button type="button" style={demoBtn} onClick={startDemo} disabled={busy}>
-              {busy ? "Loading the demo…" : "Explore the demo"}
+              {demoLoading ? "Loading the demo…" : "Explore the demo"}
             </button>
             <div style={hint}>
               Demo data lives only in your browser session — nothing is saved to a real account. The
