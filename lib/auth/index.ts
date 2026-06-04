@@ -2,10 +2,53 @@ import "server-only";
 import { passkey } from "@better-auth/passkey";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { eq } from "drizzle-orm";
 import { appDb, appSqlite, marketDb, marketSqlite } from "@/lib/db/client";
 import { runWithDbContext } from "@/lib/db/context";
-import { socialProvidersConfig, trustedLinkProviders } from "./providers";
+import { user as userTable } from "@/lib/db/schema";
+import { idTokenEmail } from "./id-token";
+import { isPlaceholderEmail } from "./placeholder-email";
+import { socialProvidersConfig } from "./providers";
 import { provisionNewUser } from "./provision";
+
+/**
+ * Adopt a freshly-linked provider's verified email onto a passkey-first account
+ * that still carries a placeholder address (see {@link isPlaceholderEmail}).
+ * Runs from the `account.create` hook on every link.
+ *
+ * Only fires for social providers and only when the local email is still a
+ * placeholder, so it's a no-op for: the `credential` bootstrap row, and
+ * OAuth-first signups (whose user row already has the real email). The email is
+ * unique, so a collision (another account already owns it) is swallowed — the
+ * link still succeeds, the account just keeps its placeholder.
+ */
+function adoptProviderEmail(account: {
+  userId: string;
+  providerId: string;
+  idToken?: string | null;
+}): void {
+  if (account.providerId !== "google" && account.providerId !== "github") return;
+  const current = appDb
+    .select({ email: userTable.email })
+    .from(userTable)
+    .where(eq(userTable.id, account.userId))
+    .get()?.email;
+  if (!isPlaceholderEmail(current)) return;
+  const { email, verified } = idTokenEmail(account.idToken);
+  if (!email || !verified || isPlaceholderEmail(email)) return;
+  try {
+    appDb
+      .update(userTable)
+      .set({ email: email.toLowerCase(), emailVerified: true, updatedAt: new Date() })
+      .where(eq(userTable.id, account.userId))
+      .run();
+  } catch (e) {
+    // Unique-collision (the email already belongs to another account) or any
+    // write error: leave the placeholder. The provider is still linked and
+    // usable for sign-in; only the display email is unchanged.
+    console.warn("[auth] could not adopt provider email onto placeholder account", e);
+  }
+}
 
 function rpName(): string {
   return process.env.AUTH_RP_NAME ?? "Macrotide";
@@ -71,11 +114,44 @@ export const auth = betterAuth({
   // GOOGLE_CLIENT_ID/SECRET, GITHUB_CLIENT_ID/SECRET enable the respective btns.
   socialProviders: socialProvidersConfig(),
   account: {
-    // Link an OAuth sign-in to an existing account with the same verified email
-    // (e.g. signed up with Google, later signs in with GitHub on the same addr).
+    // Account linking, hardened against pre-registration takeover (#98).
+    //
+    // Implicit linking stays ON: a sign-in that matches an existing account by
+    // email is auto-merged — but ONLY when BOTH sides are proven. So two
+    // *verified* methods on the same address (Google then GitHub, or a future
+    // magic link) unify into one account with no manual step.
+    //
+    // Two guards make "both sides proven" hold, and they are the whole security
+    // story here:
+    //   1. No `trustedProviders`. That list would bypass the *incoming*
+    //      provider's `email_verified` requirement. We don't need it (Google and
+    //      GitHub both assert it) and omitting it means a future non-verifying
+    //      IdP can never auto-link on an unproven email claim.
+    //   2. better-auth's `requireLocalEmailVerified` guards the *local* side: a
+    //      social sign-in is refused if it would link onto an existing
+    //      UNVERIFIED account — exactly the pre-registration takeover vector
+    //      (attacker pre-registers victim@ unverified, victim's real Google
+    //      later tries to merge in). It defaults to `true` and is slated to
+    //      become unconditional, so we rely on the default rather than pin the
+    //      deprecated option. DO NOT set it to `false`, and DO NOT add
+    //      `trustedProviders`, without re-reading docs/explanation/decisions/0002.
+    //
+    // This is safe because our signup model keeps accounts verified-at-birth:
+    // where OAuth is configured, new accounts are created via OAuth (verified);
+    // the email/passkey bootstrap (unverified) only runs as the passkey-only,
+    // no-OAuth fallback — where there is no provider to link, so nothing to
+    // hijack. The in-app path for a logged-in user to attach another provider is
+    // `authClient.linkSocial()`, which links into *their own* session account.
+    //
+    // `allowDifferentEmails` is required because a passkey-first account's email
+    // is a synthetic placeholder (see ./placeholder-email): linking a real
+    // provider necessarily means the emails differ. It only relaxes the
+    // *explicit* session-scoped link (a user attaching their own provider), so
+    // it doesn't widen the implicit-merge surface. On link, `adoptProviderEmail`
+    // replaces the placeholder with the provider's verified email.
     accountLinking: {
       enabled: true,
-      trustedProviders: trustedLinkProviders(),
+      allowDifferentEmails: true,
     },
   },
   // New-account provisioning: default tier='free' + one seeded
@@ -98,6 +174,21 @@ export const auth = betterAuth({
             },
             () => provisionNewUser(newUser.id),
           );
+        },
+      },
+    },
+    // On linking an OAuth provider to a passkey-first (placeholder-email)
+    // account, adopt the provider's verified email so the account becomes a
+    // fully-identified, verified row. No-op for the bootstrap row and for
+    // OAuth-first signups. See adoptProviderEmail above.
+    account: {
+      create: {
+        after: async (newAccount: {
+          userId: string;
+          providerId: string;
+          idToken?: string | null;
+        }) => {
+          adoptProviderEmail(newAccount);
         },
       },
     },

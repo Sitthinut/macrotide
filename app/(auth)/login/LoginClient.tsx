@@ -5,6 +5,7 @@ import { Suspense, useEffect, useState } from "react";
 import { BrandMark } from "@/components/BrandMark";
 import { clearDemoSession } from "@/lib/auth/clear-demo";
 import { authClient, signIn, useSession } from "@/lib/auth/client";
+import { placeholderEmail } from "@/lib/auth/placeholder-email";
 import { Turnstile } from "./Turnstile";
 // Pull in the marketing tokens (warm `--bg`, `--line`, radii) so the login card
 // sits on the same ground as the landing. Scoped to `.mt-landing-root`, applied
@@ -56,6 +57,26 @@ function passkeyErrorMessage(e: unknown): string | null {
   return null;
 }
 
+// Map a better-auth OAuth `?error=<code>` redirect to friendly copy. The codes
+// come from the OAuth callback when a social sign-in can't complete — e.g.
+// `account_not_linked` when the provider's email is unverified, or when the
+// address already belongs to an account that can't be auto-merged. We never
+// silently merge into a mismatched account (that's the #98 pre-registration
+// takeover guard), so on these we steer the user to their other sign-in method
+// rather than guessing which one. Method-agnostic copy: under the passkey/OAuth
+// model the existing account could use either method.
+function oauthErrorMessage(code: string | null): string | null {
+  if (!code) return null;
+  switch (code) {
+    case "account_not_linked":
+    case "unable_to_link_account":
+    case "email_doesn't_match":
+      return "We couldn't sign you in with that provider. If you already have an account, sign in with your original method, then link this provider from Account settings.";
+    default:
+      return "Sign-in didn't complete. Please try again.";
+  }
+}
+
 // useSearchParams requires a Suspense boundary in Next 15 app router.
 export default function LoginClient() {
   return (
@@ -70,7 +91,6 @@ function LoginInner() {
   const searchParams = useSearchParams();
   const { data: session } = useSession();
   const [mode, setMode] = useState<Mode>("intro");
-  const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   // Set after email signup creates the account+session but before its passkey
@@ -82,7 +102,6 @@ function LoginInner() {
   // input on submit and cleared as the user edits that field.
   const [fieldErrors, setFieldErrors] = useState<{
     name?: string;
-    email?: string;
     turnstile?: string;
   }>({});
   const [error, setError] = useState<string | null>(null);
@@ -92,6 +111,14 @@ function LoginInner() {
   // After OAuth sign-in we redirect back to /login?passkey=prompt to offer
   // registering a passkey on this device. Detect that here.
   const passkeyPrompt = searchParams.get("passkey") === "prompt";
+
+  // A refused OAuth sign-in lands back here as `?error=<code>` (see
+  // signInSocial's errorCallbackURL). Surface friendly copy once on mount.
+  const oauthErrorCode = searchParams.get("error");
+  useEffect(() => {
+    const msg = oauthErrorMessage(oauthErrorCode);
+    if (msg) setError(msg);
+  }, [oauthErrorCode]);
 
   // Load which providers + bot-protection the server has configured.
   useEffect(() => {
@@ -133,6 +160,11 @@ function LoginInner() {
       const result = await signIn.social({
         provider,
         callbackURL: "/login?passkey=prompt",
+        // If better-auth refuses the sign-in (e.g. the email already belongs to
+        // an account created a different way, so it can't be auto-linked), it
+        // redirects here with `?error=<code>` instead of better-auth's bare
+        // error page. We translate the code to friendly copy below.
+        errorCallbackURL: "/login",
       });
       if (result?.error) throw new Error(result.error.message ?? "sign in failed");
       // signIn.social triggers a redirect to the provider; nothing more to do.
@@ -194,8 +226,6 @@ function LoginInner() {
     // than leaving the user at an inert button.
     const errs: typeof fieldErrors = {};
     if (!name.trim()) errs.name = "Enter your name";
-    if (!email.trim()) errs.email = "Enter your email";
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errs.email = "Enter a valid email";
     if (!turnstileSatisfied) errs.turnstile = "Complete the verification first";
     if (Object.keys(errs).length > 0) {
       setFieldErrors(errs);
@@ -205,17 +235,20 @@ function LoginInner() {
     setBusy(true);
     setError(null);
     try {
-      // Step 1: create an empty-password user record. (Passkey registration
-      // happens after the user is "signed in" — the addPasskey() call needs
-      // a session.)
+      // Step 1: create the user record. Passkey signup collects only a name, so
+      // we mint a synthetic, non-deliverable placeholder email (the `user` row
+      // requires a unique address — see lib/auth/placeholder-email). It's hidden
+      // in the UI and gets replaced by a real verified address if the user later
+      // links an OAuth provider. (addPasskey() needs a session, hence this
+      // bootstrap first.)
       const signUp = await authClient.signUp.email({
-        email,
+        email: placeholderEmail(),
         name,
-        // better-auth requires a password even when email/password is the
-        // disabled fallback path. Generate a random one the user never sees.
+        // better-auth requires a password even though no password sign-in UI is
+        // exposed. Generate a random one the user never sees.
         password: crypto.randomUUID() + crypto.randomUUID(),
-        // Carry the Turnstile token so the server-side signup gate (6c) can
-        // verify it. Bypassed server-side when Turnstile isn't configured.
+        // Carry the Turnstile token so the server-side signup gate can verify
+        // it. Bypassed server-side when Turnstile isn't configured.
         fetchOptions: { headers: turnstileHeaders() },
       });
       if (signUp?.error) throw new Error(signUp.error.message ?? "sign up failed");
@@ -226,11 +259,10 @@ function LoginInner() {
       setPendingPasskey(true);
 
       // Step 2: prompt the browser to create a passkey now that we have a
-      // session cookie.
+      // session cookie. Label it with the person's name (the placeholder email
+      // must never surface in the authenticator / password manager).
       const addPk = await authClient.passkey.addPasskey({
-        // WebAuthn user.name — the account identifier password managers display.
-        // Convention is the email (stable, recognizable across devices).
-        name: email,
+        name,
       });
       if (addPk?.error) throw new Error(addPk.error.message ?? "passkey registration failed");
 
@@ -326,10 +358,14 @@ function LoginInner() {
                 )}
                 {/* No Turnstile here: OAuth-start mints no account (the provider
                     authenticates the user), so the bot gate lives only on the
-                    email-signup form below. */}
+                    passkey-signup form below. */}
                 <div style={divider}>or</div>
               </>
             )}
+            {/* Passkey + OAuth are peers: a user can start with either method and
+                link the other later (passkey → link OAuth in Account; OAuth →
+                add a passkey). So both "Sign in with passkey" and "Create
+                account" are always offered, alongside any OAuth buttons. */}
             <button type="button" style={primary} onClick={signInPasskey} disabled={busy}>
               Sign in with passkey
             </button>
@@ -366,19 +402,6 @@ function LoginInner() {
               style={input}
             />
             {fieldErrors.name && <div style={fieldError}>{fieldErrors.name}</div>}
-            <input
-              type="email"
-              autoComplete="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => {
-                setEmail(e.target.value);
-                if (fieldErrors.email) setFieldErrors((f) => ({ ...f, email: undefined }));
-              }}
-              aria-invalid={Boolean(fieldErrors.email)}
-              style={input}
-            />
-            {fieldErrors.email && <div style={fieldError}>{fieldErrors.email}</div>}
             {config?.turnstile.enabled && config.turnstile.siteKey && (
               <div style={{ margin: "8px 0" }}>
                 <Turnstile

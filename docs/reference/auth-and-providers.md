@@ -18,23 +18,64 @@ defined in the canonical
 
 ## Sign-in methods
 
-On first visit the `/login` screen shows three options:
+Passkeys and OAuth are **peer** methods — a user signs up with either and can add
+the other later. The `/login` screen shows:
 
+- **Continue with Google / GitHub** — env-gated (hidden unless that provider's
+  keys are set). Creates a verified account for new users, or signs in returning
+  ones.
 - **Sign in with passkey** — for returning users whose device has a passkey.
-- **Create account** — collects name + email + registers a passkey on this device.
+- **Create account** — registers a passkey. Collects **only a name** (no email),
+  guarded by a **Turnstile** gate when configured.
 - **Try the demo** — spins an isolated, in-memory SQLite with capped chat.
 
-Optional **Google / GitHub** sign-in and a **Turnstile** signup gate are
-env-gated — hidden unless their keys are set (see the env-var table). The local
-and shared setup commands live in [local development](../how-to/local-development.md)
-and [deploy](../how-to/deploy.md).
+Setup commands live in [local development](../how-to/local-development.md) and
+[deploy](../how-to/deploy.md).
+
+### Emailless passkey accounts
+
+A passkey signup claims **no email**. Because better-auth's `user` row needs a
+unique address, the account is minted with a synthetic, non-deliverable
+placeholder (`<uuid>@passkey.invalid`) that is never shown in the UI. If the
+account later links an OAuth provider, the provider's verified email is **adopted**
+onto the row (and `emailVerified` set), so it becomes a fully-identified account.
+This is what makes account-takeover and email-squatting impossible: no signup
+path ever lets someone claim an address they haven't proven. Full rationale:
+[ADR 0001](../explanation/decisions/0001-account-model-passkey-and-oauth.md).
+
+### Adding / changing methods (Account settings)
+
+- **passkey → add OAuth:** Account → **Link** a provider. Adopts its verified
+  email into the account.
+- **OAuth → add passkey:** the post-sign-in prompt, or Account → register a
+  passkey.
+- **Unlink / revoke:** providers and passkeys can be removed, but the UI always
+  keeps at least one *usable* sign-in method (you can't revoke your last passkey
+  or unlink your last provider if it would lock you out). A removed passkey can't
+  sign in again — its server credential is gone.
+- **Ended up with two accounts** (signed up separately with each method)? They
+  don't auto-merge; add a passkey to the OAuth account and abandon the spare.
+  (Deleting the spare account is [planned](https://github.com/Sitthinut/macrotide/issues/105).)
+
+### Linking & takeover hardening
+
+- Linking is **explicit and session-scoped**: `authClient.linkSocial()` links a
+  provider into the *caller's own* account — never a match-by-email merge into a
+  stranger's.
+- Implicit (sign-in) linking only merges two **already-verified** OAuth
+  identities that share an email (e.g. Google then GitHub) — no `trustedProviders`
+  bypass for the incoming side, and better-auth's `requireLocalEmailVerified`
+  blocks any merge onto an unverified row. Passkey accounts, with their
+  placeholder email, match nothing and can't be touched implicitly.
+- A social sign-in that *can't* be linked dead-ends to `/login?error=…` with
+  friendly copy, never a shared account.
 
 ### How passkeys work here
 
 - Created via `@better-auth/passkey` plugin (WebAuthn / Web Credentials API).
 - One device = one passkey. To use the app on phone + laptop, register from each device (or sync via iCloud Keychain / 1Password).
 - Stored as a `passkey` row in the same SQLite as app data, with `publicKey` + `credentialID` + `counter` columns. We never see the private key — it lives on the device's secure enclave.
-- Email/password is intentionally disabled to keep the auth surface small. Magic-link email is on the roadmap (needs a transactional sender).
+- Email/password exists only as a hidden bootstrap: passkey signup creates the `user` row via it with a random, unknowable password and no password sign-in UI, then registers the passkey. It's never a usable login. Magic-link email is on the roadmap (needs a transactional sender).
 
 ## AI provider — OpenRouter
 

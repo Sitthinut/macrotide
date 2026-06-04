@@ -55,12 +55,3 @@ export function socialProvidersConfig(): Record<string, SocialProvider> {
   }
   return cfg;
 }
-
-/** The list of trusted providers for better-auth account linking. */
-export function trustedLinkProviders(): string[] {
-  const flags = enabledProviders();
-  const list: string[] = [];
-  if (flags.google) list.push("google");
-  if (flags.github) list.push("github");
-  return list;
-}
