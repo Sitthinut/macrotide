@@ -265,9 +265,14 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
           // Clear the demo cookie alongside the real session — see comment in
           // App.tsx::signOut.
           await clearDemoSession();
-          // Use $fetch directly to ensure POST method; the dynamic proxy infers GET
-          // from an empty body, but /revoke-sessions is a POST-only endpoint.
-          const res = await authClient.$fetch("/revoke-sessions", { method: "POST" });
+          // POST /revoke-sessions (revoke all sessions = sign out everywhere).
+          // Pass an explicit empty body so better-fetch sends the required
+          // `Content-Type: application/json` — without a body it omits the header
+          // and the endpoint rejects with "Content-Type is required".
+          const res = await authClient.$fetch("/revoke-sessions", {
+            method: "POST",
+            body: {},
+          });
           if ((res as { error?: { message?: string } })?.error) {
             throw new Error(
               (res as { error?: { message?: string } }).error?.message ?? "Sign-out failed",
