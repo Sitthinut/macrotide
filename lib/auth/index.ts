@@ -2,40 +2,80 @@ import "server-only";
 import { passkey } from "@better-auth/passkey";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { appDb, appSqlite, marketDb, marketSqlite } from "@/lib/db/client";
 import { runWithDbContext } from "@/lib/db/context";
-import { user as userTable } from "@/lib/db/schema";
+import {
+  account as accountTable,
+  passkey as passkeyTable,
+  user as userTable,
+} from "@/lib/db/schema";
+import { shouldAdoptOnLink, shouldBlockUnlink, shouldResetEmailOnUnlink } from "./account-rules";
 import { idTokenEmail } from "./id-token";
-import { isPlaceholderEmail } from "./placeholder-email";
+import { isPlaceholderEmail, placeholderEmail } from "./placeholder-email";
 import { socialProvidersConfig } from "./providers";
 import { provisionNewUser } from "./provision";
 
+const SOCIAL_PROVIDERS = ["google", "github"];
+
+/** Count the user's linked OAuth accounts (excludes the `credential` bootstrap row). */
+function socialAccountCount(userId: string): number {
+  return appDb
+    .select({ id: accountTable.id })
+    .from(accountTable)
+    .where(and(eq(accountTable.userId, userId), inArray(accountTable.providerId, SOCIAL_PROVIDERS)))
+    .all().length;
+}
+
+/** Count the user's registered passkeys. */
+function passkeyCount(userId: string): number {
+  return appDb
+    .select({ id: passkeyTable.id })
+    .from(passkeyTable)
+    .where(eq(passkeyTable.userId, userId))
+    .all().length;
+}
+
+function currentEmail(userId: string): string | undefined {
+  return appDb
+    .select({ email: userTable.email })
+    .from(userTable)
+    .where(eq(userTable.id, userId))
+    .get()?.email;
+}
+
 /**
- * Adopt a freshly-linked provider's verified email onto a passkey-first account
- * that still carries a placeholder address (see {@link isPlaceholderEmail}).
- * Runs from the `account.create` hook on every link.
+ * Make the account's email mirror its OAuth provider. Runs from the
+ * `account.create` hook on every link. Adopts the provider's verified email
+ * (from the Google id_token) onto the user row + marks it verified when this is
+ * the account's **sole** OAuth provider — i.e. a passkey-first account linking
+ * its first provider, OR a re-link after unlinking the previous one (the
+ * unlink-A-then-link-B case). When a second provider is added alongside an
+ * existing one, the first-adopted email stands.
  *
- * Only fires for social providers and only when the local email is still a
- * placeholder, so it's a no-op for: the `credential` bootstrap row, and
- * OAuth-first signups (whose user row already has the real email). The email is
- * unique, so a collision (another account already owns it) is swallowed — the
- * link still succeeds, the account just keeps its placeholder.
+ * No-op for the `credential` bootstrap row. Email is unique, so a collision is
+ * swallowed — the link still succeeds, the email just doesn't change.
  */
 function adoptProviderEmail(account: {
   userId: string;
   providerId: string;
   idToken?: string | null;
 }): void {
-  if (account.providerId !== "google" && account.providerId !== "github") return;
-  const current = appDb
-    .select({ email: userTable.email })
-    .from(userTable)
-    .where(eq(userTable.id, account.userId))
-    .get()?.email;
-  if (!isPlaceholderEmail(current)) return;
+  const isSocial = SOCIAL_PROVIDERS.includes(account.providerId);
+  const current = currentEmail(account.userId);
+  const isSoleProvider = socialAccountCount(account.userId) === 1; // includes the just-created row
+  if (
+    !shouldAdoptOnLink({
+      isSocial,
+      currentIsPlaceholder: isPlaceholderEmail(current),
+      isSoleProvider,
+    })
+  ) {
+    return;
+  }
   const { email, verified } = idTokenEmail(account.idToken);
   if (!email || !verified || isPlaceholderEmail(email)) return;
+  if (current && email.toLowerCase() === current.toLowerCase()) return;
   try {
     appDb
       .update(userTable)
@@ -44,9 +84,54 @@ function adoptProviderEmail(account: {
       .run();
   } catch (e) {
     // Unique-collision (the email already belongs to another account) or any
-    // write error: leave the placeholder. The provider is still linked and
-    // usable for sign-in; only the display email is unchanged.
-    console.warn("[auth] could not adopt provider email onto placeholder account", e);
+    // write error: leave the email unchanged. The provider is still linked and
+    // usable for sign-in.
+    console.warn("[auth] could not adopt provider email", e);
+  }
+}
+
+/**
+ * Lockout backstop for unlinking an OAuth provider (`account.delete.before`;
+ * returning false blocks the deletion). Refuses to remove a social provider
+ * when it would leave the user with NO usable sign-in method — no passkey and no
+ * other OAuth provider. The `credential` bootstrap row (random password, no UI)
+ * is not usable, so it's never counted. This makes both signup origins behave
+ * the same: with `allowUnlinkingAll: true`, better-auth's own last-row guard is
+ * off, and this enforces the real rule (and guards the raw API, not just the UI).
+ */
+function blocksUnlinkLockout(account: { userId: string; providerId: string }): boolean {
+  return shouldBlockUnlink({
+    isSocial: SOCIAL_PROVIDERS.includes(account.providerId),
+    otherSocialCount: socialAccountCount(account.userId) - 1, // exclude the row being deleted
+    passkeyCount: passkeyCount(account.userId),
+  });
+}
+
+/**
+ * Mirror an unlink: when the **last** OAuth provider is removed, the account has
+ * no provider-backed email anymore, so reset it to an emailless placeholder
+ * (`account.delete.after`). Keeps the displayed email honest — it always
+ * reflects a currently-linked verified provider, or nothing.
+ */
+function resetEmailIfNoProvider(account: { userId: string; providerId: string }): void {
+  const current = currentEmail(account.userId);
+  if (
+    !shouldResetEmailOnUnlink({
+      isSocial: SOCIAL_PROVIDERS.includes(account.providerId),
+      remainingSocialCount: socialAccountCount(account.userId),
+      currentIsPlaceholder: isPlaceholderEmail(current),
+    })
+  ) {
+    return;
+  }
+  try {
+    appDb
+      .update(userTable)
+      .set({ email: placeholderEmail(), emailVerified: false, updatedAt: new Date() })
+      .where(eq(userTable.id, account.userId))
+      .run();
+  } catch (e) {
+    console.warn("[auth] could not reset email after unlinking last provider", e);
   }
 }
 
@@ -134,24 +219,31 @@ export const auth = betterAuth({
     //      later tries to merge in). It defaults to `true` and is slated to
     //      become unconditional, so we rely on the default rather than pin the
     //      deprecated option. DO NOT set it to `false`, and DO NOT add
-    //      `trustedProviders`, without re-reading docs/explanation/decisions/0002.
+    //      `trustedProviders`, without re-reading docs/explanation/decisions/0001.
     //
-    // This is safe because our signup model keeps accounts verified-at-birth:
-    // where OAuth is configured, new accounts are created via OAuth (verified);
-    // the email/passkey bootstrap (unverified) only runs as the passkey-only,
-    // no-OAuth fallback — where there is no provider to link, so nothing to
-    // hijack. The in-app path for a logged-in user to attach another provider is
+    // This is safe because no signup path lets anyone claim an unproven email
+    // (ADR 0001): passkey signup is emailless (synthetic placeholder), OAuth
+    // signup proves the address — so there is no attacker-controllable,
+    // email-bearing account for a victim's identity to merge into. The in-app
+    // path for a logged-in user to attach another provider is
     // `authClient.linkSocial()`, which links into *their own* session account.
     //
     // `allowDifferentEmails` is required because a passkey-first account's email
-    // is a synthetic placeholder (see ./placeholder-email): linking a real
-    // provider necessarily means the emails differ. It only relaxes the
-    // *explicit* session-scoped link (a user attaching their own provider), so
-    // it doesn't widen the implicit-merge surface. On link, `adoptProviderEmail`
-    // replaces the placeholder with the provider's verified email.
+    // is a synthetic placeholder (./placeholder-email): linking a real provider
+    // necessarily means the emails differ. It only relaxes the *explicit*
+    // session-scoped link, not the implicit merge. `adoptProviderEmail` then
+    // mirrors the provider's verified email onto the row.
+    //
+    // `allowUnlinkingAll` turns OFF better-auth's last-account-row guard, which
+    // counts the phantom `credential` bootstrap row and so blocks unlinking
+    // inconsistently across signup origins. We enforce the real rule — never
+    // leave the user with zero USABLE methods — in the `account.delete` hooks
+    // (blocksUnlinkLockout), which also reset the email on the last unlink
+    // (resetEmailIfNoProvider).
     accountLinking: {
       enabled: true,
       allowDifferentEmails: true,
+      allowUnlinkingAll: true,
     },
   },
   // New-account provisioning: default tier='free' + one seeded
@@ -177,10 +269,9 @@ export const auth = betterAuth({
         },
       },
     },
-    // On linking an OAuth provider to a passkey-first (placeholder-email)
-    // account, adopt the provider's verified email so the account becomes a
-    // fully-identified, verified row. No-op for the bootstrap row and for
-    // OAuth-first signups. See adoptProviderEmail above.
+    // Keep the account's email mirroring its OAuth provider, and keep unlinking
+    // from locking anyone out. See adoptProviderEmail / blocksUnlinkLockout /
+    // resetEmailIfNoProvider above.
     account: {
       create: {
         after: async (newAccount: {
@@ -189,6 +280,17 @@ export const auth = betterAuth({
           idToken?: string | null;
         }) => {
           adoptProviderEmail(newAccount);
+        },
+      },
+      delete: {
+        // Backstop: refuse an unlink that would leave no usable sign-in method.
+        before: async (acct: { userId: string; providerId: string }) => {
+          if (blocksUnlinkLockout(acct)) return false;
+        },
+        // When the last provider goes, the email is no longer provider-backed —
+        // reset it to an emailless placeholder.
+        after: async (acct: { userId: string; providerId: string }) => {
+          resetEmailIfNoProvider(acct);
         },
       },
     },

@@ -57,6 +57,13 @@ victim's identity to be merged into.
   The account becomes a fully-identified, verified row. `allowDifferentEmails:
   true` is required for this (placeholder ≠ provider email); it only relaxes the
   *explicit, session-scoped* link, not implicit merges.
+- **Email mirrors the linked provider.** Adoption fires when the linked provider
+  is the account's *sole* one — so a re-link after unlinking (unlink A → link B)
+  takes B's email, not the stale A. Unlinking the *last* provider resets the row
+  to an emailless placeholder (`resetEmailIfNoProvider`). So the shown email
+  always reflects a currently-linked verified provider, or nothing. (One edge:
+  with two providers, unlinking the one that supplied the email leaves it on the
+  old address until a re-link — account rows don't store the email to recompute.)
 - **Linking is explicit + session-scoped.** `authClient.linkSocial()` links into
   the caller's *own* account. Implicit (sign-in) linking still merges two
   *verified* OAuth identities that share an email (e.g. Google then GitHub) — both
@@ -83,12 +90,17 @@ victim's identity to be merged into.
   address the creator hasn't proven.* Passkey signup stays emailless (synthetic
   placeholder); OAuth/magic-link signups stay verified-at-birth. A future **magic
   link** must materialize its account only *after* the link is clicked.
-- **Lockout is enforced in our UI, not by better-auth alone.** The hidden
-  `credential` bootstrap row (random password, no sign-in UI) is not a usable
-  method, but better-auth's `allowUnlinkingAll` guard counts it — so it would let
-  a user unlink their last OAuth provider with no passkeys and lock themselves
-  out. The Account screen guards both revoke-passkey and unlink-provider against
-  leaving zero *usable* methods (`cannotRevokeLast` / `cannotUnlinkLastOAuth`).
+- **Lockout is enforced on the real rule, not better-auth's row count.**
+  better-auth's built-in guard counts *account rows* — including the hidden
+  `credential` bootstrap row (random password, no sign-in UI) and excluding
+  passkeys — so it blocked unlinking inconsistently across signup origins (a
+  Google-signup account + passkey couldn't unlink Google; a passkey-signup one
+  could). We set `allowUnlinkingAll: true` to disable that count and enforce the
+  real rule ourselves: never leave the user with zero *usable* methods (no
+  passkey AND no other provider). It's guarded twice — in the Account UI
+  (`cannotRevokeLast` / `cannotUnlinkLastOAuth`) and server-side in the
+  `account.delete.before` hook (`blocksUnlinkLockout`), so the raw API can't
+  strand a user either.
 - **A removed passkey is dead.** Deleting a passkey removes the server credential
   row; a later assertion fails the credential lookup (`PASSKEY_NOT_FOUND`). It
   can neither sign in nor create an account. (The private key may linger in the

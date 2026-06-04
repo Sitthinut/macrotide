@@ -20,9 +20,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   email — so no one can register an account at an address they don't control
   (closing both account-takeover and email-squatting). You can start with either
   method and add the other later from Account settings (Link/Unlink providers,
-  add/remove passkeys), with a guard that always keeps at least one working way to
-  sign in. Linking an OAuth provider to a passkey account adopts that provider's
-  verified email. Rationale: ADR 0001.
+  add/remove passkeys, edit your name), with a guard that always keeps at least
+  one working way to sign in — including when you signed up with a provider and
+  added a passkey. Your account email mirrors your linked provider: linking
+  adopts its verified address, and unlinking your last provider clears it back to
+  emailless. The post-sign-in "add a passkey" offer appears only when you don't
+  have one yet, and not again once dismissed. Rationale: ADR 0001.
 - **The fund portfolio table now reads by security and groups by asset type.**
   Each holding leads with its own identifier — the ticker for listed securities
   (e.g. "EWT US"), the issuer for a bank deposit — instead of the SEC's generic

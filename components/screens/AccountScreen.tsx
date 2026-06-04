@@ -82,6 +82,9 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
     confirmLabel: string;
     run: () => Promise<void>;
   } | null>(null);
+  // Inline name edit.
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
 
   const refreshLinkedAccounts = useCallback(async () => {
     try {
@@ -134,6 +137,39 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
       }
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Passkey registration failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function startEditName() {
+    setNameDraft(user?.name ?? "");
+    setActionError(null);
+    setEditingName(true);
+  }
+
+  async function handleSaveName() {
+    const next = nameDraft.trim();
+    if (!next) {
+      setActionError("Name can't be empty.");
+      return;
+    }
+    if (next === user?.name) {
+      setEditingName(false);
+      return;
+    }
+    setBusy(true);
+    setActionError(null);
+    try {
+      const res = await authClient.updateUser({ name: next });
+      if ((res as { error?: { message?: string } })?.error) {
+        throw new Error(
+          (res as { error?: { message?: string } }).error?.message ?? "Couldn't update name",
+        );
+      }
+      setEditingName(false);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Couldn't update name");
     } finally {
       setBusy(false);
     }
@@ -326,16 +362,86 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
             }}
           >
             <span style={{ fontSize: 12.5, color: "var(--muted)", fontWeight: 500 }}>Name</span>
-            <span
-              style={{
-                fontSize: 13.5,
-                color: "var(--ink)",
-                fontWeight: 500,
-                letterSpacing: "-0.01em",
-              }}
-            >
-              {user?.name ?? "—"}
-            </span>
+            {editingName ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <input
+                  type="text"
+                  autoComplete="name"
+                  value={nameDraft}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  // biome-ignore lint/a11y/noAutofocus: focusing the field the user just chose to edit
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveName();
+                    if (e.key === "Escape") setEditingName(false);
+                  }}
+                  style={{
+                    fontSize: 13,
+                    padding: "4px 8px",
+                    borderRadius: "var(--r-sm)",
+                    border: "1px solid var(--line)",
+                    background: "var(--paper)",
+                    color: "var(--ink)",
+                    width: 150,
+                  }}
+                />
+                <button
+                  type="button"
+                  className="btn ghost sm"
+                  onClick={handleSaveName}
+                  disabled={busy}
+                  style={{ opacity: busy ? 0.6 : 1 }}
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingName(false)}
+                  disabled={busy}
+                  aria-label="Cancel"
+                  style={{
+                    background: "transparent",
+                    border: 0,
+                    color: "var(--muted)",
+                    cursor: "pointer",
+                    fontSize: 12.5,
+                    padding: "4px 6px",
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span
+                  style={{
+                    fontSize: 13.5,
+                    color: "var(--ink)",
+                    fontWeight: 500,
+                    letterSpacing: "-0.01em",
+                  }}
+                >
+                  {user?.name ?? "—"}
+                </span>
+                <button
+                  type="button"
+                  onClick={startEditName}
+                  disabled={busy}
+                  aria-label="Edit name"
+                  style={{
+                    background: "transparent",
+                    border: 0,
+                    color: "var(--muted)",
+                    cursor: "pointer",
+                    fontSize: 12.5,
+                    padding: "2px 6px",
+                    borderRadius: "var(--r-sm)",
+                  }}
+                >
+                  Edit
+                </button>
+              </div>
+            )}
           </div>
           <div
             style={{
