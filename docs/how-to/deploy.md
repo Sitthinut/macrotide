@@ -497,6 +497,49 @@ sudo systemd-run --unit=macrotide-catalog-test \
 journalctl -u macrotide-catalog-test -f
 ```
 
+### Share-class refresh
+
+After the catalog refresh, enumerate each fund's priceable share classes into
+`fund_share_classes` (`scripts/refresh-share-classes.ts`, the
+`npm run jobs:refresh-share-classes` script). It reuses the same SEC enumeration —
+no extra API calls — but **must run after the catalog** (it FK-references
+`fund_catalog`; classes whose parent isn't catalogued yet are skipped). Schedule
+it on its own timer a safe margin after 11:00 UTC (e.g. **11:45 UTC**), or run it
+inline after the catalog `ExecStart`:
+
+```sh
+sudo tee /etc/systemd/system/macrotide-share-classes.service > /dev/null <<'EOF'
+[Unit]
+Description=Macrotide — share-class refresh (SEC profiles)
+After=network.target macrotide.service macrotide-fund-catalog.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/opt/macrotide
+EnvironmentFile=/opt/macrotide/.env.local
+ExecStart=npx -y tsx --tsconfig tsconfig.scripts.json scripts/refresh-share-classes.ts
+StandardOutput=journal
+StandardError=journal
+EOF
+
+sudo tee /etc/systemd/system/macrotide-share-classes.timer > /dev/null <<'EOF'
+[Unit]
+Description=Run Macrotide share-class refresh daily at 11:45 UTC
+
+[Timer]
+OnCalendar=*-*-* 11:45:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now macrotide-share-classes.timer
+```
+
 ## Updating
 
 ```sh

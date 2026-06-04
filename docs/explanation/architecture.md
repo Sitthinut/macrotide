@@ -38,6 +38,17 @@ so the backup is small and market.db is excluded), **credential-free dev clones*
 session gets an isolated in-memory app.db but shares the real market.db
 read-only, so it sees the same warm cache as real users).
 
+The market cache has two clocks, easily confused: a **24h freshness TTL** (when
+to re-fetch a quote/series from upstream) and **row retention (indefinite)**.
+`nav_history` is append-or-update only — writes upsert on `(ticker, date)`, so a
+re-fetch corrects a day in place but never deletes or time-prunes history. A
+refresh fetches a *window* and upserts it; older rows outside that window stay.
+A wider request than the cached depth (e.g. "All" on a fund only ever pulled at
+6mo) deepens the series even while the quote is fresh — the deepest range fetched
+is tracked per key (`fund_quotes.deepest_range`). Never add a time-based
+retention sweep or a delete-then-replace to `nav_history`, or historical series
+are lost.
+
 ```text
 Browser ──HTTPS──▶ Reverse proxy (Caddy) ──▶ Next.js (App Router) ──▶ app.db + market.db (SQLite)
                                                    │
@@ -131,6 +142,19 @@ degrades from real levels → ETF proxy → Yahoo with no config; this is what f
 Yahoo's datacenter-IP 429s. The chain is detailed in
 [auth-and-providers.md](../reference/auth-and-providers.md#market-data-providers-indices--fx--stocks).
 Thai mutual-fund NAVs come from the Thai SEC Open API.
+
+**Parent fund vs. share class.** The `fund_catalog` row is *parent-level* — one
+per SEC `proj_id`, carrying fund-level metadata — while the **priceable units**
+live in `fund_share_classes`: one row per SEC share class. NAV, fees, tax wrapper,
+and distribution policy all differ *per class*, so the class is the unit that
+gets a price. Each class's `ticker` (the parent abbr for single-class `"main"`
+funds, else the class code like `MDIVA-A`) is what `holdings` and the NAV cache
+key on, so each class resolves to its own quote series. The Explore screener lists
+priceable classes (hiding institutional/insurance by default); the fund detail
+resolves a ticker to its class, offers a class selector, and defaults via a
+retail-first, then-accumulating heuristic. Both tables are populated by the same
+SEC enumeration in one crawl — no extra API calls. Column-level detail:
+[data-model.md § Parent fund vs. share classes](../reference/data-model.md#parent-fund-vs-share-classes).
 
 ## Fund search
 

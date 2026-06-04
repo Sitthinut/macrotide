@@ -85,6 +85,33 @@ export function usePortfolioSeries(range: SeriesRange = "6mo") {
   );
 }
 
+export interface FundSeriesPoint {
+  /** ISO date. */
+  d: string;
+  /** NAV per unit. */
+  v: number;
+  /** Fund total net assets (AUM) on this date; null for sources that omit it. */
+  aum: number | null;
+}
+
+export interface FundSeriesResponse {
+  series: FundSeriesPoint[];
+  asOf: string | null;
+}
+
+/**
+ * Daily NAV history for a single catalog fund, powering the fund-detail chart.
+ * `projId` is the fund's SEC proj_id or its bare ticker (abbr_name); null while
+ * the sheet is closed. Re-fetches when the range changes.
+ */
+export function useFundSeries(projId: string | null, range: SeriesRange = "1y") {
+  return useResource<FundSeriesResponse>(
+    projId
+      ? `/api/funds/${encodeURIComponent(projId)}/series?range=${encodeURIComponent(range)}`
+      : null,
+  );
+}
+
 export interface LookThroughResponse {
   lookThrough: LookThrough | null;
 }

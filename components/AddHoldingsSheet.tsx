@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import {
@@ -9,11 +9,26 @@ import {
   type TickerSuggestion,
 } from "@/lib/data/known-funds";
 import { mergeSourceSuggestions } from "@/lib/data/sources";
+import type { ShareClassListItem } from "@/lib/db/queries/funds";
 import { useBuckets, useHoldings } from "@/lib/fetchers/portfolio";
-import { invalidate } from "@/lib/fetchers/swr";
+import { invalidate, useResource } from "@/lib/fetchers/swr";
 import { inferQuoteSource } from "@/lib/market/infer-quote-source";
 import type { QuoteSource } from "@/lib/market/sources";
 import type { ImportSeedRow } from "@/lib/stores/import-seed";
+
+// Shape of /api/fund-classes/resolve — validates a typed ticker against the
+// catalog: a bare parent ("MDIVA") with several share classes is NOT priceable
+// and must be swapped for a real class ("MDIVA-A") before it can be saved.
+interface ResolveResult {
+  ticker: string;
+  valid: boolean;
+  isParentWithClasses: boolean;
+  classes?: {
+    ticker: string;
+    distributionPolicy: string | null;
+    taxIncentiveType: string | null;
+  }[];
+}
 
 // Compact 2–3 char codes for the in-input price-source badge.
 const TYPE_BADGE_CODES: Record<QuoteSource, string> = {
@@ -57,6 +72,19 @@ type ImportedRow = ImportSeedRow;
 
 interface ImportApiResponse {
   rows: ImportedRow[];
+}
+
+// Unified dropdown suggestion — covers both the static seed / user-holdings
+// source (TickerSuggestion) and a live catalog share class. `distributionPolicy`
+// is set only for catalog rows, so the dropdown can show an Acc/Div tag that
+// distinguishes sibling classes (MDIVA-A acc vs MDIVA-D div).
+interface CatalogSuggestion {
+  ticker: string;
+  name: string;
+  quote_source: QuoteSource;
+  fromHoldings?: boolean;
+  /** 'accumulating' | 'dividend' | null — only present for catalog matches. */
+  distributionPolicy?: string | null;
 }
 
 interface OcrErrorResponse {
@@ -161,13 +189,98 @@ export function AddHoldingsSheet({ open, onClose, onAdd, seedRows }: AddHoldings
     return () => clearTimeout(t);
   }, [activeQuery]);
 
-  const suggestions = useMemo(
+  const localSuggestions = useMemo(
     () =>
       openSuggestRow === null || !debouncedTicker.trim()
         ? []
         : filterKnownTickers(suggestionPool, debouncedTicker),
     [openSuggestRow, suggestionPool, debouncedTicker],
   );
+
+  // Live catalog autocomplete — real priceable SHARE CLASSES from the SEC
+  // catalog (GET /api/fund-classes), so the user picks a class that has a NAV
+  // rather than a bare parent. Only fires once the query is ≥2 chars to keep it
+  // cheap; the static seed + the user's own holdings still surface first.
+  const catalogQuery = debouncedTicker.trim();
+  const { data: catalogMatches } = useResource<ShareClassListItem[]>(
+    openSuggestRow !== null && catalogQuery.length >= 2
+      ? `/api/fund-classes?query=${encodeURIComponent(catalogQuery)}&limit=8`
+      : null,
+  );
+
+  // Merge local (holdings + seed) and live catalog suggestions into one list,
+  // deduped by ticker (local wins so a "YOURS" tag is preserved). Catalog rows
+  // carry the parent name + Acc/Div so the user can tell sibling classes apart.
+  const suggestions = useMemo<CatalogSuggestion[]>(() => {
+    const seen = new Set<string>();
+    const out: CatalogSuggestion[] = [];
+    for (const s of localSuggestions) {
+      const key = s.ticker.trim().toUpperCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        ticker: s.ticker,
+        name: s.name,
+        quote_source: s.quote_source,
+        fromHoldings: s.fromHoldings,
+      });
+    }
+    for (const c of catalogMatches ?? []) {
+      const key = c.ticker.trim().toUpperCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        ticker: c.ticker,
+        name: c.englishName ?? c.thaiName ?? c.abbrName ?? c.ticker,
+        quote_source: "thai_mutual_fund",
+        distributionPolicy: c.distributionPolicy,
+      });
+    }
+    return out;
+  }, [localSuggestions, catalogMatches]);
+
+  // Resolve cache, keyed by the UPPERCASED ticker string (not row index, which
+  // shifts on merge/remove). Drives the "pick a class" warning and blocks save
+  // for any row whose ticker is a bare parent. Shared across manual / paste /
+  // image / seed entry — one validation per distinct symbol.
+  const [resolveCache, setResolveCache] = useState<Record<string, ResolveResult>>({});
+
+  // Validate a typed ticker against the catalog. A parent-with-classes result
+  // flags every row carrying that symbol (warning + blocked save). Non-fund
+  // tickers (stocks/indices) resolve `valid` and don't block. Cached per symbol.
+  // Stable identity (no deps) so the resolve effect below doesn't re-run every
+  // render — setResolveCache's updater reads prev, so it needs no closure deps.
+  const resolveTicker = useCallback(async (raw: string) => {
+    const ticker = raw.trim();
+    if (!ticker) return;
+    const key = ticker.toUpperCase();
+    try {
+      const res = await fetch(`/api/fund-classes/resolve?ticker=${encodeURIComponent(ticker)}`);
+      if (!res.ok) return;
+      const result = (await res.json()) as ResolveResult;
+      setResolveCache((prev) => ({ ...prev, [key]: result }));
+    } catch {
+      // Network hiccup — leave the symbol unflagged rather than blocking a valid save.
+    }
+  }, []);
+
+  // Validate any table ticker not yet in the cache — covers the paste, CSV,
+  // image, and seed paths in one place (manual entry also fires resolveTicker on
+  // blur for immediacy). Debounced so a burst of pasted rows resolves once. The
+  // cache guard makes re-runs idempotent (an edit to units/avgCost re-runs but
+  // fetches nothing once every symbol is cached).
+  useEffect(() => {
+    const pending = Array.from(
+      new Set(
+        rows.map((r) => r.ticker.trim().toUpperCase()).filter((t) => t && !(t in resolveCache)),
+      ),
+    );
+    if (pending.length === 0) return;
+    const id = setTimeout(() => {
+      for (const t of pending) void resolveTicker(t);
+    }, 200);
+    return () => clearTimeout(id);
+  }, [rows, resolveCache, resolveTicker]);
 
   const parsePaste = (text: string = pasteText): Row[] => {
     const lines = text.split("\n").filter((l) => l.trim());
@@ -388,6 +501,22 @@ export function AddHoldingsSheet({ open, onClose, onAdd, seedRows }: AddHoldings
       setSubmitError("Pick a portfolio first");
       return;
     }
+    // Block any row whose ticker is a bare parent with multiple share classes —
+    // it has no NAV of its own, so it can't be priced. The user must pick a class.
+    const blockedTickers = Array.from(
+      new Set(
+        rows
+          .filter((r) => resolveCache[r.ticker.trim().toUpperCase()]?.isParentWithClasses)
+          .map((r) => r.ticker.trim()),
+      ),
+    );
+    if (blockedTickers.length > 0) {
+      setSubmitError(
+        `Pick a share class for ${blockedTickers.join(", ")} — these are parent funds with multiple classes and no price of their own.`,
+      );
+      return;
+    }
+
     // One shared table feeds the save, regardless of how rows got there.
     const toAdd = rows.filter((r) => r.ticker && r.units);
 
@@ -474,6 +603,9 @@ export function AddHoldingsSheet({ open, onClose, onAdd, seedRows }: AddHoldings
     if (field === "ticker") {
       copy[i].englishName = undefined;
       if (!copy[i].quoteSourceLocked) copy[i].quoteSource = undefined;
+      // The resolve cache is keyed by symbol, so the edited row simply reads the
+      // new symbol's cached result (or triggers a fresh resolve via the effect /
+      // blur) — no per-row cleanup needed.
     }
     // Supplying quantity clears the "needs quantity" flag on an image-derived row.
     if (field === "units" && val.trim()) copy[i].needsUnits = false;
@@ -486,12 +618,15 @@ export function AddHoldingsSheet({ open, onClose, onAdd, seedRows }: AddHoldings
     setRows(copy);
   };
 
-  const pickSuggestion = (i: number, s: TickerSuggestion) => {
+  const pickSuggestion = (i: number, s: CatalogSuggestion) => {
     const copy = [...rows];
     // The catalog entry carries an authoritative source — adopt it for the row.
     copy[i] = { ...copy[i], ticker: s.ticker, englishName: s.name, quoteSource: s.quote_source };
     setRows(copy);
     setOpenSuggestRow(null);
+    // A picked suggestion is a real priceable class — validate it so its (valid)
+    // result lands in the cache; the resolve effect would catch it too.
+    void resolveTicker(s.ticker);
   };
 
   const addRow = () => setRows([...rows, { ticker: "", units: "", avgCost: "" }]);
@@ -499,6 +634,11 @@ export function AddHoldingsSheet({ open, onClose, onAdd, seedRows }: AddHoldings
 
   // The shared table is the single source of truth for what will be saved.
   const previewCount = rows.filter((r) => r.ticker && r.units).length;
+  // Any row still pointing at a bare parent (multiple share classes) blocks the
+  // whole save — the user must resolve it to a priceable class first.
+  const hasBlockedRow = rows.some(
+    (r) => resolveCache[r.ticker.trim().toUpperCase()]?.isParentWithClasses,
+  );
   const needsUnitsCount = rows.filter((r) => r.ticker.trim() && !r.units.trim()).length;
   const unknownSymbolCount = rows.filter((r, i) => {
     const ticker = r.ticker.trim();
@@ -899,183 +1039,239 @@ export function AddHoldingsSheet({ open, onClose, onAdd, seedRows }: AddHoldings
               !knownTickerSet.has(r.ticker.trim().toUpperCase());
             const openSuggestionsUp = i >= Math.max(0, rows.length - 2);
             const rowSource: QuoteSource = r.quoteSource ?? inferQuoteSource(r.ticker);
+            // A typed bare-parent ticker (e.g. "MDIVA") that has multiple share
+            // classes isn't priceable — flag the row and block its save until the
+            // user picks a real class.
+            const flag = resolveCache[r.ticker.trim().toUpperCase()];
+            const parentFlag = flag?.isParentWithClasses ? flag : null;
             return (
-              <div
-                key={i}
-                className="manual-row"
-                // Track row-level focus (focusin/focusout bubble) so the
-                // needs-quantity amber waits until focus leaves the whole row.
-                onFocus={() => setActiveRow(i)}
-                onBlur={(e) => {
-                  if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                    setActiveRow((cur) => (cur === i ? null : cur));
-                  }
-                }}
-              >
-                <div style={{ position: "relative" }}>
-                  <input
-                    placeholder="Symbol"
-                    value={r.ticker}
-                    onChange={(e) => updateRow(i, "ticker", e.target.value)}
-                    onFocus={() => setOpenSuggestRow(i)}
-                    // Delay clearing so a click on the dropdown lands before blur kills it.
-                    onBlur={() =>
-                      setTimeout(() => setOpenSuggestRow((cur) => (cur === i ? null : cur)), 120)
+              <div key={i}>
+                <div
+                  className="manual-row"
+                  // Track row-level focus (focusin/focusout bubble) so the
+                  // needs-quantity amber waits until focus leaves the whole row.
+                  onFocus={() => setActiveRow(i)}
+                  onBlur={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                      setActiveRow((cur) => (cur === i ? null : cur));
                     }
-                    role="combobox"
-                    aria-autocomplete="list"
-                    aria-expanded={openSuggestRow === i && suggestions.length > 0}
-                    aria-controls={`ticker-suggest-${i}`}
-                    autoComplete="off"
-                    // Full ticker on hover — the input clips long codes (fade cue below).
-                    title={
-                      hasTicker
-                        ? unknownTicker
-                          ? `${r.ticker} — not in catalog`
-                          : r.ticker
-                        : undefined
-                    }
-                    style={{
-                      // Reserve room for the in-input price-source badge.
-                      ...(hasTicker ? { paddingRight: 42 } : null),
-                      ...(unknownTicker
-                        ? { borderColor: "var(--amber)", background: "var(--card-soft)" }
-                        : null),
-                    }}
-                  />
-                  {/* Right-edge fade: cues "more text" when a long symbol clips
-                      before the badge. Only visible when text reaches the zone. */}
-                  {hasTicker && <span className="symbol-fade" aria-hidden="true" />}
-                  {hasTicker && (
-                    <button
-                      type="button"
-                      className="type-badge"
-                      data-overridden={Boolean(r.quoteSourceLocked)}
-                      title="Price source — tap to switch (Thai fund ⇄ Stock / ETF)"
-                      onClick={() =>
-                        setRowQuoteSource(
-                          i,
-                          rowSource === "thai_mutual_fund" ? "yahoo" : "thai_mutual_fund",
-                        )
-                      }
-                    >
-                      {TYPE_BADGE_CODES[rowSource]}
-                    </button>
-                  )}
-                  {openSuggestRow === i && suggestions.length > 0 && (
-                    <div
-                      id={`ticker-suggest-${i}`}
-                      role="listbox"
-                      style={{
-                        position: "absolute",
-                        top: openSuggestionsUp ? undefined : "calc(100% + 2px)",
-                        bottom: openSuggestionsUp ? "calc(100% + 2px)" : undefined,
-                        left: 0,
-                        right: 0,
-                        zIndex: 80,
-                        margin: 0,
-                        padding: 4,
-                        background: "var(--paper)",
-                        border: "1px solid var(--line-soft)",
-                        borderRadius: 8,
-                        boxShadow: "0 6px 16px rgba(0,0,0,0.12)",
-                        maxHeight: 220,
-                        overflowY: "auto",
+                  }}
+                >
+                  <div style={{ position: "relative" }}>
+                    <input
+                      placeholder="Symbol"
+                      value={r.ticker}
+                      onChange={(e) => updateRow(i, "ticker", e.target.value)}
+                      onFocus={() => setOpenSuggestRow(i)}
+                      // Delay clearing so a click on the dropdown lands before blur
+                      // kills it; validate the typed symbol against the catalog so
+                      // a bare parent gets flagged before save.
+                      onBlur={() => {
+                        const typed = r.ticker;
+                        setTimeout(() => setOpenSuggestRow((cur) => (cur === i ? null : cur)), 120);
+                        void resolveTicker(typed);
                       }}
-                    >
-                      {suggestions.map((s) => (
-                        <div
-                          key={`${s.quote_source}:${s.ticker}`}
-                          role="option"
-                          aria-selected="false"
-                          tabIndex={-1}
-                        >
-                          <button
-                            type="button"
-                            onMouseDown={(e) => {
-                              // mousedown fires before blur — keeps the input from
-                              // losing focus and hiding the dropdown before we run.
-                              e.preventDefault();
-                              pickSuggestion(i, s);
-                            }}
-                            style={{
-                              display: "block",
-                              width: "100%",
-                              textAlign: "left",
-                              padding: "6px 8px",
-                              border: "none",
-                              background: "transparent",
-                              borderRadius: 6,
-                              cursor: "pointer",
-                              fontFamily: "var(--font-sans)",
-                              fontSize: 12.5,
-                              color: "var(--ink)",
-                              lineHeight: 1.3,
-                            }}
-                          >
-                            <div style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
-                              {s.ticker}
-                              {s.fromHoldings && (
-                                <span
-                                  style={{
-                                    marginLeft: 6,
-                                    fontSize: 9.5,
-                                    color: "var(--muted)",
-                                    letterSpacing: "0.04em",
-                                  }}
-                                >
-                                  · YOURS
-                                </span>
-                              )}
-                            </div>
-                            <div style={{ fontSize: 11, color: "var(--muted)" }}>{s.name}</div>
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <input
-                  placeholder="Quantity"
-                  value={r.units}
-                  onChange={(e) => updateRow(i, "units", e.target.value)}
-                  aria-invalid={showNeedsUnits}
-                  title={
-                    rowNeedsUnits
-                      ? "No quantity on the screenshot — open the fund in your broker app (or its detail screen) for exact units + avg cost, then type them here."
-                      : r.estimated
-                        ? "Estimated from value ÷ NAV — edit for an exact quantity"
-                        : undefined
-                  }
-                  style={
-                    showNeedsUnits
-                      ? {
-                          borderColor: "var(--amber)",
-                          background: "color-mix(in oklab, var(--amber) 10%, transparent)",
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded={openSuggestRow === i && suggestions.length > 0}
+                      aria-controls={`ticker-suggest-${i}`}
+                      autoComplete="off"
+                      // Full ticker on hover — the input clips long codes (fade cue below).
+                      title={
+                        hasTicker
+                          ? unknownTicker
+                            ? `${r.ticker} — not in catalog`
+                            : r.ticker
+                          : undefined
+                      }
+                      aria-invalid={Boolean(parentFlag)}
+                      style={{
+                        // Reserve room for the in-input price-source badge.
+                        ...(hasTicker ? { paddingRight: 42 } : null),
+                        ...(unknownTicker || parentFlag
+                          ? { borderColor: "var(--amber)", background: "var(--card-soft)" }
+                          : null),
+                      }}
+                    />
+                    {/* Right-edge fade: cues "more text" when a long symbol clips
+                      before the badge. Only visible when text reaches the zone. */}
+                    {hasTicker && <span className="symbol-fade" aria-hidden="true" />}
+                    {hasTicker && (
+                      <button
+                        type="button"
+                        className="type-badge"
+                        data-overridden={Boolean(r.quoteSourceLocked)}
+                        title="Price source — tap to switch (Thai fund ⇄ Stock / ETF)"
+                        onClick={() =>
+                          setRowQuoteSource(
+                            i,
+                            rowSource === "thai_mutual_fund" ? "yahoo" : "thai_mutual_fund",
+                          )
                         }
-                      : r.estimated
-                        ? { borderStyle: "dashed" }
-                        : undefined
-                  }
-                />
-                <input
-                  placeholder="Optional"
-                  title="Avg cost per unit (optional)"
-                  value={r.avgCost}
-                  onChange={(e) => updateRow(i, "avgCost", e.target.value)}
-                />
-                <button onClick={() => removeRow(i)} aria-label="Remove">
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
+                      >
+                        {TYPE_BADGE_CODES[rowSource]}
+                      </button>
+                    )}
+                    {openSuggestRow === i && suggestions.length > 0 && (
+                      <div
+                        id={`ticker-suggest-${i}`}
+                        role="listbox"
+                        style={{
+                          position: "absolute",
+                          top: openSuggestionsUp ? undefined : "calc(100% + 2px)",
+                          bottom: openSuggestionsUp ? "calc(100% + 2px)" : undefined,
+                          left: 0,
+                          right: 0,
+                          zIndex: 80,
+                          margin: 0,
+                          padding: 4,
+                          background: "var(--paper)",
+                          border: "1px solid var(--line-soft)",
+                          borderRadius: 8,
+                          boxShadow: "0 6px 16px rgba(0,0,0,0.12)",
+                          maxHeight: 220,
+                          overflowY: "auto",
+                        }}
+                      >
+                        {suggestions.map((s) => (
+                          <div
+                            key={`${s.quote_source}:${s.ticker}`}
+                            role="option"
+                            aria-selected="false"
+                            tabIndex={-1}
+                          >
+                            <button
+                              type="button"
+                              onMouseDown={(e) => {
+                                // mousedown fires before blur — keeps the input from
+                                // losing focus and hiding the dropdown before we run.
+                                e.preventDefault();
+                                pickSuggestion(i, s);
+                              }}
+                              style={{
+                                display: "block",
+                                width: "100%",
+                                textAlign: "left",
+                                padding: "6px 8px",
+                                border: "none",
+                                background: "transparent",
+                                borderRadius: 6,
+                                cursor: "pointer",
+                                fontFamily: "var(--font-sans)",
+                                fontSize: 12.5,
+                                color: "var(--ink)",
+                                lineHeight: 1.3,
+                              }}
+                            >
+                              <div style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                                {s.ticker}
+                                {s.fromHoldings && (
+                                  <span
+                                    style={{
+                                      marginLeft: 6,
+                                      fontSize: 9.5,
+                                      color: "var(--muted)",
+                                      letterSpacing: "0.04em",
+                                    }}
+                                  >
+                                    · YOURS
+                                  </span>
+                                )}
+                                {s.distributionPolicy === "accumulating" && (
+                                  <span
+                                    style={{
+                                      marginLeft: 6,
+                                      fontSize: 9.5,
+                                      color: "var(--accent-ink)",
+                                      letterSpacing: "0.04em",
+                                    }}
+                                  >
+                                    · ACC
+                                  </span>
+                                )}
+                                {s.distributionPolicy === "dividend" && (
+                                  <span
+                                    style={{
+                                      marginLeft: 6,
+                                      fontSize: 9.5,
+                                      color: "var(--accent-ink)",
+                                      letterSpacing: "0.04em",
+                                    }}
+                                  >
+                                    · DIV
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ fontSize: 11, color: "var(--muted)" }}>{s.name}</div>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <input
+                    placeholder="Quantity"
+                    value={r.units}
+                    onChange={(e) => updateRow(i, "units", e.target.value)}
+                    aria-invalid={showNeedsUnits}
+                    title={
+                      rowNeedsUnits
+                        ? "No quantity on the screenshot — open the fund in your broker app (or its detail screen) for exact units + avg cost, then type them here."
+                        : r.estimated
+                          ? "Estimated from value ÷ NAV — edit for an exact quantity"
+                          : undefined
+                    }
+                    style={
+                      showNeedsUnits
+                        ? {
+                            borderColor: "var(--amber)",
+                            background: "color-mix(in oklab, var(--amber) 10%, transparent)",
+                          }
+                        : r.estimated
+                          ? { borderStyle: "dashed" }
+                          : undefined
+                    }
+                  />
+                  <input
+                    placeholder="Optional"
+                    title="Avg cost per unit (optional)"
+                    value={r.avgCost}
+                    onChange={(e) => updateRow(i, "avgCost", e.target.value)}
+                  />
+                  <button onClick={() => removeRow(i)} aria-label="Remove">
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                    >
+                      <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                </div>
+                {parentFlag && (
+                  <div
+                    role="alert"
+                    style={{
+                      margin: "2px 10px 6px",
+                      padding: "7px 10px",
+                      background: "color-mix(in oklab, var(--amber) 12%, transparent)",
+                      border: "1px solid var(--amber)",
+                      borderRadius: 8,
+                      fontSize: 11.5,
+                      color: "var(--ink-soft)",
+                      lineHeight: 1.45,
+                    }}
                   >
-                    <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" />
-                  </svg>
-                </button>
+                    <strong style={{ fontWeight: 600 }}>{r.ticker.trim()}</strong> has multiple
+                    share classes — pick one:{" "}
+                    <span style={{ fontFamily: "var(--font-mono)" }}>
+                      {(parentFlag.classes ?? []).map((c) => c.ticker).join(", ")}
+                    </span>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -1180,7 +1376,7 @@ export function AddHoldingsSheet({ open, onClose, onAdd, seedRows }: AddHoldings
           type="button"
           className="btn primary"
           onClick={submit}
-          disabled={previewCount === 0 || submitting || !bucketId}
+          disabled={previewCount === 0 || submitting || !bucketId || hasBlockedRow}
         >
           {submitting
             ? "Adding…"

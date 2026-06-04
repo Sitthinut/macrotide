@@ -1,5 +1,13 @@
 import { sql } from "drizzle-orm";
-import { index, integer, primaryKey, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 // ───────────────────────────────────────────────────────────────────────────
 // market.db — the regenerable market-data store (env MARKET_DB_PATH, default
@@ -20,15 +28,36 @@ export const fundQuotes = sqliteTable("fund_quotes", {
   ytdPct: real("ytd_pct"),
   y1Pct: real("y1_pct"),
   updatedAt: text("updated_at").notNull(),
+  /**
+   * Widest series range ever fetched for this key (e.g. "6mo", "max"). Lets the
+   * cache deepen a shallow series when a wider range is requested even while the
+   * quote is still fresh — so "All" returns full history, not a cached window.
+   * NULL on legacy rows (treated as the historical "6mo" default).
+   */
+  deepestRange: text("deepest_range"),
 });
 
-// Daily NAV history (written by the live-market refresh).
+// Daily NAV (+ fund AUM) history (written by the live-market refresh).
+//
+// RETENTION INVARIANT: this table is append-or-update only and is NEVER pruned
+// by age. Writes upsert on the (ticker, date) primary key — a re-fetch of the
+// same day corrects that row in place; it does not delete or replace history.
+// Refresh jobs fetch a window and upsert it; older rows outside the window stay.
+// Never delete-then-replace and never add a time-based retention sweep here, or
+// historical series are lost. (Backups have their own file retention; that is
+// unrelated to row retention.)
 export const navHistory = sqliteTable(
   "nav_history",
   {
     ticker: text("ticker").notNull(),
     date: text("date").notNull(),
     nav: real("nav").notNull(),
+    /**
+     * Fund total net assets (AUM) on this date. Nullable: only fund sources
+     * (Thai SEC) report it; index/stock/FX rows leave it NULL. Pre-existing
+     * cached rows stay NULL until their next refresh re-fetches the series.
+     */
+    netAsset: real("net_asset"),
   },
   (table) => [
     primaryKey({ columns: [table.ticker, table.date] }),
@@ -121,6 +150,55 @@ export const fundCatalog = sqliteTable(
     index("idx_fund_catalog_abbr_name").on(table.abbrName),
     index("idx_fund_catalog_english_name").on(table.englishName),
     index("idx_fund_catalog_thai_name").on(table.thaiName),
+  ],
+);
+
+// Share classes — the *priceable units* of a fund. The SEC general-info/profiles
+// endpoint returns one row per class; the catalog (one row per `proj_id`) carries
+// fund-level metadata, while facts that differ between classes (distribution
+// policy, tax wrapper, investor type, ISIN, fees) live here. Populated from the
+// same enumeration that builds the catalog — no extra SEC calls.
+//
+// `ticker` is the human-facing, holdable identifier and the `${source}:${ticker}`
+// NAV cache-key tail: the share-class code for multi-class funds ("MDIVA-A"), or
+// the parent abbr for single-class funds whose SEC class is "main" ("1DIV").
+// `className` is the raw SEC `fund_class_name` ("main" is NOT unique across funds,
+// so the PK is composite); `ticker` is globally unique (UNIQUE index) and is what
+// holdings / search / the NAV chart key on.
+export const fundShareClasses = sqliteTable(
+  "fund_share_classes",
+  {
+    projId: text("proj_id")
+      .notNull()
+      .references(() => fundCatalog.projId, { onDelete: "cascade" }),
+    // Raw SEC fund_class_name ("main" for single-class funds, "MDIVA-A" etc).
+    className: text("class_name").notNull(),
+    // Priceable ticker = holdings.ticker = NAV cache-key tail. Derived: abbr when
+    // className is "main", else className.
+    ticker: text("ticker").notNull(),
+    // Raw Thai class detail, e.g. "ชนิดสะสมมูลค่า สำหรับผู้ลงทุนทั่วไป".
+    classDetailTh: text("class_detail_th"),
+    // Parsed from classDetailTh: 'accumulating' | 'dividend' | NULL.
+    distributionPolicy: text("distribution_policy"),
+    // Parsed audience: 'retail' | 'institutional' | 'insurance' | NULL. Only
+    // retail classes are buyable by individuals; the screener defaults to these.
+    investorType: text("investor_type"),
+    // Per-class tax wrapper: 'SSF' | 'RMF' | 'ThaiESG' | NULL.
+    taxIncentiveType: text("tax_incentive_type"),
+    // Per-class ISIN.
+    isinCode: text("isin_code"),
+    // Per-class current total expense ratio %, derived from fund_fees
+    // (projId, className, 'total_expense', active period). NULL when unpublished.
+    currentTer: real("current_ter"),
+    createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
+    updatedAt: text("updated_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projId, table.className] }),
+    uniqueIndex("idx_fund_share_classes_ticker").on(table.ticker),
+    index("idx_fund_share_classes_proj").on(table.projId),
+    index("idx_fund_share_classes_tax").on(table.taxIncentiveType),
+    index("idx_fund_share_classes_investor").on(table.investorType),
   ],
 );
 

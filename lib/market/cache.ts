@@ -38,6 +38,28 @@ function isFresh(updatedAt: string, ttlMs: number): boolean {
   return Date.now() - new Date(updatedAt).getTime() < ttlMs;
 }
 
+// Series ranges ordered shallow → deep. Used to decide whether a cached series
+// already covers a requested range, and to record the deepest range fetched.
+const RANGE_ORDER: SeriesRange[] = ["1mo", "3mo", "6mo", "1y", "5y", "max"];
+
+function rangeRank(range: string | null | undefined): number {
+  // Legacy rows (null `deepest_range`) predate depth tracking; treat them as the
+  // historical "6mo" default so a wider request deepens them instead of serving
+  // a shallow window. An unrecognized value falls back to "6mo" too.
+  const idx = RANGE_ORDER.indexOf((range ?? "6mo") as SeriesRange);
+  return idx < 0 ? RANGE_ORDER.indexOf("6mo") : idx;
+}
+
+/** True if a series cached at `stored` depth already covers a `requested` range. */
+function rangeCovers(stored: string | null | undefined, requested: SeriesRange): boolean {
+  return rangeRank(stored) >= rangeRank(requested);
+}
+
+/** The deeper of two ranges (used to never shrink the recorded depth). */
+function widerRange(a: string | null | undefined, b: SeriesRange): SeriesRange {
+  return a && rangeRank(a) >= rangeRank(b) ? (a as SeriesRange) : b;
+}
+
 function yyyyMmDd(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toISOString().slice(0, 10);
 }
@@ -45,7 +67,7 @@ function yyyyMmDd(unixSeconds: number): string {
 export interface CachedSeries {
   /** Original ticker, as caller passed in. */
   ticker: string;
-  series: { date: string; close: number }[];
+  series: { date: string; close: number; netAsset?: number | null }[];
   /** Most recent value (mirrors fund_quotes). */
   quote: {
     price: number;
@@ -75,7 +97,15 @@ export async function getCachedSeries(
   const key = cacheKey(source, ticker);
   const cachedQuote = db.select().from(fundQuotes).where(eq(fundQuotes.ticker, key)).get();
 
-  if (cachedQuote && isFresh(cachedQuote.updatedAt, CACHE_TTL_MS)) {
+  // Serve from cache only when it's fresh AND already deep enough for this
+  // request. A wider range than we've stored (e.g. "All" on a fund only ever
+  // fetched at 6mo) falls through to a refetch even while the quote is fresh, so
+  // history deepens on demand rather than returning a shallow cached window.
+  if (
+    cachedQuote &&
+    isFresh(cachedQuote.updatedAt, CACHE_TTL_MS) &&
+    rangeCovers(cachedQuote.deepestRange, range)
+  ) {
     return readCached(db, key, ticker, range, cachedQuote);
   }
 
@@ -101,7 +131,11 @@ export async function getCachedSeries(
           continue; // empty result — try the next provider
         }
         recentFailures.delete(key);
-        return persistFresh(db, key, ticker, fresh);
+        // Record the deepest range we've fetched so a fresh-but-shallow cache
+        // still deepens on a wider request; never shrink it (nightly 6mo
+        // refreshes keep a prior "max" depth).
+        const deepest = widerRange(cachedQuote?.deepestRange, range);
+        return persistFresh(db, key, ticker, fresh, deepest);
       } catch (err) {
         lastErr = err; // upstream failed — fall through to the next provider
       }
@@ -133,7 +167,7 @@ function readCached(
     .all();
   return {
     ticker,
-    series: rows.map((r) => ({ date: r.date, close: r.nav })),
+    series: rows.map((r) => ({ date: r.date, close: r.nav, netAsset: r.netAsset })),
     quote: {
       price: cachedQuote.nav,
       previousClose: cachedQuote.nav - (cachedQuote.d1Pct ?? 0),
@@ -149,8 +183,9 @@ function persistFresh(
   ticker: string,
   fresh: {
     quote: { price: number; previousClose: number };
-    series: { t: number; close: number }[];
+    series: { t: number; close: number; netAsset?: number | null }[];
   },
+  deepestRange: SeriesRange,
 ): CachedSeries {
   if (fresh.series.length === 0) {
     return { ticker, series: [], quote: null };
@@ -171,6 +206,7 @@ function persistFresh(
       ytdPct,
       y1Pct,
       updatedAt,
+      deepestRange,
     })
     .onConflictDoUpdate({
       target: fundQuotes.ticker,
@@ -180,6 +216,7 @@ function persistFresh(
         ytdPct,
         y1Pct,
         updatedAt,
+        deepestRange,
       },
     })
     .run();
@@ -187,17 +224,21 @@ function persistFresh(
   for (const p of fresh.series) {
     const date = yyyyMmDd(p.t);
     db.insert(navHistory)
-      .values({ ticker: key, date, nav: p.close })
+      .values({ ticker: key, date, nav: p.close, netAsset: p.netAsset ?? null })
       .onConflictDoUpdate({
         target: [navHistory.ticker, navHistory.date],
-        set: { nav: p.close },
+        set: { nav: p.close, netAsset: p.netAsset ?? null },
       })
       .run();
   }
 
   return {
     ticker,
-    series: fresh.series.map((p) => ({ date: yyyyMmDd(p.t), close: p.close })),
+    series: fresh.series.map((p) => ({
+      date: yyyyMmDd(p.t),
+      close: p.close,
+      netAsset: p.netAsset ?? null,
+    })),
     quote: {
       price: fresh.quote.price,
       previousClose: fresh.quote.previousClose,
@@ -256,7 +297,13 @@ export async function refreshSymbols(
   for (const r of refs) {
     try {
       const key = cacheKey(r.source, r.ticker);
-      db.delete(fundQuotes).where(eq(fundQuotes.ticker, key)).run();
+      // Force a refetch by marking the quote stale rather than deleting the row,
+      // so its recorded `deepest_range` survives the refresh (and a failed
+      // refetch can still serve the prior values instead of going cold).
+      db.update(fundQuotes)
+        .set({ updatedAt: "1970-01-01T00:00:00.000Z" })
+        .where(eq(fundQuotes.ticker, key))
+        .run();
       await getCachedSeries(r.source, r.ticker, range);
       results.push({ ...r, ok: true });
     } catch (err) {

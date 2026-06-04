@@ -7,14 +7,15 @@
 // CHEAPEST FIRST by TER. Fee is the visual hero: the TER badge is the headline on
 // every row, styled to make the cost of each fund immediately legible.
 //
-// Wired through GET /api/funds, which calls findFunds() — the same query the
-// find_funds advisor tool uses. A small demo seed ensures the list is non-empty
-// in demo mode before the daily SEC refresh has run.
+// Wired through GET /api/fund-classes, which calls findShareClasses() — the
+// screener lists priceable SHARE CLASSES (e.g. MDIVA-A, MDIVA-D), since NAV,
+// fees, and tax wrapper are all per class. A small demo seed ensures the list is
+// non-empty in demo mode before the daily SEC refresh has run.
 
 import { useEffect, useState } from "react";
 import { FundDetailSheet } from "@/components/FundDetailSheet";
 import { Icon } from "@/components/Icon";
-import type { FundWithTer } from "@/lib/db/queries/funds";
+import type { ShareClassListItem } from "@/lib/db/queries/funds";
 import { useResource } from "@/lib/fetchers/swr";
 
 // ─── filter state ────────────────────────────────────────────────────────────
@@ -72,7 +73,7 @@ function buildUrl(
   if (region) params.set("region", region);
   params.set("limit", "30");
   const qs = params.toString();
-  return qs ? `/api/funds?${qs}` : "/api/funds";
+  return qs ? `/api/fund-classes?${qs}` : "/api/fund-classes";
 }
 
 function useFunds(
@@ -83,60 +84,37 @@ function useFunds(
   region: RegionFilter,
 ) {
   const url = buildUrl(assetClass, query, indexOnly, taxIncentive, region);
-  return useResource<FundWithTer[]>(url);
+  return useResource<ShareClassListItem[]>(url);
 }
 
-// ─── TER badge ───────────────────────────────────────────────────────────────
-// TER is the controllable edge — it's the headline number on every row.
-
-function TerBadge({ ter }: { ter: number | null }) {
-  if (ter == null) {
-    return (
-      <span
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          color: "var(--muted)",
-          background: "var(--surface)",
-          border: "1px solid var(--line-soft)",
-          borderRadius: 6,
-          padding: "2px 7px",
-          letterSpacing: "0.02em",
-          whiteSpace: "nowrap",
-        }}
-      >
-        TER –
-      </span>
-    );
-  }
-
-  // Colour-code by fee level: green ≤ 0.5%, amber 0.5–1.5%, red > 1.5%.
-  const color = ter <= 0.5 ? "var(--gain)" : ter <= 1.5 ? "var(--amber, #f59e0b)" : "var(--loss)";
-  const bg =
-    ter <= 0.5
-      ? "var(--gain-soft, rgba(34,197,94,0.1))"
-      : ter <= 1.5
-        ? "var(--amber-soft, rgba(245,158,11,0.1))"
-        : "var(--loss-soft, rgba(220,38,38,0.08))";
-
-  return (
-    <span
-      style={{
-        fontFamily: "var(--font-mono)",
-        fontSize: 12,
-        fontWeight: 600,
-        color,
-        background: bg,
-        borderRadius: 6,
-        padding: "2px 7px",
-        letterSpacing: "0.02em",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {ter.toFixed(2)}%
-    </span>
-  );
+// ─── TER colour ──────────────────────────────────────────────────────────────
+// TER is the controllable edge — the headline number on every row. Shown as
+// plain text (like the 1Y return), fee-level colored: green ≤ 0.5%, amber
+// 0.5–1.5%, red > 1.5%; muted when unpublished.
+function terColor(ter: number | null): string {
+  if (ter == null) return "var(--muted)";
+  return ter <= 0.5 ? "var(--gain)" : ter <= 1.5 ? "var(--amber, #f59e0b)" : "var(--loss)";
 }
+
+function terBg(ter: number | null): string {
+  if (ter == null) return "var(--card-soft)";
+  return ter <= 0.5
+    ? "var(--gain-soft, rgba(34,197,94,0.1))"
+    : ter <= 1.5
+      ? "var(--amber-soft, rgba(245,158,11,0.1))"
+      : "var(--loss-soft, rgba(220,38,38,0.08))";
+}
+
+// Grey, bold label ("TER" / "1Y") sitting left of its value.
+const METRIC_LABEL_STYLE: React.CSSProperties = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 10.5,
+  fontWeight: 600,
+  color: "var(--muted)",
+  letterSpacing: "0.04em",
+  textAlign: "right",
+  whiteSpace: "nowrap",
+};
 
 // ─── compact fund badges ──────────────────────────────────────────────────────
 
@@ -178,19 +156,45 @@ function MiniTag({
   );
 }
 
-function FundBadges({ fund }: { fund: FundWithTer }) {
-  const isIndex = fund.managementStyle === "PN" || fund.managementStyle === "PM";
-  const tax = fund.taxIncentiveType;
-  const isFeeder = fund.isFeederFund;
+// Short asset-class label for the badge row.
+const ASSET_CLASS_LABELS: Record<string, string> = {
+  equity: "Equity",
+  bond: "Bond",
+  alternative: "Alt",
+  cash: "Cash",
+};
 
-  if (!isIndex && !tax && !isFeeder) return null;
+// Class-character tags — distribution, index style, tax wrapper. Shown inline to
+// the right of the fund name (these qualify the specific share class).
+function FundClassTags({ cls }: { cls: ShareClassListItem }) {
+  const isIndex = cls.managementStyle === "PN" || cls.managementStyle === "PM";
+  const tax = cls.taxIncentiveType;
+  const dist = cls.distributionPolicy;
+
+  if (!dist && !isIndex && !tax) return null;
 
   return (
-    <span style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 3, minWidth: 0 }}>
+    <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 4, flexShrink: 0 }}>
+      {dist === "accumulating" && (
+        <MiniTag
+          label="ACC"
+          title="Accumulating — reinvests income, no cash distributions"
+          color="var(--accent)"
+          bg="var(--accent-soft)"
+        />
+      )}
+      {dist === "dividend" && (
+        <MiniTag
+          label="DIV"
+          title="Dividend — pays out income as cash distributions"
+          color="var(--accent)"
+          bg="var(--accent-soft)"
+        />
+      )}
       {isIndex && (
         <MiniTag
           label="INDEX"
-          title={`Management style: ${fund.managementStyle} — passive/index-tracking`}
+          title={`Management style: ${cls.managementStyle} — passive/index-tracking`}
           color="var(--gain)"
           bg="var(--gain-soft, rgba(34,197,94,0.1))"
         />
@@ -209,16 +213,37 @@ function FundBadges({ fund }: { fund: FundWithTer }) {
           bg="var(--accent-soft)"
         />
       )}
+    </span>
+  );
+}
+
+// Fund-type tags — asset class + feeder master. Their own row below the name.
+function FundTypeTags({ cls }: { cls: ShareClassListItem }) {
+  const isFeeder = cls.isFeederFund;
+  const assetLabel = cls.assetClass ? (ASSET_CLASS_LABELS[cls.assetClass] ?? null) : null;
+
+  if (!isFeeder && !assetLabel) return null;
+
+  return (
+    <span style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 3, minWidth: 0 }}>
+      {assetLabel && (
+        <MiniTag
+          label={assetLabel}
+          title={`Asset class: ${assetLabel}`}
+          color="var(--muted)"
+          bg="var(--card-soft)"
+        />
+      )}
       {isFeeder && (
         <MiniTag
-          label={fund.feederMasterFund ? `FEEDER → ${fund.feederMasterFund}` : "FEEDER"}
+          label={cls.feederMasterFund ? `FEEDER → ${cls.feederMasterFund}` : "FEEDER"}
           title={
-            fund.feederMasterFund
-              ? `Feeder fund — invests in ${fund.feederMasterFund}`
+            cls.feederMasterFund
+              ? `Feeder fund — invests in ${cls.feederMasterFund}`
               : "Feeder fund — invests in an offshore master fund"
           }
           color="var(--muted)"
-          bg="var(--surface)"
+          bg="var(--card-soft)"
           clamp
         />
       )}
@@ -229,19 +254,18 @@ function FundBadges({ fund }: { fund: FundWithTer }) {
 // ─── fund row ────────────────────────────────────────────────────────────────
 
 function FundRow({
-  fund,
+  cls,
   rank,
-  onAskAdvisor,
   onSelect,
 }: {
-  fund: FundWithTer;
+  cls: ShareClassListItem;
   rank: number;
-  onAskAdvisor: (abbr: string) => void;
-  onSelect: (projId: string) => void;
+  onSelect: (ticker: string) => void;
 }) {
-  const abbr = fund.abbrName ?? fund.projId;
-  const name = fund.englishName ?? fund.thaiName ?? abbr;
-  const amc = fund.amcName;
+  // The class ticker (e.g. "MDIVA-A") is the priceable identity and the headline.
+  const ticker = cls.ticker;
+  const name = cls.englishName ?? cls.thaiName ?? cls.abbrName ?? ticker;
+  const amc = cls.amcName;
 
   return (
     <div
@@ -259,8 +283,8 @@ function FundRow({
           nested, so the markup stays valid. */}
       <button
         type="button"
-        aria-label={`View details for ${abbr}`}
-        onClick={() => onSelect(fund.projId)}
+        aria-label={`View details for ${ticker}`}
+        onClick={() => onSelect(ticker)}
         style={{
           display: "flex",
           alignItems: "flex-start",
@@ -300,14 +324,8 @@ function FundRow({
 
         {/* Fund identity */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "baseline",
-              gap: 7,
-              flexWrap: "wrap",
-            }}
-          >
+          {/* Ticker + class-character tags (Acc/Div, Index, tax) on one line */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
             <span
               style={{
                 fontFamily: "var(--font-mono)",
@@ -317,10 +335,9 @@ function FundRow({
                 color: "var(--ink)",
               }}
             >
-              {abbr}
+              {ticker}
             </span>
-            {/* TER is the headline — placed right next to the ticker */}
-            <TerBadge ter={fund.ter} />
+            <FundClassTags cls={cls} />
           </div>
           <div
             style={{
@@ -349,21 +366,63 @@ function FundRow({
               {amc}
             </div>
           )}
-          {/* Compact property badges: index, tax wrapper, feeder */}
-          <FundBadges fund={fund} />
+          {/* Type tags: asset class + feeder master */}
+          <FundTypeTags cls={cls} />
         </div>
-      </button>
 
-      {/* Ask advisor shortcut — sibling of the main button, not nested. */}
-      <button
-        type="button"
-        className="icon-btn"
-        title={`Ask advisor about ${abbr}`}
-        aria-label={`Ask advisor about ${abbr}`}
-        onClick={() => onAskAdvisor(abbr)}
-        style={{ marginTop: 2, flexShrink: 0 }}
-      >
-        <Icon name="chat" size={13} />
+        {/* Numbers, right-aligned: a two-column grid so the grey 'TER'/'1Y'
+            labels line up over each other and the values share an edge. TER's
+            value sits in a fee-level-colored badge; 1Y is gain/loss text. */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "auto auto",
+            columnGap: 6,
+            rowGap: 3,
+            alignItems: "center",
+            justifyContent: "end",
+            flexShrink: 0,
+            marginTop: 1,
+          }}
+        >
+          <span style={METRIC_LABEL_STYLE}>TER</span>
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              fontWeight: 600,
+              color: terColor(cls.ter),
+              background: terBg(cls.ter),
+              borderRadius: 6,
+              padding: "2px 7px",
+              whiteSpace: "nowrap",
+              justifySelf: "end",
+            }}
+            title="Total expense ratio (annual fee)"
+          >
+            {cls.ter != null ? `${cls.ter.toFixed(2)}%` : "–"}
+          </span>
+          {cls.y1Pct != null && (
+            <>
+              <span style={METRIC_LABEL_STYLE}>1Y</span>
+              <span
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11,
+                  color: cls.y1Pct >= 0 ? "var(--gain)" : "var(--loss)",
+                  whiteSpace: "nowrap",
+                  justifySelf: "end",
+                  // Match the TER badge's 7px right padding so the two % align.
+                  paddingRight: 7,
+                }}
+                title={`Trailing 1-year return${cls.navAsOf ? ` (as of ${cls.navAsOf})` : ""}`}
+              >
+                {cls.y1Pct >= 0 ? "+" : ""}
+                {cls.y1Pct.toFixed(2)}%
+              </span>
+            </>
+          )}
+        </div>
       </button>
     </div>
   );
@@ -513,8 +572,9 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
   const [queryInput, setQueryInput] = useState("");
   // Debounce the search query so we don't fire on every keystroke.
   const [query, setQuery] = useState("");
-  // Selected fund for the detail sheet.
-  const [detailProjId, setDetailProjId] = useState<string | null>(null);
+  // Selected share-class ticker for the detail sheet. The detail route resolves
+  // a class ticker and defaults its chart to that exact class.
+  const [detailTicker, setDetailTicker] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setQuery(queryInput), 280);
@@ -523,8 +583,8 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
 
   const { data: funds, isLoading } = useFunds(assetClass, query, indexOnly, taxIncentive, region);
 
-  const handleAskAdvisor = (abbr: string) => {
-    const prompt = `Tell me about ${abbr} — is it a good low-fee option for my portfolio, and are there cheaper alternatives?`;
+  const handleAskAdvisor = (ticker: string) => {
+    const prompt = `Tell me about ${ticker} — is it a good low-fee option for my portfolio, and are there cheaper alternatives?`;
     if (onAskAdvisor) {
       onAskAdvisor(prompt);
     } else {
@@ -534,7 +594,7 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
           detail: {
             display: prompt,
             send: prompt,
-            context: { screen: "funds", intent: "fund_lookup", subject: abbr },
+            context: { screen: "funds", intent: "fund_lookup", subject: ticker },
           },
         }),
       );
@@ -546,7 +606,11 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
 
   return (
     <>
-      <FundDetailSheet projId={detailProjId} onClose={() => setDetailProjId(null)} />
+      <FundDetailSheet
+        projId={detailTicker}
+        onAskAdvisor={handleAskAdvisor}
+        onClose={() => setDetailTicker(null)}
+      />
       <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
         {/* Filters */}
         <div style={{ padding: "10px 14px 8px", borderBottom: "1px solid var(--line-soft)" }}>
@@ -668,7 +732,7 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
               borderBottom: "1px solid var(--line-soft)",
             }}
           >
-            {list.length} fund{list.length === 1 ? "" : "s"} ·{" "}
+            {list.length} class{list.length === 1 ? "" : "es"} ·{" "}
             {list.filter((f) => f.ter != null).length} with TER data
             {list.filter((f) => f.managementStyle === "PN" || f.managementStyle === "PM").length >
               0 && (
@@ -690,14 +754,8 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
           {!hasResults ? (
             <EmptyState query={query} isLoading={isLoading} />
           ) : (
-            list.map((fund, i) => (
-              <FundRow
-                key={fund.projId}
-                fund={fund}
-                rank={i + 1}
-                onAskAdvisor={handleAskAdvisor}
-                onSelect={setDetailProjId}
-              />
+            list.map((cls, i) => (
+              <FundRow key={cls.ticker} cls={cls} rank={i + 1} onSelect={setDetailTicker} />
             ))
           )}
         </div>

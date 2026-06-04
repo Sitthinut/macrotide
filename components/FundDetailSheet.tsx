@@ -7,8 +7,9 @@
 // All five enrichment sections gracefully no-op when their arrays are empty,
 // so the sheet looks clean in dev before the SEC ingest job has run.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
+import { NavChart } from "@/components/InteractiveCharts";
 import { Modal } from "@/components/Modal";
 import type {
   FeederLookThroughHoldingRow,
@@ -22,6 +23,8 @@ import type {
   FundTopHoldingRow,
 } from "@/lib/db/queries/fund-enrichment";
 import type { FundWithTer } from "@/lib/db/queries/funds";
+import type { ShareClass } from "@/lib/db/queries/share-classes";
+import { type SeriesRange, useFundSeries } from "@/lib/fetchers/portfolio";
 import { useResource } from "@/lib/fetchers/swr";
 import { buildHoldingDetailRows } from "@/lib/portfolio/holding-detail";
 import {
@@ -44,6 +47,10 @@ export type FundDetailResponse = FundWithTer & {
   masterMap: FeederMasterMapRow | null;
   /** Master fund's underlying holdings (feeder look-through). Empty when not available. */
   lookThroughHoldings: FeederLookThroughHoldingRow[];
+  /** Priceable share classes of this fund (one per SEC share class). */
+  shareClasses: ShareClass[];
+  /** Ticker of the class to show first (the opened class, else a heuristic default). */
+  selectedClassTicker: string | null;
 };
 
 // ─── performance type label map ───────────────────────────────────────────────
@@ -1024,52 +1031,196 @@ function ErrorState({ message }: { message?: string }) {
 
 // ─── Fund identity header (inside the sheet) ──────────────────────────────────
 
-function FundHeader({ fund }: { fund: FundDetailResponse }) {
-  const abbr = fund.abbrName ?? fund.projId;
-  const name = fund.englishName ?? fund.thaiName ?? abbr;
+// Class switcher for the fund header: the ticker stays the title, with a small
+// chevron that opens a popover list of sibling classes. Keeps the original
+// headline style instead of a boxy native <select>.
+function ClassPicker({
+  classes,
+  selectedTicker,
+  headlineTicker,
+  headlineFont,
+  onSelect,
+}: {
+  classes: ShareClass[];
+  selectedTicker: string | null;
+  headlineTicker: string;
+  headlineFont: React.CSSProperties;
+  onSelect: (ticker: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`Share class — ${headlineTicker}, change`}
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          ...headlineFont,
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 4,
+          background: "none",
+          border: "none",
+          padding: 0,
+          cursor: "pointer",
+        }}
+      >
+        {headlineTicker}
+        <svg
+          width="11"
+          height="11"
+          viewBox="0 0 12 12"
+          fill="none"
+          aria-hidden="true"
+          style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.12s" }}
+        >
+          <path
+            d="M3 4.5L6 7.5L9 4.5"
+            stroke="var(--muted)"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            zIndex: 20,
+            minWidth: 200,
+            maxHeight: 260,
+            overflowY: "auto",
+            background: "var(--bg)",
+            border: "1px solid var(--line)",
+            borderRadius: 10,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+            padding: 4,
+          }}
+        >
+          {classes.map((c) => (
+            <button
+              key={c.ticker}
+              type="button"
+              role="option"
+              aria-selected={c.ticker === selectedTicker}
+              onClick={() => {
+                onSelect(c.ticker);
+                setOpen(false);
+              }}
+              style={{
+                display: "block",
+                width: "100%",
+                textAlign: "left",
+                padding: "7px 10px",
+                borderRadius: 7,
+                border: "none",
+                cursor: "pointer",
+                fontSize: 12.5,
+                fontFamily: "var(--font-mono)",
+                color: "var(--ink)",
+                background: c.ticker === selectedTicker ? "var(--accent-soft)" : "transparent",
+              }}
+            >
+              {classOptionLabel(c)}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FundHeader({
+  fund,
+  shareClasses,
+  selectedTicker,
+  onSelectClass,
+}: {
+  fund: FundDetailResponse;
+  shareClasses: ShareClass[];
+  selectedTicker: string | null;
+  onSelectClass: (ticker: string) => void;
+}) {
+  const headlineTicker = selectedTicker ?? fund.abbrName ?? fund.projId;
+  const name = fund.englishName ?? fund.thaiName ?? fund.abbrName ?? fund.projId;
   const amc = fund.amcName;
+  const multi = shareClasses.length > 1;
+
+  // Per-class facts: TER and distribution come from the selected class, falling
+  // back to the parent's derived TER for single-class funds.
+  const selected = shareClasses.find((c) => c.ticker === selectedTicker) ?? null;
+  const ter = selected?.currentTer ?? fund.ter;
+  const dist = selected?.distributionPolicy;
+
+  const headlineFont: React.CSSProperties = {
+    fontFamily: "var(--font-mono)",
+    fontSize: 15,
+    fontWeight: 700,
+    letterSpacing: "0.02em",
+    color: "var(--ink)",
+  };
 
   return (
     <div style={{ marginBottom: 4 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 15,
-            fontWeight: 700,
-            letterSpacing: "0.02em",
-            color: "var(--ink)",
-          }}
-        >
-          {abbr}
-        </span>
-        {fund.ter != null && (
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        {multi ? (
+          // The class IS what you're viewing — keep the ticker as the title and
+          // hang a chevron menu off it to switch classes.
+          <ClassPicker
+            classes={shareClasses}
+            selectedTicker={selectedTicker}
+            headlineTicker={headlineTicker}
+            headlineFont={headlineFont}
+            onSelect={onSelectClass}
+          />
+        ) : (
+          <span style={headlineFont}>{headlineTicker}</span>
+        )}
+        {ter != null && (
           <span
             style={{
               fontFamily: "var(--font-mono)",
               fontSize: 11.5,
               fontWeight: 600,
               color:
-                fund.ter <= 0.5
-                  ? "var(--gain)"
-                  : fund.ter <= 1.5
-                    ? "var(--amber, #d89a1f)"
-                    : "var(--loss)",
+                ter <= 0.5 ? "var(--gain)" : ter <= 1.5 ? "var(--amber, #d89a1f)" : "var(--loss)",
               background:
-                fund.ter <= 0.5
+                ter <= 0.5
                   ? "var(--gain-soft, rgba(16,168,107,0.1))"
-                  : fund.ter <= 1.5
+                  : ter <= 1.5
                     ? "var(--amber-soft, rgba(216,154,31,0.1))"
                     : "var(--loss-soft, rgba(209,69,69,0.08))",
               borderRadius: 6,
               padding: "2px 7px",
             }}
           >
-            TER {fund.ter.toFixed(2)}%
+            TER {ter.toFixed(2)}%
+          </span>
+        )}
+        {dist && (
+          <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
+            {dist === "accumulating" ? "Accumulating" : "Dividend"}
           </span>
         )}
       </div>
-      {name !== abbr && (
+      {name !== headlineTicker && (
         <div style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 2 }}>{name}</div>
       )}
       {amc && (
@@ -1171,10 +1322,116 @@ function HoldingFallbackBody({ holding }: { holding: Holding }) {
 
 // ─── Detail body (fetches + renders all sections) ─────────────────────────────
 
+// Range pills for the NAV chart, mapping a short UI label to a SeriesRange the
+// /series route understands.
+const NAV_RANGES: { lbl: string; range: SeriesRange }[] = [
+  { lbl: "1M", range: "1mo" },
+  { lbl: "3M", range: "3mo" },
+  { lbl: "6M", range: "6mo" },
+  { lbl: "1Y", range: "1y" },
+  { lbl: "All", range: "max" },
+];
+
+const fmtNav = (n: number) =>
+  `฿${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+const fmtAum = (n: number) => {
+  if (n >= 1e9) return `฿${(n / 1e9).toFixed(2)}B`;
+  if (n >= 1e6) return `฿${(n / 1e6).toFixed(1)}M`;
+  return `฿${Math.round(n).toLocaleString("en-US")}`;
+};
+
+// NAV and AUM are genuinely different curves; "return" is just NAV rescaled
+// (same shape), so it isn't a separate tab — the NAV tooltip reads both the
+// price and the % change since the window start.
+type ChartMode = "nav" | "aum";
+const CHART_MODES: { key: ChartMode; lbl: string }[] = [
+  { key: "nav", lbl: "Price" },
+  { key: "aum", lbl: "Fund size" },
+];
+
+// Short label for a share-class option: ticker + distribution + investor type.
+// Used by the class selector in the fund header.
+function classOptionLabel(c: ShareClass): string {
+  const bits: string[] = [c.ticker];
+  if (c.distributionPolicy === "accumulating") bits.push("Acc");
+  else if (c.distributionPolicy === "dividend") bits.push("Div");
+  if (c.investorType === "institutional") bits.push("Institutional");
+  else if (c.investorType === "insurance") bits.push("Insurance-linked");
+  return bits.join(" · ");
+}
+
+/**
+ * NAV / fund-size (AUM) history for one share class. The displayed class is
+ * controlled by the header's class selector (`ticker`); NAV mode's tooltip also
+ * reads the cumulative % return since the window start. Renders its own empty
+ * state when no history is cached yet — graceful for new / sparsely-crawled funds.
+ */
+function FundNavChartSection({ ticker }: { ticker: string | null }) {
+  const [range, setRange] = useState<SeriesRange>("1y");
+  const [mode, setMode] = useState<ChartMode>("nav");
+  const { data, isLoading } = useFundSeries(ticker, range);
+
+  const series = data?.series ?? [];
+  const chartData =
+    mode === "aum"
+      ? series.flatMap((p) => (p.aum != null ? [{ d: p.d, v: p.aum }] : []))
+      : series.map((p) => ({ d: p.d, v: p.v }));
+
+  const emptyHint = isLoading
+    ? "Loading fund history…"
+    : mode === "aum"
+      ? "Fund-size history isn't available for this fund yet."
+      : "Price history isn't available for this fund yet.";
+
+  return (
+    <section>
+      <SectionHeader title="Fund history" />
+      <div className="row between" style={{ marginBottom: 8 }}>
+        <div className="range-pills">
+          {NAV_RANGES.map((r) => (
+            <button
+              key={r.lbl}
+              type="button"
+              data-active={range === r.range}
+              onClick={() => setRange(r.range)}
+            >
+              {r.lbl}
+            </button>
+          ))}
+        </div>
+        <div className="range-pills">
+          {CHART_MODES.map((m) => (
+            <button
+              key={m.key}
+              type="button"
+              data-active={mode === m.key}
+              onClick={() => setMode(m.key)}
+            >
+              {m.lbl}
+            </button>
+          ))}
+        </div>
+      </div>
+      <NavChart
+        data={chartData}
+        height={140}
+        accent="var(--accent)"
+        valueFormatter={mode === "aum" ? fmtAum : fmtNav}
+        seriesLabel={mode === "aum" ? "Fund size" : "Price"}
+        showReturnInTooltip={mode === "nav"}
+        emptyHint={emptyHint}
+      />
+    </section>
+  );
+}
+
 function FundDetailBody({ projId, holding }: { projId: string; holding?: Holding | null }) {
   const { data, isLoading, error } = useResource<FundDetailResponse>(
     projId ? `/api/funds/${encodeURIComponent(projId)}` : null,
   );
+  // The selected share class, lifted here so the header selector drives the
+  // chart. Null until the user picks one → falls back to the server's default.
+  const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
 
   if (isLoading) return <LoadingState />;
   // No catalog match (a stock/index/cash holding, or a 404). When we opened this
@@ -1193,9 +1450,19 @@ function FundDetailBody({ projId, holding }: { projId: string; holding?: Holding
     data.masterMap != null ||
     data.lookThroughHoldings.length > 0;
 
+  const shareClasses = data.shareClasses ?? [];
+  const activeTicker = selectedTicker ?? data.selectedClassTicker ?? null;
+
   return (
     <div>
-      <FundHeader fund={data} />
+      <FundHeader
+        fund={data}
+        shareClasses={shareClasses}
+        selectedTicker={activeTicker}
+        onSelectClass={setSelectedTicker}
+      />
+
+      <FundNavChartSection ticker={activeTicker} />
 
       {!hasAnyEnrichment && (
         <div
@@ -1246,24 +1513,80 @@ export interface FundDetailSheetProps {
    * the holding edit flow. Omit for the read-only Explore usage.
    */
   onEdit?: () => void;
+  /**
+   * When set, the sheet shows an "Ask Advisor" action that hands the shown class
+   * ticker back to the caller (Explore wires this to the Advisor screen). Omit to
+   * hide it (e.g. the holding view).
+   */
+  onAskAdvisor?: (ticker: string) => void;
   onClose: () => void;
 }
 
-export function FundDetailSheet({ projId, holding, onEdit, onClose }: FundDetailSheetProps) {
+export function FundDetailSheet({
+  projId,
+  holding,
+  onEdit,
+  onAskAdvisor,
+  onClose,
+}: FundDetailSheetProps) {
   // A holding looks up the catalog by its ticker (= abbr_name); Explore passes a
   // proj_id directly. One of the two is set when the sheet is open.
   const lookupId = projId ?? holding?.ticker ?? null;
   const open = lookupId != null;
+
+  // Hand the fund to the Advisor. Prefer the caller's handler (Explore wires a
+  // richer one); otherwise fall back to the app-wide `ai-prompt` event — the
+  // same channel the rest of the app uses — so the holding view works without
+  // threading a prop through the Portfolio screen.
+  const askAdvisor = (ticker: string) => {
+    if (onAskAdvisor) {
+      onAskAdvisor(ticker);
+      return;
+    }
+    const prompt = `Tell me about ${ticker} — is it a good low-fee option for my portfolio, and are there cheaper alternatives?`;
+    window.dispatchEvent(
+      new CustomEvent("ai-prompt", {
+        detail: {
+          display: prompt,
+          send: prompt,
+          context: { screen: "funds", intent: "fund_lookup", subject: ticker },
+        },
+      }),
+    );
+  };
+
   return (
     <Modal open={open} onClose={onClose} variant="detail" labelledBy="fund-detail-title">
       <Modal.Header
         title={holding ? "Holding detail" : "Fund detail"}
         id="fund-detail-title"
         action={
-          onEdit ? (
-            <button type="button" className="btn ghost sm" onClick={onEdit} style={{ gap: 4 }}>
-              <Icon name="pencil" size={12} /> Edit
-            </button>
+          // Ask + (holding) Edit, both 28px icon-btns so they line up with the ✕.
+          lookupId ? (
+            <>
+              <button
+                type="button"
+                className="icon-btn"
+                title="Ask Advisor"
+                aria-label={`Ask Advisor about ${lookupId}`}
+                onClick={() => askAdvisor(lookupId)}
+                style={{ marginTop: -4 }}
+              >
+                <Icon name="chat" size={15} />
+              </button>
+              {onEdit && (
+                <button
+                  type="button"
+                  className="icon-btn"
+                  title="Edit holding"
+                  aria-label="Edit holding"
+                  onClick={onEdit}
+                  style={{ marginTop: -4 }}
+                >
+                  <Icon name="pencil" size={15} />
+                </button>
+              )}
+            </>
           ) : undefined
         }
       />

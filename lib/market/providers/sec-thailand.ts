@@ -362,7 +362,7 @@ export const secThailandProvider: Provider = {
       if (r.last_val == null) continue;
       const t = Math.floor(Date.parse(`${r.nav_date}T00:00:00Z`) / 1000);
       if (!Number.isFinite(t)) continue;
-      series.push({ t, close: r.last_val });
+      series.push({ t, close: r.last_val, netAsset: r.net_asset ?? null });
     }
     series.sort((a, b) => a.t - b.t);
 
@@ -467,6 +467,45 @@ export async function enumerateFundProfiles(limit = 0): Promise<SecFundProfile[]
   }
 
   return profiles;
+}
+
+/**
+ * Enumerate every fund *share class* from the SEC profiles endpoint. Same
+ * paginated source as `enumerateFundProfiles`, but de-duped on
+ * `proj_id + fund_class_name` instead of `proj_id`, so multi-class funds yield
+ * one row per class (the priceable units) rather than collapsing to the parent.
+ * Zero extra API cost over the catalog enumeration — it's the same pages.
+ */
+export async function enumerateShareClasses(limit = 0): Promise<SecFundProfile[]> {
+  const key = apiKey();
+  const seen = new Set<string>();
+  const classes: SecFundProfile[] = [];
+
+  let cursor = "";
+  for (let safety = 0; safety < 500; safety++) {
+    const params = new URLSearchParams({ page_size: String(PAGE_SIZE) });
+    if (cursor) params.set("next_cursor", cursor);
+    const env = await secFetch<PaginatedEnvelope<SecFundProfile>>(
+      `/v2/fund/general-info/profiles?${params.toString()}`,
+      key,
+    );
+    if (!env?.items?.length) break;
+
+    for (const item of env.items) {
+      if (!item.proj_id) continue;
+      const dedupeKey = `${item.proj_id}:${item.fund_class_name ?? "main"}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      classes.push(item);
+      if (limit > 0 && classes.length >= limit) break;
+    }
+
+    if (!env.next_cursor || (limit > 0 && classes.length >= limit)) break;
+    cursor = env.next_cursor;
+    await sleep(REQUEST_DELAY_MS);
+  }
+
+  return classes;
 }
 
 /**

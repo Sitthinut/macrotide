@@ -71,6 +71,23 @@ export function classifyDistribution(detail: string | null | undefined): string 
   return null;
 }
 
+// fund_class_detail (Thai) → investor audience. Drives the screener's
+// retail-default: institutional and insurance-linked classes have NAV but
+// individuals can't subscribe to them.
+//   สำหรับผู้ลงทุนทั่วไป              → retail (general public)
+//   สำหรับผู้ลงทุนสถาบัน             → institutional
+//   กรมธรรม์ประกันชีวิตควบหน่วยลงทุน → insurance-linked (unit-linked policy)
+// A bare/absent detail (single-class "main" funds) is retail by default.
+export function classifyInvestorType(detail: string | null | undefined): string | null {
+  if (!detail) return "retail";
+  if (detail.includes("กรมธรรม์ประกันชีวิต")) return "insurance";
+  if (detail.includes("สถาบัน")) return "institutional";
+  if (detail.includes("ทั่วไป")) return "retail";
+  // Special-group classes (ผู้ลงทุนกลุ่มพิเศษ) and anything unrecognized: leave
+  // null so the screener neither hides nor mislabels them.
+  return null;
+}
+
 // invest_country_flag → geographic mandate.
 export function classifyInvestRegion(flag: string | null | undefined): string | null {
   switch (flag) {
