@@ -6,9 +6,20 @@ the [GitHub Project board](https://github.com/users/Sitthinut/projects/2), shipp
 history in [CHANGELOG.md](../../../CHANGELOG.md).
 
 Lightweight by design — a table for the one-line picks, prose for the rules that
-outlive any single decision. A genuinely contentious decision can graduate to
-its own numbered ADR file in this folder when it needs the full
-context/options/consequences treatment.
+outlive any single decision.
+
+## What goes here
+
+Two questions, in order:
+
+1. **Is it worth recording?** The litmus test: *will someone six months from now
+   look at the codebase or setup, think "this is weird, why didn't they just do
+   X," and need an answer to avoid undoing it?* If no — it's the obvious choice,
+   or a code comment covers it — skip it. This log is for the non-obvious calls
+   where the obvious-looking alternative was **deliberately rejected**.
+2. **How heavy?** Default to a one-line row in [Picks](#picks). Reserve a
+   numbered ADR file for a genuinely contentious decision that needs the full
+   context/options/consequences treatment (settled-by-precedent ≠ ADR-worthy).
 
 ## Picks
 
@@ -25,6 +36,7 @@ context/options/consequences treatment.
 | Fund share classes | Parent catalog + per-class child table; browse by parent, price/hold by class — [ADR 0002](./0002-fund-share-class-model.md) | Parent-only can't price multi-class funds; classes-as-catalog-rows makes browse noisy + duplicates parent enrichment |
 | Positions vs. transactions | One event ledger is the source of truth; `holdings` is a derived projection — [ADR 0004](./0004-unified-ledger-positions-derived.md) (supersedes [0003](./0003-transaction-ledger-data-model.md), which shipped them as separate models) | Two hand-entered sources (snapshot + ledger) drift and need reconciling; deriving positions removes the whole class of disagreement |
 | Sign-up bot defense | Cloudflare Turnstile | hCaptcha works too; Turnstile is already in the zone |
+| Background job scheduling | systemd timers firing the `npm run jobs:*` scripts (topology in [deploy.md](../../how-to/deploy.md#scheduled-jobs-systemd-timers)) | In-process `node-cron` ties jobs to the web process + event loop; external cron needs an authed route surface |
 | Storage scale | Single VM, single SQLite writer | Postgres/Turso only when a real scaling trigger appears |
 
 ## Durable rules
@@ -47,6 +59,15 @@ Rules that outlive any one decision above:
 - **`NULL` user_id was fail-open** (shared built-in vs. unowned-by-accident
   were indistinguishable). Resolved 2026-05-24 by making `ownedBy()`
   default-deny with explicit opt-in for genuinely-shared rows; keep it that way.
+- **Periodic jobs = idempotent `npm run jobs:*` script + a thin systemd-timer
+  wrapper** — never an in-process scheduler (it would tie job liveness to the web
+  process + event loop). The script is the unit of testing and of manual runs;
+  it's `DISABLE_JOBS=1`-aware and fails only on *systemic* error (tolerating a few
+  transient upstream blips so a 99%-good crawl doesn't page). A job exposed both
+  as a route and a timer shares one `lib/jobs/*` function so they can't drift.
+  NAV **freshness** (held + indicators) and **coverage** (whole-catalog pre-warm)
+  stay separate timers, not one flagged job. Roster + cadences:
+  [deploy.md](../../how-to/deploy.md#scheduled-jobs-systemd-timers).
 - **Portfolio health = named checks, not a headline grade.** No single 0–100
   "quality" score in the UI (a chase-able grade harms passive investors); lead
   with the plain-language headline + four named checks, keep the composite math

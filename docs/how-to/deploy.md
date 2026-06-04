@@ -425,7 +425,32 @@ Macrotide's runtime calls `backupIfStale()` on boot, snapshotting **app.db** to 
 
 ## Scheduled jobs (systemd timers)
 
-Macrotide uses **systemd timers** (not in-process cron) for periodic background work. The VM runs UTC; Bangkok is UTC+7 with no DST, so UTC times are fixed offsets.
+Macrotide uses **systemd timers** (not in-process cron) for periodic background
+work — the pick and its rationale are in the
+[decisions log](../explanation/decisions/README.md#picks) ("Background job
+scheduling", plus the durable rule on job shape). The VM runs UTC; Bangkok is
+UTC+7 with no DST, so UTC times are fixed offsets.
+
+Every job is an idempotent `npm run jobs:*` script (also runnable by hand) that a
+timer fires; the app process itself schedules nothing. The roster, in run order:
+
+| Job (`npm run …`) | Script | What | Schedule (UTC) |
+|---|---|---|---|
+| `jobs:refresh-catalog` | `refresh-fund-catalog.ts` | Fund catalog + fees + AUM (the SEC crawl) | 11:00 daily |
+| `jobs:refresh-share-classes` | `refresh-share-classes.ts` | Priceable share classes (FK-after catalog) | 11:45 daily |
+| `jobs:refresh-market` | `refresh-tracked-market.ts` | **Freshness** — NAV for held positions + indicators | 12:30 daily |
+| `jobs:prewarm-nav` | `prewarm-nav.ts` | **Coverage** — NAV/AUM for the *whole* catalog | one-off backfill; optional daily append 02:00 |
+| `jobs:close-stale` | `close-stale-sessions.ts` | Session-expiry backstop (real-time path is primary) | optional |
+
+`jobs:refresh-market` (freshness) and `jobs:prewarm-nav` (coverage) are a
+deliberate pair: the first keeps *what you track* current on a small daily timer;
+the second warms NAV for *every registered fund* so the screener and a cold
+fund-detail open read deep history instantly. Keep them distinct — the freshness
+job never enumerates the catalog.
+
+The Dockerized box (the recommended path) swaps each `ExecStart` for
+`docker exec macrotide npx tsx --tsconfig tsconfig.scripts.json scripts/<job>.ts`,
+as shown in step 5. The bare-Node units below use the `npx -y tsx` form.
 
 ### Fund-catalog refresh
 
@@ -538,6 +563,116 @@ EOF
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now macrotide-share-classes.timer
+```
+
+### Tracked-market NAV refresh (freshness)
+
+Proactively refresh the cached NAV/quote for everything the app *tracks* — every
+indicator in the catalog (the `yahoo` chain) plus every distinct held position
+(routed by its `quote_source`) — so charts are current on the first view of the
+day and the unattended digest has fresh numbers. This is `scripts/refresh-tracked-market.ts`
+(`npm run jobs:refresh-market`); it's the same `refreshTrackedMarket` job the
+`/api/admin/refresh-market` route invokes, so the route and the timer can't drift.
+
+The Thai SEC publishes the day's NAV after ~17:30 Bangkok (**10:30 UTC**), so the
+timer fires at **12:30 UTC** — past the NAV window and clear of the 11:00/11:45
+SEC crawl. It's a small job (the indicators dominate; only held Thai funds touch
+the SEC), bounded by the 24h cache TTL to ~one fetch per symbol per day.
+
+```sh
+sudo tee /etc/systemd/system/macrotide-refresh-market.service > /dev/null <<'EOF'
+[Unit]
+Description=Macrotide — tracked-market NAV refresh (held + indicators)
+After=network.target macrotide.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/opt/macrotide
+EnvironmentFile=/opt/macrotide/.env.local
+ExecStart=npx -y tsx --tsconfig tsconfig.scripts.json scripts/refresh-tracked-market.ts
+StandardOutput=journal
+StandardError=journal
+EOF
+
+sudo tee /etc/systemd/system/macrotide-refresh-market.timer > /dev/null <<'EOF'
+[Unit]
+Description=Run Macrotide tracked-market NAV refresh daily at 12:30 UTC
+
+[Timer]
+OnCalendar=*-*-* 12:30:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now macrotide-refresh-market.timer
+```
+
+### All-funds NAV pre-warm (coverage)
+
+Pre-warm the NAV + AUM history cache for the *whole* registered-fund universe so
+the screener's price / 1-year-return / size columns and a cold fund-detail open
+read deep history instantly instead of paying a per-fund fetch on first view.
+This is `scripts/prewarm-nav.ts` (`npm run jobs:prewarm-nav`); it walks every
+active share-class `ticker` through the same `getCachedSeries` write-through cache
+the on-view path uses. `nav_history` is upsert-only and never time-pruned, so a
+backfill only ever adds or corrects rows.
+
+It self-throttles under the SEC 5,000-calls/300s budget. A full `--range=max`
+backfill is heavy (tens of thousands of calls across the catalog, tens of
+minutes); `--retail-only` skips institutional/insurance classes to cut the volume
+sharply, and `--limit=N` caps it for a smoke test.
+
+**One-time backfill** (run by hand after deploy, like the share-class backfill —
+start with a small `--limit` to confirm it works, then the full run off-peak):
+
+```sh
+# Smoke test (a handful of funds):
+npx -y tsx --tsconfig tsconfig.scripts.json scripts/prewarm-nav.ts --limit=20
+
+# Full backfill, retail subset first (Dockerized box: prefix `docker exec macrotide`):
+npx -y tsx --tsconfig tsconfig.scripts.json scripts/prewarm-nav.ts --range=max --retail-only
+```
+
+**Optional daily append** keeps the latest point fresh for the whole catalog. Use
+`--range=1mo` (the depth-aware cache keeps each fund's existing deeper history) and
+run it off-peak at **02:00 UTC**, far from the 11:00 crawl:
+
+```sh
+sudo tee /etc/systemd/system/macrotide-prewarm-nav.service > /dev/null <<'EOF'
+[Unit]
+Description=Macrotide — all-funds NAV pre-warm (daily append)
+After=network.target macrotide.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/opt/macrotide
+EnvironmentFile=/opt/macrotide/.env.local
+ExecStart=npx -y tsx --tsconfig tsconfig.scripts.json scripts/prewarm-nav.ts --range=1mo --retail-only
+StandardOutput=journal
+StandardError=journal
+EOF
+
+sudo tee /etc/systemd/system/macrotide-prewarm-nav.timer > /dev/null <<'EOF'
+[Unit]
+Description=Run Macrotide all-funds NAV append daily at 02:00 UTC
+
+[Timer]
+OnCalendar=*-*-* 02:00:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now macrotide-prewarm-nav.timer
 ```
 
 ## Updating

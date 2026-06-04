@@ -6,10 +6,10 @@ Project-specific rules for AI agents working on this repo.
 > architecture, the data model, the API surface, feature deep dives — lives in
 > [docs/](./docs), with [llms.txt](./llms.txt) as a machine-readable entry point.
 > Load progressively: `llms.txt` → [docs/README.md](./docs/README.md) → the one
-> section you need. When you change behavior, update the doc that owns that fact
-> in the same commit (see below).
+> section you need. What to update when you change things — and where a new doc
+> belongs — is the next section.
 
-## Source of truth for "what's done"
+## Sources of truth & what to update
 
 [README.md](./README.md#status) holds the capability/status board (what works
 today); [CHANGELOG.md](./CHANGELOG.md) holds shipped detail by capability; the
@@ -43,13 +43,14 @@ the prose.
 | Shipped a behavior change | [CHANGELOG.md](./CHANGELOG.md) `## [Unreleased]` (by capability) |
 | A capability's shipped status | [README.md](./README.md#status) status board |
 | Planned, unbuilt work | the [GitHub Project board](https://github.com/users/Sitthinut/projects/2) (an issue, labelled + prioritized) |
-| A settled technical decision | [docs/explanation/decisions/](./docs/explanation/decisions/) |
 | Env vars | the canonical table in [configuration.md](./docs/reference/configuration.md#environment-variables) + [.env.example](.env.example) + [auth-and-providers.md](./docs/reference/auth-and-providers.md) + [deploy.md](./docs/how-to/deploy.md) |
-| Auth or security posture | [SECURITY.md](./SECURITY.md) + [auth-and-providers.md](./docs/reference/auth-and-providers.md) |
 | Deployment topology | [deploy.md](./docs/how-to/deploy.md) |
-| Conventions an agent must know | this file |
+| Auth or security posture | [SECURITY.md](./SECURITY.md) + [auth-and-providers.md](./docs/reference/auth-and-providers.md) |
 | External data source (provider, API) | feature doc under `docs/` + [SECURITY.md](./SECURITY.md) if it touches auth |
+| A settled technical decision | [docs/explanation/decisions/](./docs/explanation/decisions/) — default to a one-line Picks-table row; reserve a numbered ADR file for a genuinely contentious decision that needs the full options/consequences treatment (settled-by-precedent ≠ ADR-worthy) |
 | Product intent / scope | [product-direction.md](./docs/explanation/product-direction.md) |
+| Conventions an agent must know | this file |
+| Add / move / rename a doc | Place it in the right [Diátaxis](https://diataxis.fr/) quadrant — tutorials (learn) / how-to (task) / reference (look up) / explanation (why, incl. decisions) — per [docs/README.md § How these docs are organized](./docs/README.md#how-these-docs-are-organized), then add or fix its [llms.txt](./llms.txt) line |
 
 ### Project board conventions
 

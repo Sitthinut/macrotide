@@ -33,7 +33,8 @@ responsive across mobile / tablet / desktop with light/dark/system themes.
 | Multi-user — per-user isolation, tiers/quotas (token + optional cost caps, configurable cheap-paid free tier), owner admin | 🟡 Code shipped; launch prep open |
 | Benchmark comparison — "match or beat your index" (SET / S&P / Nasdaq / Nikkei) | ✅ Shipped; custom/goal-based benchmarks planned |
 | Reliable index/FX source (Yahoo 429 fix) | ✅ Shipped |
-| What's next — richer AI, custom benchmarks, fund-data depth, scheduled jobs | ⬜ Planned — see the [project board](https://github.com/users/Sitthinut/projects/2) |
+| Scheduled market-data jobs — daily NAV freshness (held + indicators) + all-funds NAV/AUM history pre-warm, on systemd timers | ✅ Shipped |
+| What's next — richer AI, custom benchmarks, fund-data depth | ⬜ Planned — see the [project board](https://github.com/users/Sitthinut/projects/2) |
 
 For what's next see the **[project board](https://github.com/users/Sitthinut/projects/2)**;
 for shipped detail see [CHANGELOG.md](./CHANGELOG.md) and the **[docs/](./docs)**
