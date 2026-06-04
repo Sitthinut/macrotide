@@ -20,7 +20,7 @@ import { eq, sql } from "drizzle-orm";
 import MiniSearch from "minisearch";
 import type { MarketDb } from "../db/context";
 import { getMarketDb } from "../db/context";
-import { feederMasterMap, fundCatalog } from "../db/schema";
+import { feederMasterMap, fundCatalog, fundShareClasses } from "../db/schema";
 
 // ─── Index nickname / alias expansion ────────────────────────────────────────
 
@@ -78,14 +78,29 @@ interface FundDoc {
   // Feeder master name from the catalog column AND the feeder_master_map table,
   // concatenated — this is what makes "S&P500" surface "KKP US500-UH".
   master: string;
+  // Priceable share-class tickers of this fund (space-joined), e.g.
+  // "SCBGOLD SCBGOLDA SCBGOLDP". Indexed so a class-specific ticker the user
+  // typed (SCBGOLDP) finds its parent — the screener then lists the family.
+  // Without this, only the parent abbr is searchable and class codes are
+  // invisible to search despite showing in the Explore list.
+  classTickers: string;
 }
 
 // Field boosts: the symbol is the strongest signal, then the names, then the
 // long-form policy/master text. Tuned so an exact abbr-name hit outranks a
-// buried policy-text mention.
-const SEARCH_FIELDS = ["abbrName", "englishName", "thaiName", "policyDesc", "master"] as const;
+// buried policy-text mention. Class tickers are exact symbols too, so they
+// match the abbr boost.
+const SEARCH_FIELDS = [
+  "abbrName",
+  "englishName",
+  "thaiName",
+  "policyDesc",
+  "master",
+  "classTickers",
+] as const;
 const FIELD_BOOST: Record<string, number> = {
   abbrName: 8,
+  classTickers: 8,
   englishName: 4,
   thaiName: 4,
   policyDesc: 1,
@@ -129,6 +144,19 @@ function buildDocs(db: MarketDb): FundDoc[] {
     .leftJoin(feederMasterMap, eq(feederMasterMap.projId, fundCatalog.projId))
     .all();
 
+  // Space-joined share-class tickers per proj_id (one extra grouped query, not a
+  // join — a parent has several classes, which would multiply the rows above).
+  const classRows = db
+    .select({ projId: fundShareClasses.projId, ticker: fundShareClasses.ticker })
+    .from(fundShareClasses)
+    .all();
+  const classTickersByProj = new Map<string, string[]>();
+  for (const c of classRows) {
+    const list = classTickersByProj.get(c.projId);
+    if (list) list.push(c.ticker);
+    else classTickersByProj.set(c.projId, [c.ticker]);
+  }
+
   return rows.map((r) => ({
     id: r.id,
     abbrName: r.abbrName ?? "",
@@ -137,6 +165,7 @@ function buildDocs(db: MarketDb): FundDoc[] {
     policyDesc: r.policyDesc ?? "",
     // Fold both master-name sources; dedupe identical strings to avoid double weight.
     master: [r.catalogMaster, r.mapMaster].filter((s, i, a) => s && a.indexOf(s) === i).join(" "),
+    classTickers: (classTickersByProj.get(r.id) ?? []).join(" "),
   }));
 }
 
@@ -151,16 +180,28 @@ interface IndexEntry {
 // own index (demo DBs are short-lived; the owner index dominates).
 const cache = new WeakMap<MarketDb, IndexEntry>();
 
-/** Cheap staleness signature — changes when the catalog is refreshed. */
+/**
+ * Cheap staleness signature — changes when the catalog OR the share-class table
+ * is refreshed. The class table is its own term because `jobs:refresh-share-classes`
+ * populates `fund_share_classes` without touching `fund_catalog`; watching only
+ * the catalog would serve a class-blind index until the next catalog change.
+ */
 function catalogSignature(db: MarketDb): string {
-  const row = db
+  const cat = db
     .select({
       n: sql<number>`count(*)`,
       maxUpd: sql<string | null>`max(${fundCatalog.updatedAt})`,
     })
     .from(fundCatalog)
     .get();
-  return `${row?.n ?? 0}:${row?.maxUpd ?? ""}`;
+  const cls = db
+    .select({
+      n: sql<number>`count(*)`,
+      maxUpd: sql<string | null>`max(${fundShareClasses.updatedAt})`,
+    })
+    .from(fundShareClasses)
+    .get();
+  return `${cat?.n ?? 0}:${cat?.maxUpd ?? ""}:${cls?.n ?? 0}:${cls?.maxUpd ?? ""}`;
 }
 
 function getIndex(db: MarketDb): MiniSearch<FundDoc> {

@@ -15,6 +15,13 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Explore search finds share-class tickers, and families rank by popularity.**
+  Typing a specific class code (e.g. a multi-class fund's accumulating or dividend
+  class) now finds its fund instead of returning nothing — the search index covers
+  class tickers, not just parent names. Within a fund, classes are ordered
+  most-popular-first by fund size (per-class AUM), an exact ticker match is floated
+  to the top, and a deterministic flagship heuristic (retail → primary →
+  accumulating) fills in until AUM is warmed.
 - **Market data now refreshes on a schedule, and Explore reads deep history
   instantly.** Two background jobs ride the systemd-timer scheduler. A daily
   *freshness* refresh pulls NAV for held positions and tracked indicators, so

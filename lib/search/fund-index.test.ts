@@ -13,6 +13,7 @@ import { freshMarketDb } from "@/tests/db-helpers";
 import { type DbContext, runWithDbContext } from "../db/context";
 import { upsertFeederMasterMap } from "../db/queries/feeder-enrichment";
 import { type FundInsert, upsertFund } from "../db/queries/funds";
+import { upsertShareClasses } from "../db/queries/share-classes";
 import * as schema from "../db/schema";
 import { expandQuery, searchFundIds } from "./fund-index";
 
@@ -97,6 +98,28 @@ describe("searchFundIds", () => {
     withDb(() => {
       upsertFund(fund("M1", { abbrName: "K-FIXED" }));
       expect(searchFundIds("K-FIX")).toContain("M1");
+    });
+  });
+
+  it("finds a fund by a multi-class share-class ticker (SCBGOLDP → parent)", () => {
+    withDb(() => {
+      // Parent abbr is SCBGOLD; SCBGOLDP exists only as a share-class ticker, not
+      // a catalog name — the case the catalog-only index could never match.
+      upsertFund(fund("SCBGOLD_PROJ", { abbrName: "SCBGOLD", englishName: "SCB Gold" }));
+      upsertShareClasses([
+        { projId: "SCBGOLD_PROJ", className: "SCBGOLD", ticker: "SCBGOLD", investorType: "retail" },
+        {
+          projId: "SCBGOLD_PROJ",
+          className: "SCBGOLDP",
+          ticker: "SCBGOLDP",
+          investorType: "retail",
+        },
+      ]);
+      upsertFund(fund("OTHER", { abbrName: "K-FIXED" }));
+
+      expect(searchFundIds("SCBGOLDP")).toContain("SCBGOLD_PROJ"); // the bug: was []
+      expect(searchFundIds("SCBGOLD")).toContain("SCBGOLD_PROJ");
+      expect(searchFundIds("SCBGOLDP")).not.toContain("OTHER");
     });
   });
 
