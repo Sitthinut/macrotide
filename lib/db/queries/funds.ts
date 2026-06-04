@@ -300,7 +300,7 @@ export interface ShareClassListItem {
   feederMasterFund: string | null;
   /** 'accumulating' | 'dividend' | null. */
   distributionPolicy: string | null;
-  /** 'retail' | 'institutional' | 'insurance' | null. */
+  /** 'retail' | 'restricted' | 'institutional' | 'insurance' | null. */
   investorType: string | null;
   /** 'SSF' | 'RMF' | 'ThaiESG' | null (per class). */
   taxIncentiveType: string | null;
@@ -343,9 +343,15 @@ export function findShareClasses(
   for (const p of parents) {
     if (out.length >= limit) break;
     const classes = listShareClassesByProj(p.projId).filter((c) => {
-      // Hide institutional/insurance classes by default; null (special/unknown)
-      // audiences are kept so nothing is silently dropped.
-      if (!includeNonRetail && c.investorType && c.investorType !== "retail") return false;
+      // Hide only the classes individuals genuinely can't buy directly —
+      // institutional and insurance (unit-linked). `restricted` (provident /
+      // private / special-group) is KEPT and down-ranked by the comparator
+      // (it's investable in principle); null (unknown) is kept too.
+      if (
+        !includeNonRetail &&
+        (c.investorType === "institutional" || c.investorType === "insurance")
+      )
+        return false;
       if (taxIncentive && c.taxIncentiveType !== taxIncentive) return false;
       return true;
     });

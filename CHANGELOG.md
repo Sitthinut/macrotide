@@ -15,6 +15,13 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Explore handles non-public share classes correctly.** Provident-fund /
+  private-fund / special-group classes are now identified and **down-ranked**
+  below retail classes (kept visible — they're investable in principle), while
+  unit-linked **insurance** classes are hidden (bought through a policy, not
+  directly). General-public availability takes precedence, so a class offered to
+  both the public and an insurance channel stays retail. Previously these all fell
+  through as unclassified and could top the rankings.
 - **Explore search finds share-class tickers, and families rank by popularity.**
   Typing a specific class code (e.g. a multi-class fund's accumulating or dividend
   class) now finds its fund instead of returning nothing — the search index covers

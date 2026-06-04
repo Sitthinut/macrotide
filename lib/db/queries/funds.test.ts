@@ -350,4 +350,20 @@ describe("findShareClasses (search + popularity ranking)", () => {
       expect(tickers).toEqual(["SCBGOLDP", "SCBGOLDA", "SCBGOLDRA"]);
     });
   });
+
+  it("hides insurance classes but keeps restricted ones, down-ranked below retail", () => {
+    withDb(() => {
+      upsertFund(fund("MIX", { abbrName: "MIXF", englishName: "Mixed Audience Fund" }));
+      upsertShareClasses([
+        { projId: "MIX", className: "MIXF-A", ticker: "MIXF-A", investorType: "retail" },
+        { projId: "MIX", className: "MIXF-R", ticker: "MIXF-R", investorType: "restricted" },
+        { projId: "MIX", className: "MIXF-IN", ticker: "MIXF-IN", investorType: "insurance" },
+      ]);
+      seedAum("MIXF-A", 100);
+      seedAum("MIXF-R", 9999); // huge AUM must NOT lift it above retail
+
+      const tickers = findShareClasses({ query: "MIXF" }).map((c) => c.ticker);
+      expect(tickers).toEqual(["MIXF-A", "MIXF-R"]); // insurance hidden; restricted last
+    });
+  });
 });

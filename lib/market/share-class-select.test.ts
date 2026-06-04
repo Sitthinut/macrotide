@@ -24,6 +24,17 @@ describe("compareClassesForList", () => {
     expect(order(list)).toEqual(["F-A", "F-I"]);
   });
 
+  it("ranks audience tiers: retail > unknown(null) > restricted", () => {
+    // Big AUM must not let a restricted class jump above a retail/unknown one —
+    // the tier dominates AUM.
+    const list = [
+      cls({ ticker: "F-RESTR", investorType: "restricted", aum: 9_999 }),
+      cls({ ticker: "F-NULL", investorType: null, aum: 1 }),
+      cls({ ticker: "F-RETAIL", investorType: "retail", aum: 1 }),
+    ];
+    expect(order(list)).toEqual(["F-RETAIL", "F-NULL", "F-RESTR"]);
+  });
+
   it("orders by AUM descending within the same tier (most popular first)", () => {
     const list = [
       cls({ ticker: "F-A", aum: 100 }),

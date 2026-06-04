@@ -72,19 +72,30 @@ export function classifyDistribution(detail: string | null | undefined): string 
 }
 
 // fund_class_detail (Thai) → investor audience. Drives the screener's
-// retail-default: institutional and insurance-linked classes have NAV but
-// individuals can't subscribe to them.
+// retail-default + ranking: some classes have NAV but the general public can't
+// (or wouldn't) subscribe to them directly.
 //   สำหรับผู้ลงทุนทั่วไป              → retail (general public)
+//   ผู้ลงทุนกลุ่ม / ผู้ลงทุนพิเศษ      → restricted (provident/private/special-group)
+//   ควบประกัน / กรมธรรม์ประกันชีวิต    → insurance (unit-linked policy)
 //   สำหรับผู้ลงทุนสถาบัน             → institutional
-//   กรมธรรม์ประกันชีวิตควบหน่วยลงทุน → insurance-linked (unit-linked policy)
 // A bare/absent detail (single-class "main" funds) is retail by default.
+//
+// Precedence matters:
+//  - **ทั่วไป (general public) wins first.** A dual-purpose class offered to the
+//    general public AND via an insurance/group channel (e.g. an "RU" class) is
+//    retail-buyable, so it must not be mislabeled insurance/restricted.
+//  - **Insurance keys on "ควบประกัน" / "กรมธรรม์ประกันชีวิต", never bare "ประกัน"**
+//    — some details say "…ไม่มีสิทธิประโยชน์ประกัน" (explicitly *without* insurance).
 export function classifyInvestorType(detail: string | null | undefined): string | null {
   if (!detail) return "retail";
-  if (detail.includes("กรมธรรม์ประกันชีวิต")) return "insurance";
-  if (detail.includes("สถาบัน")) return "institutional";
   if (detail.includes("ทั่วไป")) return "retail";
-  // Special-group classes (ผู้ลงทุนกลุ่มพิเศษ) and anything unrecognized: leave
-  // null so the screener neither hides nor mislabels them.
+  if (detail.includes("ควบประกัน") || detail.includes("กรมธรรม์ประกันชีวิต")) return "insurance";
+  if (detail.includes("สถาบัน")) return "institutional";
+  // Provident-fund / private-fund / special-group classes: have NAV but aren't
+  // sold to the general public. Kept visible in the screener but DOWN-RANKED
+  // below retail (not hidden) — unlike institutional/insurance, which are hidden.
+  if (detail.includes("ผู้ลงทุนกลุ่ม") || detail.includes("ผู้ลงทุนพิเศษ")) return "restricted";
+  // Anything unrecognized: leave null so the screener neither hides nor mislabels.
   return null;
 }
 

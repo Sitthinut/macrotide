@@ -69,7 +69,7 @@ class gets its own row in **`fund_share_classes`**:
 | `ticker` | The **priceable id** — holdable identifier + NAV cache-key tail |
 | `class_detail_th` | Raw Thai class detail string |
 | `distribution_policy` | `accumulating` \| `dividend` \| NULL (parsed from `class_detail_th`) |
-| `investor_type` | `retail` \| `institutional` \| `insurance` \| NULL — only retail is buyable by individuals |
+| `investor_type` | `retail` \| `restricted` \| `institutional` \| `insurance` \| NULL. Screener hides `institutional`/`insurance` (uninvestable directly), keeps `retail`/NULL, and down-ranks `restricted` (provident/private/special-group — investable in principle, not sold to the public) |
 | `tax_incentive_type` | Per-class wrapper: `SSF` \| `RMF` \| `ThaiESG` \| NULL |
 | `isin_code` | Per-class ISIN |
 | `current_ter` | Per-class total expense ratio %, derived from `fund_fees` (NULL when unpublished) |

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyDistribution,
+  classifyInvestorType,
   classifyInvestRegion,
   classifyTaxIncentive,
   inferAssetClass,
@@ -69,6 +70,53 @@ describe("classifyDistribution", () => {
     expect(classifyDistribution("ชนิดสะสมมูลค่า")).toBe("accumulating");
     expect(classifyDistribution("ชนิดจ่ายเงินปันผล")).toBe("dividend");
     expect(classifyDistribution("ชนิดผู้ลงทุนสถาบัน")).toBeNull();
+  });
+});
+
+describe("classifyInvestorType", () => {
+  it("defaults a bare/absent detail to retail (single-class 'main' funds)", () => {
+    expect(classifyInvestorType(null)).toBe("retail");
+    expect(classifyInvestorType("")).toBe("retail");
+  });
+
+  it("classifies the general public as retail", () => {
+    expect(classifyInvestorType("ชนิดเพื่อผู้ลงทุนทั่วไป")).toBe("retail");
+  });
+
+  it("tags provident/private/special-group classes as restricted (down-ranked, not hidden)", () => {
+    expect(classifyInvestorType("ชนิดผู้ลงทุนกลุ่ม/บุคคล")).toBe("restricted");
+    expect(classifyInvestorType("ชนิดผู้ลงทุนกลุ่ม")).toBe("restricted");
+    expect(classifyInvestorType("ชนิดผู้ลงทุนกลุ่มพิเศษ(สะสมมูลค่า)")).toBe("restricted");
+    expect(classifyInvestorType("ชนิดผู้ลงทุนพิเศษ")).toBe("restricted");
+  });
+
+  it("tags unit-linked classes as insurance via ควบประกัน", () => {
+    expect(classifyInvestorType("ชนิดควบประกัน")).toBe("insurance");
+    expect(classifyInvestorType("ชนิดสะสมมูลค่า สำหรับผู้ที่ลงทุนในกรมธรรม์ประกันชีวิตควบหน่วยลงทุน")).toBe(
+      "insurance",
+    );
+  });
+
+  it("classifies institutional", () => {
+    expect(classifyInvestorType("สำหรับผู้ลงทุนสถาบัน")).toBe("institutional");
+  });
+
+  it("lets general-public availability win over an insurance/group channel (dual-purpose RU class)", () => {
+    // Offered to ทั่วไป AND via unit-linked policy → retail-buyable, not hidden.
+    expect(
+      classifyInvestorType(
+        "หน่วยลงทุนชนิดไม่จ่ายปันผล สำหรับผู้ลงทุนทั่วไป หรือกรมธรรม์ประกันชีวิตควบหน่วยลงทุน (RU)",
+      ),
+    ).toBe("retail");
+  });
+
+  it("does NOT match bare 'ประกัน' — a class that explicitly has NO insurance benefit stays unclassified", () => {
+    expect(classifyInvestorType("ชนิดรับซื้อคืนอัตโนมัติและไม่มีสิทธิประโยชน์ประกัน")).toBeNull();
+  });
+
+  it("leaves an unrecognized distribution/channel detail null (kept, neither hidden nor mislabeled)", () => {
+    expect(classifyInvestorType("ชนิดจ่ายเงินปันผล")).toBeNull();
+    expect(classifyInvestorType("ชนิดช่องทางอิเล็กทรอนิกส์")).toBeNull();
   });
 });
 

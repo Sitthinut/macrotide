@@ -46,8 +46,10 @@ describe("exceedsErrorThreshold", () => {
   });
 
   it("fails only when both above the floor and above the rate", () => {
-    // 600 / 2000 = 30% > 20% and > floor → systemic outage, fail.
-    expect(exceedsErrorThreshold(600, 2000)).toBe(true);
+    // 800 / 2000 = 40% > 35% and > floor → systemic outage, fail.
+    expect(exceedsErrorThreshold(800, 2000)).toBe(true);
+    // 600 / 2000 = 30% < 35% → tolerated (the expected NAV-less retail baseline).
+    expect(exceedsErrorThreshold(600, 2000)).toBe(false);
   });
 
   it("requires BOTH — high count but low rate is tolerated", () => {
