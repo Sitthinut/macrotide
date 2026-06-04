@@ -81,6 +81,82 @@ export const holdings = sqliteTable(
   (table) => [index("idx_holdings_bucket").on(table.bucketId)],
 );
 
+// Transaction ledger — the buy/sell/dividend event log behind realized gains,
+// money-weighted return (XIRR), and the contribution timeline. Deliberately
+// SEPARATE from `holdings`: holdings is the snapshot of what you hold now;
+// `transactions` is how you got there. See
+// docs/explanation/decisions/0003-transaction-ledger-data-model.md.
+//
+// Scoping: like `holdings`, this table has NO `user_id` — it is scoped through
+// its parent bucket. The scoping invariant lives in the CALLER (resolve the
+// owner's bucket set, then query); the query layer exposes no unscoped list.
+// This intentionally overrides the general "new app tables carry user_id"
+// guidance, because a transaction belongs to a bucket, not directly to a user.
+export const transactions = sqliteTable(
+  "transactions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    bucketId: text("bucket_id")
+      .notNull()
+      .references(() => buckets.id, { onDelete: "cascade" }),
+    ticker: text("ticker").notNull(),
+    englishName: text("english_name"),
+    /**
+     * NAV/price-routing key, same semantics as holdings.quote_source — needed
+     * so proceeds and the terminal portfolio value can be priced.
+     *   - "yahoo"             — stocks, ETFs, indices, FX via Yahoo
+     *   - "thai_mutual_fund"  — Thai mutual fund NAVs via the SEC Open API
+     */
+    quoteSource: text("quote_source").notNull().default("yahoo"),
+    /**
+     * Event type. Plain TEXT validated by Zod at the route boundary (the
+     * action_item_states precedent) so a new kind needs no migration. Set:
+     *   buy | sell | dividend | fee | split | reinvest
+     */
+    kind: text("kind").notNull(),
+    /**
+     * ISO-8601 ECONOMIC event date — the cash-flow date the return math orders
+     * and discounts by. Distinct from `createdAt` (the UTC insert time): a
+     * date-only Bangkok screenshot must land on its correct local day, never
+     * drift onto the wrong UTC day.
+     */
+    tradeDate: text("trade_date").notNull(),
+    // Nullable: a cash dividend / standalone fee has no units.
+    units: real("units"),
+    // Native-currency NAV/price at execution. Derivable for display; not the
+    // primary money field.
+    pricePerUnit: real("price_per_unit"),
+    /**
+     * SIGNED THB cash flow — the SOLE money-weighted-return primitive, always
+     * present even when units/price are blank. Sign convention (validated at
+     * the route, never silently coerced):
+     *   buy / fee / reinvest-buy leg → NEGATIVE (cash out)
+     *   sell / cash dividend / withdrawal → POSITIVE (cash in)
+     * Already in THB. `fxToThb` is NEVER re-applied to this value — doing so
+     * re-introduces the mixed-currency double-count.
+     */
+    amount: real("amount").notNull(),
+    // Nullable; folds into basis on buys, nets from proceeds on sells.
+    fee: real("fee"),
+    tradeCurrency: text("trade_currency").notNull().default("THB"),
+    /**
+     * Trade-date FX rate captured AT IMPORT (historical FX is not reliably
+     * re-fetchable later). Used only to derive native price for display and to
+     * compute `amount` once at import when only a native amount was captured.
+     * THB-denominated funds: tradeCurrency "THB", fxToThb 1 (a no-op).
+     */
+    fxToThb: real("fx_to_thb").notNull().default(1),
+    note: text("note"),
+    // Free-text broker / import provenance label, like holdings.source.
+    source: text("source"),
+    // Groups the rows of one import for provenance / undo.
+    importBatchId: text("import_batch_id"),
+    createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
+    updatedAt: text("updated_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
+  },
+  (table) => [index("idx_transactions_bucket").on(table.bucketId, table.tradeDate)],
+);
+
 // Investment plan — one row per user. `id` autoincrements; a UNIQUE index on
 // `user_id` enforces a single plan per owner. SQLite treats multiple NULLs as
 // distinct in a UNIQUE index, which is fine: single-owner mode has exactly one

@@ -91,7 +91,8 @@ ask the user — never invent one and commit it as if it were real.
 ## DB routing — read before touching a route handler
 
 Two SQLite files split by lifecycle: **app.db** (precious system of record —
-accounts, holdings, plans, chat; `getAppDb()`/`getDb()`) and **market.db**
+accounts, the `transactions` ledger + its derived `holdings` projection, plans,
+chat; `getAppDb()`/`getDb()`) and **market.db**
 (regenerable — catalog/fees + NAV/quote cache; `getMarketDb()`). No FK or join
 crosses the boundary; a module needing both reads each handle and joins app-side.
 Full model (schema split, demo routing, why): [architecture.md § Two databases](./docs/explanation/architecture.md#two-databases-split-by-lifecycle).
@@ -99,6 +100,7 @@ Full model (schema split, demo routing, why): [architecture.md § Two databases]
 - **Every route handler that queries MUST run inside `withDb`** ([lib/api/with-db.ts](./lib/api/with-db.ts)) — it reads the `macrotide_demo` cookie and routes to the right app.db (owner singleton vs per-session demo). Skip it and demo writes leak into the owner DB.
 - **`streamText`'s `onFinish` fires after `withDb` returns** — capture the context and re-enter with `runWithDbContext(ctx, …)`, or demo writes land in the owner DB. Canonical pattern: `app/api/chat/route.ts`.
 - Queries are `import "server-only"` ([lib/db/queries/](./lib/db/queries)); never import one into a client component — go through a fetcher.
+- **`holdings` is a DERIVED projection of the `transactions` ledger, not a thing you write directly** ([ADR 0004](./docs/explanation/decisions/0004-unified-ledger-positions-derived.md)). The ledger is the source of truth for positions; `holdings` carries the projected `units`/`avg_cost` plus user-editable instrument metadata, and is rebuilt after every ledger write. To add/edit/delete a position, write a ledger event — `createHoldingViaLedger`/`editHoldingViaLedger`/`deleteHoldingViaLedger` and `insertTransactions`/`updateTransaction`/`deleteTransaction` ([project-holdings.ts](./lib/db/queries/project-holdings.ts), [transactions.ts](./lib/db/queries/transactions.ts)) all rebuild the projection. Never `INSERT`/`UPDATE` `holdings.units`/`avg_cost` by hand — the next rebuild overwrites it.
 
 ## Demo mode
 
@@ -150,8 +152,8 @@ degradation: [auth-and-providers.md § Market data providers](./docs/reference/a
 - `AUTH_DISABLED=1` opt-out for trusted local dev only. Default is
   auth-required.
 - `AUTH_SECRET` is mandatory in production; throws on boot if unset.
-- Multi-user mode adds a nullable `user_id` to app tables (migration `0007`).
-  A signed-in owner's rows are stamped with their id; demo and built-in rows
+- Multi-user mode adds a nullable `user_id` to app tables (in the app baseline +
+  migration `0004`). A signed-in owner's rows are stamped with their id; demo and built-in rows
   stay `NULL` (shared). Pre-multi-user rows start `NULL`.
 - `OWNER_EMAIL` — names the owner account. The
   [backfill script](./scripts/backfill-owner.ts) attaches those `NULL`-owned
@@ -213,7 +215,8 @@ GitHub Actions CI runs typecheck + lint + build. The build step needs
   handles. Demo DBs replay the APP baseline only on session create (market is
   the shared real DB).
 - Adding a column to an app table? Most app tables already carry a nullable
-  `user_id` (migration `0007`) for per-user scoping; design new ones the same way.
+  `user_id` (app baseline + `0004`) for per-user scoping; design new ones the same way.
+  (`0007` is the holdings→ledger backfill — see ADR 0004.)
 
 ## Product copy & vocabulary
 

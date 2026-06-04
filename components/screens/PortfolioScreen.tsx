@@ -475,6 +475,8 @@ export interface PortfolioScreenProps {
   onOpenModels: () => void;
   onOpenChat: () => void;
   onOpenImport: () => void;
+  /** Open the Activity (transaction ledger) modal. */
+  onOpenActivity?: () => void;
   /** Show the top-right kebab that opens the account menu (mobile only). */
   showMenu?: boolean;
 }
@@ -483,6 +485,7 @@ export function PortfolioScreen({
   onOpenSettings,
   onOpenModels,
   onOpenImport,
+  onOpenActivity,
   showMenu = true,
 }: PortfolioScreenProps) {
   // Active portfolio lives in the shared store so the right-rail PortfoliosPanel
@@ -1474,6 +1477,11 @@ export function PortfolioScreen({
         <h3>Holdings</h3>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span className="link">{view.holdings.length} holdings</span>
+          {onOpenActivity && (
+            <button className="btn ghost sm" onClick={onOpenActivity} style={{ gap: 4 }}>
+              <Icon name="book" size={12} /> Activity
+            </button>
+          )}
           <button
             className="btn ghost sm"
             onClick={onOpenImport}

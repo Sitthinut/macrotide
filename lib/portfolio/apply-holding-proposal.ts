@@ -11,7 +11,8 @@
 // caller's own rows), and reject anything that doesn't belong to them. Never
 // insert against a bucketId we haven't confirmed the user owns.
 import { getBucket, listBuckets } from "@/lib/db/queries/buckets";
-import { createHolding, type Holding } from "@/lib/db/queries/holdings";
+import type { Holding } from "@/lib/db/queries/holdings";
+import { createHoldingViaLedger } from "@/lib/db/queries/project-holdings";
 import { QUOTE_SOURCES, type QuoteSource } from "@/lib/market/sources";
 
 export interface HoldingProposalInput {
@@ -79,7 +80,9 @@ export function applyHoldingProposal(input: HoldingProposalInput): HoldingPropos
     input.avgCost != null && Number.isFinite(Number(input.avgCost)) ? Number(input.avgCost) : null;
   const ter = input.ter != null && Number.isFinite(Number(input.ter)) ? Number(input.ter) : null;
 
-  const holding = createHolding({
+  // Routes through the ledger: writes an `opening` anchor, then the holding is
+  // the projection of it (ADR 0004).
+  const holding = createHoldingViaLedger({
     bucketId,
     ticker,
     englishName: input.englishName.trim() || ticker,
@@ -94,5 +97,5 @@ export function applyHoldingProposal(input: HoldingProposalInput): HoldingPropos
     quoteSource: normalizeQuoteSource(input.quoteSource),
   });
 
-  return { ok: true, holding };
+  return holding ? { ok: true, holding } : { ok: false, error: "invalid" };
 }

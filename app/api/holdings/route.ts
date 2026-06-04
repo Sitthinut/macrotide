@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
 import { getBucket, listBuckets } from "@/lib/db/queries/buckets";
-import { createHolding, listHoldings } from "@/lib/db/queries/holdings";
+import { listHoldings } from "@/lib/db/queries/holdings";
+import { createHoldingViaLedger } from "@/lib/db/queries/project-holdings";
 
 export async function GET(req: Request) {
   const bucket = new URL(req.url).searchParams.get("bucket") ?? undefined;
@@ -26,9 +27,32 @@ export async function POST(req: Request) {
     // Never insert against a bucket the caller doesn't own. getBucket is
     // user-scoped, so a foreign or missing bucket id is rejected here.
     const bucketId = typeof body?.bucketId === "string" ? body.bucketId.trim() : "";
+    const ticker = typeof body?.ticker === "string" ? body.ticker.trim() : "";
     if (!bucketId || !getBucket(bucketId)) {
       return NextResponse.json({ error: "bucket_not_found" }, { status: 404 });
     }
-    return NextResponse.json(createHolding(body), { status: 201 });
+    if (!ticker) return NextResponse.json({ error: "ticker_required" }, { status: 400 });
+
+    // A holding is created by writing an `opening` anchor to the ledger; the
+    // holding row is then the projection of it (ADR 0004).
+    const created = createHoldingViaLedger({
+      bucketId,
+      ticker,
+      englishName:
+        typeof body.englishName === "string" && body.englishName ? body.englishName : ticker,
+      quoteSource:
+        typeof body.quoteSource === "string" && body.quoteSource ? body.quoteSource : "yahoo",
+      units: Number(body.units) || 0,
+      avgCost: body.avgCost == null ? null : Number(body.avgCost),
+      source: body.source ?? null,
+      acquiredOn: body.acquiredOn ?? null,
+      thaiName: body.thaiName ?? null,
+      category: body.category ?? null,
+      assetClass: body.assetClass ?? null,
+      region: body.region ?? null,
+      ter: body.ter == null ? null : Number(body.ter),
+      color: body.color ?? null,
+    });
+    return NextResponse.json(created, { status: 201 });
   });
 }

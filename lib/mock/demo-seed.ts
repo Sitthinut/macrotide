@@ -13,7 +13,14 @@
 // against real SEC NAVs and write-throughs any cache misses into the shared file.
 
 import type { drizzle } from "drizzle-orm/better-sqlite3";
-import { buckets, holdings, journalEntries, modelPortfolios, plans } from "../db/schema";
+import {
+  buckets,
+  holdings,
+  journalEntries,
+  modelPortfolios,
+  plans,
+  transactions,
+} from "../db/schema";
 import type * as appSchema from "../db/schema/app";
 import { MODEL_PORTFOLIOS, PORTFOLIOS, USER_GOALS, USER_JOURNAL, USER_PLAN } from "./data";
 
@@ -103,6 +110,28 @@ export function seedDemoData(db: Db): void {
           // lookups through the SEC Open API against the shared market.db.
           quoteSource: DEMO_QUOTE_SOURCE,
           acquiredOn: null,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+      // Matching `opening` anchor — the ledger is the source of truth and the
+      // holding above is its projection (ADR 0004).
+      db.insert(transactions)
+        .values({
+          bucketId: p.id,
+          ticker: h.ticker,
+          englishName: h.name,
+          quoteSource: DEMO_QUOTE_SOURCE,
+          kind: "opening",
+          tradeDate: now.slice(0, 10),
+          units: h.units,
+          pricePerUnit: avgCost,
+          amount: avgCost == null ? 0 : -(h.units * avgCost),
+          fee: null,
+          tradeCurrency: "THB",
+          fxToThb: 1,
+          source: h.source,
+          importBatchId: "seed-opening",
           createdAt: now,
           updatedAt: now,
         })

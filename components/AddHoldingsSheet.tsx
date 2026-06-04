@@ -14,6 +14,8 @@ import { useBuckets, useHoldings } from "@/lib/fetchers/portfolio";
 import { invalidate, useResource } from "@/lib/fetchers/swr";
 import { inferQuoteSource } from "@/lib/market/infer-quote-source";
 import type { QuoteSource } from "@/lib/market/sources";
+import type { ExtractedTxnRow } from "@/lib/portfolio/ocr";
+import { looksLikeTransactionHistory } from "@/lib/portfolio/txn-import";
 import type { ImportSeedRow } from "@/lib/stores/import-seed";
 
 // Shape of /api/fund-classes/resolve — validates a typed ticker against the
@@ -116,9 +118,24 @@ export interface AddHoldingsSheetProps {
    * exactly like an image extract; consumed once per array identity.
    */
   seedRows?: ImportSeedRow[] | null;
+  /**
+   * Scope-guard handoff: the upload looked like a TRANSACTION history (dates /
+   * prices per row), not a holdings snapshot. Closes this sheet and opens the
+   * transaction importer, carrying the ticker stubs so the user needn't re-type.
+   */
+  onSwitchToTransactions?: (seed?: ExtractedTxnRow[] | null) => void;
+  /** Snapshot ↔ Activity segmented control, injected by AddToPortfolioSheet. */
+  modeToggle?: React.ReactNode;
 }
 
-export function AddHoldingsSheet({ open, onClose, onAdd, seedRows }: AddHoldingsSheetProps) {
+export function AddHoldingsSheet({
+  open,
+  onClose,
+  onAdd,
+  seedRows,
+  onSwitchToTransactions,
+  modeToggle,
+}: AddHoldingsSheetProps) {
   const { data: buckets } = useBuckets();
   const { data: holdings } = useHoldings();
   const [method, setMethod] = useState<"paste" | "image">("paste");
@@ -146,6 +163,10 @@ export function AddHoldingsSheet({ open, onClose, onAdd, seedRows }: AddHoldings
   const [bucketId, setBucketId] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Scope-guard: set when an import looked like a transaction history; dismissed
+  // when the user chooses to import as a snapshot anyway.
+  const [txnShapeDetected, setTxnShapeDetected] = useState(false);
+  const [scopeGuardDismissed, setScopeGuardDismissed] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const csvFileRef = useRef<HTMLInputElement>(null);
 
@@ -352,12 +373,20 @@ export function AddHoldingsSheet({ open, onClose, onAdd, seedRows }: AddHoldings
   };
 
   const appendRows = (incoming: Row[], provenance?: Row["provenance"]) => {
+    // Detect transaction-shape on the PRE-MERGE rows (mergeRows would dedup the
+    // repeated tickers that signal a ledger).
+    if (looksLikeTransactionHistory(incoming.filter((r) => r.ticker.trim()))) {
+      setTxnShapeDetected(true);
+    }
     setRows((prev) => mergeRows(prev, incoming, provenance));
   };
 
   const stagePastedRows = (text: string, silent = false) => {
     const parsed = parsePaste(text);
     setPasteParseCount(parsed.length);
+    if (looksLikeTransactionHistory(parsed.filter((r) => r.ticker.trim()))) {
+      setTxnShapeDetected(true);
+    }
     if (parsed.length === 0) {
       if (!silent) {
         setSubmitError("Couldn't parse any rows — check the format (SYMBOL + quantity per line).");
@@ -567,6 +596,8 @@ export function AddHoldingsSheet({ open, onClose, onAdd, seedRows }: AddHoldings
         { ticker: "", units: "", avgCost: "" },
         { ticker: "", units: "", avgCost: "" },
       ]);
+      setTxnShapeDetected(false);
+      setScopeGuardDismissed(false);
       clearImages();
       onClose();
     } catch (err) {
@@ -632,6 +663,29 @@ export function AddHoldingsSheet({ open, onClose, onAdd, seedRows }: AddHoldings
   const addRow = () => setRows([...rows, { ticker: "", units: "", avgCost: "" }]);
   const removeRow = (i: number) => setRows(rows.filter((_, idx) => idx !== i));
 
+  // Scope-guard: did the imported input look like a transaction history (the
+  // same fund repeated, i.e. a buy/sell log) rather than a holdings snapshot? If
+  // so, nudge the user toward the transaction importer. Light-touch — never
+  // blocks. NOTE: this is detected on the PRE-MERGE rows (see stagePastedRows /
+  // appendRows), because mergeRows collapses repeated tickers into one row —
+  // checking the merged table would never see the repeat that signals a ledger.
+  const txnShaped = !!onSwitchToTransactions && txnShapeDetected && !scopeGuardDismissed;
+  const switchToTransactions = () => {
+    // Hand off DISTINCT ticker stubs only — the holdings table merges rows by
+    // ticker, so its units/cost are not per-trade figures. The user re-enters
+    // dates, types, and amounts in the transaction sheet (which is the point).
+    const seen = new Set<string>();
+    const seed: ExtractedTxnRow[] = [];
+    for (const r of rows) {
+      const ticker = r.ticker.trim();
+      const key = ticker.toUpperCase();
+      if (!ticker || seen.has(key)) continue;
+      seen.add(key);
+      seed.push({ ticker });
+    }
+    onSwitchToTransactions?.(seed.length > 0 ? seed : null);
+  };
+
   // The shared table is the single source of truth for what will be saved.
   const previewCount = rows.filter((r) => r.ticker && r.units).length;
   // Any row still pointing at a bare parent (multiple share classes) blocks the
@@ -645,14 +699,48 @@ export function AddHoldingsSheet({ open, onClose, onAdd, seedRows }: AddHoldings
     return ticker && openSuggestRow !== i && !knownTickerSet.has(ticker.toUpperCase());
   }).length;
 
+  // Renders the Modal CONTENTS only — the single <Modal> shell is owned by
+  // AddToPortfolioSheet so the Holdings↔Activity toggle swaps the body without
+  // changing the modal's chrome or width. Must be rendered inside a <Modal>.
   return (
-    <Modal open={open} onClose={onClose} variant="form" labelledBy="ah-title">
+    <>
       <Modal.Header
-        title="Add holdings"
-        subtitle="Combine holdings from any Thai brokerage. Read-only — we never trade for you."
+        title="Add to portfolio"
+        subtitle="A snapshot of what you hold now, from any Thai brokerage. Read-only — we never trade for you."
         id="ah-title"
-      />
+      >
+        {modeToggle}
+      </Modal.Header>
       <Modal.Body>
+        {txnShaped && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 10,
+              padding: "10px 12px",
+              marginBottom: 14,
+              borderRadius: 8,
+              background: "var(--accent-soft, rgba(0,0,0,0.04))",
+              border: "1px solid var(--line-soft)",
+            }}
+          >
+            <Icon name="info" size={15} />
+            <div style={{ fontSize: 12.5, lineHeight: 1.45 }}>
+              This looks like a transaction history — the same fund appears more than once. The
+              Holdings importer records what you hold <em>now</em>; to track buys, sells, realized
+              gains and return, use the Transaction log instead.
+              <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                <button className="btn primary sm" onClick={switchToTransactions}>
+                  Open Transaction log
+                </button>
+                <button className="btn ghost sm" onClick={() => setScopeGuardDismissed(true)}>
+                  Import as a snapshot anyway
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
           <div>
             <label
@@ -1386,6 +1474,6 @@ export function AddHoldingsSheet({ open, onClose, onAdd, seedRows }: AddHoldings
           <Icon name="check" size={13} />
         </button>
       </Modal.Footer>
-    </Modal>
+    </>
   );
 }

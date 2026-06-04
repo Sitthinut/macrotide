@@ -7,7 +7,14 @@ import { dirname, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { buckets, holdings, journalEntries, modelPortfolios, plans } from "../db/schema";
+import {
+  buckets,
+  holdings,
+  journalEntries,
+  modelPortfolios,
+  plans,
+  transactions,
+} from "../db/schema";
 import { MODEL_PORTFOLIOS, PORTFOLIOS, USER_GOALS, USER_JOURNAL, USER_PLAN } from "./data";
 
 // Seeds app.db only — the system of record. Market data (fund catalog, the
@@ -53,6 +60,7 @@ async function main() {
     DELETE FROM chat_threads;
     DELETE FROM journal_entries;
     DELETE FROM plans;
+    DELETE FROM transactions;
     DELETE FROM holdings;
     DELETE FROM buckets;
     DELETE FROM model_portfolios;
@@ -123,6 +131,28 @@ async function main() {
           // the right source explicitly via the type selector.
           quoteSource: "thai_mutual_fund",
           acquiredOn: null,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+      // Matching `opening` anchor so the ledger is the source of truth and the
+      // holding above is its projection (ADR 0004).
+      db.insert(transactions)
+        .values({
+          bucketId: p.id,
+          ticker: h.ticker,
+          englishName: h.name,
+          quoteSource: "thai_mutual_fund",
+          kind: "opening",
+          tradeDate: now.slice(0, 10),
+          units: h.units,
+          pricePerUnit: avgCost,
+          amount: avgCost == null ? 0 : -(h.units * avgCost),
+          fee: null,
+          tradeCurrency: "THB",
+          fxToThb: 1,
+          source: h.source,
+          importBatchId: "seed-opening",
           createdAt: now,
           updatedAt: now,
         })

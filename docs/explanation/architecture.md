@@ -23,7 +23,8 @@ documented in [SECURITY.md](../../SECURITY.md) and
 ### Two databases, split by lifecycle
 
 The store is split along a lifecycle boundary into **app.db** (the system of
-record — accounts, buckets, holdings, plans, journal, chat, preferences, market
+record — accounts, buckets, the `transactions` ledger + its derived `holdings`
+projection (ADR 0004), plans, journal, chat, preferences, market
 indicators) and **market.db** (regenerable — fund catalog/fees/performance/
 portfolio, feeder look-through, and the NAV/quote cache). A two-handle
 `DbContext` ([lib/db/context.ts](../../lib/db/context.ts)) routes each query to

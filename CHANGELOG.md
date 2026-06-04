@@ -72,6 +72,27 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   scrolls with the same thin, auto-hiding overlay scrollbar as the rest of the
   app (main column, side panels, thread list) instead of the browser's native
   bar, on desktop/tablet; touch keeps the native scrollbar.
+- **One unified ledger — your holdings are a projection of your transactions.**
+  A single event ledger is the source of truth for positions; the holdings list
+  is derived from it and rebuilt on every write, so "what you hold now" and "how
+  you got here" can never contradict each other (there is nothing to reconcile).
+  The ledger has DELTAS (buy/sell/dividend/fee/split/reinvest) and ANCHORS —
+  `opening` (a starting balance) and `snapshot` (a point-in-time restatement) —
+  supporting three flows: enter full history, start from an opening balance then
+  track forward, or just periodically restate what you hold. **Add holdings** and
+  **Add transactions** are now one **Add to portfolio** sheet — a single
+  fixed-width modal whose Holdings ↔ Activity toggle swaps only the body (no more
+  reopening a differently-shaped dialog). The **Activity** view is inline-editable:
+  edit, add, or delete any ledger row in place (explicit per-row Save/Cancel), with
+  the starting-balance row shown as a plain pinned label and its delete guarded
+  (it re-bases every position). Editing a holding edits its backing event (or
+  records a snapshot). From the ledger the **Activity** view shows realized gains
+  (average-cost, FIFO available), money-weighted return (XIRR, in THB, once
+  there's enough history and a current price), and a cost-basis timeline. A
+  position entered without an average cost degrades gracefully — value and
+  allocation still work; gains/return show a quiet "add cost" nudge rather than a
+  fabricated figure. Design:
+  docs/explanation/decisions/0004-unified-ledger-positions-derived.md.
 - **The Portfolio screen leads with plain-language checks instead of a 0–100
   grade.** The single composite health score is gone from the screen — a
   chase-able grade nudges the checking-and-tinkering that measurably hurts

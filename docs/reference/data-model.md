@@ -31,7 +31,8 @@ app.db but share the real market.db read-write (same warm cache as real users).
 | Table | Holds | Key columns / notes |
 |---|---|---|
 | `buckets` | Portfolio slices (Core, SSF, experiment, …) | `target_allocation` (JSON), `target_model_id`, `position` (sidebar order), `user_id` |
-| `holdings` | Fund positions inside a bucket | `bucket_id` (FK, cascade), `units`, `avg_cost`, `ter`, `quote_source` (routing key) |
+| `transactions` | The canonical event ledger — the single source of truth for positions ([ADR 0004](../explanation/decisions/0004-unified-ledger-positions-derived.md)). DELTAS (`buy`/`sell`/`dividend`/`fee`/`split`/`reinvest`) move a position; ANCHORS (`opening`/`snapshot`) assert an absolute position at a date. | `bucket_id` (FK, cascade), `kind` (TEXT, Zod-validated), `trade_date` (economic event date), `units`, `price_per_unit` (avg cost on anchors), signed THB `amount` (the return primitive; 0 for a snapshot, −cost for a costed opening), `fee`, `quote_source`, `fx_to_thb`, `import_batch_id`. **No `user_id`** — scoped through its bucket. |
+| `holdings` | A DERIVED projection of the ledger (the current position per ticker), rebuilt after every ledger write — not typed directly. Stores the ledger-derived `units`/`avg_cost` plus user-editable instrument metadata (`thai_name`, `category`, `asset_class`, `region`, `ter`, `color`) that has no home in the ledger. `avg_cost` is `null` when cost is unknown (an uncosted opening → gains degrade gracefully). | `bucket_id` (FK, cascade), `units`, `avg_cost`, `ter`, `quote_source` (routing key). Projection logic: `lib/db/queries/project-holdings.ts`. |
 | `plans` | The investment plan | Single-row in v1; `markdown`, `selected_model_id`, `user_id` |
 | `journal_entries` | Notes, decisions, questions, reading, and feedback (a `kind: "feedback"` entry records a 👍/👎 reaction — e.g. a Portfolio "Not for me" rejection — with its rating in a `rating:up\|down` tag) | `kind`, `tags` (JSON), `pinned`, `archived_at`, `user_id` |
 | `model_portfolios` | Built-in + custom model allocations | `built_in`, `allocation` (JSON slices), risk/return metadata, `user_id` |
@@ -128,7 +129,8 @@ mode scopes every query by `user_id`. The evolution is described in
 ## Relationships (sketch)
 
 ```text
-user ──< buckets ──< holdings
+user ──< buckets ──< transactions  (the source of truth for positions)
+                 └─▶ holdings  (derived projection of the ledger, rebuilt on write)
 user ──< plans
 user ──< journal_entries
 user ──< model_portfolios

@@ -1,0 +1,562 @@
+// Cost-basis lot engine — pure, deterministic, DB- and network-free.
+//
+// Folds a transaction ledger into per-position state (running units + remaining
+// cost basis + derived average cost), a realized-CAPITAL-gain log, and the
+// separate income (cash dividends) / expense (standalone fees) lines. It is the
+// math behind the Activity ledger's realized gains, the cost-basis-vs-value
+// timeline, AND the derived `holdings` projection (positions are computed from
+// the ledger, never typed directly — see ADR 0004).
+//
+// Design rules baked in (see
+// docs/explanation/decisions/0004-unified-ledger-positions-derived.md):
+//
+//   • Everything is in THB. The SIGNED `amount` on each txn is the authoritative
+//     money field — it already folds in fees and trade-date FX. This engine uses
+//     its MAGNITUDE for basis/proceeds and never re-applies any FX rate, so the
+//     mixed-currency double-count cannot creep back in. (XIRR consumes the signed
+//     value directly; see xirr.ts.)
+//   • Basis on a sell is removed PROPORTIONALLY (avgCost × unitsSold for average,
+//     oldest-lot cost for FIFO) — NEVER by sale proceeds. This is the single most
+//     important invariant; getting it wrong corrupts every later realized gain.
+//   • Rows are ALWAYS folded in (tradeDate, createdAt, id) order, never import
+//     order — moving-average basis at a sell depends on the running average at
+//     that moment, so a backfilled/out-of-order buy must still land before a
+//     later sell.
+//   • A full exit resets the position (next buy starts a fresh average, never a
+//     stale blend). An oversell is flagged, never allowed to go negative.
+//
+// Two event categories (ADR 0004): DELTAS (buy/sell/dividend/fee/split/reinvest)
+// move the position relatively; ANCHORS (opening/snapshot) assert an absolute
+// position at a date and DISCARD accumulated drift before them:
+//   • `opening`  — opening balance: absolute units at an optional avg cost. The
+//     "start from where I am, then track forward" flow. Counts toward
+//     net-invested when costed.
+//   • `snapshot` — point-in-time restatement: absolute units (+ optional avg
+//     cost). Resets the position; never a realized event, never a cash flow. If
+//     no avg cost is given, the prior per-unit cost is CARRIED FORWARD (units
+//     snap to the anchor, cost basis is preserved) — a value-only restatement
+//     never destroys cost basis.
+//
+// Cost and market value are kept ORTHOGONAL: a position can be held with cost
+// UNKNOWN (an uncosted opening/snapshot, or a buy onto an already-unknown
+// position). Unknown cost surfaces as `costBasis: null` / `avgCost: null` while
+// `units > 0`; gain-based analytics then return null rather than fabricate a
+// basis. A ticker is cost-known only while ALL its contributing units are
+// costed.
+
+export type TxnKind =
+  | "buy"
+  | "sell"
+  | "dividend"
+  | "fee"
+  | "split"
+  | "reinvest"
+  | "opening"
+  | "snapshot";
+
+export type CostBasisMethod = "average" | "fifo";
+
+/** The pure subset of a transaction row the lot engine needs. */
+export interface LedgerTxn {
+  /** Stable tie-breaker for same-date ordering (the DB row id). */
+  id?: number;
+  ticker: string;
+  kind: TxnKind;
+  /** ISO-8601 economic event date — the ordering + discounting key. */
+  tradeDate: string;
+  /**
+   * Units moved. For `buy`/`sell`/`reinvest` the share count. For `split` this is
+   * the RATIO (2 = 2-for-1, 0.5 = 1-for-2 reverse). For an `opening`/`snapshot`
+   * anchor it is the ABSOLUTE units held as of the date. `null`/absent for a cash
+   * `dividend` or standalone `fee`.
+   */
+  units?: number | null;
+  /**
+   * Per-unit cost in THB. Only read for `opening`/`snapshot` anchors, where it is
+   * the avg cost being asserted (null/absent → cost unknown). Deltas derive their
+   * cost from `amount`; this is ignored for them.
+   */
+  pricePerUnit?: number | null;
+  /** Signed THB cash flow; magnitude is the basis (buy) or proceeds (sell). */
+  amount: number;
+  /** Secondary tie-breaker when ids are absent. */
+  createdAt?: string;
+}
+
+/** Per-position state after folding the whole ledger. */
+export interface PositionState {
+  ticker: string;
+  /** Units still held. */
+  units: number;
+  /** Remaining cost basis in THB, or null when the cost is unknown. */
+  costBasis: number | null;
+  /** Derived average cost per unit in THB; null when nothing is held OR cost is unknown. */
+  avgCost: number | null;
+}
+
+/** One realized CAPITAL gain — produced only by `sell` rows on cost-known positions. */
+export interface RealizedEvent {
+  ticker: string;
+  tradeDate: string;
+  unitsSold: number;
+  /** THB received (the sell `amount` magnitude, already net of fee). */
+  proceeds: number;
+  /** THB cost basis removed for the sold units. */
+  costRemoved: number;
+  /** proceeds − costRemoved (negative = a realized loss). */
+  realizedGain: number;
+}
+
+/** A cash dividend received (income) or a standalone fee paid (expense). */
+export interface CashEvent {
+  ticker: string;
+  tradeDate: string;
+  /** THB magnitude. */
+  amount: number;
+}
+
+export type LotWarningCode = "oversell" | "missing_units" | "missing_ratio" | "cost_unknown";
+
+export interface LotWarning {
+  code: LotWarningCode;
+  ticker: string;
+  tradeDate: string;
+  detail: string;
+}
+
+/** A snapshot of aggregate cost basis after an event — drives the timeline chart. */
+export interface BasisPoint {
+  date: string;
+  /** Total remaining KNOWN cost basis across all positions, THB (unknown-cost positions contribute 0). */
+  costBasis: number;
+  /** Cumulative net invested (Σ buys + costed openings − Σ sells) to date, THB. */
+  netInvested: number;
+}
+
+export interface LotEngineResult {
+  method: CostBasisMethod;
+  positions: PositionState[];
+  realized: RealizedEvent[];
+  realizedTotal: number;
+  income: CashEvent[];
+  incomeTotal: number;
+  expenses: CashEvent[];
+  expenseTotal: number;
+  warnings: LotWarning[];
+  /** Aggregate cost-basis timeline, one point per event in date order. */
+  basisTimeline: BasisPoint[];
+}
+
+// Units below this are treated as zero (float dust after a full exit).
+const UNIT_EPSILON = 1e-9;
+
+interface AverageState {
+  units: number;
+  basis: number;
+}
+
+interface Lot {
+  units: number;
+  costPerUnit: number;
+}
+
+/**
+ * Fold a transaction ledger into realized gains + position state.
+ *
+ * @param txns  the ledger rows (any order — sorted internally by trade date)
+ * @param method "average" (default) or "fifo"
+ */
+export function reduceLots(
+  txns: readonly LedgerTxn[],
+  method: CostBasisMethod = "average",
+): LotEngineResult {
+  const sorted = [...txns].sort(compareTxns);
+
+  // Per-ticker state. Average tracks {units, basis}; FIFO tracks a lot queue.
+  const avg = new Map<string, AverageState>();
+  const fifo = new Map<string, Lot[]>();
+  // A ticker is cost-known until an uncosted anchor (or a buy onto an already-
+  // unknown position) makes its basis unblendable. Default true; absence = true.
+  const costKnown = new Map<string, boolean>();
+  const isKnown = (ticker: string): boolean => costKnown.get(ticker) ?? true;
+
+  const realized: RealizedEvent[] = [];
+  const income: CashEvent[] = [];
+  const expenses: CashEvent[] = [];
+  const warnings: LotWarning[] = [];
+  const basisTimeline: BasisPoint[] = [];
+
+  let netInvested = 0;
+
+  const aggregateBasis = (): number => {
+    let total = 0;
+    if (method === "fifo") {
+      for (const [ticker, lots] of fifo) {
+        if (!isKnown(ticker)) continue;
+        for (const lot of lots) total += lot.units * lot.costPerUnit;
+      }
+      return total;
+    }
+    for (const [ticker, s] of avg) {
+      if (!isKnown(ticker)) continue;
+      total += s.basis;
+    }
+    return total;
+  };
+
+  for (const txn of sorted) {
+    const { ticker, kind, tradeDate } = txn;
+    const magnitude = Math.abs(txn.amount);
+
+    switch (kind) {
+      case "buy":
+      case "reinvest": {
+        const units = txn.units ?? 0;
+        if (units <= 0) {
+          warnings.push({
+            code: "missing_units",
+            ticker,
+            tradeDate,
+            detail: `${kind} has no positive units`,
+          });
+          break;
+        }
+        applyBuy(method, avg, fifo, ticker, units, magnitude, isKnown(ticker));
+        // A reinvested (accumulating) dividend adds basis but is NOT external
+        // cash — XIRR excludes it. A cash buy IS external. Either way it adds to
+        // net-invested for the cost-basis timeline.
+        netInvested += magnitude;
+        break;
+      }
+      case "sell": {
+        const units = txn.units ?? 0;
+        if (units <= 0) {
+          warnings.push({
+            code: "missing_units",
+            ticker,
+            tradeDate,
+            detail: "sell has no positive units",
+          });
+          break;
+        }
+        const ev = applySell(
+          method,
+          avg,
+          fifo,
+          ticker,
+          units,
+          magnitude,
+          tradeDate,
+          isKnown(ticker),
+          warnings,
+        );
+        // A full exit resets the position to a fresh, cost-known slate.
+        if (positionUnits(method, avg, fifo, ticker) <= UNIT_EPSILON) costKnown.set(ticker, true);
+        if (ev) realized.push(ev);
+        netInvested -= magnitude;
+        break;
+      }
+      case "split": {
+        const ratio = txn.units ?? 0;
+        if (ratio <= 0) {
+          warnings.push({
+            code: "missing_ratio",
+            ticker,
+            tradeDate,
+            detail: "split has no positive ratio (set units = post:pre ratio)",
+          });
+          break;
+        }
+        applySplit(method, avg, fifo, ticker, ratio);
+        break;
+      }
+      case "opening":
+      case "snapshot": {
+        const units = txn.units ?? 0;
+        if (units <= 0) {
+          // A zero-unit anchor clears the position (e.g. "I no longer hold this").
+          applyAnchor(method, avg, fifo, ticker, 0, null, false);
+          costKnown.set(ticker, true);
+          break;
+        }
+        // Avg cost for the anchor: explicit pricePerUnit, else (for snapshot only)
+        // carry the prior per-unit cost forward so a value-only restatement keeps
+        // its basis. An `opening` with no price is a genuinely uncosted balance.
+        const explicit = txn.pricePerUnit ?? null;
+        const prior =
+          kind === "snapshot" && isKnown(ticker) ? priorAvgCost(method, avg, fifo, ticker) : null;
+        const perUnit = explicit !== null && explicit > 0 ? explicit : prior;
+        const known = perUnit !== null;
+        applyAnchor(method, avg, fifo, ticker, units, known ? perUnit : null, known);
+        costKnown.set(ticker, known);
+        if (!known) {
+          warnings.push({
+            code: "cost_unknown",
+            ticker,
+            tradeDate,
+            detail: `${kind} has no average cost — gains and return are unavailable until you add one`,
+          });
+        }
+        // A costed opening is money put to work; a snapshot is a restatement, not
+        // a contribution, so it never moves net-invested.
+        if (kind === "opening" && known) netInvested += units * (perUnit as number);
+        break;
+      }
+      case "dividend": {
+        // Cash dividend paid out — income, not a capital gain. No basis effect.
+        income.push({ ticker, tradeDate, amount: magnitude });
+        break;
+      }
+      case "fee": {
+        // Standalone account fee — expense, no basis effect, no realized gain.
+        expenses.push({ ticker, tradeDate, amount: magnitude });
+        break;
+      }
+    }
+
+    basisTimeline.push({ date: tradeDate, costBasis: aggregateBasis(), netInvested });
+  }
+
+  const positions = collectPositions(method, avg, fifo, isKnown);
+  const realizedTotal = realized.reduce((s, e) => s + e.realizedGain, 0);
+  const incomeTotal = income.reduce((s, e) => s + e.amount, 0);
+  const expenseTotal = expenses.reduce((s, e) => s + e.amount, 0);
+
+  return {
+    method,
+    positions,
+    realized,
+    realizedTotal,
+    income,
+    incomeTotal,
+    expenses,
+    expenseTotal,
+    warnings,
+    basisTimeline,
+  };
+}
+
+/** Stable chronological order: trade date, then createdAt, then id. */
+function compareTxns(a: LedgerTxn, b: LedgerTxn): number {
+  if (a.tradeDate !== b.tradeDate) return a.tradeDate < b.tradeDate ? -1 : 1;
+  const ac = a.createdAt ?? "";
+  const bc = b.createdAt ?? "";
+  if (ac !== bc) return ac < bc ? -1 : 1;
+  return (a.id ?? 0) - (b.id ?? 0);
+}
+
+/** Current held units for a ticker (method-aware). */
+function positionUnits(
+  method: CostBasisMethod,
+  avg: Map<string, AverageState>,
+  fifo: Map<string, Lot[]>,
+  ticker: string,
+): number {
+  if (method === "fifo") return (fifo.get(ticker) ?? []).reduce((s, l) => s + l.units, 0);
+  return avg.get(ticker)?.units ?? 0;
+}
+
+/** Per-unit cost of the current position (for carrying forward across a snapshot). */
+function priorAvgCost(
+  method: CostBasisMethod,
+  avg: Map<string, AverageState>,
+  fifo: Map<string, Lot[]>,
+  ticker: string,
+): number | null {
+  if (method === "fifo") {
+    const lots = fifo.get(ticker) ?? [];
+    const units = lots.reduce((s, l) => s + l.units, 0);
+    if (units <= UNIT_EPSILON) return null;
+    const basis = lots.reduce((s, l) => s + l.units * l.costPerUnit, 0);
+    return basis / units;
+  }
+  const s = avg.get(ticker);
+  if (!s || s.units <= UNIT_EPSILON) return null;
+  return s.basis / s.units;
+}
+
+function applyBuy(
+  method: CostBasisMethod,
+  avg: Map<string, AverageState>,
+  fifo: Map<string, Lot[]>,
+  ticker: string,
+  units: number,
+  costThb: number,
+  known: boolean,
+): void {
+  if (method === "fifo") {
+    const lots = fifo.get(ticker) ?? [];
+    // Onto an already-unknown position the per-unit cost can't be blended; carry a
+    // zero-cost lot so the unit count stays right (basis is reported as unknown).
+    lots.push({ units, costPerUnit: known ? costThb / units : 0 });
+    fifo.set(ticker, lots);
+    return;
+  }
+  const s = avg.get(ticker) ?? { units: 0, basis: 0 };
+  s.units += units;
+  if (known) s.basis += costThb;
+  avg.set(ticker, s);
+}
+
+function applySell(
+  method: CostBasisMethod,
+  avg: Map<string, AverageState>,
+  fifo: Map<string, Lot[]>,
+  ticker: string,
+  unitsSold: number,
+  proceeds: number,
+  tradeDate: string,
+  known: boolean,
+  warnings: LotWarning[],
+): RealizedEvent | null {
+  if (method === "fifo") {
+    const lots = fifo.get(ticker) ?? [];
+    const held = lots.reduce((s, l) => s + l.units, 0);
+    let remaining = unitsSold;
+    let costRemoved = 0;
+    while (remaining > UNIT_EPSILON && lots.length > 0) {
+      const lot = lots[0];
+      const take = Math.min(lot.units, remaining);
+      costRemoved += take * lot.costPerUnit;
+      lot.units -= take;
+      remaining -= take;
+      if (lot.units <= UNIT_EPSILON) lots.shift();
+    }
+    if (remaining > UNIT_EPSILON) {
+      warnings.push({
+        code: "oversell",
+        ticker,
+        tradeDate,
+        detail: `sold ${unitsSold} units but only ${held} held`,
+      });
+    }
+    fifo.set(ticker, lots);
+    // Cost unknown → no computable capital gain; units still leave the position.
+    if (!known) return null;
+    return {
+      ticker,
+      tradeDate,
+      unitsSold,
+      proceeds,
+      costRemoved,
+      realizedGain: proceeds - costRemoved,
+    };
+  }
+
+  const s = avg.get(ticker) ?? { units: 0, basis: 0 };
+  const avgCost = s.units > UNIT_EPSILON ? s.basis / s.units : 0;
+  const sellable = Math.min(unitsSold, s.units);
+  if (unitsSold > s.units + UNIT_EPSILON) {
+    warnings.push({
+      code: "oversell",
+      ticker,
+      tradeDate,
+      detail: `sold ${unitsSold} units but only ${s.units} held`,
+    });
+  }
+  const costRemoved = avgCost * sellable;
+  s.units -= sellable;
+  if (known) s.basis -= costRemoved;
+  // Full exit: snap to zero so the next buy starts a fresh average (no dust).
+  if (s.units <= UNIT_EPSILON) {
+    s.units = 0;
+    s.basis = 0;
+  }
+  avg.set(ticker, s);
+  if (!known) return null;
+  return {
+    ticker,
+    tradeDate,
+    unitsSold,
+    proceeds,
+    costRemoved,
+    realizedGain: proceeds - costRemoved,
+  };
+}
+
+function applySplit(
+  method: CostBasisMethod,
+  avg: Map<string, AverageState>,
+  fifo: Map<string, Lot[]>,
+  ticker: string,
+  ratio: number,
+): void {
+  // Total dollar basis is unchanged; units scale by the ratio, so per-unit cost
+  // scales by 1/ratio. With average cost we derive avgCost = basis/units on
+  // demand, so only `units` needs scaling. With FIFO each lot's per-unit cost
+  // must be rescaled explicitly.
+  if (method === "fifo") {
+    const lots = fifo.get(ticker);
+    if (!lots) return;
+    for (const lot of lots) {
+      lot.units *= ratio;
+      lot.costPerUnit /= ratio;
+    }
+    return;
+  }
+  const s = avg.get(ticker);
+  if (!s) return;
+  s.units *= ratio;
+}
+
+/**
+ * Apply an anchor: discard any prior drift and SET the position to `units` (at
+ * `perUnit` cost when known). `units <= 0` clears the position entirely.
+ */
+function applyAnchor(
+  method: CostBasisMethod,
+  avg: Map<string, AverageState>,
+  fifo: Map<string, Lot[]>,
+  ticker: string,
+  units: number,
+  perUnit: number | null,
+  known: boolean,
+): void {
+  if (units <= UNIT_EPSILON) {
+    if (method === "fifo") fifo.set(ticker, []);
+    else avg.set(ticker, { units: 0, basis: 0 });
+    return;
+  }
+  if (method === "fifo") {
+    fifo.set(ticker, [{ units, costPerUnit: known ? (perUnit as number) : 0 }]);
+    return;
+  }
+  avg.set(ticker, { units, basis: known ? units * (perUnit as number) : 0 });
+}
+
+function collectPositions(
+  method: CostBasisMethod,
+  avg: Map<string, AverageState>,
+  fifo: Map<string, Lot[]>,
+  isKnown: (ticker: string) => boolean,
+): PositionState[] {
+  const out: PositionState[] = [];
+  if (method === "fifo") {
+    for (const [ticker, lots] of fifo) {
+      const units = lots.reduce((s, l) => s + l.units, 0);
+      if (units <= UNIT_EPSILON) continue;
+      if (!isKnown(ticker)) {
+        out.push({ ticker, units, costBasis: null, avgCost: null });
+        continue;
+      }
+      const basis = lots.reduce((s, l) => s + l.units * l.costPerUnit, 0);
+      out.push({ ticker, units, costBasis: basis, avgCost: basis / units });
+    }
+  } else {
+    for (const [ticker, s] of avg) {
+      if (s.units <= UNIT_EPSILON) continue;
+      if (!isKnown(ticker)) {
+        out.push({ ticker, units: s.units, costBasis: null, avgCost: null });
+        continue;
+      }
+      out.push({
+        ticker,
+        units: s.units,
+        costBasis: s.basis,
+        avgCost: s.basis / s.units,
+      });
+    }
+  }
+  out.sort((a, b) => (a.ticker < b.ticker ? -1 : a.ticker > b.ticker ? 1 : 0));
+  return out;
+}

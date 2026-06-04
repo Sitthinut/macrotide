@@ -30,6 +30,9 @@ export interface HoldingDetailRow {
  * em dash consistently.
  */
 export function buildHoldingDetailRows(h: Holding): HoldingDetailRow[] {
+  // Cost unknown (an uncosted opening/snapshot — ADR 0004): show a quiet nudge
+  // instead of a bogus ฿0 avg cost, so gains stay honestly hidden until set.
+  const costUnknown = h.costKnown === false;
   const avgCost = h.units > 0 ? h.cost / h.units : null;
   return [
     { label: "Name", value: h.name || h.ticker },
@@ -46,8 +49,9 @@ export function buildHoldingDetailRows(h: Holding): HoldingDetailRow[] {
     },
     {
       label: "Avg cost",
-      value:
-        avgCost != null
+      value: costUnknown
+        ? "Not set — add to see gains & return"
+        : avgCost != null
           ? `฿${avgCost.toLocaleString("en-US", { maximumFractionDigits: 2 })}`
           : null,
     },

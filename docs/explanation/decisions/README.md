@@ -23,6 +23,7 @@ context/options/consequences treatment.
 | Email transport | **Skip entirely** — SSO + passkeys only | DNS + spam-folder UX is friction for a soft-public launch |
 | Thai fund data | Thai SEC Open API — official, free w/ key | Scraping fund supermarkets = TOS/legal exposure |
 | Fund share classes | Parent catalog + per-class child table; browse by parent, price/hold by class — [ADR 0002](./0002-fund-share-class-model.md) | Parent-only can't price multi-class funds; classes-as-catalog-rows makes browse noisy + duplicates parent enrichment |
+| Positions vs. transactions | One event ledger is the source of truth; `holdings` is a derived projection — [ADR 0004](./0004-unified-ledger-positions-derived.md) (supersedes [0003](./0003-transaction-ledger-data-model.md), which shipped them as separate models) | Two hand-entered sources (snapshot + ledger) drift and need reconciling; deriving positions removes the whole class of disagreement |
 | Sign-up bot defense | Cloudflare Turnstile | hCaptcha works too; Turnstile is already in the zone |
 | Storage scale | Single VM, single SQLite writer | Postgres/Turso only when a real scaling trigger appears |
 

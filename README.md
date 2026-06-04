@@ -28,6 +28,7 @@ responsive across mobile / tablet / desktop with light/dark/system themes.
 | Fund finder & screener — fuzzy + feeder-aware search over priceable **share classes**, with per-class fee / tax wrapper / 1-year return | ✅ Shipped |
 | Fund detail — per-share-class price & fund-size (AUM) history chart with class selector | ✅ Shipped |
 | Portfolio import — Paste/CSV, editable table entry with autocomplete, image OCR review | ✅ Shipped |
+| Unified ledger + Activity — one "Add to portfolio" sheet (Holdings/Activity toggle); holdings are a projection of the buy/sell ledger; realized gains, money-weighted return (XIRR), cost-basis timeline; graceful degradation when cost is unknown | ✅ Shipped |
 | Long-term memory + chat archival — recall, FTS, session lifecycle | ✅ Shipped |
 | Multi-user — per-user isolation, tiers/quotas (token + optional cost caps, configurable cheap-paid free tier), owner admin | 🟡 Code shipped; launch prep open |
 | Benchmark comparison — "match or beat your index" (SET / S&P / Nasdaq / Nikkei) | ✅ Shipped; custom/goal-based benchmarks planned |
