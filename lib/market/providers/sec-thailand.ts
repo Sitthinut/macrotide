@@ -700,6 +700,32 @@ export async function fetchFundPortfolioAssetType(
   );
 }
 
+/**
+ * Pre-seed the symbol-resolution cache from the local catalog so a bulk crawl
+ * (the NAV pre-warm job, #104) skips the 1–2 SEC `general-info/profiles` lookups
+ * `resolveSymbol` would otherwise make per ticker. Each entry maps a priceable
+ * ticker → its proj_id + raw SEC `fund_class_name` — exactly what `fetchSeries`
+ * needs to hit the NAV endpoint directly. Cached under the same 24h TTL as a live
+ * resolution and keyed identically (upper-cased ticker), so the next live request
+ * for the same code also benefits. The display `name` is only a label (the cache
+ * layer discards it), so the caller may pass the ticker itself.
+ */
+export function primeFundResolution(
+  entries: Array<{ ticker: string; projId: string; fundClassName: string; name?: string }>,
+): void {
+  const now = Date.now();
+  for (const e of entries) {
+    const upper = e.ticker.trim().toUpperCase();
+    if (!upper) continue;
+    symbolCache.set(upper, {
+      projId: e.projId,
+      name: e.name ?? e.ticker,
+      fundClassName: e.fundClassName,
+      cachedAt: now,
+    });
+  }
+}
+
 /** Test-only — reset the per-symbol cache. */
 export function __resetSecThailandCache(): void {
   symbolCache.clear();
