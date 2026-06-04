@@ -21,9 +21,8 @@ defined in the canonical
 Passkeys and OAuth are **peer** methods — a user signs up with either and can add
 the other later. The `/login` screen shows:
 
-- **Continue with Google / GitHub** — env-gated (hidden unless that provider's
-  keys are set). Creates a verified account for new users, or signs in returning
-  ones.
+- **Continue with Google** — env-gated (hidden unless its keys are set). Creates
+  a verified account for new users, or signs in returning ones.
 - **Sign in with passkey** — for returning users whose device has a passkey.
 - **Create account** — registers a passkey. Collects **only a name** (no email),
   guarded by a **Turnstile** gate when configured.
@@ -64,11 +63,13 @@ path ever lets someone claim an address they haven't proven. Full rationale:
 - Linking is **explicit and session-scoped**: `authClient.linkSocial()` links a
   provider into the *caller's own* account — never a match-by-email merge into a
   stranger's.
-- Implicit (sign-in) linking only merges two **already-verified** OAuth
-  identities that share an email (e.g. Google then GitHub) — no `trustedProviders`
-  bypass for the incoming side, and better-auth's `requireLocalEmailVerified`
-  blocks any merge onto an unverified row. Passkey accounts, with their
-  placeholder email, match nothing and can't be touched implicitly.
+- Implicit (sign-in) linking is guarded so it only ever merges onto an
+  **already-verified** account, and only from a provider that asserts a verified
+  email — no `trustedProviders` bypass, and better-auth's
+  `requireLocalEmailVerified` blocks any merge onto an unverified row. Passkey
+  accounts, with their placeholder email, match nothing and can't be touched
+  implicitly. (With Google the only provider, this is the takeover guard on a
+  Google sign-in that matches an existing account.)
 - A social sign-in that *can't* be linked dead-ends to `/login?error=…` with
   friendly copy, never a shared account.
 

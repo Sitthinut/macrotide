@@ -11,17 +11,14 @@ import "server-only";
  *
  * Env vars (operator-supplied; never committed):
  *   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
- *   GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET
  */
 export interface EnabledProviders {
   google: boolean;
-  github: boolean;
 }
 
 export function enabledProviders(): EnabledProviders {
   return {
     google: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
-    github: Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET),
   };
 }
 
@@ -43,14 +40,6 @@ export function socialProvidersConfig(): Record<string, SocialProvider> {
       clientId: process.env.GOOGLE_CLIENT_ID!,
       // biome-ignore lint/style/noNonNullAssertion: flags.google guarantees presence
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-    };
-  }
-  if (flags.github) {
-    cfg.github = {
-      // biome-ignore lint/style/noNonNullAssertion: flags.github guarantees presence
-      clientId: process.env.GITHUB_CLIENT_ID!,
-      // biome-ignore lint/style/noNonNullAssertion: flags.github guarantees presence
-      clientSecret: process.env.GITHUB_CLIENT_SECRET!,
     };
   }
   return cfg;

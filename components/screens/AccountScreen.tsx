@@ -24,7 +24,7 @@ interface LinkedAccount {
 
 // Subset of /api/auth-config we need: which OAuth providers are configured.
 interface AuthConfigData {
-  providers: { google: boolean; github: boolean };
+  providers: { google: boolean };
 }
 
 export interface AccountScreenProps {
@@ -33,10 +33,7 @@ export interface AccountScreenProps {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const OAUTH_PROVIDERS: { id: string; label: string }[] = [
-  { id: "google", label: "Google" },
-  { id: "github", label: "GitHub" },
-];
+const OAUTH_PROVIDERS: { id: string; label: string }[] = [{ id: "google", label: "Google" }];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -526,7 +523,7 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
               or already linked. Link/Unlink act on THIS account. */}
           {OAUTH_PROVIDERS.map((provider) => {
             const linked = linkedAccounts?.some((a) => a.providerId === provider.id) ?? false;
-            const enabled = authConfig?.providers?.[provider.id as "google" | "github"] ?? false;
+            const enabled = authConfig?.providers?.[provider.id as "google"] ?? false;
             if (!linked && !enabled) return null;
             return (
               <div
@@ -594,8 +591,8 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
             lineHeight: 1.5,
           }}
         >
-          Passkeys and Google/GitHub are peer sign-in methods — link or unlink anytime. You'll
-          always keep at least one way to sign in.
+          Passkeys and Google are peer sign-in methods — link or unlink anytime. You'll always keep
+          at least one way to sign in.
         </div>
 
         {/* Your registered passkeys */}
@@ -936,22 +933,6 @@ function ProviderIcon({ id }: { id: string }) {
       >
         <circle cx="12" cy="12" r="10" />
         <path d="M17.5 12H12v3h3.2A5 5 0 0112 17a5 5 0 010-10c1.35 0 2.57.51 3.48 1.34L17.41 6.4A8 8 0 1012 20a8 8 0 007.5-10.84H17.5z" />
-      </svg>
-    );
-  }
-  if (id === "github") {
-    return (
-      <svg
-        width="15"
-        height="15"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="var(--muted)"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22" />
       </svg>
     );
   }
