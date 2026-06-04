@@ -15,6 +15,16 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Market data now refreshes on a schedule, and Explore reads deep history
+  instantly.** Two background jobs ride the systemd-timer scheduler. A daily
+  *freshness* refresh pulls NAV for held positions and tracked indicators, so
+  charts (and the unattended digest) are current without anyone opening the app.
+  An all-funds NAV + fund-size *pre-warm* crawler fills deep price history for the
+  whole registered-fund catalog, so the screener's price / 1-year-return / size
+  columns and a cold fund-detail open render immediately instead of fetching on
+  first view. Both are idempotent `npm run jobs:*` scripts; the firing mechanism
+  is systemd timers, not in-process cron (see the
+  [decisions log](docs/explanation/decisions/README.md#picks) + deploy.md).
 - **Refreshed sign-in & Account UI.** The login screen leads with "Continue with
   Google" / "Continue with passkey" (each with its provider icon), a quiet
   "Create account" link, and the demo below a divider. Account settings shows all
