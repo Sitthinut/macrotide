@@ -22,6 +22,7 @@ context/options/consequences treatment.
 | Signup + account linking | Emailless passkey accounts + OAuth as peer methods; link on demand, adopt the verified email on link — [ADR 0001](./0001-account-model-passkey-and-oauth.md) | Verifying a passkey-signup email needs a sender we don't run; keeping an email on passkey accounts leaves it squat-able |
 | Email transport | **Skip entirely** — SSO + passkeys only | DNS + spam-folder UX is friction for a soft-public launch |
 | Thai fund data | Thai SEC Open API — official, free w/ key | Scraping fund supermarkets = TOS/legal exposure |
+| Fund share classes | Parent catalog + per-class child table; browse by parent, price/hold by class — [ADR 0002](./0002-fund-share-class-model.md) | Parent-only can't price multi-class funds; classes-as-catalog-rows makes browse noisy + duplicates parent enrichment |
 | Sign-up bot defense | Cloudflare Turnstile | hCaptcha works too; Turnstile is already in the zone |
 | Storage scale | Single VM, single SQLite writer | Postgres/Turso only when a real scaling trigger appears |
 
