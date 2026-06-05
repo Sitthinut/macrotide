@@ -359,19 +359,28 @@ export function findShareClasses(
   filter: FindFundsFilter & { includeNonRetail?: boolean } = {},
 ): ShareClassListItem[] {
   const { limit = 50, taxIncentive, includeNonRetail = false, ...rest } = filter;
+  const hasQuery = !!filter.query?.trim();
   // Pull parents generously (each yields several classes, most filtered out) so
-  // class-level filtering still fills ~limit rows. Tax is applied per class below.
-  const parents = findFunds({ ...rest, taxIncentive: undefined, limit: Math.max(limit * 4, 200) });
+  // class-level filtering still fills ~limit rows:
+  //   • Search: relevance already narrows the set — a small over-fetch suffices.
+  //   • Browse: classes are ranked by their OWN TER across the whole list, so the
+  //     globally-cheapest class can sit in any family — pull a wide pool. findFunds
+  //     sorts all funds then slices, so a larger cap is nearly free there; only the
+  //     per-parent class fetch below scales with it.
+  const parents = findFunds({
+    ...rest,
+    taxIncentive: undefined,
+    limit: hasQuery ? Math.max(limit * 4, 200) : Math.max(limit * 20, 1000),
+  });
 
-  // Gather filtered classes; parents are already in relevance→TER order. Don't
-  // cap mid-family — a family must be whole to rank it — so stop once we've
-  // collected at least `limit` candidates (the final family is kept entire, then
-  // trimmed to `limit` after ranking below).
+  // Gather filtered classes. Search keeps families whole and stops at ~limit rows
+  // (relevance order IS the ranking). Browse collects every eligible class in the
+  // pool, then ranks the whole set by per-class TER below.
   const out: ShareClassListItem[] = [];
   const parentOrder = new Map<string, number>();
   let order = 0;
   for (const p of parents) {
-    if (out.length >= limit) break;
+    if (hasQuery && out.length >= limit) break;
     // Fund-level retail gate: the SEC marks accredited / institutional-only
     // private funds with proj_retail_type != 'R' (their class detail describes
     // hedging, not audience, so the per-class filter can't catch them). Hide the
@@ -423,14 +432,37 @@ export function findShareClasses(
 
   attachQuotesAndAum(out);
 
-  // Parent blocks stay in relevance→TER order; within a family, rank by
-  // popularity (compareClassesForList — retail → AUM → flagship heuristic).
+  // Ordering depends on whether the user is searching:
+  //   • Search (query): relevance first, so a great name match isn't buried by a
+  //     cheaper unrelated class. Families stay grouped (parentOrder = relevance)
+  //     and compareClassesForList ranks within a family; TER is only an indirect
+  //     tie-break via the parent.
+  //   • Browse (no query): rank each priceable class on its OWN TER — the screener
+  //     is a fee finder, so a row's position must match the TER it shows, and a
+  //     cheap sibling must NOT lift an expensive class up with it. Ties → larger
+  //     AUM, then retail before restricted, then ticker. Zero/null TER sorts last.
+  const effTer = (t: number | null) => (t != null && t > 0 ? t : null);
+  const audienceTier = (c: ShareClassListItem) =>
+    c.investorType === "retail" ? 0 : c.investorType == null ? 1 : 2;
   out.sort((a, b) => {
-    const pa = parentOrder.get(a.projId) ?? Number.MAX_SAFE_INTEGER;
-    const pb = parentOrder.get(b.projId) ?? Number.MAX_SAFE_INTEGER;
-    if (pa !== pb) return pa - pb;
-    // Same parent → same abbr, so a.abbrName drives the flagship-ticker check.
-    return compareClassesForList(a.abbrName)(a, b);
+    if (hasQuery) {
+      const pa = parentOrder.get(a.projId) ?? Number.MAX_SAFE_INTEGER;
+      const pb = parentOrder.get(b.projId) ?? Number.MAX_SAFE_INTEGER;
+      if (pa !== pb) return pa - pb;
+      // Same parent → same abbr, so a.abbrName drives the flagship-ticker check.
+      return compareClassesForList(a.abbrName)(a, b);
+    }
+    const ta = effTer(a.ter);
+    const tb = effTer(b.ter);
+    if (ta == null && tb != null) return 1; // null/zero TER last
+    if (ta != null && tb == null) return -1;
+    if (ta != null && tb != null && ta !== tb) return ta - tb; // cheaper class first
+    const aa = a.aum ?? -1;
+    const ab = b.aum ?? -1;
+    if (aa !== ab) return ab - aa; // larger AUM first
+    const at = audienceTier(a) - audienceTier(b);
+    if (at !== 0) return at; // retail before restricted
+    return a.ticker.localeCompare(b.ticker);
   });
 
   // The user typed a specific class code (e.g. "SCBGOLDP") → float that exact

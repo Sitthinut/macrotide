@@ -15,6 +15,13 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Explore's browse list ranks each share class on its own fee.** The default
+  (no-search) screener now sorts by each priceable class's *own* TER — cheapest
+  first — instead of grouping a fund's classes together under the family's cheapest
+  class. Previously an expensive class (e.g. a 0.53% retail class) could ride into
+  the top alongside a fee-waived sibling; now every row sits at the fee it shows.
+  Equal TERs break by fund size then retail-before-restricted. Search is unchanged
+  (still relevance-first, with the exact-ticker match floated to the top).
 - **Explore's cheapest-first ordering no longer trusts a fee-waived class.** A
   multi-class fund publishes one total-expense figure per class; the screener's
   fund-level TER could latch onto a near-zero special class (e.g. a fee-waived

@@ -96,3 +96,20 @@ These follow from C and were settled alongside it:
   top-holdings/feeder data to the class grain; it's a fund-level fact.
 - **This ADR is the definition of "model C"** referenced in the shipping work and
   commit history.
+
+## Updates
+
+The decision above stands; these note where reality has moved since it was
+written. (New decisions live in the [Picks table](./README.md#picks), not here.)
+
+- **2026-06 — per-class AUM is now cached.** The deferred all-funds NAV/AUM
+  pre-warm (above) shipped: a daily job warms NAV/AUM across the registered
+  universe. So per-class AUM *is* pre-cached and now drives the screener's size
+  tie-break and within-family order — the D6 "flagship isn't a largest-by-AUM
+  pick" caveat applies only to the fund-detail default (`pickDefaultClass`), which
+  deliberately stays a retail/accumulating heuristic.
+- **2026-06 — screener ordering settled.** Browse ranks each class by its *own*
+  TER (cheapest first; ties by fund size, then retail before restricted); search
+  ranks by name relevance with the exact-ticker match floated first. Recorded in
+  Picks → "Explore screener ordering"; the fund-level `current_ter` it reads
+  follows the representative retail class, not a fee-waived sibling.

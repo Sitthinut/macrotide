@@ -412,6 +412,80 @@ describe("findShareClasses (search + popularity ranking)", () => {
   });
 });
 
+describe("findShareClasses browse order (pure per-class TER)", () => {
+  const seedTer = (
+    projId: string,
+    abbr: string,
+    classes: Array<[string, number | null, string | null]>,
+  ) => {
+    upsertFund(fund(projId, { abbrName: abbr }));
+    upsertShareClasses(
+      classes.map(([ticker, ter, investorType]) => ({
+        projId,
+        className: ticker,
+        ticker,
+        investorType,
+        currentTer: ter,
+      })),
+    );
+  };
+
+  it("ranks each class on its OWN TER — a cheap sibling does not lift an expensive class", () => {
+    withDb(() => {
+      // Family FAM: a cheap class (0.09) and an expensive one (0.53), both buyable.
+      seedTer("FAM", "FAM", [
+        ["FAM-P", 0.09, null],
+        ["FAM-B", 0.53, null],
+      ]);
+      // Two single-class funds priced between the siblings.
+      seedTer("MIDA", "MIDA", [["MIDA", 0.2, "retail"]]);
+      seedTer("MIDB", "MIDB", [["MIDB", 0.4, "retail"]]);
+
+      // Pure per-class TER: FAM-B sits at its own 0.53%, NOT grouped up with FAM-P.
+      expect(findShareClasses({}).map((c) => c.ticker)).toEqual(["FAM-P", "MIDA", "MIDB", "FAM-B"]);
+    });
+  });
+
+  it("breaks equal-TER ties by AUM (desc), then retail before restricted only on equal AUM", () => {
+    withDb(() => {
+      // All four share TER=0.5. AUM dominates audience: the biggest class leads
+      // even though it's restricted. Audience only decides the equal-AUM pair.
+      seedTer("EQ", "EQ", [
+        ["EQ-BIG", 0.5, "restricted"], // biggest AUM → #1 despite being restricted
+        ["EQ-MID", 0.5, "retail"],
+        ["EQ-SMALLR", 0.5, "restricted"], // ties EQ-SMALLA on AUM → loses on audience
+        ["EQ-SMALLA", 0.5, "retail"],
+      ]);
+      getMarketDb()
+        .insert(schema.navHistory)
+        .values([
+          { ticker: "thai_mutual_fund:EQ-BIG", date: "2026-06-01", nav: 10, netAsset: 900 },
+          { ticker: "thai_mutual_fund:EQ-MID", date: "2026-06-01", nav: 10, netAsset: 500 },
+          { ticker: "thai_mutual_fund:EQ-SMALLR", date: "2026-06-01", nav: 10, netAsset: 100 },
+          { ticker: "thai_mutual_fund:EQ-SMALLA", date: "2026-06-01", nav: 10, netAsset: 100 },
+        ])
+        .run();
+      expect(findShareClasses({}).map((c) => c.ticker)).toEqual([
+        "EQ-BIG", // 900, restricted — AUM beats audience
+        "EQ-MID", // 500
+        "EQ-SMALLA", // 100, retail — beats EQ-SMALLR on audience at equal AUM
+        "EQ-SMALLR", // 100, restricted
+      ]);
+    });
+  });
+
+  it("sorts zero/null-TER classes last, below every priced class", () => {
+    withDb(() => {
+      seedTer("PRICED", "PRICED", [["PRICED", 1.5, "retail"]]);
+      seedTer("ZERO", "ZERO", [["ZERO", 0, "retail"]]);
+      seedTer("NULLT", "NULLT", [["NULLT", null, "retail"]]);
+      const tickers = findShareClasses({}).map((c) => c.ticker);
+      expect(tickers[0]).toBe("PRICED"); // a real 1.5% beats no-fee
+      expect(tickers.slice(1)).toEqual(expect.arrayContaining(["ZERO", "NULLT"]));
+    });
+  });
+});
+
 describe("retail-availability gate + zero-TER sort (#117)", () => {
   it("treats a zero/negative TER as no-fee — sorts it last, not as cheapest", () => {
     withDb(() => {
