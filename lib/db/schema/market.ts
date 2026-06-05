@@ -135,8 +135,9 @@ export const fundCatalog = sqliteTable(
     policyDesc: text("policy_desc"),
     // Our normalized allocation taxonomy, mirrors holdings.assetClass:
     // 'equity' | 'bond' | 'alternative' | 'cash'. NULL = mixed/unclassifiable.
-    // Derived from `policyDescTh` (the v2 API has no fund-type field — see
-    // lib/market/fund-classify.ts).
+    // Derived risk-spectrum-first (the SEC factsheet risk code), falling back to
+    // `policyDescTh` + the money-market name match — see deriveAssetClass in
+    // lib/market/fund-classify.ts.
     assetClass: text("asset_class"),
     // Short Thai asset-type label from the SEC (ตราสารหนี้ / ตราสารทุน / ผสม /
     // ทรัพย์สินทางเลือก) — the source for `assetClass` inference.

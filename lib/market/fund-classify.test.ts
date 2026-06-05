@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  assetClassFromRiskSpectrum,
   classifyDistribution,
   classifyInvestorType,
   classifyInvestRegion,
   classifyTaxIncentive,
+  deriveAssetClass,
   inferAssetClass,
   isIndexStyle,
   shouldFetchFees,
@@ -55,6 +57,48 @@ describe("inferAssetClass", () => {
   it("ignores the name for non-money-market funds (no false positives)", () => {
     expect(inferAssetClass("ตราสารทุน", "กองทุนเปิดหุ้นไทย", "K Thai Equity Fund")).toBe("equity");
     expect(inferAssetClass("ตราสารหนี้", "กองทุนเปิดตราสารหนี้ระยะสั้น", "Short Term Bond")).toBe("bond");
+  });
+});
+
+describe("assetClassFromRiskSpectrum", () => {
+  it("maps the clean risk codes to an asset class", () => {
+    expect(assetClassFromRiskSpectrum("RS1")).toBe("cash");
+    expect(assetClassFromRiskSpectrum("RS2")).toBe("cash");
+    expect(assetClassFromRiskSpectrum("RS3")).toBe("bond");
+    expect(assetClassFromRiskSpectrum("RS4")).toBe("bond");
+    expect(assetClassFromRiskSpectrum("RS6")).toBe("equity");
+    expect(assetClassFromRiskSpectrum("RS7")).toBe("equity");
+    expect(assetClassFromRiskSpectrum("RS8")).toBe("alternative");
+  });
+
+  it("returns undefined (defer to fallback) for ambiguous / unknown codes", () => {
+    // RS5 mixes balanced + high-yield-bond funds; RS81/RS8+ are complex.
+    expect(assetClassFromRiskSpectrum("RS5")).toBeUndefined();
+    expect(assetClassFromRiskSpectrum("RS81")).toBeUndefined();
+    expect(assetClassFromRiskSpectrum("RS8+")).toBeUndefined();
+    expect(assetClassFromRiskSpectrum("RS99")).toBeUndefined();
+    expect(assetClassFromRiskSpectrum(null)).toBeUndefined();
+    expect(assetClassFromRiskSpectrum(undefined)).toBeUndefined();
+  });
+});
+
+describe("deriveAssetClass", () => {
+  it("uses the risk spectrum first, overriding the policy label", () => {
+    // policy says bond, RS1 says money market → cash wins.
+    expect(deriveAssetClass("RS1", "ตราสารหนี้")).toBe("cash");
+    // policy is blank, RS6 recovers equity.
+    expect(deriveAssetClass("RS6", null)).toBe("equity");
+  });
+
+  it("falls back to policy / name when the RS code is ambiguous or absent", () => {
+    // RS5 → defer: policy (bond) decides.
+    expect(deriveAssetClass("RS5", "ตราสารหนี้")).toBe("bond");
+    // No RS code → policy label.
+    expect(deriveAssetClass(null, "ตราสารทุน")).toBe("equity");
+    // No RS, no useful policy, but the money-market name match still fires.
+    expect(deriveAssetClass(undefined, "ตราสารหนี้", "กองทุนเปิดเค ตลาดเงิน")).toBe("cash");
+    // Nothing to go on → null.
+    expect(deriveAssetClass(undefined, "ผสม")).toBeNull();
   });
 });
 

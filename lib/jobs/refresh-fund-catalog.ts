@@ -71,6 +71,7 @@ import {
   fetchFundPortfolio,
   fetchFundPortfolioAssetType,
   fetchFundTop5Holdings,
+  fetchRiskSpectrumLatest,
   type SecFundProfile,
 } from "../market/providers/sec-thailand";
 import { transformFundCatalog } from "./transform-fund-catalog";
@@ -108,6 +109,8 @@ export interface RefreshFundCatalogOptions {
   _fetchPortfolioAssetType?: typeof fetchFundPortfolioAssetType;
   /** Injectable feeder look-through fetcher (replaces the real EDGAR HTTP call in tests). */
   _fetchFeederHoldings?: typeof fetchNportHoldings;
+  /** Injectable risk-spectrum fetcher (replaces the real bulk API call in tests). */
+  _fetchRiskSpectrum?: typeof fetchRiskSpectrumLatest;
 }
 
 export interface RefreshFundCatalogResult {
@@ -128,6 +131,8 @@ export interface RefreshFundCatalogResult {
   fundsWithPortfolio: number;
   /** Feeder funds for which master-fund look-through holdings were fetched. */
   fundsWithFeederLookThrough: number;
+  /** Funds for which a latest risk-spectrum record was landed (drives asset class). */
+  riskSpectrumLanded: number;
   errors: Array<{ projId: string; error: string }>;
 }
 
@@ -164,6 +169,7 @@ export async function refreshFundCatalog(
   const getPortfolio = opts._fetchPortfolio ?? fetchFundPortfolio;
   const getPortfolioAssetType = opts._fetchPortfolioAssetType ?? fetchFundPortfolioAssetType;
   const getFeederHoldings = opts._fetchFeederHoldings ?? fetchNportHoldings;
+  const getRiskSpectrum = opts._fetchRiskSpectrum ?? fetchRiskSpectrumLatest;
 
   // Read enrichment flags once per run (not per fund).
   const doPerformance = envFlag("SEC_INGEST_PERFORMANCE");
@@ -185,7 +191,28 @@ export async function refreshFundCatalog(
   let fundsWithHoldings = 0;
   let fundsWithPortfolio = 0;
   let fundsWithFeederLookThrough = 0;
+  let riskSpectrumLanded = 0;
   const errors: Array<{ projId: string; error: string }> = [];
+
+  // 1b. Bulk-land the latest risk-spectrum for the enumerated funds in ONE
+  // paginated sweep (not per-fund). The transform reads these to drive asset
+  // class (RS primary, policy/name fallback). Resilient: a failed sweep is
+  // logged and the transform simply falls back to policy/name — never aborts the
+  // crawl. Scoped to the enumerated proj_ids so a --limit dev run stays small.
+  try {
+    const enumeratedIds = new Set(profiles.map((p) => p.proj_id));
+    const rsItems = await getRiskSpectrum();
+    const rsRows = rsItems
+      .filter((it) => it.proj_id && enumeratedIds.has(it.proj_id))
+      .map((it) => makeSecRaw(SEC_ENDPOINTS.riskSpectrum, it.proj_id, "", it));
+    upsertSecRaw(rsRows);
+    riskSpectrumLanded = rsRows.length;
+  } catch (err) {
+    errors.push({
+      projId: "(risk-spectrum)",
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   // Enrichment writes are DEFERRED: their tables FK-reference fund_catalog, which
   // the transform below builds only after the land loop. We fetch + build the
@@ -427,6 +454,7 @@ export async function refreshFundCatalog(
     fundsWithHoldings,
     fundsWithPortfolio,
     fundsWithFeederLookThrough,
+    riskSpectrumLanded,
     errors,
   };
 }

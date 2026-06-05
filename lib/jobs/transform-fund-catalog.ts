@@ -21,11 +21,11 @@ import {
   classifyDistribution,
   classifyInvestRegion,
   classifyTaxIncentive,
-  inferAssetClass,
+  deriveAssetClass,
   statusFromSec,
 } from "../market/fund-classify";
 import { normalizeFeeType, type SecFundFeeItem } from "../market/fund-fees";
-import type { SecFundProfile } from "../market/providers/sec-thailand";
+import type { SecFundProfile, SecRiskSpectrumItem } from "../market/providers/sec-thailand";
 import { invalidateFundIndex } from "../search/fund-index";
 
 // ─── Pure mappers (raw SEC item → catalog insert shape) ─────────────────────
@@ -37,14 +37,20 @@ export interface AumSnapshot {
 }
 
 /**
- * Map a verbatim SEC profile (+ optional AUM snapshot) to a `fund_catalog` row.
- * This is where the SEC's coarse fields become our normalized taxonomy. Moved
- * verbatim from the old inline crawl so the derived columns are byte-identical.
+ * Map a verbatim SEC profile (+ optional AUM snapshot + risk-spectrum code) to a
+ * `fund_catalog` row. This is where the SEC's fields become our normalized
+ * taxonomy. Asset class is risk-spectrum-first (the structured signal), falling
+ * back to policy_desc + the money-market name match; pass `rsCode = undefined`
+ * (no landed risk-spectrum) to use the fallback alone.
  *
  * AUM is set only when present (active funds): inactive funds land no AUM, so the
  * field stays undefined and the upsert leaves any existing value intact.
  */
-export function profileToFundInsert(p: SecFundProfile, aum?: AumSnapshot | null): FundInsert {
+export function profileToFundInsert(
+  p: SecFundProfile,
+  aum?: AumSnapshot | null,
+  rsCode?: string | null,
+): FundInsert {
   const secStatus = p.fund_status ?? null;
   const feederMaster = p.feederfund_master_fund ?? null;
 
@@ -58,7 +64,7 @@ export function profileToFundInsert(p: SecFundProfile, aum?: AumSnapshot | null)
     fundType: null,
     policyDesc: p.policy_desc ?? null,
     policyDescTh: p.policy_desc ?? null,
-    assetClass: inferAssetClass(p.policy_desc, p.proj_name_th, p.proj_name_en),
+    assetClass: deriveAssetClass(rsCode, p.policy_desc, p.proj_name_th, p.proj_name_en),
     managementStyle: p.management_style ?? null,
     taxIncentiveType: classifyTaxIncentive(p.fund_class_tax_incentive_type),
     distributionPolicy: classifyDistribution(p.fund_class_detail),
@@ -127,12 +133,18 @@ export function transformFundCatalog(): TransformFundCatalogResult {
     }
   }
 
+  // Latest risk-spectrum code per fund — the primary asset-class signal.
+  const rsByProj = new Map<string, string>();
+  for (const it of readSecRawItems<SecRiskSpectrumItem>(SEC_ENDPOINTS.riskSpectrum)) {
+    if (it.proj_id && it.risk_spectrum) rsByProj.set(it.proj_id, it.risk_spectrum);
+  }
+
   // 1. Catalog rows from landed profiles (one landed row per fund).
   const profiles = readSecRawItems<SecFundProfile>(SEC_ENDPOINTS.profiles);
   let fundsUpserted = 0;
   for (const p of profiles) {
     if (!p.proj_id) continue;
-    upsertFund(profileToFundInsert(p, aumByProj.get(p.proj_id) ?? null));
+    upsertFund(profileToFundInsert(p, aumByProj.get(p.proj_id) ?? null, rsByProj.get(p.proj_id)));
     fundsUpserted++;
   }
 

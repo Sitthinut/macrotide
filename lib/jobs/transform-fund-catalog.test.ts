@@ -140,6 +140,30 @@ describe("profileToFundInsert", () => {
     expect(profileToFundInsert(makeProfile({ fund_status: "Liquidated" })).status).toBe("inactive");
   });
 
+  it("uses the risk-spectrum code for asset class, overriding policy_desc", () => {
+    // policy says bond, RS1 says money market → cash wins.
+    const cash = profileToFundInsert(makeProfile({ policy_desc: "ตราสารหนี้" }), null, "RS1");
+    expect(cash.assetClass).toBe("cash");
+    // policy says nothing, RS6 → equity recovered.
+    const equity = profileToFundInsert(makeProfile({ policy_desc: null }), null, "RS6");
+    expect(equity.assetClass).toBe("equity");
+  });
+
+  it("falls back to policy when the RS code is ambiguous (RS5) or absent", () => {
+    // RS5 mixes balanced + high-yield-bond funds, so policy disambiguates.
+    expect(
+      profileToFundInsert(makeProfile({ policy_desc: "ตราสารหนี้" }), null, "RS5").assetClass,
+    ).toBe("bond");
+    // No RS code → the money-market name match still works as the fallback.
+    expect(
+      profileToFundInsert(
+        makeProfile({ policy_desc: "ตราสารหนี้", proj_name_th: "กองทุนเปิดเค ตลาดเงิน" }),
+        null,
+        undefined,
+      ).assetClass,
+    ).toBe("cash");
+  });
+
   it("leaves AUM fields undefined when no snapshot is given (no clobber)", () => {
     const insert = profileToFundInsert(makeProfile(), null);
     expect(insert.aum).toBeUndefined();
@@ -261,6 +285,34 @@ describe("transformFundCatalog", () => {
       const rows = getMarketDb().select().from(fundCatalog).all();
       expect(rows).toHaveLength(1);
     }));
+
+  it("classifies asset class from landed risk-spectrum, policy as fallback", () =>
+    transformWith(
+      [
+        // RS1 fund whose policy says bond → cash (RS overrides).
+        makeSecRaw(
+          SEC_ENDPOINTS.profiles,
+          "MM",
+          "",
+          makeProfile({ proj_id: "MM", policy_desc: "ตราสารหนี้" }),
+        ),
+        makeSecRaw(SEC_ENDPOINTS.riskSpectrum, "MM", "", { proj_id: "MM", risk_spectrum: "RS1" }),
+        // No RS landed for this fund → policy fallback (equity).
+        makeSecRaw(
+          SEC_ENDPOINTS.profiles,
+          "EQ",
+          "",
+          makeProfile({ proj_id: "EQ", policy_desc: "ตราสารทุน" }),
+        ),
+      ],
+      () => {
+        const db = getMarketDb();
+        const mm = db.select().from(fundCatalog).where(eq(fundCatalog.projId, "MM")).get();
+        const eqf = db.select().from(fundCatalog).where(eq(fundCatalog.projId, "EQ")).get();
+        expect(mm?.assetClass).toBe("cash");
+        expect(eqf?.assetClass).toBe("equity");
+      },
+    ));
 
   it("merges AUM only when landed (inactive fund keeps null)", () =>
     transformWith(

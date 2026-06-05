@@ -519,6 +519,34 @@ export async function fetchFundFees(projId: string): Promise<SecFundFeeItem[]> {
   return secFetchPaginated<SecFundFeeItem>("/v2/fund/factsheet/fees", { proj_id: projId }, key);
 }
 
+/** Raw item from /v2/fund/factsheet/risk-spectrum (latest=true snapshot). */
+export interface SecRiskSpectrumItem {
+  proj_id: string;
+  /** Risk-spectrum code, e.g. "RS1".."RS8", plus complex "RS81"/"RS8+". */
+  risk_spectrum: string;
+  /** Thai description of the risk level / mandate. */
+  risk_spectrum_desc?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  prospectus_type?: string | null;
+  last_upd_date?: string | null;
+}
+
+/**
+ * Bulk-fetch the LATEST risk-spectrum record for every fund in one paginated
+ * sweep (no per-fund calls): `latest=true` returns the current effective row per
+ * fund (`end_date` null). ~40 pages for the whole universe — far cheaper than a
+ * per-fund fetch. Drives the SEC-native asset-class classification.
+ */
+export async function fetchRiskSpectrumLatest(): Promise<SecRiskSpectrumItem[]> {
+  const key = apiKey();
+  return secFetchPaginated<SecRiskSpectrumItem>(
+    "/v2/fund/factsheet/risk-spectrum",
+    { latest: "true" },
+    key,
+  );
+}
+
 interface SecDailyNavRow {
   proj_id: string;
   nav_date: string;
