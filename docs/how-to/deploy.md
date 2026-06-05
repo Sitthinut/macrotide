@@ -194,7 +194,7 @@ Requires=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/docker exec macrotide npx tsx --tsconfig tsconfig.scripts.json scripts/refresh-fund-catalog.ts
+ExecStart=/usr/bin/bash /opt/services/macrotide/scripts/run-job.sh refresh-fund-catalog
 EOF
 
 sudo tee /etc/systemd/system/macrotide-fund-catalog.timer > /dev/null <<'EOF'
@@ -213,7 +213,7 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now macrotide-fund-catalog.timer
 # First run now (cap with --limit=20 to smoke-test):
-docker exec macrotide npx tsx --tsconfig tsconfig.scripts.json scripts/refresh-fund-catalog.ts --limit=20
+bash /opt/services/macrotide/scripts/run-job.sh refresh-fund-catalog --limit=20
 ```
 
 A full crawl is ~10,000–15,000 SEC calls and completes in ~15–30 min at the
@@ -448,9 +448,17 @@ the second warms NAV for *every registered fund* so the screener and a cold
 fund-detail open read deep history instantly. Keep them distinct — the freshness
 job never enumerates the catalog.
 
-The Dockerized box (the recommended path) swaps each `ExecStart` for
-`docker exec macrotide npx tsx --tsconfig tsconfig.scripts.json scripts/<job>.ts`,
-as shown in step 5. The bare-Node units below use the `npx -y tsx` form.
+The Dockerized box (the recommended path) runs each job as a **one-shot
+container**, not `docker exec` into the live app: each `ExecStart` is
+`bash /opt/services/macrotide/scripts/run-job.sh <job> [args…]`, which wraps
+`docker compose run --rm --no-deps macrotide npx tsx … scripts/<job>.ts`.
+
+Why not `docker exec`: an `exec`'d job runs *inside* the app container, so a
+deploy (`docker compose up --build`) recreates that container and **SIGKILLs the
+in-flight job** (issue #115 — a mid-crawl deploy killed three nightly catalog
+refreshes). A `run --rm` one-off shares the app's image, `.env.local`, and
+`./data` volume but is its own ephemeral container, so an app redeploy leaves it
+untouched. The bare-Node units below use the `npx -y tsx` form.
 
 ### Fund-catalog refresh
 
@@ -634,7 +642,7 @@ start with a small `--limit` to confirm it works, then the full run off-peak):
 # Smoke test (a handful of funds):
 npx -y tsx --tsconfig tsconfig.scripts.json scripts/prewarm-nav.ts --limit=20
 
-# Full backfill, retail subset first (Dockerized box: prefix `docker exec macrotide`):
+# Full backfill, retail subset first (Dockerized box: `scripts/run-job.sh prewarm-nav --range=max --retail-only`):
 npx -y tsx --tsconfig tsconfig.scripts.json scripts/prewarm-nav.ts --range=max --retail-only
 ```
 
