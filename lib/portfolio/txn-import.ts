@@ -38,6 +38,35 @@ export function isDeltaKind(v: unknown): v is TxnKind {
   return typeof v === "string" && (TXN_KINDS as readonly string[]).includes(v);
 }
 
+/** True for an anchor kind (opening / snapshot). */
+export function isAnchorKind(v: unknown): v is TxnKind {
+  return typeof v === "string" && (ANCHOR_KINDS as readonly string[]).includes(v);
+}
+
+/**
+ * Auto-promote repeat anchors (ADR 0004). The FIRST anchor for a fund is its
+ * Starting balance (`opening`); any LATER anchor on the same fund — e.g. a user
+ * re-pasting their current holdings every few months — is a Restatement
+ * (`snapshot`), which re-bases units WITHOUT re-counting the money as a new
+ * contribution. Given the tickers that already carry an anchor (DB state) and an
+ * ORDERED batch of incoming rows, returns each row's effective kind. Ticker
+ * matching is case-insensitive. Pure — callers do the DB read + write.
+ */
+export function promoteAnchorKinds(
+  alreadyAnchored: Iterable<string>,
+  incoming: readonly { kind: TxnKind; ticker: string }[],
+): TxnKind[] {
+  const anchored = new Set<string>();
+  for (const t of alreadyAnchored) anchored.add(t.trim().toUpperCase());
+  return incoming.map((row) => {
+    const key = row.ticker.trim().toUpperCase();
+    let kind = row.kind;
+    if (kind === "opening" && anchored.has(key)) kind = "snapshot";
+    if (isAnchorKind(kind)) anchored.add(key);
+    return kind;
+  });
+}
+
 /**
  * Canonical sign for the stored `amount` from a transaction kind. The API
  * receives a POSITIVE magnitude + a kind; the server derives the sign here so a

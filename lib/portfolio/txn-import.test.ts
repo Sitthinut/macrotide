@@ -5,6 +5,7 @@ import {
   normalizeDate,
   normalizeTxnDraft,
   parseTxnPaste,
+  promoteAnchorKinds,
   signedAmount,
 } from "./txn-import";
 
@@ -149,5 +150,58 @@ describe("looksLikeTransactionHistory", () => {
         { ticker: "EXAMPLE-FUND-C" },
       ]),
     ).toBe(false);
+  });
+});
+
+describe("promoteAnchorKinds (auto-promote repeat anchors, ADR 0004)", () => {
+  it("keeps the first opening per fund and promotes later ones to snapshot", () => {
+    // No prior anchors in the DB; a batch with the same fund opened twice.
+    expect(
+      promoteAnchorKinds(
+        [],
+        [
+          { kind: "opening", ticker: "K-EQUITY" },
+          { kind: "opening", ticker: "K-EQUITY" },
+        ],
+      ),
+    ).toEqual(["opening", "snapshot"]);
+  });
+
+  it("promotes an opening for a fund that already has an anchor in the DB", () => {
+    // The quarterly re-paste: the fund already opened in a prior save.
+    expect(promoteAnchorKinds(["K-EQUITY"], [{ kind: "opening", ticker: "K-EQUITY" }])).toEqual([
+      "snapshot",
+    ]);
+  });
+
+  it("leaves a first-ever opening as opening, and never touches trade deltas", () => {
+    expect(
+      promoteAnchorKinds(
+        ["OTHER-FUND"],
+        [
+          { kind: "opening", ticker: "NEW-FUND" },
+          { kind: "buy", ticker: "NEW-FUND" },
+          { kind: "sell", ticker: "K-EQUITY" },
+        ],
+      ),
+    ).toEqual(["opening", "buy", "sell"]);
+  });
+
+  it("matches tickers case-insensitively", () => {
+    expect(promoteAnchorKinds(["k-equity"], [{ kind: "opening", ticker: "K-EQUITY" }])).toEqual([
+      "snapshot",
+    ]);
+  });
+
+  it("treats an existing snapshot as already-anchored", () => {
+    expect(
+      promoteAnchorKinds(
+        [],
+        [
+          { kind: "snapshot", ticker: "K-EQUITY" },
+          { kind: "opening", ticker: "K-EQUITY" },
+        ],
+      ),
+    ).toEqual(["snapshot", "snapshot"]);
   });
 });

@@ -24,6 +24,7 @@ const patchBody = z
     englishName: z.string().trim().max(200).nullish(),
     units: z.number().finite().nonnegative().nullish(),
     pricePerUnit: z.number().finite().nonnegative().nullish(),
+    marketPrice: z.number().finite().nonnegative().nullish(),
     amount: z.number().finite().nonnegative().default(0),
     fee: z.number().finite().nonnegative().nullish(),
     quoteSource: z.string().trim().min(1).max(40),
@@ -80,6 +81,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       englishName: t.englishName ?? null,
       units,
       pricePerUnit,
+      marketPrice:
+        t.marketPrice ?? (t.kind === "opening" || t.kind === "snapshot" ? null : pricePerUnit),
       amount: deriveAmount(t.kind, t.amount, units, pricePerUnit),
       fee: t.fee ?? null,
       quoteSource: t.quoteSource,

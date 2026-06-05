@@ -212,6 +212,52 @@ describe("reduceLots — anchors (opening / snapshot)", () => {
     expect(r.positions[0].avgCost).toBeNull();
   });
 
+  // Opening vs restatement is decided by prior STATE, not the stored kind — so the
+  // ledger self-heals if the original opening is deleted, and a ledger of pure
+  // balances still gets a real opening.
+  it("a balance on a fresh position is the opening even if stored as a snapshot", () => {
+    // e.g. the user deleted the first balance, leaving only this later one.
+    const r = reduceLots([
+      tx({ kind: "snapshot", units: 130, pricePerUnit: 10, amount: 0, tradeDate: "2024-06-01" }),
+    ]);
+    expect(r.positions[0].units).toBeCloseTo(130, 6);
+    expect(r.positions[0].avgCost).toBeCloseTo(10, 6);
+    expect(r.positions[0].costBasis).toBeCloseTo(1300, 6);
+    // Counts as the opening contribution (not skipped as a restatement).
+    expect(r.basisTimeline.at(-1)?.netInvested).toBeCloseTo(1300, 6);
+  });
+
+  it("a re-stated balance counts the INCREASE in cost basis as money added", () => {
+    // Finnomena-style: units 100→130 and avg cost 10→10.5 ⇒ basis 1000→1365.
+    const r = reduceLots([
+      tx({ kind: "opening", units: 100, pricePerUnit: 10, amount: 0, tradeDate: "2024-01-01" }),
+      tx({ kind: "snapshot", units: 130, pricePerUnit: 10.5, amount: 0, tradeDate: "2024-06-01" }),
+    ]);
+    expect(r.positions[0].units).toBeCloseTo(130, 6);
+    expect(r.positions[0].avgCost).toBeCloseTo(10.5, 6);
+    // +365 of basis ⇒ +365 invested (the rest of any value change is market).
+    expect(r.basisTimeline.at(-1)?.netInvested).toBeCloseTo(1365, 6);
+  });
+
+  it("a re-stated balance at the SAME cost basis adds nothing (pure market move)", () => {
+    const r = reduceLots([
+      tx({ kind: "opening", units: 100, pricePerUnit: 10, amount: 0, tradeDate: "2024-01-01" }),
+      tx({ kind: "snapshot", units: 100, pricePerUnit: 10, amount: 0, tradeDate: "2024-06-01" }),
+    ]);
+    expect(r.basisTimeline.at(-1)?.netInvested).toBeCloseTo(1000, 6); // unchanged
+  });
+
+  it("a value-only re-state to MORE units counts the added units at the carried cost", () => {
+    const r = reduceLots([
+      tx({ kind: "opening", units: 100, pricePerUnit: 10, amount: 0, tradeDate: "2024-01-01" }),
+      tx({ kind: "snapshot", units: 130, amount: 0, tradeDate: "2024-06-01" }), // value-only, cost carried = 10
+    ]);
+    expect(r.positions[0].units).toBeCloseTo(130, 6); // latest balance wins
+    expect(r.positions[0].avgCost).toBeCloseTo(10, 6); // carried forward
+    // 30 extra units × carried cost 10 = +300 added.
+    expect(r.basisTimeline.at(-1)?.netInvested).toBeCloseTo(1300, 6);
+  });
+
   it("flow #2 — opening balance then track forward (realized gain off the opening basis)", () => {
     const r = reduceLots([
       tx({ kind: "opening", units: 100, pricePerUnit: 10, amount: -1000, tradeDate: "2024-01-01" }),

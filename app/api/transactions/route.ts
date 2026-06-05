@@ -9,7 +9,12 @@ import {
   listTransactionsForBuckets,
   type TransactionInsert,
 } from "@/lib/db/queries/transactions";
-import { signedAmount, TXN_KINDS } from "@/lib/portfolio/txn-import";
+import {
+  isAnchorKind,
+  LEDGER_KINDS,
+  promoteAnchorKinds,
+  signedAmount,
+} from "@/lib/portfolio/txn-import";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,11 +27,16 @@ export const dynamic = "force-dynamic";
 const txnInput = z
   .object({
     tradeDate: z.string().regex(/^\d{4}-\d{2}-\d{2}/, "tradeDate must be ISO (YYYY-MM-DD)"),
-    kind: z.enum(TXN_KINDS),
+    // The unified ledger accepts trade deltas AND position anchors
+    // (opening = Starting balance, snapshot = Restatement) — see ADR 0004.
+    kind: z.enum(LEDGER_KINDS),
     ticker: z.string().trim().min(1).max(64),
     englishName: z.string().trim().max(200).optional(),
     units: z.number().finite().nonnegative().nullish(),
     pricePerUnit: z.number().finite().nonnegative().nullish(),
+    // The asset's current/market price per unit (a Balance's "current price").
+    // Trades derive their own from the execution price, so this is optional.
+    marketPrice: z.number().finite().nonnegative().nullish(),
     amount: z.number().finite().nonnegative(),
     fee: z.number().finite().nonnegative().nullish(),
     quoteSource: z.string().trim().min(1).max(40).default("yahoo"),
@@ -35,8 +45,9 @@ const txnInput = z
     note: z.string().trim().max(500).optional(),
     source: z.string().trim().max(120).optional(),
   })
-  // A cash-moving event must carry a positive amount; only a split may be zero.
-  .refine((r) => r.kind === "split" || r.amount > 0, {
+  // A cash-moving event must carry a positive amount; a split and the position
+  // anchors (opening/snapshot) carry no cash, so their amount is zero.
+  .refine((r) => r.kind === "split" || isAnchorKind(r.kind) || r.amount > 0, {
     message: "amount must be greater than zero for a cash transaction",
     path: ["amount"],
   });
@@ -84,25 +95,41 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "bucket_not_found" }, { status: 404 });
     }
 
+    // Auto-promote anchors (ADR 0004): the FIRST anchor for a fund is its
+    // Starting balance (opening); any LATER anchor — a quarterly re-paste of
+    // current holdings — becomes a Restatement (snapshot), which re-bases units
+    // WITHOUT re-counting the money as a new contribution. So a user who just
+    // re-pastes their portfolio every few months gets correct invested/return.
+    const alreadyAnchored = listTransactionsByBucket(bucketId)
+      .filter((t) => isAnchorKind(t.kind))
+      .map((t) => t.ticker);
+    const kinds = promoteAnchorKinds(alreadyAnchored, transactions);
+
     const importBatchId = randomUUID();
-    const rows: TransactionInsert[] = transactions.map((t) => ({
-      bucketId,
-      ticker: t.ticker,
-      englishName: t.englishName ?? null,
-      quoteSource: t.quoteSource,
-      kind: t.kind,
-      tradeDate: t.tradeDate,
-      units: t.units ?? null,
-      pricePerUnit: t.pricePerUnit ?? null,
-      // Authoritative sign applied here from the kind.
-      amount: signedAmount(t.kind, t.amount),
-      fee: t.fee ?? null,
-      tradeCurrency: t.tradeCurrency,
-      fxToThb: t.fxToThb,
-      note: t.note ?? null,
-      source: t.source ?? null,
-      importBatchId,
-    }));
+    const rows: TransactionInsert[] = transactions.map((t, i) => {
+      const kind = kinds[i];
+      return {
+        bucketId,
+        ticker: t.ticker,
+        englishName: t.englishName ?? null,
+        quoteSource: t.quoteSource,
+        kind,
+        tradeDate: t.tradeDate,
+        units: t.units ?? null,
+        pricePerUnit: t.pricePerUnit ?? null,
+        // The asset's market price at this date. A Balance supplies its own
+        // ("current price"); a trade's execution price doubles as its market point.
+        marketPrice: t.marketPrice ?? (isAnchorKind(kind) ? null : (t.pricePerUnit ?? null)),
+        // Authoritative sign applied here from the (possibly promoted) kind.
+        amount: signedAmount(kind, t.amount),
+        fee: t.fee ?? null,
+        tradeCurrency: t.tradeCurrency,
+        fxToThb: t.fxToThb,
+        note: t.note ?? null,
+        source: t.source ?? null,
+        importBatchId,
+      };
+    });
 
     const inserted = insertTransactions(rows);
     return NextResponse.json({ inserted, importBatchId, count: inserted.length }, { status: 201 });

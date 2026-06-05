@@ -36,5 +36,9 @@ export function inferQuoteSource(ticker: string): QuoteSource {
   if (t.length >= 5 && THAI_AMC_PREFIXES.some((p) => t.startsWith(p))) {
     return "thai_mutual_fund";
   }
-  return "yahoo";
+  // Unknown symbols default to a CUSTOM (manual-priced) asset rather than the
+  // stock/ETF chain — we can't reliably price an arbitrary ticker, so it's more
+  // honest to let the user set the price than to assume a feed that returns
+  // nothing. A real stock/ETF/index can still be tagged via the source badge.
+  return "manual";
 }

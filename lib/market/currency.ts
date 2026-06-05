@@ -62,7 +62,9 @@ const SYMBOL_CURRENCY: Record<string, string> = {
  * silently treating a USD ETF as THB.
  */
 export function inferHoldingCurrency(quoteSource: string, ticker: string): string {
-  if (quoteSource === "thai_mutual_fund") return "THB";
+  // Thai funds and manually-priced custom assets are entered in THB (the app's
+  // base currency) — no FX is applied to their price.
+  if (quoteSource === "thai_mutual_fund" || quoteSource === "manual") return "THB";
 
   const t = ticker.trim().toUpperCase();
   if (SYMBOL_CURRENCY[t]) return SYMBOL_CURRENCY[t];

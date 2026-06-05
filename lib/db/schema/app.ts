@@ -127,6 +127,15 @@ export const transactions = sqliteTable(
     // primary money field.
     pricePerUnit: real("price_per_unit"),
     /**
+     * The asset's MARKET price at `tradeDate` (per unit), independent of cost.
+     * For a trade this equals the execution price; for a Balance it's the
+     * user-entered "current price". Its LATEST value per ticker is the current
+     * price used to value an asset that has no live NAV (a custom / "manual"
+     * holding) — see lib/portfolio/transaction-analytics.ts. Null = no price
+     * point recorded by this row.
+     */
+    marketPrice: real("market_price"),
+    /**
      * SIGNED THB cash flow — the SOLE money-weighted-return primitive, always
      * present even when units/price are blank. Sign convention (validated at
      * the route, never silently coerced):
