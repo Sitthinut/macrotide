@@ -1,12 +1,23 @@
-// Refresh job — enumerate all Thai mutual funds from the SEC and upsert their
-// catalog metadata + fee time-series into the local DB.
+// Refresh job — the EXTRACT/LOAD half of the ELT crawl. Enumerate all Thai mutual
+// funds from the SEC, fetch their fees/AUM, and LAND the verbatim payloads in
+// `sec_raw`. The normalized fund_catalog + fund_fees columns are then derived by
+// transformFundCatalog() (the API-free transform) over those landed rows.
 //
-// Design: enumerate → upsert catalog row (always) → if Registered: fetch fees + AUM
-//         + (if opted in via env flags) enrichment data.
-// Idempotent: the underlying upserts key on PK, so re-running is safe.
+// Design: enumerate → (per fund) fetch fees + AUM + optional enrichment → land
+//         verbatim profile/fees/AUM in sec_raw → after the crawl, run the
+//         transform to (re)derive catalog + fees from everything landed.
+// Why ELT: nothing fetched is discarded at land time, and re-deriving a column
+//         (a classification fix, a recovered field) is a seconds-long transform
+//         re-run (`npm run jobs:transform-catalog`), not an ~80-min re-crawl.
+// Idempotent: landing keys on (endpoint, projId, rowKey) and the transform's
+//         upserts key on PK, so re-running either is safe.
 // Concurrency: p-limit style manual pool (configurable, default 4) so we don't
 // hammer the SEC API (5 000 calls / 300 s ceiling; modest concurrency helps).
 // Errors per fund are collected and do NOT abort the whole run.
+//
+// Enrichment (perf/allocation/holdings/portfolio/feeder) still writes its own
+// dedicated snapshot tables in this loop — those tables already store near-raw
+// snapshots, so they are not routed through sec_raw in this iteration.
 //
 // ─── Enrichment env flags (all default OFF) ────────────────────────────────
 // SEC_INGEST_PERFORMANCE=1  — fetch /v2/fund/factsheet/performance (all types)
@@ -48,21 +59,8 @@ import {
   upsertFundPortfolioAssetType,
   upsertFundTopHoldings,
 } from "../db/queries/fund-enrichment";
-import {
-  type FundFeeInsert,
-  type FundInsert,
-  upsertFund,
-  upsertFundFees,
-} from "../db/queries/funds";
-import {
-  classifyDistribution,
-  classifyInvestRegion,
-  classifyTaxIncentive,
-  inferAssetClass,
-  shouldFetchFees,
-  statusFromSec,
-} from "../market/fund-classify";
-import { normalizeFeeType } from "../market/fund-fees";
+import { makeSecRaw, SEC_ENDPOINTS, type SecRawInsert, upsertSecRaw } from "../db/queries/sec-raw";
+import { shouldFetchFees } from "../market/fund-classify";
 import { EDGAR_FUNDS, fetchNportHoldings, matchEdgarFund } from "../market/providers/edgar-nport";
 import {
   enumerateFundProfiles,
@@ -75,7 +73,7 @@ import {
   fetchFundTop5Holdings,
   type SecFundProfile,
 } from "../market/providers/sec-thailand";
-import { invalidateFundIndex } from "../search/fund-index";
+import { transformFundCatalog } from "./transform-fund-catalog";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -139,62 +137,18 @@ function envFlag(name: string): boolean {
   return process.env[name] === "1" || process.env[name] === "true";
 }
 
-// ─── Profile mapper ───────────────────────────────────────────────────────────
-
-function profileToFundInsert(
-  p: SecFundProfile,
-  aum?: { aum: number; aumDate: string } | null,
-): FundInsert {
-  const secStatus = p.fund_status ?? null;
-  const status = statusFromSec(secStatus);
-  const feederMaster = p.feederfund_master_fund ?? null;
-
-  const insert: FundInsert = {
-    projId: p.proj_id,
-    abbrName: p.proj_abbr_name,
-    thaiName: p.proj_name_th ?? null,
-    englishName: p.proj_name_en ?? null,
-    amcName: p.amc_name ?? null,
-    // fundType is not returned by v2; keep null so we don't wipe any existing value.
-    fundType: null,
-    policyDesc: p.policy_desc ?? null,
-    policyDescTh: p.policy_desc ?? null,
-    assetClass: inferAssetClass(p.policy_desc, p.proj_name_th, p.proj_name_en),
-    managementStyle: p.management_style ?? null,
-    taxIncentiveType: classifyTaxIncentive(p.fund_class_tax_incentive_type),
-    distributionPolicy: classifyDistribution(p.fund_class_detail),
-    investRegion: classifyInvestRegion(p.invest_country_flag),
-    isFeederFund: !!feederMaster,
-    feederMasterFund: feederMaster,
-    isFixedTerm: p.proj_term_flag === "Y",
-    initDate: p.init_date ?? null,
-    isinCode: p.fund_class_isin_code ?? null,
-    secStatus,
-    status,
-    projRetailType: p.proj_retail_type ?? null,
-  };
-
-  // Only set AUM fields when we actually fetched them (active funds).
-  // Inactive funds leave these undefined so the DB upsert doesn't clobber
-  // any previously-stored AUM with null.
-  if (aum != null) {
-    insert.aum = aum.aum;
-    insert.aumDate = aum.aumDate;
-  }
-
-  return insert;
-}
-
 // ─── Core job ────────────────────────────────────────────────────────────────
 
 /**
- * Enumerate all SEC mutual funds, upsert catalog rows, then for Registered
- * funds fetch their fee time-series + latest AUM and batch-upsert.
- * Optionally also fetches enrichment data (performance, allocation, holdings,
- * portfolio) when the corresponding SEC_INGEST_* env flags are set.
+ * Enumerate all SEC mutual funds, land their verbatim profile + fee + AUM
+ * payloads in `sec_raw`, then derive `fund_catalog` + `fund_fees` from everything
+ * landed via {@link transformFundCatalog}. Optionally also fetches enrichment
+ * data (performance, allocation, holdings, portfolio) into its dedicated tables
+ * when the corresponding SEC_INGEST_* env flags are set.
  *
  * Returns a summary object. Non-fatal errors (per fund) are collected in
- * `errors`; they do not abort the run.
+ * `errors`; they do not abort the run. A fund that errors during its fetch lands
+ * nothing, so the transform produces no catalog row for it (unchanged behavior).
  */
 export async function refreshFundCatalog(
   opts: RefreshFundCatalogOptions = {},
@@ -233,6 +187,13 @@ export async function refreshFundCatalog(
   let fundsWithFeederLookThrough = 0;
   const errors: Array<{ projId: string; error: string }> = [];
 
+  // Enrichment writes are DEFERRED: their tables FK-reference fund_catalog, which
+  // the transform below builds only after the land loop. We fetch + build the
+  // rows in the loop (so the concurrency pool still parallelizes the network),
+  // buffer the writes here, and flush them after transformFundCatalog() has
+  // created the catalog rows — FK-safe even on a first-ever crawl.
+  const deferredEnrichmentWrites: Array<() => void> = [];
+
   // 2. Process in a concurrency-capped pool.
   const inFlight = new Set<Promise<void>>();
 
@@ -267,7 +228,7 @@ export async function refreshFundCatalog(
               performanceValue: item.performance_value ?? null,
               lastUpdDate: item.last_upd_date ?? null,
             }));
-            upsertFundPerformance(projId, perfRows);
+            deferredEnrichmentWrites.push(() => upsertFundPerformance(projId, perfRows));
             fundsWithPerformance++;
           }
         }
@@ -285,7 +246,7 @@ export async function refreshFundCatalog(
               assetRatio: item.asset_ratio ?? null,
               lastUpdDate: item.last_upd_date ?? null,
             }));
-            upsertFundAssetAllocation(projId, allocRows);
+            deferredEnrichmentWrites.push(() => upsertFundAssetAllocation(projId, allocRows));
             fundsWithAllocation++;
           }
         }
@@ -303,7 +264,7 @@ export async function refreshFundCatalog(
               assetRatio: item.asset_ratio ?? null,
               lastUpdDate: item.last_upd_date ?? null,
             }));
-            upsertFundTopHoldings(projId, holdingRows);
+            deferredEnrichmentWrites.push(() => upsertFundTopHoldings(projId, holdingRows));
             fundsWithHoldings++;
           }
         }
@@ -333,7 +294,7 @@ export async function refreshFundCatalog(
               percentNav: item.percent_nav ?? null,
               lastUpdDate: item.last_upd_date ?? null,
             }));
-            upsertFundPortfolio(projId, portRows);
+            deferredEnrichmentWrites.push(() => upsertFundPortfolio(projId, portRows));
             fundsWithPortfolio++;
           }
 
@@ -346,7 +307,7 @@ export async function refreshFundCatalog(
               marketValue: item.market_value ?? null,
               percentNav: item.percent_nav ?? null,
             }));
-            upsertFundPortfolioAssetType(projId, portTypeRows);
+            deferredEnrichmentWrites.push(() => upsertFundPortfolioAssetType(projId, portTypeRows));
           }
         }
 
@@ -372,12 +333,14 @@ export async function refreshFundCatalog(
               // Only record an auto-derived map; never clobber an operator's
               // explicit mapping with the SEC-sourced name.
               if (!explicit) {
-                upsertFeederMasterMap({
-                  projId,
-                  masterIsin: ref.isin,
-                  masterName,
-                  provider: "sec-nport",
-                });
+                deferredEnrichmentWrites.push(() =>
+                  upsertFeederMasterMap({
+                    projId,
+                    masterIsin: ref.isin,
+                    masterName,
+                    provider: "sec-nport",
+                  }),
+                );
               }
 
               const lookThroughRows: FeederLookThroughHoldingInsert[] = holdings.map((h, i) => ({
@@ -390,7 +353,9 @@ export async function refreshFundCatalog(
                 weightPct: h.weightPct,
                 asOfDate,
               }));
-              upsertFeederLookThroughHoldings(projId, lookThroughRows);
+              deferredEnrichmentWrites.push(() =>
+                upsertFeederLookThroughHoldings(projId, lookThroughRows),
+              );
               fundsWithFeederLookThrough++;
             }
           }
@@ -398,28 +363,24 @@ export async function refreshFundCatalog(
         }
       }
 
-      // 2b. Upsert catalog row (always — active and inactive).
-      upsertFund(profileToFundInsert(p, aumResult));
-      fundsUpserted++;
-
-      // 2c. Upsert fees (only when we fetched them).
+      // 2b. Land verbatim payloads in sec_raw. Done only after the fetches above
+      // succeed, so a fund that errors mid-fetch lands nothing and the transform
+      // produces no catalog row for it (matches the pre-ELT behavior). The
+      // profile is landed for every fund (active + inactive); fees/AUM only when
+      // fetched (active funds). The transform derives the catalog/fees rows.
+      const rawRows: SecRawInsert[] = [makeSecRaw(SEC_ENDPOINTS.profiles, projId, "", p)];
       if (feeItems.length > 0) {
-        const feeRows: FundFeeInsert[] = feeItems.map((item) => ({
-          projId: item.proj_id,
-          fundClassName: item.fund_class_name,
-          feeType: normalizeFeeType(item.fee_type_desc),
-          feeTypeRaw: item.fee_type_desc,
-          rateCeilingPct: item.rate ?? null,
-          actualRatePct: item.actual_value ?? null,
-          periodStart: item.start_date,
-          periodEnd: item.end_date ?? null,
-          prospectusType: item.prospectus_type ?? null,
-          lastUpdDate: item.last_upd_date ?? null,
-        }));
-        upsertFundFees(feeRows);
-        feeRowsUpserted += feeRows.length;
+        // Land the whole fee array under one row so a re-land replaces the fund's
+        // fee snapshot atomically; the transform flattens it.
+        rawRows.push(makeSecRaw(SEC_ENDPOINTS.fees, projId, "", feeItems));
+        feeRowsUpserted += feeItems.length;
         fundsWithFees++;
       }
+      if (aumResult != null) {
+        rawRows.push(makeSecRaw(SEC_ENDPOINTS.aum, projId, "", aumResult));
+      }
+      upsertSecRaw(rawRows);
+      fundsUpserted++;
 
       opts.onProgress?.({ index, total, projId, ok: true });
     } catch (err) {
@@ -446,10 +407,14 @@ export async function refreshFundCatalog(
   // Wait for remaining in-flight tasks.
   await Promise.all(inFlight);
 
-  // Drop the cached search index so the next search rebuilds over the fresh
-  // catalog (the staleness signature also covers this, but invalidate eagerly
-  // so the first post-refresh query never serves a stale-then-rebuild result).
-  invalidateFundIndex();
+  // Derive fund_catalog + fund_fees from everything just landed. This is the
+  // same transform `jobs:transform-catalog` runs standalone; it also drops the
+  // cached search index so the next search rebuilds over the fresh catalog.
+  transformFundCatalog();
+
+  // Now that the catalog rows exist, flush the buffered enrichment writes (their
+  // tables FK-reference fund_catalog).
+  for (const write of deferredEnrichmentWrites) write();
 
   return {
     fundsSeen: total,

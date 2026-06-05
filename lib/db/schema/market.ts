@@ -66,10 +66,54 @@ export const navHistory = sqliteTable(
 );
 
 // ───────────────────────────────────────────────────────────────────────────
+// SEC raw landing (ELT) — verbatim SEC Open API payloads, the EXTRACT/LOAD half
+// of the crawl. The catalog refresh lands raw rows here first; a separate,
+// API-free transform (lib/jobs/transform-fund-catalog.ts) derives the normalized
+// fund_catalog / fund_share_classes / fund_fees columns from them. Re-deriving a
+// field — a new classification rule, a recovered taxonomy — is then a seconds-long
+// transform re-run over local rows, not an ~80-min re-crawl, and fields we don't
+// map yet survive verbatim instead of being discarded at fetch time.
+//
+// One table for every endpoint: the (endpoint, proj_id, row_key) key plus a
+// verbatim JSON `payload` means adding a new SEC endpoint (any of the ~20 the
+// API exposes) is a new `endpoint` value + a transform step, never a schema
+// change. `row_key` discriminates rows within one (endpoint, proj_id): the share
+// class for profiles, the fee identity for fees, "" for proj-level singletons.
+// Regenerable — rebuilt by the next crawl — so it lives in market.db, unbacked.
+// ───────────────────────────────────────────────────────────────────────────
+export const secRaw = sqliteTable(
+  "sec_raw",
+  {
+    // SEC endpoint path tail, e.g. "general-info/profiles" | "factsheet/fees" |
+    // "daily-info/aum". Stable string keys live in lib/db/queries/sec-raw.ts.
+    endpoint: text("endpoint").notNull(),
+    // SEC proj_id the payload belongs to (the universal fund key).
+    projId: text("proj_id").notNull(),
+    // Discriminator within (endpoint, proj_id): share class for profiles, the
+    // `${class}|${feeTypeRaw}|${start}` identity for fees, "" for a per-fund
+    // singleton (e.g. the AUM snapshot). Keeps multi-row endpoints addressable.
+    rowKey: text("row_key").notNull(),
+    // Verbatim SEC item, JSON-stringified. Nothing is dropped at land time, so a
+    // later transform can read fields the current mappers ignore.
+    payload: text("payload").notNull(),
+    fetchedAt: text("fetched_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
+  },
+  (table) => [
+    primaryKey({ columns: [table.endpoint, table.projId, table.rowKey] }),
+    // The transform reads a whole endpoint at once (WHERE endpoint = ?).
+    index("idx_sec_raw_endpoint").on(table.endpoint),
+  ],
+);
+
+// ───────────────────────────────────────────────────────────────────────────
 // Fund catalog — the universe of Thai-registered funds and their fees, refreshed
 // daily from the SEC Open API. Powers the fee-aware fund finder ("Select"): given
 // a target exposure, name the lowest-fee fund that delivers it. Distinct from
 // `holdings` (what the user owns) and `fund_quotes` (live NAV cache).
+//
+// DERIVED, not authoritative: every column here is computed by the transform
+// from `sec_raw`. To change how a field is derived, fix the transform and re-run
+// it — do not hand-edit catalog rows (the next transform overwrites them).
 // ───────────────────────────────────────────────────────────────────────────
 
 // One row per fund, keyed by the SEC's internal project id (`proj_id`).

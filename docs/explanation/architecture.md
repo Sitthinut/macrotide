@@ -153,6 +153,19 @@ straight from app.db by the analytics layer
 than the registry. An unrecognized symbol infers `manual` rather than assuming a
 feed that returns nothing.
 
+**The fund catalog is ELT.** The SEC crawl
+([refresh-fund-catalog.ts](../../lib/jobs/refresh-fund-catalog.ts)) *lands* verbatim
+SEC payloads in `sec_raw` (the EXTRACT/LOAD), then an API-free *transform*
+([transform-fund-catalog.ts](../../lib/jobs/transform-fund-catalog.ts)) derives the
+`fund_catalog` + `fund_fees` columns from them. Splitting the two means a
+classification change — a new asset-class rule, a recovered field — re-derives the
+whole universe in seconds (`npm run jobs:transform-catalog`) instead of an ~80-min
+re-crawl, and nothing fetched is discarded at land time, so a later transform can
+read fields the current mappers ignore. One `sec_raw` table holds every endpoint
+(keyed by `endpoint`/`proj_id`/`row_key`), so landing a new SEC endpoint is a new
+key value plus a transform step, not a schema change. Enrichment snapshot tables
+are written after the transform so their `fund_catalog` foreign keys resolve.
+
 **Parent fund vs. share class.** The `fund_catalog` row is *parent-level* — one
 per SEC `proj_id`, carrying fund-level metadata — while the **priceable units**
 live in `fund_share_classes`: one row per SEC share class. NAV, fees, tax wrapper,

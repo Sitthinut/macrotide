@@ -436,7 +436,8 @@ timer fires; the app process itself schedules nothing. The roster, in run order:
 
 | Job (`npm run …`) | Script | What | Schedule (UTC) |
 |---|---|---|---|
-| `jobs:refresh-catalog` | `refresh-fund-catalog.ts` | Fund catalog + fees + AUM (the SEC crawl) | 11:00 daily |
+| `jobs:refresh-catalog` | `refresh-fund-catalog.ts` | SEC crawl — lands raw payloads in `sec_raw`, then transforms → fund catalog + fees + AUM | 11:00 daily |
+| `jobs:transform-catalog` | `transform-catalog.ts` | Re-derive catalog + fees from already-landed `sec_raw` — API-free, seconds (no SEC key). Run after a classification/derivation change instead of a full re-crawl | on demand (not scheduled) |
 | `jobs:refresh-share-classes` | `refresh-share-classes.ts` | Priceable share classes (FK-after catalog) | 11:45 daily |
 | `jobs:refresh-market` | `refresh-tracked-market.ts` | **Freshness** — NAV for held positions + indicators | 12:30 daily |
 | `jobs:prewarm-nav` | `prewarm-nav.ts` | **Coverage** — NAV/AUM for the *whole* catalog | one-off backfill; optional daily append 02:00 |
