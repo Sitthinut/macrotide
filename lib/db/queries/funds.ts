@@ -54,6 +54,7 @@ export function upsertFund(input: FundInsert): Fund {
         aumDate: input.aumDate,
         secStatus: input.secStatus,
         status: input.status ?? "active",
+        projRetailType: input.projRetailType,
         updatedAt: sql`(CURRENT_TIMESTAMP)`,
       },
     })
@@ -262,10 +263,16 @@ export function findFunds(filter: FindFundsFilter = {}): FundWithTer[] {
     ter: f.currentTer ?? null,
   }));
 
+  // A non-positive TER means "no published fee" (institutional/private funds
+  // report 0, fees charged elsewhere) — sort it last like a null, not as the
+  // cheapest, so a zero-TER fund can't top the cheapest-first default.
+  const effTer = (t: number | null) => (t != null && t > 0 ? t : null);
   const byTer = (a: FundWithTer, b: FundWithTer) => {
-    if (a.ter == null) return b.ter == null ? 0 : 1; // nulls last
-    if (b.ter == null) return -1;
-    return a.ter - b.ter;
+    const ta = effTer(a.ter);
+    const tb = effTer(b.ter);
+    if (ta == null) return tb == null ? 0 : 1; // null/zero last
+    if (tb == null) return -1;
+    return ta - tb;
   };
 
   if (relevanceRank) {
@@ -342,6 +349,12 @@ export function findShareClasses(
   let order = 0;
   for (const p of parents) {
     if (out.length >= limit) break;
+    // Fund-level retail gate: the SEC marks accredited / institutional-only
+    // private funds with proj_retail_type != 'R' (their class detail describes
+    // hedging, not audience, so the per-class filter can't catch them). Hide the
+    // whole fund. NULL = unknown (pre-crawl) → keep, so this is a safe no-op until
+    // the catalog is re-crawled.
+    if (!includeNonRetail && p.projRetailType && p.projRetailType !== "R") continue;
     const classes = listShareClassesByProj(p.projId).filter((c) => {
       // Hide only the classes individuals genuinely can't buy directly —
       // institutional and insurance (unit-linked). `restricted` (provident /

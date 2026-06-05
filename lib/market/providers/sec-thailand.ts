@@ -407,6 +407,8 @@ export interface SecFundProfile {
   amc_name?: string | null;
   /** Raw SEC fund status: 'Registered' | 'IPO' | 'Liquidated' | 'Expired' | 'Canceled'. */
   fund_status?: string | null;
+  /** Retail availability: 'R' = retail; else (e.g. 'X') not for retail (accredited/institutional). */
+  proj_retail_type?: string | null;
   /** Short Thai asset-type label (ตราสารหนี้ / ตราสารทุน / ผสม / ทรัพย์สินทางเลือก / ตลาดเงิน). */
   policy_desc?: string | null;
   /** Management style code: 'AM' active | 'PN' passive/index | 'SM' systematic | 'PM' passive multi-factor | 'BH' buy-and-hold. */

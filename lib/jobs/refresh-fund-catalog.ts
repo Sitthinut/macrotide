@@ -171,6 +171,7 @@ function profileToFundInsert(
     isinCode: p.fund_class_isin_code ?? null,
     secStatus,
     status,
+    projRetailType: p.proj_retail_type ?? null,
   };
 
   // Only set AUM fields when we actually fetched them (active funds).

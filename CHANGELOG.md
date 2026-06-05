@@ -15,6 +15,11 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Explore stops surfacing funds you can't buy.** Funds the SEC marks not-for-retail
+  (`proj_retail_type` ≠ `R` — accredited / institutional-only private funds whose
+  class detail describes hedging, not audience) are now hidden from the screener,
+  and a zero TER is treated as "no published fee" (sorted last, not the cheapest) so
+  those funds no longer top the default list.
 - **Explore handles non-public share classes correctly.** Provident-fund /
   private-fund / special-group classes are now identified and **down-ranked**
   below retail classes (kept visible — they're investable in principle), while
