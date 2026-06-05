@@ -32,7 +32,7 @@ const sampleHolding = {
   ter: 0.22,
   color: "#3b82f6",
   source: "live",
-  quoteSource: "yahoo",
+  quoteSource: "market",
   acquiredOn: null,
   createdAt: "2026-01-01",
   updatedAt: "2026-01-01",

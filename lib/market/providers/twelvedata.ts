@@ -110,7 +110,7 @@ export const twelveDataProvider: Provider = {
   // Owns the same logical sources as Yahoo (indices / stocks / FX), but only
   // when a key is configured — otherwise it stays out of the chain entirely.
   matches(source: string, _ticker: string): boolean {
-    return source === "yahoo" && apiKey() !== undefined;
+    return source === "market" && apiKey() !== undefined;
   },
   async fetchSeries(
     ticker: string,

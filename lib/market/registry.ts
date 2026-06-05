@@ -3,7 +3,7 @@
 // Providers are checked in registration order; the first one whose `matches`
 // returns true wins. Providers shipped with the app:
 //   - "thai_mutual_fund"  → sec-thailand (Thai SEC Open API)
-//   - "yahoo"             → yahoo (broad catch-all for stocks/indices/FX)
+//   - "market"             → yahoo (broad catch-all for stocks/indices/FX)
 //
 // Add a new asset class by introducing a new quote_source value (see
 // lib/market/sources.ts), implementing a Provider that matches it, and
@@ -18,7 +18,7 @@ import { twelveDataProvider } from "./providers/twelvedata";
 import type { Provider } from "./providers/types";
 import { yahooProvider } from "./providers/yahoo";
 
-// Order matters: preferred sources first, then fallbacks. For the `yahoo`
+// Order matters: preferred sources first, then fallbacks. For the `market`
 // logical source the chain is:
 //   fmp (keyed, REAL US indices)  → eodhd (keyed, REAL global indices + SET)
 //     → twelveData (keyed, ETF proxies)  → frankfurter (keyless, FX only)

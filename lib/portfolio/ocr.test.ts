@@ -64,13 +64,13 @@ describe("inferQuoteSource", () => {
     expect(inferQuoteSource("k-fixed-a")).toBe("thai_mutual_fund"); // case-insensitive
   });
 
-  it("keeps known stock/ETF/index seeds on yahoo, but defaults unknown symbols to custom", () => {
+  it("keeps known stock/ETF/index seeds on market, but defaults unknown symbols to custom", () => {
     // Tickers in the seed catalog keep their tagged source.
-    expect(inferQuoteSource("AAPL")).toBe("yahoo");
-    expect(inferQuoteSource("PTT.BK")).toBe("yahoo");
-    expect(inferQuoteSource("^GSPC")).toBe("yahoo");
-    expect(inferQuoteSource("THB=X")).toBe("yahoo");
-    expect(inferQuoteSource("QQQ")).toBe("yahoo");
+    expect(inferQuoteSource("AAPL")).toBe("market");
+    expect(inferQuoteSource("PTT.BK")).toBe("market");
+    expect(inferQuoteSource("^GSPC")).toBe("market");
+    expect(inferQuoteSource("THB=X")).toBe("market");
+    expect(inferQuoteSource("QQQ")).toBe("market");
     // Unknown bare tickers default to a CUSTOM (manual-priced) asset — we can't
     // price an arbitrary symbol, so don't assume the ETF chain.
     expect(inferQuoteSource("KFIXED")).toBe("manual"); // no hyphen, not a known AMC prefix
@@ -82,7 +82,7 @@ describe("inferQuoteSource", () => {
   it("tags Thai funds the old shape-only regex missed", () => {
     // Parenthetical share class — parens weren't in the old character class.
     expect(inferQuoteSource("K-GOLD-A(A)")).toBe("thai_mutual_fund");
-    // No-hyphen AMC codes — fell through to yahoo under shape-only rules.
+    // No-hyphen AMC codes — fell through to market under shape-only rules.
     expect(inferQuoteSource("SCBCOMP")).toBe("thai_mutual_fund");
     expect(inferQuoteSource("KFS100SSFX")).toBe("thai_mutual_fund");
     // Hyphen / ampersand fund codes stay Thai funds.
@@ -92,8 +92,8 @@ describe("inferQuoteSource", () => {
   });
 
   it("honours the seed catalog by membership (case-insensitive)", () => {
-    expect(inferQuoteSource("^set.bk")).toBe("yahoo");
-    expect(inferQuoteSource("ptt.bk")).toBe("yahoo");
+    expect(inferQuoteSource("^set.bk")).toBe("market");
+    expect(inferQuoteSource("ptt.bk")).toBe("market");
   });
 });
 
@@ -299,6 +299,6 @@ describe("deriveRow", () => {
     expect(deriveRow({ ticker: "K-FIXED-A", units: 1 }, undefined).quoteSource).toBe(
       "thai_mutual_fund",
     );
-    expect(deriveRow({ ticker: "AAPL", units: 1 }, undefined).quoteSource).toBe("yahoo");
+    expect(deriveRow({ ticker: "AAPL", units: 1 }, undefined).quoteSource).toBe("market");
   });
 });

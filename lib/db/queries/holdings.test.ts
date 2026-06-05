@@ -48,7 +48,7 @@ const BUCKET = {
 };
 
 function seedHolding(bucketId: string, ticker: string, source: string | null) {
-  createHolding({ bucketId, ticker, englishName: ticker, units: 1, source, quoteSource: "yahoo" });
+  createHolding({ bucketId, ticker, englishName: ticker, units: 1, source, quoteSource: "market" });
 }
 
 describe("renameHoldingSource", () => {

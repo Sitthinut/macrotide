@@ -136,11 +136,11 @@ describe("getPortfolioSeries — FX conversion", () => {
 
   it("converts a USD holding to THB at each date's USD/THB rate", async () => {
     seedBucket(appDb);
-    seedHolding(appDb, { ticker: "VOO", quoteSource: "yahoo", units: 2 });
-    seedNav(marketDb, "yahoo:VOO", [100, 100, 100]); // flat in USD
+    seedHolding(appDb, { ticker: "VOO", quoteSource: "market", units: 2 });
+    seedNav(marketDb, "market:VOO", [100, 100, 100]); // flat in USD
     // USD/THB rises 30 → 31 → 32: the THB value should track the FX move even
     // though the USD price is flat.
-    seedNav(marketDb, "yahoo:THB=X", [30, 31, 32]);
+    seedNav(marketDb, "market:THB=X", [30, 31, 32]);
 
     const { aggregate, missingFx } = await run(() => getPortfolioSeries("1mo"));
 
@@ -155,15 +155,15 @@ describe("getPortfolioSeries — FX conversion", () => {
     seedHolding(appDb, { ticker: "EXAMPLE-FUND-A", quoteSource: "thai_mutual_fund", units: 100 });
     seedNav(marketDb, "thai_mutual_fund:EXAMPLE-FUND-A", [10, 10, 10]);
     // USD ETF: 1 unit * 100 USD.
-    seedHolding(appDb, { ticker: "VOO", quoteSource: "yahoo", units: 1 });
-    seedNav(marketDb, "yahoo:VOO", [100, 100, 100]);
+    seedHolding(appDb, { ticker: "VOO", quoteSource: "market", units: 1 });
+    seedNav(marketDb, "market:VOO", [100, 100, 100]);
     // JPY index proxy: 10 units * 200 JPY.
-    seedHolding(appDb, { ticker: "^N225", quoteSource: "yahoo", units: 10 });
-    seedNav(marketDb, "yahoo:^N225", [200, 200, 200]);
+    seedHolding(appDb, { ticker: "^N225", quoteSource: "market", units: 10 });
+    seedNav(marketDb, "market:^N225", [200, 200, 200]);
 
     // USD/THB = 30 (flat). USD/JPY = 150 (flat) → JPY/THB = 30/150 = 0.2.
-    seedNav(marketDb, "yahoo:THB=X", [30, 30, 30]);
-    seedNav(marketDb, "yahoo:JPY=X", [150, 150, 150]);
+    seedNav(marketDb, "market:THB=X", [30, 30, 30]);
+    seedNav(marketDb, "market:JPY=X", [150, 150, 150]);
 
     const { aggregate, missingFx } = await run(() => getPortfolioSeries("1mo"));
 
@@ -176,8 +176,8 @@ describe("getPortfolioSeries — FX conversion", () => {
     seedBucket(appDb);
     seedHolding(appDb, { ticker: "EXAMPLE-FUND-A", quoteSource: "thai_mutual_fund", units: 100 });
     seedNav(marketDb, "thai_mutual_fund:EXAMPLE-FUND-A", [10, 10, 10]);
-    seedHolding(appDb, { ticker: "VOO", quoteSource: "yahoo", units: 1 });
-    seedNav(marketDb, "yahoo:VOO", [100, 100, 100]);
+    seedHolding(appDb, { ticker: "VOO", quoteSource: "market", units: 1 });
+    seedNav(marketDb, "market:VOO", [100, 100, 100]);
     // No yahoo:THB=X seeded and no network → USD can't convert. The THB fund
     // still totals; the USD holding is dropped and USD is flagged.
     const { aggregate, missingFx } = await run(() => getPortfolioSeries("1mo"));
@@ -274,9 +274,9 @@ describe("getPortfolioSeries — hasDistributingHolding flag", () => {
 
   it("is false when a holding doesn't match any catalog fund (e.g. a US ETF)", async () => {
     seedBucket(appDb);
-    seedHolding(appDb, { ticker: "VOO", quoteSource: "yahoo", units: 2 });
-    seedNav(marketDb, "yahoo:VOO", [100, 100, 100]);
-    seedNav(marketDb, "yahoo:THB=X", [30, 30, 30]);
+    seedHolding(appDb, { ticker: "VOO", quoteSource: "market", units: 2 });
+    seedNav(marketDb, "market:VOO", [100, 100, 100]);
+    seedNav(marketDb, "market:THB=X", [30, 30, 30]);
     // A dividend-paying catalog fund the user does NOT hold must not trigger it.
     seedCatalogFund(marketDb, "EXAMPLE-FUND-A", "dividend");
 

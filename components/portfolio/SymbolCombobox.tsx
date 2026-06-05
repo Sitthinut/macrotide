@@ -19,7 +19,7 @@ import type { QuoteSource } from "@/lib/market/sources";
 // provider. "Fund" reads clearer than "TH" for a Thai mutual fund.
 const TYPE_BADGE_CODES: Record<QuoteSource, string> = {
   thai_mutual_fund: "Fund",
-  yahoo: "ETF",
+  market: "ETF",
   manual: "Custom",
 };
 

@@ -171,7 +171,7 @@ describe("sec-thailand provider", () => {
 
   it("matches only the thai_mutual_fund source", () => {
     expect(secThailandProvider.matches("thai_mutual_fund", "anything")).toBe(true);
-    expect(secThailandProvider.matches("yahoo", "AAPL")).toBe(false);
+    expect(secThailandProvider.matches("market", "AAPL")).toBe(false);
     expect(secThailandProvider.matches("", "EX-CLASS-A")).toBe(false);
   });
 

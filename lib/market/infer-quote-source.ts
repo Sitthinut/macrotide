@@ -8,13 +8,13 @@ import type { QuoteSource } from "@/lib/market/sources";
 
 // Authoritative source per known ticker (case-insensitive). The seed catalog
 // carries an explicit `quote_source`, so membership beats any shape guess —
-// this is what keeps e.g. PTT.BK / ^GSPC on yahoo and K-FIXED-A on the fund feed.
+// this is what keeps e.g. PTT.BK / ^GSPC on market and K-FIXED-A on the fund feed.
 const KNOWN_QUOTE_SOURCE = new Map<string, QuoteSource>(
   KNOWN_TICKERS.map((k) => [k.ticker.toUpperCase(), k.quote_source]),
 );
 
 // Thai AMC prefixes that appear on share-class codes WITHOUT a hyphen
-// (e.g. SCBCOMP, KFS100SSFX) — yahoo never carries these. Kept deliberately
+// (e.g. SCBCOMP, KFS100SSFX) — the market source never carries these. Kept deliberately
 // short and distinctive (and gated on length ≥ 5) so plain US tickers aren't
 // mis-tagged; hyphen / "&" / parenthetical codes are already caught by shape.
 const THAI_AMC_PREFIXES = ["SCB", "KFS"] as const;
@@ -25,7 +25,7 @@ const THAI_AMC_PREFIXES = ["SCB", "KFS"] as const;
  * hyphen group (K-FIXED-A), an ampersand (SCBS&P500), or a parenthetical share
  * class (K-GOLD-A(A)); a longer all-caps code from a known Thai AMC (SCBCOMP)
  * is also a fund. Dotted / caret / equals symbols (PTT.BK, ^GSPC, THB=X) and
- * plain ETF tickers (SPY) are yahoo. This only sets the *default* in the
+ * plain ETF tickers (SPY) are market. This only sets the *default* in the
  * editable confirmation table — the user can still flip the source per row.
  */
 export function inferQuoteSource(ticker: string): QuoteSource {

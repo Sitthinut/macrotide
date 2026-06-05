@@ -15,9 +15,9 @@ function seedNav(ticker: string, nav: number): void {
 
 describe("quoteCacheKey", () => {
   it("builds the composite source:TICKER key fund_quotes is keyed by", () => {
-    // Hyphenated code → Thai mutual fund; bare ETF → yahoo.
+    // Hyphenated code → Thai mutual fund; bare ETF → market.
     expect(quoteCacheKey("k-usa-a")).toBe("thai_mutual_fund:K-USA-A");
-    expect(quoteCacheKey(" voo ")).toBe("yahoo:VOO");
+    expect(quoteCacheKey(" voo ")).toBe("market:VOO");
   });
 });
 
@@ -53,7 +53,7 @@ describe("deriveRowsWithNav", () => {
     expect(rows[0].units).toBe(10);
     expect(rows[0].avgCost).toBe(5);
     expect(rows[0].estimated).toBe(false);
-    expect(rows[0].quoteSource).toBe("yahoo");
+    expect(rows[0].quoteSource).toBe("market");
   });
 
   it("flags needsUnits when there is no NAV on file and none on the image", () => {

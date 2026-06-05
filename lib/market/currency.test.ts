@@ -8,36 +8,36 @@ describe("inferHoldingCurrency", () => {
   });
 
   it("maps Yahoo exchange suffixes to the listing currency", () => {
-    expect(inferHoldingCurrency("yahoo", "PTT.BK")).toBe("THB"); // Bangkok
-    expect(inferHoldingCurrency("yahoo", "^SET.BK")).toBe("THB"); // SET index
-    expect(inferHoldingCurrency("yahoo", "7203.T")).toBe("JPY"); // Tokyo
-    expect(inferHoldingCurrency("yahoo", "0700.HK")).toBe("HKD"); // Hong Kong
-    expect(inferHoldingCurrency("yahoo", "VWRL.L")).toBe("GBP"); // London
-    expect(inferHoldingCurrency("yahoo", "EXS1.DE")).toBe("EUR"); // Xetra
+    expect(inferHoldingCurrency("market", "PTT.BK")).toBe("THB"); // Bangkok
+    expect(inferHoldingCurrency("market", "^SET.BK")).toBe("THB"); // SET index
+    expect(inferHoldingCurrency("market", "7203.T")).toBe("JPY"); // Tokyo
+    expect(inferHoldingCurrency("market", "0700.HK")).toBe("HKD"); // Hong Kong
+    expect(inferHoldingCurrency("market", "VWRL.L")).toBe("GBP"); // London
+    expect(inferHoldingCurrency("market", "EXS1.DE")).toBe("EUR"); // Xetra
   });
 
   it("maps known non-suffixed index symbols", () => {
-    expect(inferHoldingCurrency("yahoo", "^N225")).toBe("JPY"); // Nikkei
-    expect(inferHoldingCurrency("yahoo", "^HSI")).toBe("HKD"); // Hang Seng
-    expect(inferHoldingCurrency("yahoo", "^FTSE")).toBe("GBP");
+    expect(inferHoldingCurrency("market", "^N225")).toBe("JPY"); // Nikkei
+    expect(inferHoldingCurrency("market", "^HSI")).toBe("HKD"); // Hang Seng
+    expect(inferHoldingCurrency("market", "^FTSE")).toBe("GBP");
   });
 
   it("defaults bare US tickers and US-index carets to USD", () => {
-    expect(inferHoldingCurrency("yahoo", "VOO")).toBe("USD");
-    expect(inferHoldingCurrency("yahoo", "ACWI")).toBe("USD");
-    expect(inferHoldingCurrency("yahoo", "^GSPC")).toBe("USD");
-    expect(inferHoldingCurrency("yahoo", "^NDX")).toBe("USD");
-    expect(inferHoldingCurrency("yahoo", "GC=F")).toBe("USD"); // gold spot
+    expect(inferHoldingCurrency("market", "VOO")).toBe("USD");
+    expect(inferHoldingCurrency("market", "ACWI")).toBe("USD");
+    expect(inferHoldingCurrency("market", "^GSPC")).toBe("USD");
+    expect(inferHoldingCurrency("market", "^NDX")).toBe("USD");
+    expect(inferHoldingCurrency("market", "GC=F")).toBe("USD"); // gold spot
   });
 
   it("degrades an unknown symbol to USD, not to THB", () => {
     // Falling back to USD is the honest default — the dominant foreign case —
     // rather than silently treating a foreign holding as already-baht.
-    expect(inferHoldingCurrency("yahoo", "MYSTERY")).toBe("USD");
+    expect(inferHoldingCurrency("market", "MYSTERY")).toBe("USD");
   });
 
   it("is case-insensitive on the ticker", () => {
-    expect(inferHoldingCurrency("yahoo", "ptt.bk")).toBe("THB");
+    expect(inferHoldingCurrency("market", "ptt.bk")).toBe("THB");
   });
 
   it("exposes THB as the base currency", () => {

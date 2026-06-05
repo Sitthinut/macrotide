@@ -82,13 +82,13 @@ describe("projectPositions — derived-row hygiene", () => {
         kind: "buy",
         units: 5,
         amount: -250,
-        quoteSource: "yahoo",
+        quoteSource: "market",
         source: "Broker X",
       }),
     ]);
     const byTicker = Object.fromEntries(rows.map((r) => [r.ticker, r]));
     expect(byTicker[A].quoteSource).toBe("thai_mutual_fund");
-    expect(byTicker[B].quoteSource).toBe("yahoo");
+    expect(byTicker[B].quoteSource).toBe("market");
     expect(byTicker[B].source).toBe("Broker X");
   });
 

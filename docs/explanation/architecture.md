@@ -135,7 +135,7 @@ names the *asset class*, not the provider, so swapping a provider only touches
 the registry. Adding one is a documented four-step recipe in
 [AGENTS.md § Provider routing](../../AGENTS.md#provider-routing-via-holdingsquote_source).
 
-For index/FX/stock symbols (the `yahoo` source) the registry tries a **graceful
+For index/FX/stock symbols (the `market` source) the registry tries a **graceful
 chain**: FMP and EODHD (keyed; **real** index levels where a free source exists)
 → Twelve Data (keyed; ETF proxies) → Frankfurter (keyless; FX) → Yahoo (keyless
 fallback). The keyed providers drop out when their env var is unset, so the app

@@ -492,7 +492,11 @@ function TxnEditor({
             // Cycle Thai fund → Stock/ETF → Custom (manual price).
             const qs = (draft.quoteSource || inferQuoteSource(draft.ticker)) as QuoteSource;
             const next: QuoteSource =
-              qs === "thai_mutual_fund" ? "yahoo" : qs === "yahoo" ? "manual" : "thai_mutual_fund";
+              qs === "thai_mutual_fund"
+                ? "market"
+                : qs === "market"
+                  ? "manual"
+                  : "thai_mutual_fund";
             set({ quoteSource: next, quoteSourceLocked: true });
           }}
         />

@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { listProviders, resolveProvider, resolveProviderChain } from "./registry";
 
 describe("resolveProvider", () => {
-  it("routes yahoo source → yahoo provider", () => {
-    expect(resolveProvider("yahoo", "AAPL").id).toBe("yahoo");
-    expect(resolveProvider("yahoo", "^GSPC").id).toBe("yahoo");
-    expect(resolveProvider("yahoo", "PTT.BK").id).toBe("yahoo");
+  it("routes market source → yahoo provider", () => {
+    expect(resolveProvider("market", "AAPL").id).toBe("yahoo");
+    expect(resolveProvider("market", "^GSPC").id).toBe("yahoo");
+    expect(resolveProvider("market", "PTT.BK").id).toBe("yahoo");
   });
 
   it("routes thai_mutual_fund source → sec-thailand provider", () => {
@@ -41,7 +41,7 @@ describe("resolveProviderChain — key gating / graceful fallback", () => {
   });
 
   it("with no keys, a real-index symbol only matches the keyless Yahoo fallback", () => {
-    const ids = resolveProviderChain("yahoo", "^GSPC").map((p) => p.id);
+    const ids = resolveProviderChain("market", "^GSPC").map((p) => p.id);
     expect(ids).toEqual(["yahoo"]);
   });
 
@@ -49,7 +49,7 @@ describe("resolveProviderChain — key gating / graceful fallback", () => {
     process.env.FMP_API_KEY = "k";
     process.env.EODHD_API_KEY = "k";
     process.env.TWELVE_DATA_API_KEY = "k";
-    const ids = resolveProviderChain("yahoo", "^GSPC").map((p) => p.id);
+    const ids = resolveProviderChain("market", "^GSPC").map((p) => p.id);
     expect(ids).toEqual(["fmp", "eodhd", "twelvedata", "yahoo"]);
   });
 
@@ -57,7 +57,7 @@ describe("resolveProviderChain — key gating / graceful fallback", () => {
     process.env.FMP_API_KEY = "k";
     process.env.EODHD_API_KEY = "k";
     process.env.TWELVE_DATA_API_KEY = "k";
-    const ids = resolveProviderChain("yahoo", "^SET.BK").map((p) => p.id);
+    const ids = resolveProviderChain("market", "^SET.BK").map((p) => p.id);
     expect(ids).toEqual(["eodhd", "twelvedata", "yahoo"]);
   });
 });

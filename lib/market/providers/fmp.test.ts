@@ -27,18 +27,18 @@ describe("fmpProvider.matches", () => {
 
   it("matches only when the key is set AND the symbol is a covered US index", () => {
     process.env.FMP_API_KEY = KEY;
-    expect(fmpProvider.matches("yahoo", "^GSPC")).toBe(true);
-    expect(fmpProvider.matches("yahoo", "^DJI")).toBe(true);
+    expect(fmpProvider.matches("market", "^GSPC")).toBe(true);
+    expect(fmpProvider.matches("market", "^DJI")).toBe(true);
     expect(fmpProvider.matches("thai_mutual_fund", "^GSPC")).toBe(false);
-    expect(fmpProvider.matches("yahoo", "^SET.BK")).toBe(false);
-    expect(fmpProvider.matches("yahoo", "ACWI")).toBe(false);
+    expect(fmpProvider.matches("market", "^SET.BK")).toBe(false);
+    expect(fmpProvider.matches("market", "ACWI")).toBe(false);
   });
 
   it("drops out of the chain when no key is configured", () => {
     delete process.env.FMP_API_KEY;
-    expect(fmpProvider.matches("yahoo", "^GSPC")).toBe(false);
+    expect(fmpProvider.matches("market", "^GSPC")).toBe(false);
     process.env.FMP_API_KEY = "  ";
-    expect(fmpProvider.matches("yahoo", "^GSPC")).toBe(false);
+    expect(fmpProvider.matches("market", "^GSPC")).toBe(false);
   });
 });
 

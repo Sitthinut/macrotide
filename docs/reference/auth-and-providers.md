@@ -161,7 +161,7 @@ DEMO_AI_MODELS=meta-llama/llama-3.3-70b-instruct:free
 
 ## Market data providers (indices / FX / stocks)
 
-Markets-screen indicators and any `yahoo`-sourced holding resolve through a
+Markets-screen indicators and any `market`-sourced holding resolve through a
 provider chain, tried preferred → fallback. Each provider only matches the
 symbols it actually serves, and the keyed ones **drop out of the chain entirely
 when their env var is unset** — so the app degrades gracefully from real index

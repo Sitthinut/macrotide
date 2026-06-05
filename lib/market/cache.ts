@@ -9,7 +9,7 @@ import { resolveProviderChain } from "./registry";
 // the latest quote derived from it — so a quote refreshes at most once a day.
 //
 // The window is set by provider quotas, not by how often prices move. The
-// `yahoo` logical source resolves to real-index providers with small free quotas
+// `market` logical source resolves to real-index providers with small free quotas
 // (FMP ~250/day, EODHD ~20/day; see providers/{fmp,eodhd}.ts), and the keyless
 // Yahoo fallback returns 429 from datacenter IPs. At 24h that is ~1 fetch/day per
 // symbol, within quota; a 5-minute TTL would be ~288/day per symbol, past EODHD's

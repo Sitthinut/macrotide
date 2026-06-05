@@ -76,10 +76,10 @@ interface EodhdValue {
 
 export const eodhdProvider: Provider = {
   id: "eodhd",
-  // Owns the "yahoo" logical source, but only when a key is configured AND the
+  // Owns the "market" logical source, but only when a key is configured AND the
   // ticker is a real index symbol we map — otherwise it stays out of the chain.
   matches(source: string, ticker: string): boolean {
-    return source === "yahoo" && apiKey() !== undefined && toEodhdSymbol(ticker) !== undefined;
+    return source === "market" && apiKey() !== undefined && toEodhdSymbol(ticker) !== undefined;
   },
   async fetchSeries(
     ticker: string,

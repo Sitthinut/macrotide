@@ -16,9 +16,9 @@ export async function GET() {
 
     const results = await Promise.allSettled(
       symbols.map(async (symbol) => {
-        // All indicators route through the "yahoo" provider chain
+        // All indicators route through the "market" provider chain
         // (Twelve Data → Frankfurter → Yahoo).
-        const cached = await getCachedSeries("yahoo", symbol, "6mo", "1d");
+        const cached = await getCachedSeries("market", symbol, "6mo", "1d");
         const series = cached.series;
         const latest = series.at(-1);
         const prev = series.length > 1 ? series[series.length - 2] : null;

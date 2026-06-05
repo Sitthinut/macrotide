@@ -41,7 +41,7 @@ export async function POST(req: Request) {
       englishName:
         typeof body.englishName === "string" && body.englishName ? body.englishName : ticker,
       quoteSource:
-        typeof body.quoteSource === "string" && body.quoteSource ? body.quoteSource : "yahoo",
+        typeof body.quoteSource === "string" && body.quoteSource ? body.quoteSource : "market",
       units: Number(body.units) || 0,
       avgCost: body.avgCost == null ? null : Number(body.avgCost),
       source: body.source ?? null,

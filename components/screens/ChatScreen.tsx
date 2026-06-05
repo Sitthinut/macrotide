@@ -826,7 +826,7 @@ export function ChatScreen({
                   ter: raw.ter ?? null,
                   assetClass: raw.assetClass ?? null,
                   region: raw.region ?? null,
-                  quoteSource: String(raw.quoteSource ?? "yahoo"),
+                  quoteSource: String(raw.quoteSource ?? "market"),
                   bucketId: raw.bucketId ?? null,
                   source: raw.source ?? null,
                   rationale: String(raw.rationale ?? ""),

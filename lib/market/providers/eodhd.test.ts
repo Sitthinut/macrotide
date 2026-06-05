@@ -29,20 +29,20 @@ describe("eodhdProvider.matches", () => {
 
   it("matches only when the key is set AND the symbol is mapped", () => {
     process.env.EODHD_API_KEY = KEY;
-    expect(eodhdProvider.matches("yahoo", "^GSPC")).toBe(true);
-    expect(eodhdProvider.matches("yahoo", "^SET.BK")).toBe(true);
+    expect(eodhdProvider.matches("market", "^GSPC")).toBe(true);
+    expect(eodhdProvider.matches("market", "^SET.BK")).toBe(true);
     // mapped symbol, but other logical source → no match
     expect(eodhdProvider.matches("thai_mutual_fund", "^GSPC")).toBe(false);
     // unmapped symbol → no match even with a key
-    expect(eodhdProvider.matches("yahoo", "ACWI")).toBe(false);
-    expect(eodhdProvider.matches("yahoo", "THB=X")).toBe(false);
+    expect(eodhdProvider.matches("market", "ACWI")).toBe(false);
+    expect(eodhdProvider.matches("market", "THB=X")).toBe(false);
   });
 
   it("drops out of the chain when no key is configured", () => {
     delete process.env.EODHD_API_KEY;
-    expect(eodhdProvider.matches("yahoo", "^GSPC")).toBe(false);
+    expect(eodhdProvider.matches("market", "^GSPC")).toBe(false);
     process.env.EODHD_API_KEY = "  ";
-    expect(eodhdProvider.matches("yahoo", "^GSPC")).toBe(false);
+    expect(eodhdProvider.matches("market", "^GSPC")).toBe(false);
   });
 });
 

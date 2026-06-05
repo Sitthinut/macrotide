@@ -779,7 +779,11 @@ function RowEditor({
             // Cycle Thai fund → Stock/ETF → Custom (manual price).
             const qs = row.quoteSource ?? inferQuoteSource(row.ticker);
             const next: QuoteSource =
-              qs === "thai_mutual_fund" ? "yahoo" : qs === "yahoo" ? "manual" : "thai_mutual_fund";
+              qs === "thai_mutual_fund"
+                ? "market"
+                : qs === "market"
+                  ? "manual"
+                  : "thai_mutual_fund";
             onChange({ quoteSource: next, quoteSourceLocked: true });
           }}
         />
