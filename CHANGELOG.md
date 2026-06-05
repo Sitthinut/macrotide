@@ -232,6 +232,19 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Fixed
 
+- **A fund with no published fee no longer reads as "0.00%".** The SEC feed
+  reports a `0` expense rate two ways that don't mean "free": a new/IPO fund
+  carries a fee ceiling but a `0` *actualized* rate until a period elapses, and a
+  multi-class fund emits an all-zero `main` placeholder row beside its real
+  classes. The TER derivation took those zeros at face value, so a 4.49%-ceiling
+  fund showed 0.00% and could top the fee finder's cheapest-first ranking — and
+  surface as an absurd "0.00% cheaper alternative" in the portfolio fee check. The
+  derivation now treats a `0` rate as "not actualized": an unactualized rate falls
+  through to the ceiling, and a fully dataless fee resolves to *no published fee*
+  (sorted and excluded like a null) rather than a fake free fund. There is no
+  genuinely 0% Thai fund — the feed can't even express one — so this only removes
+  false zeros. Applies everywhere TER is read: the screener, the advisor, and the
+  fee check.
 - **The login screen no longer shows a bot-check under the social sign-in
   buttons.** OAuth sign-in starts a redirect to the provider, which authenticates
   the user — so the Turnstile gate (which protects direct account creation) no

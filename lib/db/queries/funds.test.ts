@@ -116,6 +116,26 @@ describe("getCurrentFees / getCurrentTer", () => {
     });
   });
 
+  it("treats a zero actual rate as unactualized and falls back to the ceiling", () => {
+    withDb(() => {
+      // New/IPO funds report actual=0 (no realized expense yet) with a real
+      // ceiling. The 0 is not a free fee — read through to the ceiling.
+      upsertFund(fund("IPO"));
+      upsertFundFees([ter("IPO", 0, { actualRatePct: 0, rateCeilingPct: 4.49 })]);
+      expect(getCurrentTer("IPO")).toBe(4.49);
+    });
+  });
+
+  it("returns null when both actual and ceiling are zero (no fee data, not free)", () => {
+    withDb(() => {
+      // A fully-dataless row (and the SEC `main` placeholder) is 0/0. There is no
+      // genuinely-free Thai fund, so this is 'unknown', not a real 0%.
+      upsertFund(fund("NODATA"));
+      upsertFundFees([ter("NODATA", 0, { actualRatePct: 0, rateCeilingPct: 0 })]);
+      expect(getCurrentTer("NODATA")).toBeNull();
+    });
+  });
+
   it("returns null when the fund has no TER row", () => {
     withDb(() => {
       upsertFund(fund("F4"));
@@ -150,6 +170,37 @@ describe("parent current_ter picks the retail class, not a fee-waived one", () =
       ]);
       // findFunds annotates ter from the fund_catalog.current_ter cache.
       expect(findFunds({}).find((f) => f.projId === "APDI")?.ter).toBe(1.964);
+    });
+  });
+
+  it("ignores the SEC 'main' 0/0 placeholder and uses a real class's fee", () => {
+    withDb(() => {
+      // A multi-class fund (e.g. MUSPIN-H) reports an all-zero `main` placeholder
+      // row beside the real, fee-bearing class rows. The cache must not inherit
+      // the placeholder's 0 and brand the family "0.00%".
+      upsertFund(fund("MULTI", { abbrName: "MULTI" }));
+      upsertShareClasses([
+        { projId: "MULTI", className: "MULTI-AC", ticker: "MULTI-AC", investorType: "retail" },
+      ]);
+      upsertFundFees([
+        ter("MULTI", 0, { fundClassName: "main", actualRatePct: 0, rateCeilingPct: 0 }),
+        ter("MULTI", 1.16, { fundClassName: "MULTI-AC" }), // the real retail class
+      ]);
+      expect(findFunds({}).find((f) => f.projId === "MULTI")?.ter).toBe(1.16);
+    });
+  });
+
+  it("reads an unactualized retail class through to its ceiling, not 0", () => {
+    withDb(() => {
+      // New/IPO fund: the retail class reports actual=0 with a real ceiling.
+      upsertFund(fund("FRESH", { abbrName: "FRESH" }));
+      upsertShareClasses([
+        { projId: "FRESH", className: "FRESH-A", ticker: "FRESH-A", investorType: "retail" },
+      ]);
+      upsertFundFees([
+        ter("FRESH", 0, { fundClassName: "FRESH-A", actualRatePct: 0, rateCeilingPct: 4.49 }),
+      ]);
+      expect(findFunds({}).find((f) => f.projId === "FRESH")?.ter).toBe(4.49);
     });
   });
 
@@ -319,6 +370,26 @@ describe("getCheaperAlternatives", () => {
       upsertFund(fund("OTHER", {}));
       upsertFundFees([ter("OTHER", 0.1)]);
       expect(getCheaperAlternatives("HELD2")).toEqual([]);
+    });
+  });
+
+  it("excludes no-fee-data peers (0/0) instead of ranking them as free '0.00%'", () => {
+    withDb(() => {
+      // A peer with no published fee (0 actual AND 0 ceiling) used to derive a
+      // current_ter of 0 and top the cheapest list as an absurd 0.00% match.
+      // The NULLIF derivation makes its TER null, so it's excluded entirely; a
+      // real cheaper peer still surfaces.
+      upsertFund(fund("HELD4"));
+      upsertFund(fund("NOFEE-PEER"));
+      upsertFund(fund("REAL-CHEAP"));
+      upsertFundFees([
+        ter("HELD4", 1.0),
+        ter("NOFEE-PEER", 0, { actualRatePct: 0, rateCeilingPct: 0 }),
+        ter("REAL-CHEAP", 0.4),
+      ]);
+      const alts = getCheaperAlternatives("HELD4").map((f) => f.projId);
+      expect(alts).toEqual(["REAL-CHEAP"]);
+      expect(alts).not.toContain("NOFEE-PEER");
     });
   });
 

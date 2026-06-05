@@ -108,10 +108,20 @@ export function upsertFundFees(rows: FundFeeInsert[]): void {
   // classes, drop the ones individuals can't buy (institutional / insurance),
   // and break the period tie by the same audience tier compareClassesForList
   // uses (retail → unknown → restricted), then a deterministic class name.
+  //
+  // NULLIF(rate, 0) before COALESCE: the SEC reports a `0` actual rate for a fund
+  // whose fee hasn't been actualized yet (new/IPO funds carry a ceiling but no
+  // realized expense) and an all-zero `main` placeholder row beside the real
+  // classes. A bare COALESCE(actual, ceiling) treats that `0` as a genuine fee —
+  // so a 4.49%-ceiling fund reads as "0.00%" and a multi-class fund can inherit
+  // the placeholder. Nulling the zeros makes an unactualized rate fall through to
+  // the ceiling, and a truly dataless row resolve to NULL ("no published fee"),
+  // never a fake free fund. (No Thai fund genuinely charges 0; the feed can't
+  // even express it — both fields are 0 when data is simply absent.)
   const projIds = [...new Set(rows.map((r) => r.projId))];
   db.run(sql`
     UPDATE ${fundCatalog} SET current_ter = (
-      SELECT COALESCE(${fundFees.actualRatePct}, ${fundFees.rateCeilingPct})
+      SELECT COALESCE(NULLIF(${fundFees.actualRatePct}, 0), NULLIF(${fundFees.rateCeilingPct}, 0))
       FROM ${fundFees}
       LEFT JOIN ${fundShareClasses}
         ON ${fundShareClasses.projId} = ${fundFees.projId}
@@ -179,7 +189,13 @@ function pickCurrentFees(rows: FundFee[]): Partial<Record<FeeType, FundFee>> {
 /** TER from a fund's current-fee map. Same semantics as `getCurrentTer`. */
 function terFromCurrentFees(current: Partial<Record<FeeType, FundFee>>): number | null {
   const ter = current[TER_FEE_TYPE];
-  return ter?.actualRatePct ?? ter?.rateCeilingPct ?? null;
+  // Mirror the current_ter cache's NULLIF(rate, 0) → COALESCE: a `0` rate means
+  // "not actualized / no data", not a real free fee, so an unactualized actual
+  // rate falls through to the ceiling and an all-zero row resolves to null. See
+  // the upsertFundFees cache-update comment for why the SEC feed encodes it this
+  // way.
+  const nonZero = (x: number | null | undefined) => (x != null && x !== 0 ? x : null);
+  return nonZero(ter?.actualRatePct) ?? nonZero(ter?.rateCeilingPct) ?? null;
 }
 
 /**
