@@ -151,7 +151,10 @@ degradation: [auth-and-providers.md § Market data providers](./docs/reference/a
 ## Auth conventions
 
 - `AUTH_DISABLED=1` opt-out for trusted local dev only. Default is
-  auth-required.
+  auth-required. It routes to the **persistent owner `app.db`** (not demo's
+  in-memory DB), so holdings/plans/journal save and survive restarts; only the
+  username doesn't persist — there's no better-auth `user` row to store it on,
+  so the UI shows the fallback label ("Macrotide").
 - `AUTH_SECRET` is mandatory in production; throws on boot if unset.
 - Multi-user mode adds a nullable `user_id` to app tables (in the app baseline +
   migration `0004`). A signed-in owner's rows are stamped with their id; demo and built-in rows

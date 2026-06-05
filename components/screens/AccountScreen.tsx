@@ -29,6 +29,7 @@ interface AuthConfigData {
 }
 
 export interface AccountScreenProps {
+  isDemo: boolean;
   onBack: () => void;
 }
 
@@ -55,7 +56,7 @@ function fmtTokens(n: number): string {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function AccountScreen({ onBack }: AccountScreenProps) {
+export function AccountScreen({ isDemo, onBack }: AccountScreenProps) {
   // Session (name + email)
   const session = authClient.useSession();
   // Passkeys (reactive — refetches after add/delete)
@@ -104,10 +105,10 @@ export function AccountScreen({ onBack }: AccountScreenProps) {
   // ── Derived ─────────────────────────────────────────────────────────────────
 
   const user = session.data?.user;
-  // Demo / AUTH_DISABLED sessions have no better-auth user — show the same
-  // "Demo user" label the rail uses (App.tsx). Real accounts always have a name
-  // (signup collects it), so an absent name means a non-real session.
-  const displayName = user?.name?.trim() || demoName || "Demo user";
+  // No better-auth user in demo / AUTH_DISABLED mode. Distinguish them like the
+  // rail (App.tsx): a real demo session shows "Demo user"; AUTH_DISABLED single-
+  // owner shows "Macrotide". Real accounts always have a name (signup collects it).
+  const displayName = user?.name?.trim() || demoName || (isDemo ? "Demo user" : "Macrotide");
   // The account's real email, if it has adopted one (placeholder = none yet).
   const realEmail = user?.email && !isPlaceholderEmail(user.email) ? user.email : null;
   const googleEnabled = authConfig?.providers?.google ?? false;

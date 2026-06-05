@@ -31,7 +31,7 @@ export default async function Home() {
   return (
     <>
       {isDemo && <DemoBanner />}
-      <ClientApp />
+      <ClientApp isDemo={isDemo} />
     </>
   );
 }

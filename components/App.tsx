@@ -136,7 +136,7 @@ function readStoredActiveApp(): AppId | null | undefined {
   return undefined;
 }
 
-export function App() {
+export function App({ isDemo }: { isDemo: boolean }) {
   const viewport = useViewport();
   const isWide = viewport !== "mobile";
   const isDesktop = viewport === "desktop";
@@ -172,9 +172,9 @@ export function App() {
     // isWide handles the wide↔mobile shell swap.
   }, [isWide, initOverlayScrollbars]);
 
-  // Rail identity. A signed-in owner shows their real name/email; demo and
-  // AUTH_DISABLED sessions have no better-auth user, so we fall back to the
-  // generic "Demo user" labels.
+  // Rail identity. A signed-in owner shows their real name/email. With no
+  // better-auth user we distinguish the two no-user modes: a real demo session
+  // (isDemo) shows "Demo user"; AUTH_DISABLED single-owner shows "Macrotide".
   const accountUser = authClient.useSession().data?.user;
   // Owner gate for the Admin entry point. The /api/admin/status endpoint is the
   // single source of truth (mirrors the server-side OWNER_EMAIL check); the UI
@@ -182,7 +182,7 @@ export function App() {
   // is independently authorized server-side.
   const { data: adminStatus } = useResource<{ isOwner: boolean }>("/api/admin/status");
   const isOwner = adminStatus?.isOwner ?? false;
-  const accountName = accountUser?.name?.trim() || "Demo user";
+  const accountName = accountUser?.name?.trim() || (isDemo ? "Demo user" : "Macrotide");
   const accountInitials =
     accountName
       .split(/\s+/)
@@ -606,7 +606,7 @@ export function App() {
       );
     }
     if (screen === "account") {
-      return <AccountScreen onBack={() => setScreen("portfolio")} />;
+      return <AccountScreen isDemo={isDemo} onBack={() => setScreen("portfolio")} />;
     }
     if (screen === "admin") {
       // Defense in depth: even if a non-owner reaches this branch, the API

@@ -10,6 +10,6 @@ const App = dynamic(() => import("@/components/App").then((m) => m.App), {
   ssr: false,
 });
 
-export default function ClientApp() {
-  return <App />;
+export default function ClientApp({ isDemo }: { isDemo: boolean }) {
+  return <App isDemo={isDemo} />;
 }
