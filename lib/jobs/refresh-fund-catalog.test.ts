@@ -33,7 +33,7 @@ import { getCurrentTer } from "../db/queries/funds";
 import { readSecRaw, SEC_ENDPOINTS } from "../db/queries/sec-raw";
 import { fundCatalog, fundFees } from "../db/schema";
 import type { SecFundFeeItem } from "../market/fund-fees";
-import type { SecFundProfile } from "../market/providers/sec-thailand";
+import type { SecFundProfile, SecRiskSpectrumItem } from "../market/providers/sec-thailand";
 import { refreshFundCatalog } from "./refresh-fund-catalog";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -82,6 +82,17 @@ function makeFetchFees(items: SecFundFeeItem[]) {
 function makeFetchAum(result: { aum: number; aumDate: string } | null = makeAum()) {
   return vi.fn().mockResolvedValue(result);
 }
+function makeFetchRS(items: SecRiskSpectrumItem[] = []) {
+  return vi.fn().mockResolvedValue(items);
+}
+
+/**
+ * refreshFundCatalog with a default (empty) risk-spectrum stub so tests don't hit
+ * the real bulk API; pass `_fetchRiskSpectrum` to override.
+ */
+function refresh(opts: Parameters<typeof refreshFundCatalog>[0] = {}) {
+  return refreshFundCatalog({ _fetchRiskSpectrum: makeFetchRS(), ...opts });
+}
 
 /** Run a job body inside a fresh in-memory market.db context. */
 function run<T>(fn: () => Promise<T>): Promise<T> {
@@ -105,7 +116,7 @@ describe("refreshFundCatalog", () => {
 
   it("returns zero counts and lands nothing when no profiles are enumerated", () =>
     run(async () => {
-      const result = await refreshFundCatalog({
+      const result = await refresh({
         _enumerate: makeEnumerate([]),
         _fetchFees: makeFetchFees([]),
         _fetchAum: makeFetchAum(null),
@@ -122,6 +133,7 @@ describe("refreshFundCatalog", () => {
         fundsWithHoldings: 0,
         fundsWithPortfolio: 0,
         fundsWithFeederLookThrough: 0,
+        riskSpectrumLanded: 0,
         errors: [],
       });
       expect(readSecRaw(SEC_ENDPOINTS.profiles)).toHaveLength(0);
@@ -134,7 +146,7 @@ describe("refreshFundCatalog", () => {
       const feeItem = makeFeeItem();
       const aum = makeAum();
 
-      const result = await refreshFundCatalog({
+      const result = await refresh({
         _enumerate: makeEnumerate([profile]),
         _fetchFees: makeFetchFees([feeItem]),
         _fetchAum: makeFetchAum(aum),
@@ -184,12 +196,68 @@ describe("refreshFundCatalog", () => {
       expect(getCurrentTer("1234")).toBe(1.2);
     }));
 
+  it("bulk-lands risk-spectrum (scoped to enumerated funds) and drives asset class from it", () =>
+    run(async () => {
+      // policy_desc says bond, but the risk-spectrum code RS1 = money market.
+      const profile = makeProfile({
+        proj_id: "MM1",
+        policy_desc: "ตราสารหนี้",
+        proj_name_th: "กองทุนพันธบัตร",
+      });
+      const fetchRS = makeFetchRS([
+        { proj_id: "MM1", risk_spectrum: "RS1", risk_spectrum_desc: "money market" },
+        { proj_id: "OTHER", risk_spectrum: "RS6" }, // not enumerated → must be filtered out
+      ]);
+
+      const result = await refresh({
+        _enumerate: makeEnumerate([profile]),
+        _fetchFees: makeFetchFees([]),
+        _fetchAum: makeFetchAum(null),
+        _fetchRiskSpectrum: fetchRS,
+      });
+
+      expect(fetchRS).toHaveBeenCalledOnce();
+      expect(result.riskSpectrumLanded).toBe(1); // only MM1, OTHER filtered out
+      const rsRaw = readSecRaw(SEC_ENDPOINTS.riskSpectrum);
+      expect(rsRaw.map((r) => r.projId)).toEqual(["MM1"]);
+
+      // RS1 (cash) overrides the bond policy_desc.
+      const fund = getMarketDb()
+        .select()
+        .from(fundCatalog)
+        .where(eq(fundCatalog.projId, "MM1"))
+        .get();
+      expect(fund?.assetClass).toBe("cash");
+    }));
+
+  it("survives a risk-spectrum fetch failure — logs it and falls back to policy", () =>
+    run(async () => {
+      const fetchRS = vi.fn().mockRejectedValue(new Error("RS API down"));
+      const result = await refresh({
+        _enumerate: makeEnumerate([makeProfile()]), // policy ตราสารทุน → equity
+        _fetchFees: makeFetchFees([]),
+        _fetchAum: makeFetchAum(null),
+        _fetchRiskSpectrum: fetchRS,
+      });
+
+      expect(result.riskSpectrumLanded).toBe(0);
+      expect(result.errors.some((e) => e.projId === "(risk-spectrum)")).toBe(true);
+      // The crawl still produced a catalog row, classified by the policy fallback.
+      expect(result.fundsUpserted).toBe(1);
+      const fund = getMarketDb()
+        .select()
+        .from(fundCatalog)
+        .where(eq(fundCatalog.projId, "1234"))
+        .get();
+      expect(fund?.assetClass).toBe("equity");
+    }));
+
   it("skips fee + AUM fetch for non-Registered funds; catalog row is inactive, AUM null", () =>
     run(async () => {
       const fetchFees = vi.fn();
       const fetchAum = vi.fn();
 
-      const result = await refreshFundCatalog({
+      const result = await refresh({
         _enumerate: makeEnumerate([
           makeProfile({ fund_status: "Liquidated" }),
           makeProfile({ proj_id: "9999", proj_abbr_name: "NEW-IPO", fund_status: "IPO" }),
@@ -231,7 +299,7 @@ describe("refreshFundCatalog", () => {
         return Promise.resolve([makeFeeItem({ proj_id: projId })]);
       });
 
-      const result = await refreshFundCatalog({
+      const result = await refresh({
         _enumerate: makeEnumerate(profiles),
         _fetchFees: fetchFees,
         _fetchAum: makeFetchAum(),
@@ -263,7 +331,7 @@ describe("refreshFundCatalog", () => {
   it("calls onProgress for each fund processed", () =>
     run(async () => {
       const progressCalls: unknown[] = [];
-      await refreshFundCatalog({
+      await refresh({
         _enumerate: makeEnumerate([
           makeProfile({ proj_id: "X1", proj_abbr_name: "F1" }),
           makeProfile({ proj_id: "X2", proj_abbr_name: "F2" }),
@@ -280,7 +348,7 @@ describe("refreshFundCatalog", () => {
   it("passes limit to the enumerate function", () =>
     run(async () => {
       const enumerate = makeEnumerate([]);
-      await refreshFundCatalog({
+      await refresh({
         _enumerate: enumerate,
         _fetchFees: makeFetchFees([]),
         _fetchAum: makeFetchAum(null),
@@ -301,7 +369,7 @@ describe("refreshFundCatalog", () => {
         return Promise.resolve([makeFeeItem({ proj_id: projId })]);
       });
 
-      const result = await refreshFundCatalog({
+      const result = await refresh({
         _enumerate: makeEnumerate(profiles),
         _fetchFees: fetchFees,
         _fetchAum: makeFetchAum(),
@@ -324,7 +392,7 @@ describe("refreshFundCatalog", () => {
       const fetchPortfolio = vi.fn().mockResolvedValue([]);
       const fetchPortfolioAssetType = vi.fn().mockResolvedValue([]);
 
-      await refreshFundCatalog({
+      await refresh({
         _enumerate: makeEnumerate([makeProfile()]),
         _fetchFees: makeFetchFees([]),
         _fetchAum: makeFetchAum(),
@@ -358,7 +426,7 @@ describe("refreshFundCatalog", () => {
       };
       const fetchPerformance = vi.fn().mockResolvedValue([perfItem]);
 
-      const result = await refreshFundCatalog({
+      const result = await refresh({
         _enumerate: makeEnumerate([makeProfile()]),
         _fetchFees: makeFetchFees([]),
         _fetchAum: makeFetchAum(),
@@ -385,7 +453,7 @@ describe("refreshFundCatalog", () => {
       };
       const fetchAllocation = vi.fn().mockResolvedValue([allocItem]);
 
-      const result = await refreshFundCatalog({
+      const result = await refresh({
         _enumerate: makeEnumerate([makeProfile()]),
         _fetchFees: makeFetchFees([]),
         _fetchAum: makeFetchAum(),
@@ -424,7 +492,7 @@ describe("refreshFundCatalog", () => {
       const fetchPortfolio = vi.fn().mockResolvedValue([portItem]);
       const fetchPortfolioAssetType = vi.fn().mockResolvedValue([portTypeItem]);
 
-      const result = await refreshFundCatalog({
+      const result = await refresh({
         _enumerate: makeEnumerate([makeProfile()]),
         _fetchFees: makeFetchFees([]),
         _fetchAum: makeFetchAum(),
@@ -446,7 +514,7 @@ describe("refreshFundCatalog", () => {
       const fetchPerformance = vi.fn().mockResolvedValue([]);
       const fetchPortfolio = vi.fn().mockResolvedValue([]);
 
-      await refreshFundCatalog({
+      await refresh({
         _enumerate: makeEnumerate([makeProfile({ fund_status: "Liquidated" })]),
         _fetchFees: makeFetchFees([]),
         _fetchAum: makeFetchAum(null),

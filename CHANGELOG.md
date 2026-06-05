@@ -74,8 +74,10 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 - **The Cash filter in Explore returns money-market funds.** Money-market funds
   were classified as bond because the SEC's coarse `policy_desc` has no
   money-market value, leaving the Cash filter permanently empty. They're now
-  recognized from the fund name (Thai `ตลาดเงิน` or English "money market") and
-  bucketed as cash-equivalents.
+  recognized from the SEC risk-spectrum code (RS1/RS2 = money market), with the
+  fund-name match (Thai `ตลาดเงิน` / English "money market") as a fallback, and
+  bucketed as cash-equivalents. (See the risk-spectrum classification note under
+  *Changed*.)
 - **Explore stops surfacing funds you can't buy.** Funds the SEC marks not-for-retail
   (`proj_retail_type` ≠ `R` — accredited / institutional-only private funds whose
   class detail describes hedging, not audience) are now hidden from the screener,
@@ -274,6 +276,16 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Changed
 
+- **Fund asset class (including Cash) is now driven by the SEC risk-spectrum, not
+  name-matching.** Each fund's regulatory risk code from the SEC factsheet
+  (RS1/RS2 → money market, RS3/RS4 → bond, RS6/RS7 → equity, RS8 → alternative)
+  is the primary classification signal; the old `policy_desc` + money-market
+  name-match is now only the fallback for the handful of funds without a risk
+  code. This recovers money-market funds whose names omit "money market" (e.g.
+  treasury / cash-management funds) and fills in asset classes the coarse
+  `policy_desc` left blank — so the Cash filter and asset-class screening reflect
+  what each fund actually is. Ambiguous risk codes (RS5, which mixes balanced and
+  high-yield-bond funds; the complex RS8x codes) defer to the policy label.
 - **The SEC fund crawl is now ELT (raw landing + a re-runnable transform).** The
   crawl lands verbatim SEC payloads in a new `sec_raw` table, then an API-free
   transform derives the `fund_catalog` + `fund_fees` columns from them. Re-deriving

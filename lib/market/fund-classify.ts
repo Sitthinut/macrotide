@@ -67,6 +67,61 @@ export function inferAssetClass(
   return null; // ผสม (mixed) and unknowns
 }
 
+// SEC `risk_spectrum` code → normalized asset class. The risk spectrum is the
+// AMC-reported regulatory risk level on the fund factsheet — a structured signal
+// that, unlike the coarse `policy_desc`, cleanly separates money market from bond
+// and recovers asset classes `policy_desc` leaves blank. It is the PRIMARY asset-
+// class signal; `inferAssetClass` (policy_desc + the money-market name match) is
+// the FALLBACK for the handful of funds with no risk-spectrum record.
+//
+// The Thai SEC scale (verified live against the universe):
+//   RS1  domestic money market            → cash
+//   RS2  money market incl. some foreign   → cash
+//   RS3  government bond                    → bond
+//   RS4  general fixed income              → bond
+//   RS5  mixed/allocation OR high-yield bond → AMBIGUOUS (defer to policy)
+//   RS6  equity (≥80% NAV)                 → equity
+//   RS7  sector / concentrated equity      → equity
+//   RS8  alternative (REITs, infra, oil…)  → alternative
+//   RS81, RS8+  concentrated / complex (bond, private equity, …) → AMBIGUOUS
+//
+// RS1/RS2 are authoritative for cash: the cross-check found zero name-detected
+// money-market funds without an RS1/RS2 code, and RS recovers ~25 more (e.g.
+// treasury / cash-management funds whose names omit "money market"). RS5 and the
+// RS8x complex codes mix asset classes within one code, so they return undefined
+// and let the policy/name fallback decide rather than forcing a wrong bucket.
+//
+// Returns `undefined` (not null) for "no opinion — fall back": null is a real
+// answer (mixed/unclassifiable), so the caller distinguishes the two via `??`.
+const ASSET_CLASS_BY_RISK_SPECTRUM: Readonly<Record<string, string>> = {
+  RS1: "cash",
+  RS2: "cash",
+  RS3: "bond",
+  RS4: "bond",
+  RS6: "equity",
+  RS7: "equity",
+  RS8: "alternative",
+};
+
+export function assetClassFromRiskSpectrum(code: string | null | undefined): string | undefined {
+  if (!code) return undefined;
+  return ASSET_CLASS_BY_RISK_SPECTRUM[code]; // undefined for RS5 / RS81 / RS8+ / unknown
+}
+
+/**
+ * Normalized asset class, risk-spectrum first then policy/name. The SEC risk
+ * code is the structured primary signal; for funds without one (or with an
+ * ambiguous RS5/RS8x code) we fall back to {@link inferAssetClass}.
+ */
+export function deriveAssetClass(
+  riskSpectrum: string | null | undefined,
+  policyDescTh: string | null | undefined,
+  nameTh?: string | null | undefined,
+  nameEn?: string | null | undefined,
+): string | null {
+  return assetClassFromRiskSpectrum(riskSpectrum) ?? inferAssetClass(policyDescTh, nameTh, nameEn);
+}
+
 // fund_class_tax_incentive_type (Thai) → wrapper code.
 const TAX_INCENTIVE_BY_LABEL: ReadonlyArray<readonly [string, string]> = [
   ["เพื่อการออม", "SSF"], // กองทุนรวมเพื่อการออม

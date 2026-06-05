@@ -24,6 +24,7 @@ export const SEC_ENDPOINTS = {
   profiles: "general-info/profiles",
   fees: "factsheet/fees",
   aum: "daily-info/aum",
+  riskSpectrum: "factsheet/risk-spectrum",
 } as const;
 
 export type SecEndpoint = (typeof SEC_ENDPOINTS)[keyof typeof SEC_ENDPOINTS];
