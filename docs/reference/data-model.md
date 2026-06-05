@@ -41,13 +41,21 @@ app.db but share the real market.db read-write (same warm cache as real users).
 
 ### Market data (market.db — written by the market layer + the SEC crawl)
 
+The SEC crawl is **ELT**: it lands verbatim payloads in `sec_raw`, then a separate
+API-free transform ([lib/jobs/transform-fund-catalog.ts](../../lib/jobs/transform-fund-catalog.ts))
+derives the `fund_catalog` + `fund_fees` columns from them. Re-deriving a field is
+a seconds-long transform re-run (`npm run jobs:transform-catalog`), not an ~80-min
+re-crawl — and nothing fetched is discarded, so a later transform can read fields
+the current mappers ignore.
+
 | Table | Holds | Key columns / notes |
 |---|---|---|
+| `sec_raw` | Verbatim SEC Open API payloads — the **raw landing** (EXTRACT/LOAD) the crawl writes before any transform | PK (`endpoint`, `proj_id`, `row_key`); `payload` is the JSON-stringified SEC item; `fetched_at` stamps the land. One table per *every* endpoint — adding one (any of the ~20 the API exposes) is a new `endpoint` value + a transform step, never a schema change. `row_key` discriminates rows within one (endpoint, proj_id): share class for profiles, fee identity for fees, `""` for a per-fund singleton |
 | `fund_quotes` | Latest NAV + performance per ticker | `ticker` PK, `nav`, `d1_pct`, `ytd_pct`, `y1_pct`, `deepest_range` (widest series range fetched — lets a wider request deepen a fresh-but-shallow cache) |
 | `nav_history` | Daily NAV (+ fund AUM) history — **append/update only, never time-pruned** | Composite PK (`ticker`, `date`); `nav`, `net_asset` (fund total net assets / AUM, when the source reports it) |
-| `fund_catalog` | SEC-sourced fund universe (parent-level: one row per `proj_id`) | keyed by `proj_id`; `current_ter` is a **derived cache** of the latest TER (maintained by `upsertFundFees`; source of truth stays `fund_fees`) — picked from the **representative retail class**, not a fee-waived sibling, so the parent fee reflects what a retail buyer pays; a `0` rate is read as "not actualized" (a new fund's unrealized rate falls through to its ceiling; an all-zero row — including the SEC `main` placeholder — resolves to NULL "no published fee"), never a fake free fund; `proj_retail_type` (`R` = retail, else not-for-retail) is the screener's fund-level retail gate; `asset_class` is derived from the SEC `policy_desc` label, except **money market** (which `policy_desc` lumps under bond) is recovered from the fund name → `cash` |
+| `fund_catalog` | SEC-sourced fund universe (parent-level: one row per `proj_id`) — **derived by the transform from `sec_raw`**, not hand-edited | keyed by `proj_id`; `current_ter` is a **derived cache** of the latest TER (maintained by `upsertFundFees`; source of truth stays `fund_fees`) — picked from the **representative retail class**, not a fee-waived sibling, so the parent fee reflects what a retail buyer pays; a `0` rate is read as "not actualized" (a new fund's unrealized rate falls through to its ceiling; an all-zero row — including the SEC `main` placeholder — resolves to NULL "no published fee"), never a fake free fund; `proj_retail_type` (`R` = retail, else not-for-retail) is the screener's fund-level retail gate; `asset_class` is derived from the SEC `policy_desc` label, except **money market** (which `policy_desc` lumps under bond) is recovered from the fund name → `cash` |
 | `fund_share_classes` | The **priceable units** of each fund (one row per SEC share class) | composite PK (`proj_id`, `class_name`); `ticker` is `UNIQUE` and is the holdable/cache-key id — see below |
-| `fund_fees` | Fee history per fund class | source of truth for TER |
+| `fund_fees` | Fee history per fund class — derived by the transform from `sec_raw` | source of truth for TER among the derived tables (raw fee payloads live in `sec_raw`) |
 | `fund_performance`, `fund_asset_allocation`, `fund_top_holdings`, `fund_portfolio`, `fund_portfolio_asset_type` | Per-fund enrichment depth | ingested behind default-off crawl flags; composite `(proj_id, period)` indexes |
 | `feeder_master_map`, `feeder_look_through_holdings` | Feeder-fund → US master look-through | from SEC EDGAR N-PORT |
 

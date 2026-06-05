@@ -43,6 +43,13 @@
       "when": 1780617167906,
       "tag": "0005_groovy_the_call",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1780643354385,
+      "tag": "0006_bouncy_firebird",
+      "breakpoints": true
     }
   ]
 }

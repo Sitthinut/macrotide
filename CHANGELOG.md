@@ -272,6 +272,16 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   explicit affordance: a pencil button on each editable row, and an Edit button
   inside the detail view, both opening the existing holding edit flow.
 
+### Changed
+
+- **The SEC fund crawl is now ELT (raw landing + a re-runnable transform).** The
+  crawl lands verbatim SEC payloads in a new `sec_raw` table, then an API-free
+  transform derives the `fund_catalog` + `fund_fees` columns from them. Re-deriving
+  a field — a classification fix, a recovered column — is a seconds-long transform
+  re-run (`npm run jobs:transform-catalog`) instead of an ~80-min re-crawl, and
+  nothing fetched is discarded at land time. No change to the catalog data or any
+  screen; this is the data-infrastructure foundation for SEC-native classification.
+
 ### Fixed
 
 - **A fund with no published fee no longer reads as "0.00%".** The SEC feed
