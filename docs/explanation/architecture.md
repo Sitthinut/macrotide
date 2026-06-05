@@ -144,6 +144,15 @@ Yahoo's datacenter-IP 429s. The chain is detailed in
 [auth-and-providers.md](../reference/auth-and-providers.md#market-data-providers-indices--fx--stocks).
 Thai mutual-fund NAVs come from the Thai SEC Open API.
 
+A third source, `manual`, has **no live provider**: it's a custom asset (crypto,
+a private fund, anything off-catalog) the user prices themselves. Its current
+price is the latest positive `transactions.market_price` recorded in its own
+ledger — a Balance's *current price* field, or a trade's execution price — read
+straight from app.db by the analytics layer
+([transaction-analytics.ts](../../lib/portfolio/transaction-analytics.ts)) rather
+than the registry. An unrecognized symbol infers `manual` rather than assuming a
+feed that returns nothing.
+
 **Parent fund vs. share class.** The `fund_catalog` row is *parent-level* — one
 per SEC `proj_id`, carrying fund-level metadata — while the **priceable units**
 live in `fund_share_classes`: one row per SEC share class. NAV, fees, tax wrapper,

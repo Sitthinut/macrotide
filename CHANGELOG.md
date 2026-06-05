@@ -15,6 +15,48 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **One Add surface records everything in your portfolio.** A single Add modal
+  replaces the old separate holdings / activity / transaction sheets. Each row
+  carries its own **Type**, auto-detected from what you paste or import: a
+  **Balance** (a starting balance or a later restatement of what you hold now) or
+  a trade (buy / sell / dividend / fee / split / reinvest). Intake is one calm
+  surface — paste rows, drop a screenshot or CSV, or add a row by hand — feeding
+  one editable review list of native-style rows you can open and edit inline
+  before saving. A symbol field autocompletes against the known-fund catalog, and
+  a quantity switcher lets you enter either **Units** or a **฿ Total** (units are
+  derived from the price), matching Thai broker apps that show value rather than
+  unit count.
+- **A full-screen History view and a per-fund Position page.** History reads the
+  whole ledger as a money story — recent activity, balances grouped under their
+  own header, and KPI cards (Return · Invested · Realized · Income) — and every
+  ledger row is editable inline with the same grid the Add modal uses. Tapping a
+  holding opens its Position page: that fund's own analytics (its return,
+  invested, realized, and income), scoped to its events alone.
+- **Custom assets you price yourself.** A holding with no live NAV provider
+  (crypto, a private fund, anything off-catalog) can be a **custom** asset:
+  you record its current price, and the app values it from the latest price in
+  its own ledger — a Balance's *current price* field or a trade's execution
+  price. An unrecognized symbol now defaults to custom rather than assuming a
+  market feed that returns nothing. If you later edit a custom holding's symbol
+  to one the catalog tracks, it offers to adopt the official fund details and
+  switch to the live NAV, keeping your units and cost.
+- **Known funds keep their canonical details.** When a holding's symbol matches a
+  fund in the catalog, its name, asset class, category, tax wrapper, and TER come
+  from there and are locked — only its Portfolio and price Source stay editable —
+  so catalog facts can't be overwritten by hand. Custom assets stay fully
+  editable.
+- **A clearer action menu on each holding.** A ⋮ menu (View history · Edit
+  holding) replaces the ambiguous pencil on holding rows and the fund detail
+  view, so each action is labelled. Deleting a fund lives inside its Edit form,
+  where its destructive effect — removing the fund's whole ledger — is explicit.
+- **Recording your holdings again doesn't double-count.** The first Balance you
+  record for a fund is its starting balance; any later Balance for the same fund
+  is treated as a restatement, which re-bases your units without re-counting the
+  money as a fresh contribution. A Balance contributes only the **change** in cost
+  basis since the last one — so it captures money you added between balances,
+  reads a pure price move as zero new money, and never inflates your invested
+  total. Whether a Balance is a starting balance or a restatement is decided by
+  what came before it, so deleting one self-heals the rest.
 - **Explore's browse list ranks each share class on its own fee.** The default
   (no-search) screener now sorts by each priceable class's *own* TER — cheapest
   first — instead of grouping a fund's classes together under the family's cheapest
@@ -127,15 +169,15 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   The ledger has DELTAS (buy/sell/dividend/fee/split/reinvest) and ANCHORS —
   `opening` (a starting balance) and `snapshot` (a point-in-time restatement) —
   supporting three flows: enter full history, start from an opening balance then
-  track forward, or just periodically restate what you hold. **Add holdings** and
-  **Add transactions** are now one **Add to portfolio** sheet — a single
-  fixed-width modal whose Holdings ↔ Activity toggle swaps only the body (no more
-  reopening a differently-shaped dialog). The **Activity** view is inline-editable:
-  edit, add, or delete any ledger row in place (explicit per-row Save/Cancel), with
-  the starting-balance row shown as a plain pinned label and its delete guarded
-  (it re-bases every position). Editing a holding edits its backing event (or
-  records a snapshot). From the ledger the **Activity** view shows realized gains
-  (average-cost, FIFO available), money-weighted return (XIRR, in THB, once
+  track forward, or just periodically restate what you hold. One **Add** modal
+  records all of it — anchors (shown as a "Balance") and trades sit on the same
+  surface, each row's type set per row (see *One Add surface*, above). A
+  full-screen **History** view and per-fund **Position** pages read the ledger
+  back, and every row is inline-editable — edit, add, or delete in place, with
+  balances grouped under their own header and a fund's delete guarded (it removes
+  that fund's whole ledger). Editing a holding edits its backing event (or
+  records a restatement). From the ledger, History and Position show realized
+  gains (average-cost, FIFO available), money-weighted return (XIRR, in THB, once
   there's enough history and a current price), and a cost-basis timeline. A
   position entered without an average cost degrades gracefully — value and
   allocation still work; gains/return show a quiet "add cost" nudge rather than a
