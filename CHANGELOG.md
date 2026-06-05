@@ -15,6 +15,17 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Explore's cheapest-first ordering no longer trusts a fee-waived class.** A
+  multi-class fund publishes one total-expense figure per class; the screener's
+  fund-level TER could latch onto a near-zero special class (e.g. a fee-waived
+  `-X`) and brand the whole family with a fee no retail buyer pays, floating it to
+  #1 while the row showed the real ~2% retail fee. The fund-level TER now follows
+  the class the screener actually leads with — retail over restricted, never an
+  institutional/insurance class — so the default list ranks on what you'd pay.
+- **The Cash filter in Explore returns money-market funds.** Money-market funds
+  were classified as bond because the SEC's coarse `policy_desc` has no
+  money-market value, leaving the Cash filter permanently empty. They're now
+  recognized from the fund name and bucketed as cash-equivalents.
 - **Explore stops surfacing funds you can't buy.** Funds the SEC marks not-for-retail
   (`proj_retail_type` ≠ `R` — accredited / institutional-only private funds whose
   class detail describes hedging, not audience) are now hidden from the screener,

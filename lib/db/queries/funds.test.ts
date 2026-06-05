@@ -125,6 +125,50 @@ describe("getCurrentFees / getCurrentTer", () => {
   });
 });
 
+describe("parent current_ter picks the retail class, not a fee-waived one", () => {
+  // Real bug: a fund publishes one total_expense row per class in the same open
+  // period. A fee-waived special class (e.g. restricted `-X` at 0.011%) would win
+  // the period tie arbitrarily and brand the whole family with a fee no retail
+  // buyer pays — floating it to #1 of the cheapest-first screener while the row
+  // displays the retail class's real ~1.96%. The cache must follow the class the
+  // screener leads with: retail over restricted, regardless of class-name order.
+  it("prefers the retail class's TER over a cheaper restricted/institutional sibling", () => {
+    withDb(() => {
+      upsertFund(fund("APDI", { abbrName: "APDI" }));
+      // Seed classes first so upsertFundFees' cache-update can join them.
+      // Adversarial naming: the retail class sorts LAST alphabetically, so an
+      // alphabetical tie-break alone would pick the wrong (cheap) class.
+      upsertShareClasses([
+        { projId: "APDI", className: "APDI-X", ticker: "APDI-X", investorType: "retail" },
+        { projId: "APDI", className: "APDI-A", ticker: "APDI-A", investorType: "restricted" },
+        { projId: "APDI", className: "APDI-I", ticker: "APDI-I", investorType: "institutional" },
+      ]);
+      upsertFundFees([
+        ter("APDI", 1.964, { fundClassName: "APDI-X" }), // retail
+        ter("APDI", 0.011, { fundClassName: "APDI-A" }), // restricted, fee-waived
+        ter("APDI", 0.005, { fundClassName: "APDI-I" }), // institutional — must be ignored
+      ]);
+      // findFunds annotates ter from the fund_catalog.current_ter cache.
+      expect(findFunds({}).find((f) => f.projId === "APDI")?.ter).toBe(1.964);
+    });
+  });
+
+  it("falls back to a restricted class when no retail/unknown class has a fee", () => {
+    withDb(() => {
+      upsertFund(fund("PRIV", { abbrName: "PRIV" }));
+      upsertShareClasses([
+        { projId: "PRIV", className: "PRIV-R", ticker: "PRIV-R", investorType: "restricted" },
+        { projId: "PRIV", className: "PRIV-I", ticker: "PRIV-I", investorType: "institutional" },
+      ]);
+      upsertFundFees([
+        ter("PRIV", 2.5, { fundClassName: "PRIV-R" }),
+        ter("PRIV", 0.01, { fundClassName: "PRIV-I" }), // institutional excluded
+      ]);
+      expect(findFunds({}).find((f) => f.projId === "PRIV")?.ter).toBe(2.5);
+    });
+  });
+});
+
 describe("findFunds", () => {
   it("ranks cheapest-first and sorts no-TER funds last", () => {
     withDb(() => {

@@ -34,13 +34,28 @@ export function isIndexStyle(managementStyle: string | null | undefined): boolea
 // anything unrecognized stay NULL so allocation math doesn't bucket a balanced
 // fund into one class. Matched by substring to tolerate trailing qualifiers.
 const ASSET_CLASS_BY_POLICY: ReadonlyArray<readonly [string, string]> = [
-  ["ตลาดเงิน", "cash"], // money market — check before ตราสารหนี้
   ["ตราสารหนี้", "bond"], // fixed income
   ["ตราสารทุน", "equity"], // equity
   ["ทรัพย์สินทางเลือก", "alternative"], // alternatives (REITs, gold, etc.)
 ];
 
-export function inferAssetClass(policyDescTh: string | null | undefined): string | null {
+/**
+ * Normalized asset class from the SEC's coarse `policy_desc` label, refined by
+ * the fund name.
+ *
+ * Money market is a distinct cash-equivalent bucket the screener filters on, but
+ * the v2 `policy_desc` field has no money-market value — every money-market fund
+ * is labelled `ตราสารหนี้` (fixed income), so a `cash` class derived from
+ * `policy_desc` alone is empty by construction. The fund NAME reliably carries
+ * `ตลาดเงิน` (money market) and nothing else does (verified: every name match is
+ * otherwise a bond, zero equity/mixed false positives), so we recover `cash`
+ * from the name before falling back to the policy label.
+ */
+export function inferAssetClass(
+  policyDescTh: string | null | undefined,
+  nameTh?: string | null | undefined,
+): string | null {
+  if (nameTh?.includes("ตลาดเงิน")) return "cash"; // money market → cash-equivalent
   if (!policyDescTh) return null;
   for (const [needle, cls] of ASSET_CLASS_BY_POLICY) {
     if (policyDescTh.includes(needle)) return cls;

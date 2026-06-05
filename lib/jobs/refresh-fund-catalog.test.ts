@@ -222,22 +222,24 @@ describe("refreshFundCatalog", () => {
     ]);
   });
 
-  it("infers asset class from policy_desc Thai label (not fund_type_en)", async () => {
+  it("infers asset class from policy_desc Thai label, money market from the name", async () => {
     // policy_desc is the Thai asset-type label. fund_type_en does not exist in v2.
-    const cases: Array<[string | null, string | null]> = [
-      ["ตราสารทุน", "equity"],
-      ["ตราสารหนี้", "bond"],
-      ["ตลาดเงิน", "cash"],
-      ["ทรัพย์สินทางเลือก", "alternative"],
-      ["ผสม", null], // mixed — intentionally stays null
-      [null, null],
+    // Money market has no policy_desc value (SEC labels it bond); it's recovered
+    // from the fund name carrying ตลาดเงิน, which must win over the bond label.
+    const cases: Array<[string | null, string, string | null]> = [
+      ["ตราสารทุน", "กองทุนทดสอบ", "equity"],
+      ["ตราสารหนี้", "กองทุนทดสอบ", "bond"],
+      ["ตราสารหนี้", "กองทุนเปิดเค ตลาดเงิน", "cash"], // money market → cash, from name
+      ["ทรัพย์สินทางเลือก", "กองทุนทดสอบ", "alternative"],
+      ["ผสม", "กองทุนทดสอบ", null], // mixed — intentionally stays null
+      [null, "กองทุนทดสอบ", null],
     ];
 
-    for (const [policyDesc, expectedAssetClass] of cases) {
+    for (const [policyDesc, nameTh, expectedAssetClass] of cases) {
       vi.mocked(upsertFund).mockReset();
       await refreshFundCatalog({
         _enumerate: makeEnumerate([
-          makeProfile({ policy_desc: policyDesc, fund_status: "Registered" }),
+          makeProfile({ policy_desc: policyDesc, proj_name_th: nameTh, fund_status: "Registered" }),
         ]),
         _fetchFees: makeFetchFees([]),
         _fetchAum: makeFetchAum(null),

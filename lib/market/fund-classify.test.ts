@@ -34,16 +34,22 @@ describe("inferAssetClass", () => {
     expect(inferAssetClass("ตราสารหนี้")).toBe("bond");
     expect(inferAssetClass("ตราสารทุน")).toBe("equity");
     expect(inferAssetClass("ทรัพย์สินทางเลือก")).toBe("alternative");
-    expect(inferAssetClass("ตลาดเงิน")).toBe("cash");
   });
   it("returns null for mixed and unknown", () => {
     expect(inferAssetClass("ผสม")).toBeNull();
     expect(inferAssetClass("")).toBeNull();
     expect(inferAssetClass(null)).toBeNull();
   });
-  it("matches money market before fixed income", () => {
-    // a label that contains both should resolve to cash via ordering
-    expect(inferAssetClass("ตลาดเงิน (ตราสารหนี้ระยะสั้น)")).toBe("cash");
+  it("recovers money market as cash from the fund name (policy_desc says bond)", () => {
+    // The SEC's policy_desc has no money-market value — every money-market fund
+    // is labelled ตราสารหนี้ (bond). The fund NAME carries ตลาดเงิน, and that
+    // must win over the bond policy label.
+    expect(inferAssetClass("ตราสารหนี้", "กองทุนเปิดเค ตลาดเงิน")).toBe("cash");
+    expect(inferAssetClass("ตราสารหนี้", "กองทุนเปิดไทยพาณิชย์ตราสารรัฐตลาดเงิน")).toBe("cash");
+  });
+  it("ignores the name for non-money-market funds (no false positives)", () => {
+    expect(inferAssetClass("ตราสารทุน", "กองทุนเปิดหุ้นไทย")).toBe("equity");
+    expect(inferAssetClass("ตราสารหนี้", "กองทุนเปิดตราสารหนี้ระยะสั้น")).toBe("bond");
   });
 });
 

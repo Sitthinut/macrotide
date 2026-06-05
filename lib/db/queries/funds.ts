@@ -15,7 +15,7 @@ import { type FeeType, TER_FEE_TYPE } from "../../market/fund-fees";
 import { compareClassesForList } from "../../market/share-class-select";
 import { searchFundIds } from "../../search/fund-index";
 import { getMarketDb } from "../context";
-import { fundCatalog, fundFees, fundQuotes, navHistory } from "../schema";
+import { fundCatalog, fundFees, fundQuotes, fundShareClasses, navHistory } from "../schema";
 import { listShareClassesByProj } from "./share-classes";
 
 export type Fund = typeof fundCatalog.$inferSelect;
@@ -98,14 +98,37 @@ export function upsertFundFees(rows: FundFeeInsert[]): void {
   // written, so findFunds can sort/annotate by TER without touching the full
   // fee history. Picks the current total_expense row (open period first, then
   // newest start) for exactly the funds in `rows`.
+  //
+  // A multi-class fund publishes one total_expense row PER class in the same
+  // open period, so the period sort alone leaves a tie that SQLite breaks
+  // arbitrarily — and a single fee-waived special class (e.g. a `-X` at 0.011%
+  // beside a `-A` retail class at 1.964%) could win, dragging the whole family
+  // to the top of the cheapest-TER-first screener under a fee no retail buyer
+  // pays. So pick the class the screener actually leads with: join the share
+  // classes, drop the ones individuals can't buy (institutional / insurance),
+  // and break the period tie by the same audience tier compareClassesForList
+  // uses (retail → unknown → restricted), then a deterministic class name.
   const projIds = [...new Set(rows.map((r) => r.projId))];
   db.run(sql`
     UPDATE ${fundCatalog} SET current_ter = (
       SELECT COALESCE(${fundFees.actualRatePct}, ${fundFees.rateCeilingPct})
       FROM ${fundFees}
+      LEFT JOIN ${fundShareClasses}
+        ON ${fundShareClasses.projId} = ${fundFees.projId}
+       AND ${fundShareClasses.className} = ${fundFees.fundClassName}
       WHERE ${fundFees.projId} = ${fundCatalog.projId}
         AND ${fundFees.feeType} = ${TER_FEE_TYPE}
-      ORDER BY (${fundFees.periodEnd} IS NULL) DESC, ${fundFees.periodStart} DESC
+        AND (${fundShareClasses.investorType} IS NULL
+             OR ${fundShareClasses.investorType} NOT IN ('institutional', 'insurance'))
+      ORDER BY
+        (${fundFees.periodEnd} IS NULL) DESC,
+        ${fundFees.periodStart} DESC,
+        CASE
+          WHEN ${fundShareClasses.investorType} = 'retail' THEN 0
+          WHEN ${fundShareClasses.investorType} IS NULL THEN 1
+          ELSE 2
+        END,
+        ${fundFees.fundClassName}
       LIMIT 1
     )
     WHERE ${fundCatalog.projId} IN (${sql.join(
