@@ -66,14 +66,14 @@ export const holdings = sqliteTable(
     /**
      * Data-routing key. Tells the market registry which provider to call when
      * fetching NAV / price (see lib/market/sources.ts). One of:
-     *   - "yahoo"             — stocks, ETFs, indices, FX via Yahoo
+     *   - "market"            — stocks, ETFs, indices, FX via Yahoo
      *   - "thai_mutual_fund"  — Thai mutual fund NAVs via the SEC Open API
      *
      * This + `ticker` is the soft routing key into market.db's nav_history /
      * fund_quotes cache (see lib/market/cache.ts). It is NOT a SQL foreign key —
      * `holdings` denormalizes its display fields and never joins fund_catalog.
      */
-    quoteSource: text("quote_source").notNull().default("yahoo"),
+    quoteSource: text("quote_source").notNull().default("market"),
     acquiredOn: text("acquired_on"),
     createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
     updatedAt: text("updated_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
@@ -104,10 +104,10 @@ export const transactions = sqliteTable(
     /**
      * NAV/price-routing key, same semantics as holdings.quote_source — needed
      * so proceeds and the terminal portfolio value can be priced.
-     *   - "yahoo"             — stocks, ETFs, indices, FX via Yahoo
+     *   - "market"            — stocks, ETFs, indices, FX via Yahoo
      *   - "thai_mutual_fund"  — Thai mutual fund NAVs via the SEC Open API
      */
-    quoteSource: text("quote_source").notNull().default("yahoo"),
+    quoteSource: text("quote_source").notNull().default("market"),
     /**
      * Event type. Plain TEXT validated by Zod at the route boundary (the
      * action_item_states precedent) so a new kind needs no migration. Set:

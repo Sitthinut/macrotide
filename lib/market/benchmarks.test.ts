@@ -48,8 +48,8 @@ afterEach(() => {
 
 describe("getBenchmarkSeries — owner-mode carry-in", () => {
   it("seeds the window's first date from the last pre-window close", async () => {
-    // S&P 500 benchmark key → cache key "yahoo:^GSPC".
-    const key = "yahoo:^GSPC";
+    // S&P 500 benchmark key → cache key "market:^GSPC".
+    const key = "market:^GSPC";
     // Pre-window close (45d ago) + one in-window close (10d ago). A fresh quote
     // makes getCachedSeries serve from cache (no network).
     navAtOffset(key, 45, 4000);
@@ -73,7 +73,7 @@ describe("getBenchmarkSeries — owner-mode carry-in", () => {
   });
 
   it("no carry-in when an in-window point already lands on the window start", async () => {
-    const key = "yahoo:^GSPC";
+    const key = "market:^GSPC";
     navAtOffset(key, 31, 5000); // exactly on the 1mo window start
     navAtOffset(key, 5, 5100);
     marketDb

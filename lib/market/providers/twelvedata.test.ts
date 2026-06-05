@@ -51,9 +51,9 @@ describe("twelveDataProvider", () => {
   });
 
   it("joins the chain only when a key is configured", () => {
-    expect(twelveDataProvider.matches("yahoo", "^GSPC")).toBe(true);
+    expect(twelveDataProvider.matches("market", "^GSPC")).toBe(true);
     process.env.TWELVE_DATA_API_KEY = "  ";
-    expect(twelveDataProvider.matches("yahoo", "^GSPC")).toBe(false);
+    expect(twelveDataProvider.matches("market", "^GSPC")).toBe(false);
     process.env.TWELVE_DATA_API_KEY = KEY;
     expect(twelveDataProvider.matches("thai_mutual_fund", "X")).toBe(false);
   });

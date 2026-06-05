@@ -40,27 +40,27 @@ export interface DemoIndexDef {
  * which is all the demo chart needs (values are rebased + rescaled anyway).
  */
 export const DEMO_INDICES: DemoIndexDef[] = [
-  { indexKey: "sp500", source: "yahoo", ticker: "^GSPC", label: "S&P 500" },
-  { indexKey: "nasdaq", source: "yahoo", ticker: "^IXIC", label: "Nasdaq Composite" },
-  { indexKey: "nikkei", source: "yahoo", ticker: "^N225", label: "Nikkei 225" },
+  { indexKey: "sp500", source: "market", ticker: "^GSPC", label: "S&P 500" },
+  { indexKey: "nasdaq", source: "market", ticker: "^IXIC", label: "Nasdaq Composite" },
+  { indexKey: "nikkei", source: "market", ticker: "^N225", label: "Nikkei 225" },
   {
     indexKey: "set",
-    source: "yahoo",
+    source: "market",
     ticker: "^SET.BK",
     label: "SET (Stock Exchange of Thailand)",
   },
-  { indexKey: "acwi", source: "yahoo", ticker: "ACWI", label: "MSCI ACWI (global equity)" },
-  { indexKey: "gold", source: "yahoo", ticker: "GC=F", label: "Gold (XAU/USD)" },
+  { indexKey: "acwi", source: "market", ticker: "ACWI", label: "MSCI ACWI (global equity)" },
+  { indexKey: "gold", source: "market", ticker: "GC=F", label: "Gold (XAU/USD)" },
   {
     indexKey: "thai_bond",
-    source: "yahoo",
+    source: "market",
     ticker: null,
     label: "Thai government bonds (synthetic)",
     syntheticAnnualPct: 2.6,
   },
   {
     indexKey: "cash",
-    source: "yahoo",
+    source: "market",
     ticker: null,
     label: "Thai short-rate / cash (synthetic)",
     syntheticAnnualPct: 1.4,

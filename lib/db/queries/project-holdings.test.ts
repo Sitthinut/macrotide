@@ -70,7 +70,7 @@ describe("holdings projection — ledger writes rebuild holdings", () => {
           bucketId: "b1",
           ticker: A,
           englishName: "Fund A",
-          quoteSource: "yahoo",
+          quoteSource: "market",
           kind: "buy",
           tradeDate: "2024-01-01",
           units: 100,
@@ -81,7 +81,7 @@ describe("holdings projection — ledger writes rebuild holdings", () => {
         {
           bucketId: "b1",
           ticker: A,
-          quoteSource: "yahoo",
+          quoteSource: "market",
           kind: "buy",
           tradeDate: "2024-02-01",
           units: 100,
@@ -105,7 +105,7 @@ describe("holdings projection — ledger writes rebuild holdings", () => {
         {
           bucketId: "b1",
           ticker: A,
-          quoteSource: "yahoo",
+          quoteSource: "market",
           kind: "buy",
           tradeDate: "2024-01-01",
           units: 100,
@@ -115,7 +115,7 @@ describe("holdings projection — ledger writes rebuild holdings", () => {
         {
           bucketId: "b1",
           ticker: A,
-          quoteSource: "yahoo",
+          quoteSource: "market",
           kind: "sell",
           tradeDate: "2024-02-01",
           units: 100,
@@ -134,7 +134,7 @@ describe("holdings projection — ledger writes rebuild holdings", () => {
         {
           bucketId: "b1",
           ticker: A,
-          quoteSource: "yahoo",
+          quoteSource: "market",
           kind: "opening",
           tradeDate: "2024-01-01",
           units: 100,
@@ -155,7 +155,7 @@ describe("holdings projection — ledger writes rebuild holdings", () => {
         {
           bucketId: "b1",
           ticker: A,
-          quoteSource: "yahoo",
+          quoteSource: "market",
           kind: "buy",
           tradeDate: "2024-01-01",
           units: 100,
@@ -201,7 +201,7 @@ describe("holdings write paths route through the ledger", () => {
         bucketId: "b1",
         ticker: A,
         englishName: "Fund A",
-        quoteSource: "yahoo",
+        quoteSource: "market",
         units: 100,
         avgCost: 12,
       });
@@ -218,7 +218,7 @@ describe("holdings write paths route through the ledger", () => {
         bucketId: "b1",
         ticker: A,
         englishName: "Fund A",
-        quoteSource: "yahoo",
+        quoteSource: "market",
         units: 100,
         avgCost: 12,
       });
@@ -237,7 +237,7 @@ describe("holdings write paths route through the ledger", () => {
         {
           bucketId: "b1",
           ticker: A,
-          quoteSource: "yahoo",
+          quoteSource: "market",
           kind: "buy",
           tradeDate: "2024-01-01",
           units: 100,
@@ -247,7 +247,7 @@ describe("holdings write paths route through the ledger", () => {
         {
           bucketId: "b1",
           ticker: A,
-          quoteSource: "yahoo",
+          quoteSource: "market",
           kind: "buy",
           tradeDate: "2024-02-01",
           units: 100,
@@ -271,7 +271,7 @@ describe("holdings write paths route through the ledger", () => {
         bucketId: "b1",
         ticker: A,
         englishName: "Fund A",
-        quoteSource: "yahoo",
+        quoteSource: "market",
         units: 100,
         avgCost: 12,
       });

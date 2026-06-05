@@ -54,23 +54,23 @@ export const KNOWN_TICKERS: readonly KnownTicker[] = [
   { ticker: "TMB50", name: "TMB SET50 Index Fund", quote_source: "thai_mutual_fund" },
 
   // ── Yahoo: Thai market indices and well-known SET listings ──
-  { ticker: "^SET.BK", name: "SET Index (Thailand)", quote_source: "yahoo" },
-  { ticker: "PTT.BK", name: "PTT Public Company Limited", quote_source: "yahoo" },
-  { ticker: "AOT.BK", name: "Airports of Thailand", quote_source: "yahoo" },
-  { ticker: "CPALL.BK", name: "CP All", quote_source: "yahoo" },
+  { ticker: "^SET.BK", name: "SET Index (Thailand)", quote_source: "market" },
+  { ticker: "PTT.BK", name: "PTT Public Company Limited", quote_source: "market" },
+  { ticker: "AOT.BK", name: "Airports of Thailand", quote_source: "market" },
+  { ticker: "CPALL.BK", name: "CP All", quote_source: "market" },
 
   // ── Yahoo: global indices and large ETFs ──
-  { ticker: "^GSPC", name: "S&P 500 Index", quote_source: "yahoo" },
-  { ticker: "^DJI", name: "Dow Jones Industrial Average", quote_source: "yahoo" },
-  { ticker: "^IXIC", name: "Nasdaq Composite", quote_source: "yahoo" },
-  { ticker: "VOO", name: "Vanguard S&P 500 ETF", quote_source: "yahoo" },
-  { ticker: "VT", name: "Vanguard Total World Stock ETF", quote_source: "yahoo" },
-  { ticker: "QQQ", name: "Invesco QQQ Trust (Nasdaq-100)", quote_source: "yahoo" },
-  { ticker: "AAPL", name: "Apple Inc.", quote_source: "yahoo" },
-  { ticker: "MSFT", name: "Microsoft Corporation", quote_source: "yahoo" },
+  { ticker: "^GSPC", name: "S&P 500 Index", quote_source: "market" },
+  { ticker: "^DJI", name: "Dow Jones Industrial Average", quote_source: "market" },
+  { ticker: "^IXIC", name: "Nasdaq Composite", quote_source: "market" },
+  { ticker: "VOO", name: "Vanguard S&P 500 ETF", quote_source: "market" },
+  { ticker: "VT", name: "Vanguard Total World Stock ETF", quote_source: "market" },
+  { ticker: "QQQ", name: "Invesco QQQ Trust (Nasdaq-100)", quote_source: "market" },
+  { ticker: "AAPL", name: "Apple Inc.", quote_source: "market" },
+  { ticker: "MSFT", name: "Microsoft Corporation", quote_source: "market" },
 
   // ── Yahoo: FX ──
-  { ticker: "THB=X", name: "USD / THB Exchange Rate", quote_source: "yahoo" },
+  { ticker: "THB=X", name: "USD / THB Exchange Rate", quote_source: "market" },
 ];
 
 export interface TickerSuggestion extends KnownTicker {
@@ -133,7 +133,7 @@ export function mergeWithHoldings(
       ticker: h.ticker,
       name: h.englishName,
       // The holdings table column is text; defensively narrow to our union.
-      quote_source: (h.quoteSource === "thai_mutual_fund" ? "thai_mutual_fund" : "yahoo"),
+      quote_source: (h.quoteSource === "thai_mutual_fund" ? "thai_mutual_fund" : "market"),
       fromHoldings: true,
     });
   }

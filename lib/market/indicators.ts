@@ -7,7 +7,7 @@
 // remove / reorder) from this catalog; see lib/db/queries/market-indicators.ts.
 //
 // REAL index levels vs ETF proxies — `symbol` is the canonical Yahoo-style
-// ticker the provider chain resolves (quote_source "yahoo"). Where a free
+// ticker the provider chain resolves (quote_source "market"). Where a free
 // real-index source exists we use the index symbol (^GSPC, ^NDX, ^DJI, ^N225,
 // ^SET.BK) and the chain serves the actual level from FMP (US) or EODHD
 // (global + SET); when those keys are absent it transparently falls back to the

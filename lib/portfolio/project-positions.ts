@@ -39,7 +39,7 @@ export interface ProjectedPosition {
   acquiredOn: string | null;
 }
 
-const DEFAULT_QUOTE_SOURCE = "yahoo";
+const DEFAULT_QUOTE_SOURCE = "market";
 
 /**
  * Project a bucket's ledger events into derived positions (one row per held

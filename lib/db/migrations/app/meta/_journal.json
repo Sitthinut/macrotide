@@ -64,6 +64,13 @@
       "when": 1780645544228,
       "tag": "0008_groovy_harrier",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1780645644228,
+      "tag": "0009_rename_quote_source_market",
+      "breakpoints": true
     }
   ]
 }

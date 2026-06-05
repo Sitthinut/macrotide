@@ -119,7 +119,7 @@ async function fetchUsdRate(
   dates: string[],
 ): Promise<Map<string, number> | null> {
   try {
-    const cached = await getCachedSeries("yahoo", `${currency}=X`, range);
+    const cached = await getCachedSeries("market", `${currency}=X`, range);
     if (cached.series.length === 0) return null;
     return forwardFillRates(cached.series, dates);
   } catch {

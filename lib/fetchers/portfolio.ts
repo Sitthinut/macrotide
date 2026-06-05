@@ -42,7 +42,7 @@ export interface RefreshedQuote extends QuoteRef {
  * Live-refresh quotes through the provider registry (Yahoo / Thai SEC / …).
  * Cache hits return from the DB; misses trigger a network call. Pass `null`
  * to skip. Each ref must carry both `source` (the quote_source value, e.g.
- * "yahoo" or "thai_mutual_fund") and `ticker` (the bare user-visible code).
+ * "market" or "thai_mutual_fund") and `ticker` (the bare user-visible code).
  */
 export function useRefreshedQuotes(refs: QuoteRef[] | null) {
   const key =

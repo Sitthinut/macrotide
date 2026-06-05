@@ -129,7 +129,7 @@ function toQuote(r: YahooResult): Quote {
 export const yahooProvider: Provider = {
   id: "yahoo",
   matches(source: string, _ticker: string): boolean {
-    return source === "yahoo";
+    return source === "market";
   },
   async fetchSeries(
     ticker: string,

@@ -205,7 +205,7 @@ describe("advisor tools — propose_holding", () => {
         avgCost: 400,
         assetClass: "equity",
         region: "US",
-        quoteSource: "yahoo",
+        quoteSource: "market",
         rationale: "Read from the statement.",
       })) as {
         ok: boolean;
@@ -230,12 +230,12 @@ describe("advisor tools — propose_holding", () => {
     expect(result.out.holding.units).toBe(12.5);
     expect(result.out.holding.avgCost).toBe(400);
     expect(result.out.holding.assetClass).toBe("equity");
-    expect(result.out.holding.quoteSource).toBe("yahoo");
+    expect(result.out.holding.quoteSource).toBe("market");
     // Crucially: proposing did NOT insert a holding.
     expect(result.count).toBe(0);
   });
 
-  it("defaults quoteSource to yahoo and nulls absent optional fields", async () => {
+  it("defaults quoteSource to market and nulls absent optional fields", async () => {
     const out = (await withFresh(async () => {
       const tools = createAdvisorTools({ userId: null });
       return run(tools.propose_holding, {
@@ -245,7 +245,7 @@ describe("advisor tools — propose_holding", () => {
         rationale: "row 1",
       });
     })) as { holding: { quoteSource: string; avgCost: number | null; assetClass: string | null } };
-    expect(out.holding.quoteSource).toBe("yahoo");
+    expect(out.holding.quoteSource).toBe("market");
     expect(out.holding.avgCost).toBeNull();
     expect(out.holding.assetClass).toBeNull();
   });
@@ -304,12 +304,12 @@ describe("advisor tools — propose_holdings_import", () => {
   it("honors an explicit per-row quoteSource override", async () => {
     const out = (await withFresh(async () => {
       const tools = createAdvisorTools({ userId: null });
-      // 'K-USA-A' would infer thai_mutual_fund; override forces yahoo.
+      // 'K-USA-A' would infer thai_mutual_fund; override forces market.
       return run(tools.propose_holdings_import, {
-        rows: [{ ticker: "K-USA-A", units: 1, quoteSource: "yahoo" }],
+        rows: [{ ticker: "K-USA-A", units: 1, quoteSource: "market" }],
       });
     })) as ImportOut;
-    expect(out.holdingsImport.rows[0].quoteSource).toBe("yahoo");
+    expect(out.holdingsImport.rows[0].quoteSource).toBe("market");
   });
 
   it("flags rows that still need a unit count in the message", async () => {

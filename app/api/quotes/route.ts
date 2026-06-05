@@ -15,7 +15,7 @@ interface QuoteResult {
 
 /**
  * Each `refs` parameter value is a `source:ticker` pair. Examples:
- *   refs=yahoo:AAPL,yahoo:^GSPC
+ *   refs=market:AAPL,market:^GSPC
  *   refs=thai_mutual_fund:K-FIXED-A
  *
  * Without `refresh=1`, returns the raw cached fund_quotes rows for the

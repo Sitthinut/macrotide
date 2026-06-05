@@ -20,10 +20,10 @@ export interface BenchmarkOption {
  * this list.
  */
 export const BENCHMARK_OPTIONS: BenchmarkOption[] = [
-  { key: "set", label: "SET", source: "yahoo", ticker: "^SET.BK" },
-  { key: "sp500", label: "S&P 500", source: "yahoo", ticker: "^GSPC" },
-  { key: "nasdaq", label: "Nasdaq", source: "yahoo", ticker: "^IXIC" },
-  { key: "nikkei", label: "Nikkei", source: "yahoo", ticker: "^N225" },
+  { key: "set", label: "SET", source: "market", ticker: "^SET.BK" },
+  { key: "sp500", label: "S&P 500", source: "market", ticker: "^GSPC" },
+  { key: "nasdaq", label: "Nasdaq", source: "market", ticker: "^IXIC" },
+  { key: "nikkei", label: "Nikkei", source: "market", ticker: "^N225" },
 ];
 
 export function findBenchmark(key: string): BenchmarkOption | undefined {

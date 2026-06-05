@@ -94,7 +94,7 @@ export async function computeTransactionAnalytics(
     marketValue = 0;
     ({ irr, irrUnavailable } = solveIrr(txns, null, opts.asOf));
   } else {
-    const cacheKeys = held.map((p) => `${sourceByTicker.get(p.ticker) ?? "yahoo"}:${p.ticker}`);
+    const cacheKeys = held.map((p) => `${sourceByTicker.get(p.ticker) ?? "market"}:${p.ticker}`);
     const navByKey = new Map<string, number>();
     for (const q of listFundQuotes(cacheKeys)) {
       if (q.nav > 0) navByKey.set(q.ticker, q.nav);
@@ -106,7 +106,7 @@ export async function computeTransactionAnalytics(
 
     const currencies = new Set<string>();
     for (const p of held) {
-      currencies.add(inferHoldingCurrency(sourceByTicker.get(p.ticker) ?? "yahoo", p.ticker));
+      currencies.add(inferHoldingCurrency(sourceByTicker.get(p.ticker) ?? "market", p.ticker));
     }
     const fx = await buildFxConverter(currencies, "1mo", [opts.asOf]);
     for (const c of fx.missing) missingFx.push(c);
@@ -114,7 +114,7 @@ export async function computeTransactionAnalytics(
     let total = 0;
     const unpriced: string[] = [];
     for (const p of held) {
-      const source = sourceByTicker.get(p.ticker) ?? "yahoo";
+      const source = sourceByTicker.get(p.ticker) ?? "market";
       const nav =
         source === "manual" ? manualPrice.get(p.ticker) : navByKey.get(`${source}:${p.ticker}`);
       const rate = fx.rateOn(inferHoldingCurrency(source, p.ticker), opts.asOf);

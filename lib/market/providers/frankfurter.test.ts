@@ -6,10 +6,10 @@ import { ProviderError } from "./types";
 
 describe("frankfurterProvider.matches", () => {
   it("owns Yahoo-style FX pairs and nothing else", () => {
-    expect(frankfurterProvider.matches("yahoo", "THB=X")).toBe(true);
-    expect(frankfurterProvider.matches("yahoo", "JPY=X")).toBe(true);
-    expect(frankfurterProvider.matches("yahoo", "^GSPC")).toBe(false);
-    expect(frankfurterProvider.matches("yahoo", "AAPL")).toBe(false);
+    expect(frankfurterProvider.matches("market", "THB=X")).toBe(true);
+    expect(frankfurterProvider.matches("market", "JPY=X")).toBe(true);
+    expect(frankfurterProvider.matches("market", "^GSPC")).toBe(false);
+    expect(frankfurterProvider.matches("market", "AAPL")).toBe(false);
     expect(frankfurterProvider.matches("thai_mutual_fund", "THB=X")).toBe(false);
   });
 });

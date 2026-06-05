@@ -412,7 +412,7 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
         .optional()
         .describe(
           "Price source: 'thai_mutual_fund' for SEC-registered Thai mutual funds, " +
-            "'yahoo' for stocks/ETFs/indices. Defaults to 'yahoo'.",
+            "'market' for stocks/ETFs/indices. Defaults to 'market'.",
         ),
       bucketId: z
         .string()
@@ -448,7 +448,7 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
         ter: input.ter ?? null,
         assetClass: input.assetClass ?? null,
         region: input.region?.trim() ?? null,
-        quoteSource: input.quoteSource ?? "yahoo",
+        quoteSource: input.quoteSource ?? "market",
         bucketId: input.bucketId?.trim() ?? null,
         source: input.source?.trim() ?? null,
         rationale: input.rationale,
@@ -508,7 +508,7 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
               .optional()
               .describe(
                 "Price source override: 'thai_mutual_fund' for SEC-registered Thai funds, " +
-                  "'yahoo' for stocks/ETFs. Omit to let the importer infer it from the ticker.",
+                  "'market' for stocks/ETFs. Omit to let the importer infer it from the ticker.",
               ),
           }),
         )

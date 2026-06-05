@@ -577,7 +577,7 @@ sudo systemctl enable --now macrotide-share-classes.timer
 ### Tracked-market NAV refresh (freshness)
 
 Proactively refresh the cached NAV/quote for everything the app *tracks* — every
-indicator in the catalog (the `yahoo` chain) plus every distinct held position
+indicator in the catalog (the `market` chain) plus every distinct held position
 (routed by its `quote_source`) — so charts are current on the first view of the
 day and the unattended digest has fresh numbers. This is `scripts/refresh-tracked-market.ts`
 (`npm run jobs:refresh-market`); it's the same `refreshTrackedMarket` job the

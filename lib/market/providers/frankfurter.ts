@@ -51,7 +51,7 @@ export const frankfurterProvider: Provider = {
   id: "frankfurter",
   // Keyless FX only: owns Yahoo-style currency pairs, leaves everything else.
   matches(source: string, ticker: string): boolean {
-    return source === "yahoo" && FX_RE.test(ticker);
+    return source === "market" && FX_RE.test(ticker);
   },
   async fetchSeries(
     ticker: string,

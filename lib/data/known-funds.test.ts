@@ -9,9 +9,9 @@ import {
 const sample: TickerSuggestion[] = [
   { ticker: "K-FIXED-A", name: "K Fixed Income Fund — A", quote_source: "thai_mutual_fund" },
   { ticker: "K-USA-A(A)", name: "K USA Equity Fund — A (Accum.)", quote_source: "thai_mutual_fund" },
-  { ticker: "AAPL", name: "Apple Inc.", quote_source: "yahoo" },
-  { ticker: "MSFT", name: "Microsoft Corporation", quote_source: "yahoo" },
-  { ticker: "^GSPC", name: "S&P 500 Index", quote_source: "yahoo" },
+  { ticker: "AAPL", name: "Apple Inc.", quote_source: "market" },
+  { ticker: "MSFT", name: "Microsoft Corporation", quote_source: "market" },
+  { ticker: "^GSPC", name: "S&P 500 Index", quote_source: "market" },
 ];
 
 describe("filterKnownTickers", () => {
@@ -55,7 +55,7 @@ describe("filterKnownTickers", () => {
 
   it("surfaces holdings entries ahead of static entries within the same match tier", () => {
     const list: TickerSuggestion[] = [
-      { ticker: "AAPL", name: "Apple Inc.", quote_source: "yahoo" },
+      { ticker: "AAPL", name: "Apple Inc.", quote_source: "market" },
       { ticker: "APPLE-FUND", name: "Apple Fund", quote_source: "thai_mutual_fund", fromHoldings: true },
     ];
     const out = filterKnownTickers(list, "apple");
@@ -84,7 +84,7 @@ describe("mergeWithHoldings", () => {
 
   it("dedupes when a holding ticker also appears in the static list", () => {
     const out = mergeWithHoldings([
-      { ticker: "AAPL", englishName: "Apple (my entry)", quoteSource: "yahoo" },
+      { ticker: "AAPL", englishName: "Apple (my entry)", quoteSource: "market" },
     ]);
     const apples = out.filter((e) => e.ticker.toUpperCase() === "AAPL");
     expect(apples).toHaveLength(1);
@@ -102,10 +102,10 @@ describe("mergeWithHoldings", () => {
     expect(matches[0].name).toBe("First");
   });
 
-  it("narrows unrecognised quote_source values to yahoo", () => {
+  it("narrows unrecognised quote_source values to market", () => {
     const out = mergeWithHoldings([
       { ticker: "WEIRD", englishName: "Weird", quoteSource: "something-else" },
     ]);
-    expect(out[0].quote_source).toBe("yahoo");
+    expect(out[0].quote_source).toBe("market");
   });
 });

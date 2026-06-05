@@ -4,7 +4,7 @@
 //   - decide whether it owns a given (source, ticker) pair (`matches`)
 //   - return a normalized quote + daily series for that pair (`fetchSeries`)
 //
-// `source` names the asset class (see lib/market/sources.ts — e.g. "yahoo",
+// `source` names the asset class (see lib/market/sources.ts — e.g. "market",
 // "thai_mutual_fund"). `ticker` is the symbol exactly as it appears on a
 // holding row — no namespace prefix, no provider-specific encoding. The
 // registry (see lib/market/registry.ts) iterates providers in registration

@@ -39,7 +39,7 @@ const txnInput = z
     marketPrice: z.number().finite().nonnegative().nullish(),
     amount: z.number().finite().nonnegative(),
     fee: z.number().finite().nonnegative().nullish(),
-    quoteSource: z.string().trim().min(1).max(40).default("yahoo"),
+    quoteSource: z.string().trim().min(1).max(40).default("market"),
     tradeCurrency: z.string().trim().min(1).max(8).default("THB"),
     fxToThb: z.number().finite().positive().default(1),
     note: z.string().trim().max(500).optional(),

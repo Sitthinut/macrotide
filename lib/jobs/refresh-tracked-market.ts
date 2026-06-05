@@ -15,7 +15,7 @@ export interface RefreshTrackedMarketResult {
 
 /**
  * Refresh the cached NAV/quote for everything the app *actively tracks*: every
- * indicator in `INDICATOR_CATALOG` (the `yahoo` provider chain) plus every
+ * indicator in `INDICATOR_CATALOG` (the `market` provider chain) plus every
  * distinct held position (routed by its own `quote_source`). De-dups by
  * `${source}:${ticker}` so a held index isn't fetched twice.
  *
@@ -36,8 +36,8 @@ export async function refreshTrackedMarket(
   const range = opts.range ?? "6mo";
 
   // Warm every catalog indicator (so any user's selection is cached) — all route
-  // through the "yahoo" provider chain.
-  const indexRefs = INDICATOR_CATALOG.map((i) => ({ source: "yahoo", ticker: i.symbol }));
+  // through the "market" provider chain.
+  const indexRefs = INDICATOR_CATALOG.map((i) => ({ source: "market", ticker: i.symbol }));
   // Every held position is refreshed via its own provider — holdings carry
   // quote_source explicitly so we don't guess by ticker shape.
   const heldRows = appDb

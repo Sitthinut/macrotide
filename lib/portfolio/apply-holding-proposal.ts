@@ -49,7 +49,7 @@ export interface HoldingProposalResult {
 function normalizeQuoteSource(value: string | null | undefined): QuoteSource {
   return value && (QUOTE_SOURCES as readonly string[]).includes(value)
     ? (value as QuoteSource)
-    : "yahoo";
+    : "market";
 }
 
 /**
