@@ -25,7 +25,8 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 - **The Cash filter in Explore returns money-market funds.** Money-market funds
   were classified as bond because the SEC's coarse `policy_desc` has no
   money-market value, leaving the Cash filter permanently empty. They're now
-  recognized from the fund name and bucketed as cash-equivalents.
+  recognized from the fund name (Thai `ตลาดเงิน` or English "money market") and
+  bucketed as cash-equivalents.
 - **Explore stops surfacing funds you can't buy.** Funds the SEC marks not-for-retail
   (`proj_retail_type` ≠ `R` — accredited / institutional-only private funds whose
   class detail describes hedging, not audience) are now hidden from the screener,

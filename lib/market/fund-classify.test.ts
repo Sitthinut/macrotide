@@ -42,14 +42,19 @@ describe("inferAssetClass", () => {
   });
   it("recovers money market as cash from the fund name (policy_desc says bond)", () => {
     // The SEC's policy_desc has no money-market value — every money-market fund
-    // is labelled ตราสารหนี้ (bond). The fund NAME carries ตลาดเงิน, and that
-    // must win over the bond policy label.
+    // is labelled ตราสารหนี้ (bond). The fund NAME carries the money-market
+    // marker (Thai ตลาดเงิน or English "money market"), and that must win over
+    // the bond policy label. Some funds spell it only one way.
     expect(inferAssetClass("ตราสารหนี้", "กองทุนเปิดเค ตลาดเงิน")).toBe("cash");
     expect(inferAssetClass("ตราสารหนี้", "กองทุนเปิดไทยพาณิชย์ตราสารรัฐตลาดเงิน")).toBe("cash");
+    // English-only marker (Thai name uses a transliteration, not ตลาดเงิน)
+    expect(inferAssetClass("ตราสารหนี้", "กองทุนเปิด ดาโอ มันนี่ มาร์เก็ต", "DAOL Money Market Fund")).toBe(
+      "cash",
+    );
   });
   it("ignores the name for non-money-market funds (no false positives)", () => {
-    expect(inferAssetClass("ตราสารทุน", "กองทุนเปิดหุ้นไทย")).toBe("equity");
-    expect(inferAssetClass("ตราสารหนี้", "กองทุนเปิดตราสารหนี้ระยะสั้น")).toBe("bond");
+    expect(inferAssetClass("ตราสารทุน", "กองทุนเปิดหุ้นไทย", "K Thai Equity Fund")).toBe("equity");
+    expect(inferAssetClass("ตราสารหนี้", "กองทุนเปิดตราสารหนี้ระยะสั้น", "Short Term Bond")).toBe("bond");
   });
 });
 

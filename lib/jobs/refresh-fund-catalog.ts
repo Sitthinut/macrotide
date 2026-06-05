@@ -159,7 +159,7 @@ function profileToFundInsert(
     fundType: null,
     policyDesc: p.policy_desc ?? null,
     policyDescTh: p.policy_desc ?? null,
-    assetClass: inferAssetClass(p.policy_desc, p.proj_name_th),
+    assetClass: inferAssetClass(p.policy_desc, p.proj_name_th, p.proj_name_en),
     managementStyle: p.management_style ?? null,
     taxIncentiveType: classifyTaxIncentive(p.fund_class_tax_incentive_type),
     distributionPolicy: classifyDistribution(p.fund_class_detail),

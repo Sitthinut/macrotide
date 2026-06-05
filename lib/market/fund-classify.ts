@@ -47,15 +47,19 @@ const ASSET_CLASS_BY_POLICY: ReadonlyArray<readonly [string, string]> = [
  * the v2 `policy_desc` field has no money-market value — every money-market fund
  * is labelled `ตราสารหนี้` (fixed income), so a `cash` class derived from
  * `policy_desc` alone is empty by construction. The fund NAME reliably carries
- * `ตลาดเงิน` (money market) and nothing else does (verified: every name match is
+ * the money-market marker instead — Thai `ตลาดเงิน` or English `money market`
+ * (some funds spell it only one way, e.g. `ดาโอ มันนี่ มาร์เก็ต` /
+ * `DAOL Money Market`) — and nothing else does (verified: every name match is
  * otherwise a bond, zero equity/mixed false positives), so we recover `cash`
  * from the name before falling back to the policy label.
  */
 export function inferAssetClass(
   policyDescTh: string | null | undefined,
   nameTh?: string | null | undefined,
+  nameEn?: string | null | undefined,
 ): string | null {
-  if (nameTh?.includes("ตลาดเงิน")) return "cash"; // money market → cash-equivalent
+  // money market → cash-equivalent, recovered from either-language name
+  if (nameTh?.includes("ตลาดเงิน") || /money\s*market/i.test(nameEn ?? "")) return "cash";
   if (!policyDescTh) return null;
   for (const [needle, cls] of ASSET_CLASS_BY_POLICY) {
     if (policyDescTh.includes(needle)) return cls;
