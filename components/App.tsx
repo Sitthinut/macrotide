@@ -4,9 +4,6 @@ import "overlayscrollbars/overlayscrollbars.css";
 import { useOverlayScrollbars } from "overlayscrollbars-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ActivityModal } from "@/components/ActivityModal";
-import type { AddedHolding } from "@/components/AddHoldingsSheet";
-import { type AddMode, AddToPortfolioSheet } from "@/components/AddToPortfolioSheet";
 import {
   type AppId,
   ChatPanel,
@@ -17,13 +14,16 @@ import {
 import { FundSelectScreen } from "@/components/FundSelect";
 import { Icon } from "@/components/Icon";
 import { type PortfolioFormValues, PortfolioSheet } from "@/components/PortfolioSheet";
+import { RecordSheet } from "@/components/RecordSheet";
 import { AccountScreen } from "@/components/screens/AccountScreen";
 import { AdminScreen } from "@/components/screens/AdminScreen";
 import { ChatScreen, type SeedPrompt } from "@/components/screens/ChatScreen";
+import { HistoryScreen } from "@/components/screens/HistoryScreen";
 import { JournalScreen } from "@/components/screens/JournalScreen";
 import { MarketsScreen } from "@/components/screens/MarketsScreen";
 import { ModelPortfoliosScreen } from "@/components/screens/ModelPortfoliosScreen";
 import { PortfolioScreen } from "@/components/screens/PortfolioScreen";
+import { PositionScreen } from "@/components/screens/PositionScreen";
 import { SettingsScreen, type Theme } from "@/components/screens/SettingsScreen";
 import { clearDemoSession } from "@/lib/auth/clear-demo";
 import { authClient } from "@/lib/auth/client";
@@ -49,8 +49,14 @@ function portfolioToFormValues(p: Portfolio): PortfolioFormValues {
   };
 }
 
+// Which entry the unified Add (RecordSheet) opens in: a holdings snapshot
+// (Balance rows) or buy/sell activity. (Formerly from the retired AddToPortfolioSheet.)
+type AddMode = "snapshot" | "activity";
+
 type Screen =
   | "portfolio"
+  | "activity"
+  | "position"
   | "markets"
   | "funds"
   | "chat"
@@ -205,10 +211,13 @@ export function App() {
   // import-seed store), copied into local state so the sheet keeps them after
   // the consumable store intent is cleared.
   const [importSeed, setImportSeed] = useState<ImportSeedRow[] | null>(null);
-  // The Activity modal (the ledger view, scoped to a bucket or all). `txnSeed`
-  // carries rows handed off from the holdings importer's scope-guard.
-  const [activityOpen, setActivityOpen] = useState(false);
+  // `txnSeed` carries rows handed off from the holdings importer's scope-guard
+  // into the Add sheet's Activity mode. The all-activity ledger is now its own
+  // screen (setScreen("activity")), not a modal.
   const [txnSeed, setTxnSeed] = useState<ExtractedTxnRow[] | null>(null);
+  // Ticker for the per-position drill-in screen (One Truth: a holding opens its
+  // own record — summary above the history that produced it).
+  const [positionTicker, setPositionTicker] = useState<string | null>(null);
   const { seedRows: seedRequest, openNonce: seedNonce, consumeImportSeed } = useImportSeed();
   const handledSeedNonce = useRef(0);
   useEffect(() => {
@@ -220,7 +229,6 @@ export function App() {
       consumeImportSeed();
     }
   }, [seedNonce, seedRequest, consumeImportSeed]);
-  const [, setExtraHoldings] = useState<AddedHolding[]>([]);
   const [, setSavedReading] = useState<unknown[]>([]);
   const planSelectedModelId = useSelectedModelId();
   const { data: plan } = usePlan();
@@ -254,7 +262,7 @@ export function App() {
   // host into whichever mount-point is live. Because the host DOM node and the
   // portal both keep a stable React-tree position across the shell swap, the
   // screen — and any modal it owns — is reconciled (state preserved), never
-  // remounted. PortfolioSheet/AddHoldingsSheet (sharedModals) are lifted for
+  // remounted. PortfolioSheet/RecordSheet (sharedModals) are lifted for
   // the same reason; this generalizes that protection to the whole screen.
   const screenHostRef = useRef<HTMLDivElement | null>(null);
   if (screenHostRef.current === null && typeof document !== "undefined") {
@@ -506,7 +514,34 @@ export function App() {
             setAddMode("snapshot");
             setAddOpen(true);
           }}
-          onOpenActivity={() => setActivityOpen(true)}
+          onOpenActivity={() => setScreen("activity")}
+          onOpenPosition={(t) => {
+            setPositionTicker(t);
+            setScreen("position");
+          }}
+        />
+      );
+    }
+    if (screen === "activity") {
+      return (
+        <HistoryScreen
+          onBack={() => setScreen("portfolio")}
+          onAdd={() => {
+            setAddMode("activity");
+            setAddOpen(true);
+          }}
+        />
+      );
+    }
+    if (screen === "position" && positionTicker) {
+      return (
+        <PositionScreen
+          ticker={positionTicker}
+          onBack={() => setScreen("portfolio")}
+          onRecord={() => {
+            setAddMode("activity");
+            setAddOpen(true);
+          }}
         />
       );
     }
@@ -597,10 +632,9 @@ export function App() {
             : undefined
         }
       />
-      <AddToPortfolioSheet
+      <RecordSheet
         open={addOpen}
-        mode={addMode}
-        onModeChange={setAddMode}
+        defaultKind={addMode === "activity" ? "buy" : "opening"}
         holdingsSeed={importSeed}
         txnSeed={txnSeed}
         onClose={() => {
@@ -608,20 +642,7 @@ export function App() {
           setImportSeed(null);
           setTxnSeed(null);
         }}
-        onAdd={(rows) => setExtraHoldings((prev) => [...prev, ...rows])}
-        onHandoffToActivity={(seed) => setTxnSeed(seed)}
-        onSaved={() => setActivityOpen(true)}
-      />
-      <ActivityModal
-        open={activityOpen}
-        onClose={() => setActivityOpen(false)}
-        onAddTransactions={() => {
-          // Don't stack modals — close Activity, then open the unified Add sheet
-          // straight into Activity mode.
-          setActivityOpen(false);
-          setAddMode("activity");
-          setAddOpen(true);
-        }}
+        onSaved={() => setScreen("activity")}
       />
     </>
   );
