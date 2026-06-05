@@ -53,6 +53,32 @@ export interface PortfolioOutput {
     } | null;
   };
   cashPct: number;
+  // Lifetime ledger analytics — mirrors the History screen's KPI cards so a
+  // spoken answer matches what the user sees. null only when there are no
+  // holdings. `irrPct` is the money-weighted (annualized) return in percent;
+  // when it can't be computed `irrUnavailable` says why (and irrPct is null).
+  ledger: {
+    invested: number;
+    realized: number;
+    income: number;
+    irrPct: number | null;
+    irrUnavailable: string | null;
+  } | null;
+  // Holdings priced from the user's own last-entered price (quote_source
+  // "manual"), not a live feed — the model must flag these as user-supplied.
+  customHoldings: { ticker: string; label: string; pct: number }[];
+  // Present only when read_portfolio was called with a `ticker` — that one
+  // fund's ledger analytics (same figures, scoped to its events).
+  position: {
+    ticker: string;
+    invested: number;
+    realized: number;
+    income: number;
+    irrPct: number | null;
+    irrUnavailable: string | null;
+    marketValue: number | null;
+    units: number;
+  } | null;
   headline: { tone: string; title: string; body: string };
   message: string;
 }
@@ -75,10 +101,43 @@ export function portfolioModelText(o: PortfolioOutput): string {
     }.`,
     `Concentration: ${top ? `largest ${top.ticker} ${top.pct}%` : "n/a"}, top-3 ${o.concentration.top3Pct}%, ${o.concentration.holdingCount} holdings; cash ${o.cashPct}%.`,
     concentrationLine(o.concentration),
+    ledgerLine(o.ledger),
+    customLine(o.customHoldings),
+    positionLine(o.position),
     `${o.headline.title} — ${o.headline.body}`,
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+const baht = (n: number) => `฿${n.toLocaleString()}`;
+const bahtSigned = (n: number) => `${n < 0 ? "−" : "+"}฿${Math.abs(n).toLocaleString()}`;
+const mwReturn = (irrPct: number | null, why: string | null) =>
+  irrPct != null
+    ? `money-weighted return ${num(irrPct, { pct: true, sign: true })}`
+    : `money-weighted return n/a (${why ?? "unavailable"})`;
+
+/** Lifetime ledger figures (invested / realized / income / money-weighted return). */
+function ledgerLine(l: PortfolioOutput["ledger"]): string | null {
+  if (!l) return null;
+  return `Lifetime ledger: invested ${baht(l.invested)} (contributions), realized ${bahtSigned(l.realized)}, income ${baht(l.income)}, ${mwReturn(l.irrPct, l.irrUnavailable)}.`;
+}
+
+/**
+ * Self-priced (custom) holdings — valued from the user's last-entered price, not
+ * a live feed. Stated tersely; the system prompt carries the full caveat.
+ */
+function customLine(custom: PortfolioOutput["customHoldings"]): string | null {
+  if (!custom.length) return null;
+  const list = custom.map((c) => `${c.ticker} ${c.pct}%`).join(", ");
+  return `Self-priced (custom) holdings (user-set price, not a live feed): ${list}.`;
+}
+
+/** Per-fund ledger analytics, present only when a `ticker` was requested. */
+function positionLine(p: PortfolioOutput["position"]): string | null {
+  if (!p) return null;
+  const value = p.marketValue == null ? "value unpriced" : `value ${baht(p.marketValue)}`;
+  return `Fund ${p.ticker}: invested ${baht(p.invested)}, realized ${bahtSigned(p.realized)}, income ${baht(p.income)}, ${mwReturn(p.irrPct, p.irrUnavailable)}; ${value} (${p.units} units).`;
 }
 
 /** Underlying-exposure look-through line for the model — omitted when absent. */

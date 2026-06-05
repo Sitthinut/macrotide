@@ -10,6 +10,7 @@ import { createHolding, listHoldings } from "../db/queries/holdings";
 import { listJournalEntries } from "../db/queries/journal";
 import { getPlan, upsertPlan } from "../db/queries/plan";
 import { upsertFundQuote } from "../db/queries/quotes";
+import { insertTransactions } from "../db/queries/transactions";
 import * as schema from "../db/schema";
 import { persistPlanEdit } from "../portfolio/apply-plan-edit";
 import { quoteCacheKey } from "../portfolio/derive-rows";
@@ -118,6 +119,70 @@ describe("advisor tools — read_portfolio", () => {
     expect(out.hasHoldings).toBe(false);
     expect(out.totalValue).toBe(0);
     expect(out.message).toMatch(/no holdings/i);
+  });
+
+  it("surfaces lifetime ledger analytics, a per-fund block, and flags custom holdings", async () => {
+    const out = (await withFresh(async () => {
+      createBucket(BUCKET);
+      insertTransactions([
+        // A real contribution (buy) → counts as invested.
+        {
+          bucketId: "core",
+          ticker: "VOO",
+          englishName: "S&P 500",
+          quoteSource: "market",
+          kind: "buy",
+          tradeDate: "2024-01-01",
+          units: 100,
+          pricePerUnit: 6,
+          amount: -600,
+          fxToThb: 1,
+        },
+        // A dividend → income (not a contribution).
+        {
+          bucketId: "core",
+          ticker: "VOO",
+          englishName: "S&P 500",
+          quoteSource: "market",
+          kind: "dividend",
+          tradeDate: "2024-03-01",
+          units: 0,
+          amount: 50,
+          fxToThb: 1,
+        },
+        // A custom / self-priced holding (manual source).
+        {
+          bucketId: "core",
+          ticker: "GOLDSAVE",
+          englishName: "Gold savings",
+          quoteSource: "manual",
+          kind: "opening",
+          tradeDate: "2024-01-01",
+          units: 10,
+          pricePerUnit: 100,
+          amount: -1000,
+          marketPrice: 120,
+          fxToThb: 1,
+        },
+      ]);
+      const tools = createAdvisorTools({ userId: null });
+      return run(tools.read_portfolio, { ticker: "VOO" });
+    })) as {
+      ledger: { invested: number; realized: number; income: number } | null;
+      customHoldings: { ticker: string; pct: number }[];
+      position: { ticker: string; invested: number; income: number } | null;
+    };
+
+    // Aggregate ledger: the buy is the only contribution; the dividend is income.
+    expect(out.ledger).not.toBeNull();
+    expect(out.ledger?.invested).toBe(600);
+    expect(out.ledger?.income).toBe(50);
+    // The manual holding is flagged as self-priced.
+    expect(out.customHoldings.map((c) => c.ticker)).toContain("GOLDSAVE");
+    // Per-fund block, scoped to VOO's own events.
+    expect(out.position?.ticker).toBe("VOO");
+    expect(out.position?.invested).toBe(600);
+    expect(out.position?.income).toBe(50);
   });
 });
 

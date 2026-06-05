@@ -37,7 +37,10 @@ catch-all.
 The first two are well-modelled. The memory block is bounded and visible
 ([memory.md](./memory.md)); the tool reads return deterministic structured data
 (`read_portfolio` returns allocation, drift, blended TER, concentration, cash
-drag — see `lib/advisor/tools.ts`). **The third channel used to be the weak one**
+drag, the lifetime ledger figures — money invested, realized gains, income,
+money-weighted return — and a flag for self-priced custom holdings; pass a
+`ticker` for one fund's own realized P/L and return — see `lib/advisor/tools.ts`).
+**The third channel used to be the weak one**
 — entry-point facts travelled as prose — which is what the
 [context envelope](#the-context-envelope) below now fixes.
 
