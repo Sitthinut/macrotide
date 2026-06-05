@@ -204,6 +204,18 @@ export function reduceLots(
     return total;
   };
 
+  // One ticker's current cost basis (units × avg cost). Uncosted → 0 (it has
+  // contributed nothing to net-invested). Drives the anchor basis-delta below.
+  const tickerBasis = (ticker: string): number => {
+    if (!isKnown(ticker)) return 0;
+    if (method === "fifo") {
+      let total = 0;
+      for (const lot of fifo.get(ticker) ?? []) total += lot.units * lot.costPerUnit;
+      return total;
+    }
+    return avg.get(ticker)?.basis ?? 0;
+  };
+
   for (const txn of sorted) {
     const { ticker, kind, tradeDate } = txn;
     const magnitude = Math.abs(txn.amount);
@@ -273,18 +285,25 @@ export function reduceLots(
       case "opening":
       case "snapshot": {
         const units = txn.units ?? 0;
+        // Cost basis (units × avg cost) already counted into net-invested for this
+        // fund — 0 if uncosted. Its CHANGE across this anchor is the money added or
+        // removed this period: market-immune, because avg cost only moves when you
+        // buy or sell, never when the price changes.
+        const priorBasis = tickerBasis(ticker);
         if (units <= 0) {
-          // A zero-unit anchor clears the position (e.g. "I no longer hold this").
+          // A zero-unit anchor clears the position; its basis leaves net-invested.
           applyAnchor(method, avg, fifo, ticker, 0, null, false);
           costKnown.set(ticker, true);
+          netInvested -= priorBasis;
           break;
         }
-        // Avg cost for the anchor: explicit pricePerUnit, else (for snapshot only)
-        // carry the prior per-unit cost forward so a value-only restatement keeps
-        // its basis. An `opening` with no price is a genuinely uncosted balance.
+        // Avg cost: explicit pricePerUnit, else carry the prior per-unit cost
+        // forward (a value-only restatement keeps its basis). A fresh anchor with
+        // no price is a genuinely uncosted balance.
+        const hasPriorPosition = positionUnits(method, avg, fifo, ticker) > UNIT_EPSILON;
         const explicit = txn.pricePerUnit ?? null;
         const prior =
-          kind === "snapshot" && isKnown(ticker) ? priorAvgCost(method, avg, fifo, ticker) : null;
+          hasPriorPosition && isKnown(ticker) ? priorAvgCost(method, avg, fifo, ticker) : null;
         const perUnit = explicit !== null && explicit > 0 ? explicit : prior;
         const known = perUnit !== null;
         applyAnchor(method, avg, fifo, ticker, units, known ? perUnit : null, known);
@@ -297,9 +316,13 @@ export function reduceLots(
             detail: `${kind} has no average cost — gains and return are unavailable until you add one`,
           });
         }
-        // A costed opening is money put to work; a snapshot is a restatement, not
-        // a contribution, so it never moves net-invested.
-        if (kind === "opening" && known) netInvested += units * (perUnit as number);
+        // Contribution = the INCREASE in cost basis. A fresh opening counts its full
+        // basis (prior 0); a re-statement counts only what changed — zero on a pure
+        // market move, positive when money was added (more units and/or a higher avg
+        // cost), negative if the basis fell. A snapshot can't see sale proceeds, so a
+        // basis drop reads as an at-cost withdrawal (realized gain isn't recoverable).
+        const newBasis = known ? units * (perUnit as number) : 0;
+        netInvested += newBasis - priorBasis;
         break;
       }
       case "dividend": {

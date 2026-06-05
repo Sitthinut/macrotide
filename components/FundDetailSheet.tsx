@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { NavChart } from "@/components/InteractiveCharts";
 import { Modal } from "@/components/Modal";
+import { KebabMenu } from "@/components/ui/KebabMenu";
 import type {
   FeederLookThroughHoldingRow,
   FeederMasterMapRow,
@@ -1513,6 +1514,8 @@ export interface FundDetailSheetProps {
    * the holding edit flow. Omit for the read-only Explore usage.
    */
   onEdit?: () => void;
+  /** When set (holding view), the kebab offers "View history" → the position page. */
+  onHistory?: () => void;
   /**
    * When set, the sheet shows an "Ask Advisor" action that hands the shown class
    * ticker back to the caller (Explore wires this to the Advisor screen). Omit to
@@ -1526,6 +1529,7 @@ export function FundDetailSheet({
   projId,
   holding,
   onEdit,
+  onHistory,
   onAskAdvisor,
   onClose,
 }: FundDetailSheetProps) {
@@ -1575,16 +1579,17 @@ export function FundDetailSheet({
                 <Icon name="chat" size={15} />
               </button>
               {onEdit && (
-                <button
-                  type="button"
-                  className="icon-btn"
-                  title="Edit holding"
-                  aria-label="Edit holding"
-                  onClick={onEdit}
-                  style={{ marginTop: -4 }}
-                >
-                  <Icon name="pencil" size={15} />
-                </button>
+                <div style={{ marginTop: -4 }}>
+                  <KebabMenu
+                    label="Holding actions"
+                    size={18}
+                    triggerClassName="icon-btn"
+                    items={[
+                      ...(onHistory ? [{ label: "View history", onClick: onHistory }] : []),
+                      { label: "Edit holding", onClick: onEdit },
+                    ]}
+                  />
+                </div>
               )}
             </>
           ) : undefined

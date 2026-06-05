@@ -53,6 +53,22 @@ export interface AnalyticsOptions {
 
 const MIN_IRR_DAYS = 28; // annualized XIRR over < ~1 month is meaningless
 
+// Latest positive market_price per ticker, by trade date — the current price for
+// a holding with no live NAV (a "manual" / custom asset). Prices come straight
+// from the ledger: a Balance's current-price field, or a trade's execution price.
+function latestMarketPriceByTicker(rows: readonly Transaction[]): Map<string, number> {
+  const best = new Map<string, { date: string; price: number }>();
+  for (const r of rows) {
+    const price = r.marketPrice;
+    if (price == null || price <= 0) continue;
+    const cur = best.get(r.ticker);
+    if (!cur || r.tradeDate > cur.date) best.set(r.ticker, { date: r.tradeDate, price });
+  }
+  const out = new Map<string, number>();
+  for (const [ticker, v] of best) out.set(ticker, v.price);
+  return out;
+}
+
 export async function computeTransactionAnalytics(
   rows: readonly Transaction[],
   opts: AnalyticsOptions,
@@ -83,6 +99,10 @@ export async function computeTransactionAnalytics(
     for (const q of listFundQuotes(cacheKeys)) {
       if (q.nav > 0) navByKey.set(q.ticker, q.nav);
     }
+    // A "manual" holding has no live provider — it's priced from the LATEST
+    // market_price the user recorded in its own ledger (the current-price field on
+    // a Balance, or a trade's execution price). Known funds never use this.
+    const manualPrice = latestMarketPriceByTicker(rows);
 
     const currencies = new Set<string>();
     for (const p of held) {
@@ -95,7 +115,8 @@ export async function computeTransactionAnalytics(
     const unpriced: string[] = [];
     for (const p of held) {
       const source = sourceByTicker.get(p.ticker) ?? "yahoo";
-      const nav = navByKey.get(`${source}:${p.ticker}`);
+      const nav =
+        source === "manual" ? manualPrice.get(p.ticker) : navByKey.get(`${source}:${p.ticker}`);
       const rate = fx.rateOn(inferHoldingCurrency(source, p.ticker), opts.asOf);
       if (nav === undefined || rate === null) {
         unpriced.push(p.ticker);
@@ -108,7 +129,10 @@ export async function computeTransactionAnalytics(
       // A missing price must NOT masquerade as a zero terminal value (that would
       // read as a total loss). Refuse to compute rather than mislead.
       marketValue = null;
-      irrUnavailable = `Waiting on a current price for ${unpriced.join(", ")}.`;
+      irrUnavailable =
+        unpriced.length === 1
+          ? "Waiting on a current price for 1 holding."
+          : `Waiting on current prices for ${unpriced.length} holdings.`;
     } else {
       marketValue = total;
       ({ irr, irrUnavailable } = solveIrr(txns, { date: opts.asOf, amount: total }, opts.asOf));

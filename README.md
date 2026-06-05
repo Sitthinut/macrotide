@@ -27,8 +27,8 @@ responsive across mobile / tablet / desktop with light/dark/system themes.
 | Market data — real index levels (EODHD/FMP, with ETF-proxy + Yahoo fallback) + FX, Thai fund NAVs + history (Thai SEC), RSS news | ✅ Shipped |
 | Fund finder & screener — fuzzy + feeder-aware search over priceable **share classes**, with per-class fee / tax wrapper / 1-year return | ✅ Shipped |
 | Fund detail — per-share-class price & fund-size (AUM) history chart with class selector | ✅ Shipped |
-| Portfolio import — Paste/CSV, editable table entry with autocomplete, image OCR review | ✅ Shipped |
-| Unified ledger + Activity — one "Add to portfolio" sheet (Holdings/Activity toggle); holdings are a projection of the buy/sell ledger; realized gains, money-weighted return (XIRR), cost-basis timeline; graceful degradation when cost is unknown | ✅ Shipped |
+| Portfolio import — one Add modal with per-row Balance/trade types; paste, screenshot OCR, CSV, or typed rows in one editable review list; symbol autocomplete; units ↔ ฿-total entry | ✅ Shipped |
+| Unified ledger — holdings are a projection of one buy/sell + balance ledger; full-screen History + per-fund Position pages; realized gains, money-weighted return (XIRR), cost-basis timeline; custom (self-priced) assets; graceful degradation when cost is unknown | ✅ Shipped |
 | Long-term memory + chat archival — recall, FTS, session lifecycle | ✅ Shipped |
 | Multi-user — per-user isolation, tiers/quotas (token + optional cost caps, configurable cheap-paid free tier), owner admin | 🟡 Code shipped; launch prep open |
 | Benchmark comparison — "match or beat your index" (SET / S&P / Nasdaq / Nikkei) | ✅ Shipped; custom/goal-based benchmarks planned |

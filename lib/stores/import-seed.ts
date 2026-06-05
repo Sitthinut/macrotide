@@ -1,8 +1,8 @@
 "use client";
 
 // Typed external store that lets the Advisor's in-chat holdings table open the
-// full Add-holdings importer pre-seeded with rows. ChatScreen (in the chat tree)
-// and AddHoldingsSheet (lifted in App.tsx, above the mobile↔wide swap) share no
+// unified Add modal (RecordSheet) pre-seeded with rows. ChatScreen (in the chat
+// tree) and RecordSheet (lifted in App.tsx, above the mobile↔wide swap) share no
 // provider subtree, so — exactly like lib/stores/chat-ui.ts — they coordinate
 // through one module singleton read via useSyncExternalStore.
 //

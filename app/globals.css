@@ -731,6 +731,10 @@ body[data-topbar-hidden="true"] .portfolio-switch {
   border-color: var(--accent);
   background: var(--paper);
 }
+.sheet-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 textarea.sheet-input {
   font-family: var(--font-mono);
   font-size: 12.5px;
@@ -852,7 +856,8 @@ textarea.sheet-input {
 /* In-input price-source badge, pinned to the symbol input's right edge. Higher
    specificity than `.manual-row button` so it keeps its chip styling. Appears
    once a symbol is entered; the symbol input reserves right padding for it. */
-.manual-row .type-badge {
+.manual-row .type-badge,
+.combobox .type-badge {
   position: absolute;
   top: 50%;
   right: 5px;
@@ -869,7 +874,8 @@ textarea.sheet-input {
   border-radius: 5px;
   cursor: pointer;
 }
-.manual-row .type-badge[data-overridden="true"] {
+.manual-row .type-badge[data-overridden="true"],
+.combobox .type-badge[data-overridden="true"] {
   color: var(--ink);
   border-color: var(--accent);
 }
@@ -900,7 +906,8 @@ textarea.sheet-input {
    the input's title tooltip). Sits just left of the badge; invisible over the
    empty bg, so short tickers show nothing. Painted after the input but before
    the badge in DOM, so the badge stays crisp. */
-.manual-row .symbol-fade {
+.manual-row .symbol-fade,
+.combobox .symbol-fade {
   position: absolute;
   top: 1px;
   bottom: 1px;
@@ -908,6 +915,10 @@ textarea.sheet-input {
   width: 16px;
   pointer-events: none;
   background: linear-gradient(to right, transparent, var(--card-soft));
+}
+/* The .rec-edit symbol input paints on --paper, so its fade must match. */
+.rec-edit .combobox .symbol-fade {
+  background: linear-gradient(to right, transparent, var(--paper));
 }
 /* Narrow phones: shrink the symbol column and floor the numeric columns so
    "Quantity" / "Optional" always fit without clipping. */
@@ -996,49 +1007,8 @@ textarea.sheet-input {
   }
 }
 
-/* Inline editor for a single Activity-ledger row (edit-in-place + add-row).
-   Distinct from .txn-row (the bulk importer) — fewer columns, its own action
-   row, and an anchor variant that hides the trade-type/fee/amount cells. */
-.ledger-edit {
-  display: grid;
-  gap: 6px;
-  align-items: center;
-  grid-template-columns: 116px 100px minmax(90px, 1fr) 68px 68px 62px 88px;
-}
-.ledger-edit.is-anchor {
-  grid-template-columns: 116px minmax(110px, 1fr) 90px 90px;
-}
-.ledger-edit.has-bucket {
-  grid-template-columns: 120px 116px 100px minmax(80px, 1fr) 64px 64px 60px 84px;
-}
-.ledger-edit input,
-.ledger-edit select {
-  background: var(--paper);
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  padding: 7px 9px;
-  font-family: var(--font-sans);
-  font-size: 12.5px;
-  color: var(--ink);
-  outline: none;
-  min-width: 0;
-  width: 100%;
-}
-.ledger-edit input:focus,
-.ledger-edit select:focus {
-  border-color: var(--accent);
-}
-/* The pinned anchor type — a plain label, never a trade-type the user can pick. */
-.ledger-edit__pin {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--muted);
-  border: 1px dashed var(--line-soft);
-  border-radius: 6px;
-  padding: 6px 8px;
-  text-align: center;
-  white-space: nowrap;
-}
+/* The inline ledger-row editor's card + action row. The field grid itself is
+   `.rec-edit` (shared with the Add sheet); these two just frame it. */
 .ledger-edit-actions {
   display: flex;
   gap: 6px;
@@ -1050,15 +1020,14 @@ textarea.sheet-input {
   border: 1px solid var(--accent);
   border-radius: 10px;
   padding: 10px;
-  margin-bottom: 8px;
+  /* Symmetric breathing room so an expanded editor isn't flush against the row
+     above it (only spaced below). */
+  margin: 8px 0;
   background: var(--card-soft);
-}
-@media (max-width: 760px) {
-  .ledger-edit,
-  .ledger-edit.is-anchor,
-  .ledger-edit.has-bucket {
-    grid-template-columns: 1fr 1fr;
-  }
+  /* Query container: the .rec-edit grid inside stacks based on THIS card's real
+     width, not the viewport — so it adapts to the sidebar / modal width without
+     hardcoded viewport breakpoints. */
+  container-type: inline-size;
 }
 
 /* Wider form modal for the transaction importer — its row needs ≥7 columns on
@@ -1454,6 +1423,16 @@ textarea.sheet-input {
 .btn:active {
   transform: scale(0.98);
 }
+/* Global disabled state for every .btn variant. */
+.btn:disabled,
+.btn[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn:disabled:active,
+.btn[disabled]:active {
+  transform: none;
+}
 .btn.primary {
   background: var(--ink);
   color: var(--bg);
@@ -1608,6 +1587,39 @@ textarea.sheet-input {
   font-weight: 500;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+}
+
+/* KPI cards (components/ui/Stat) — the richer recap: a bordered card per metric
+   with a label, a large tone-colored value, and an optional caption. Auto-fits
+   so 2–4 cards wrap cleanly on any width. */
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  margin: 10px 4px 4px;
+}
+.stat-card {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md, 10px);
+  padding: 10px 12px;
+}
+.stat-card__label {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--muted);
+  letter-spacing: 0.05em;
+}
+.stat-card__value {
+  font-size: 18px;
+  font-weight: 600;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.stat-card__caption {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 2px;
+  line-height: 1.35;
 }
 
 /* Range chips (pill segmented control) */
@@ -3289,4 +3301,326 @@ textarea.sheet-input {
 .mi-add-chip:hover {
   background: var(--accent-soft);
   border-color: var(--accent);
+}
+
+/* Combobox — the shared custom autocomplete dropdown (symbol, source, …). The
+   input keeps whatever class the caller gives it (.rec-edit input / .sheet-input);
+   this owns the relative wrapper + the styled suggestion list. Ported from the
+   original symbol field's inline styles so every dropdown looks identical. */
+.combobox {
+  position: relative;
+  min-width: 0;
+  width: 100%;
+}
+.combobox__list {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  /* Size to the suggestion text (so long fund names are readable) instead of
+     being clamped to a narrow symbol field — but never narrower than the field,
+     and capped so it can't run off the edge. */
+  right: auto;
+  width: max-content;
+  min-width: 100%;
+  max-width: min(340px, 80vw);
+  z-index: 80;
+  margin: 0;
+  padding: 4px;
+  background: var(--paper);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+  max-height: 220px;
+  overflow-y: auto;
+}
+.combobox__list[data-up] {
+  top: auto;
+  bottom: calc(100% + 2px);
+}
+.combobox__option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  color: var(--ink);
+  line-height: 1.3;
+}
+.combobox__option:hover,
+.combobox__option:focus-visible {
+  background: var(--card-soft);
+}
+.combobox__option-ticker {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.combobox__option-name {
+  font-size: 11px;
+  color: var(--muted);
+}
+.combobox__option-tag {
+  margin-left: 6px;
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+}
+.combobox__option-tag[data-tone="muted"] {
+  color: var(--muted);
+}
+.combobox__option-tag[data-tone="accent"] {
+  color: var(--accent-ink);
+}
+
+/* RecordSheet — the unified Add modal (composes native primitives). */
+.rec-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rec-field__label {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.rec-intake__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.rec-error {
+  font-size: 12px;
+  color: var(--loss);
+  padding: 2px 0;
+}
+.rec-intake {
+  border-radius: 10px;
+  transition: box-shadow 0.12s ease;
+}
+.rec-intake[data-drag] {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.rec-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+/* Per-type help line under the inline editor — an (i) icon + a plain-English
+   one-liner for the selected Type. */
+.rec-type-help {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  /* Grow to fill the row up to the action buttons, instead of capping early and
+     leaving dead space to the right. */
+  flex: 1;
+  min-width: 0;
+  margin-right: 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.rec-type-help svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+/* On a narrow sheet the type explanation gets its own line ABOVE the action
+   buttons, instead of being squeezed onto the same row. */
+@media (max-width: 600px) {
+  .ledger-edit-actions {
+    flex-wrap: wrap;
+  }
+  .ledger-edit-actions .rec-type-help {
+    flex-basis: 100%;
+    margin: 0 0 8px;
+  }
+}
+
+/* Full-width "add a row" affordance — a dashed slot so the visual matches its
+   (full-width) click target, instead of a small centered text link. */
+.rec-add-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 9px 12px;
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition:
+    border-color 0.12s,
+    color 0.12s;
+}
+.rec-add-row:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+/* Quantity field with a units ↔ ฿ switcher (components/ui/QtyInput). */
+.qty-input {
+  position: relative;
+  min-width: 0;
+}
+.qty-input__toggle {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  font-family: var(--font-sans);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  background: var(--paper);
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.qty-input__toggle:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+/* Kebab (⋮) action menu (components/ui/KebabMenu). */
+.kebab {
+  position: relative;
+}
+.kebab__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 90;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--paper);
+  border: 1px solid var(--line-soft);
+  border-radius: 9px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
+}
+.kebab__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.kebab__item:hover {
+  background: var(--card-soft);
+}
+.kebab__item[data-danger] {
+  color: var(--loss);
+}
+
+/* Paste box as an input group: a borderless textarea with an action bar pinned
+   at its bottom (the "Apply" button), so Apply reads as the box's own action
+   without floating over the text you typed. */
+.rec-paste {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: var(--card-soft);
+  overflow: hidden;
+}
+.rec-paste:focus-within {
+  border-color: var(--accent);
+  background: var(--paper);
+}
+.rec-paste textarea {
+  width: 100%;
+  border: none;
+  background: transparent;
+  outline: none;
+  /* User can drag to resize; typing scrolls inside, so the box height stays put. */
+  resize: vertical;
+  padding: 12px 14px 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  /* Tall enough that the multi-line placeholder shows without scrolling. Same on
+     every device. */
+  min-height: 150px;
+}
+.rec-paste textarea::placeholder {
+  color: var(--muted);
+  opacity: 0.85;
+}
+
+/* RecordSheet inline editor grid — column order Type · Date · Symbol · Units ·
+   Price · Fee · Amount, with the date given real width so the row stays one line
+   on desktop. Stacks to two columns on a narrow viewport / bottom sheet. */
+.rec-edit {
+  display: grid;
+  gap: 6px;
+  align-items: center;
+  /* Type + Date stay fixed (their controls have an intrinsic width); the rest
+     flex so the row fills the modal's full width on any desktop size without
+     any single field stretching too far. */
+  grid-template-columns:
+    98px 124px minmax(120px, 1.6fr) minmax(70px, 1fr)
+    minmax(72px, 1fr) minmax(60px, 0.9fr);
+}
+/* Amount-only kinds (dividend / fee): Type · Date · Symbol · ฿ amount. */
+.rec-edit.is-flow {
+  grid-template-columns: 98px 124px minmax(120px, 1.8fr) minmax(96px, 1fr);
+}
+/* Balance row: Type · Date · Symbol · Units · Avg cost · Current price. */
+.rec-edit.is-anchor {
+  grid-template-columns: 98px 124px minmax(120px, 1.4fr) minmax(74px, 1fr) minmax(84px, 1fr) minmax(
+      96px,
+      1.05fr
+    );
+}
+.rec-edit input,
+.rec-edit select {
+  background: var(--paper);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  color: var(--ink);
+  outline: none;
+  min-width: 0;
+  width: 100%;
+}
+.rec-edit input:focus,
+.rec-edit select:focus {
+  border-color: var(--accent);
+}
+/* When the editor card itself is too narrow to hold the one-line grid (a narrow
+   modal, or the History column with the sidebar open), stack to two columns —
+   driven by the card's width, not the viewport. */
+@container (max-width: 660px) {
+  .rec-edit,
+  .rec-edit.is-anchor,
+  .rec-edit.is-flow {
+    grid-template-columns: 1fr 1fr;
+  }
 }

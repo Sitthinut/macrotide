@@ -64,14 +64,18 @@ describe("inferQuoteSource", () => {
     expect(inferQuoteSource("k-fixed-a")).toBe("thai_mutual_fund"); // case-insensitive
   });
 
-  it("treats bare / dotted / caret symbols as yahoo", () => {
+  it("keeps known stock/ETF/index seeds on yahoo, but defaults unknown symbols to custom", () => {
+    // Tickers in the seed catalog keep their tagged source.
     expect(inferQuoteSource("AAPL")).toBe("yahoo");
     expect(inferQuoteSource("PTT.BK")).toBe("yahoo");
     expect(inferQuoteSource("^GSPC")).toBe("yahoo");
     expect(inferQuoteSource("THB=X")).toBe("yahoo");
-    expect(inferQuoteSource("KFIXED")).toBe("yahoo"); // no hyphen, not a known AMC prefix
-    for (const t of ["SPY", "QQQ", "THD", "ACWI"]) {
-      expect(inferQuoteSource(t)).toBe("yahoo"); // plain ETF tickers
+    expect(inferQuoteSource("QQQ")).toBe("yahoo");
+    // Unknown bare tickers default to a CUSTOM (manual-priced) asset — we can't
+    // price an arbitrary symbol, so don't assume the ETF chain.
+    expect(inferQuoteSource("KFIXED")).toBe("manual"); // no hyphen, not a known AMC prefix
+    for (const t of ["SPY", "THD", "ACWI", "ZZUNLISTED"]) {
+      expect(inferQuoteSource(t)).toBe("manual");
     }
   });
 

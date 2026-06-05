@@ -5,7 +5,9 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import { mergeSourceSuggestions } from "@/lib/data/sources";
+import type { ShareClassListItem } from "@/lib/db/queries/funds";
 import { useHoldings } from "@/lib/fetchers/portfolio";
+import { useResource } from "@/lib/fetchers/swr";
 import { QUOTE_SOURCE_LABELS, QUOTE_SOURCES, type QuoteSource } from "@/lib/market/sources";
 import type { AssetClass } from "@/lib/static/types";
 
@@ -62,9 +64,25 @@ export function HoldingSheet({
   const [submitting, setSubmitting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmPromote, setConfirmPromote] = useState(false);
   // Free-text source label, with suggestions from the user's existing sources.
   const { data: allHoldings } = useHoldings();
   const sourceOptions = mergeSourceSuggestions((allHoldings ?? []).map((h) => h.source));
+
+  // Is this symbol a fund we have in the SSOT catalog? If so, its name/class/etc.
+  // come from there — they're locked; only Portfolio + Source stay editable. A
+  // custom (off-catalog) asset stays fully editable.
+  const q = values.ticker.trim();
+  const { data: catalogMatches } = useResource<ShareClassListItem[]>(
+    q.length >= 2 ? `/api/fund-classes?query=${encodeURIComponent(q)}&limit=8` : null,
+  );
+  const catalogMatch = (catalogMatches ?? []).find(
+    (m) => m.ticker.trim().toUpperCase() === q.toUpperCase(),
+  );
+  const known = !!catalogMatch;
+  // Promote: a custom (manual-priced) holding whose symbol now matches the
+  // catalog should adopt the fund's official details + live price.
+  const canPromote = known && values.quoteSource === "manual";
 
   useEffect(() => {
     if (open) {
@@ -76,6 +94,19 @@ export function HoldingSheet({
   }, [open]);
 
   const update = (patch: Partial<HoldingFormValues>) => setValues((v) => ({ ...v, ...patch }));
+
+  const doSave = async (vals: HoldingFormValues) => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onSave(vals);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const submit = async () => {
     if (!values.ticker.trim()) {
@@ -94,17 +125,24 @@ export function HoldingSheet({
       setError("Quantity must be a positive number");
       return;
     }
-    setSubmitting(true);
-    setError(null);
-    try {
-      await onSave(values);
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save");
-    } finally {
-      setSubmitting(false);
+    // A custom asset whose symbol now matches the catalog → confirm promotion.
+    if (canPromote) {
+      setConfirmPromote(true);
+      return;
     }
+    await doSave(values);
   };
+
+  // Adopt the catalog fund: switch to its live-priced source + official name,
+  // keeping the user's units and cost. editHoldingViaLedger re-tickers the ledger
+  // (and the projection merges if the fund is already held).
+  const promote = () =>
+    doSave({
+      ...values,
+      quoteSource: "thai_mutual_fund",
+      englishName: catalogMatch?.englishName || values.englishName,
+      thaiName: catalogMatch?.thaiName || values.thaiName,
+    });
 
   const handleDelete = async () => {
     if (!onDelete) return;
@@ -138,7 +176,7 @@ export function HoldingSheet({
               className="sheet-input"
               value={values.quoteSource}
               onChange={(e) => update({ quoteSource: e.target.value as QuoteSource })}
-              disabled={lockTicker}
+              disabled={lockTicker || known}
             >
               {QUOTE_SOURCES.map((s) => (
                 <option key={s} value={s}>
@@ -153,11 +191,33 @@ export function HoldingSheet({
               className="sheet-input"
               value={values.ticker}
               onChange={(e) => update({ ticker: e.target.value.toUpperCase() })}
-              disabled={lockTicker}
+              disabled={lockTicker || known}
               placeholder="Symbol"
               style={{ textTransform: "uppercase" }}
             />
           </FormRow>
+
+          {known && (
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "flex-start",
+                padding: "9px 12px",
+                borderRadius: 8,
+                background: "var(--accent-soft)",
+                fontSize: 12,
+                lineHeight: 1.45,
+                color: "var(--accent-ink)",
+              }}
+            >
+              <Icon name="info" size={14} />
+              <span>
+                We track this fund — its name, details, and price come from our data. You can still
+                move it between portfolios and edit the source.
+              </span>
+            </div>
+          )}
 
           <FormRow label="Name (English)">
             <input
@@ -165,6 +225,7 @@ export function HoldingSheet({
               value={values.englishName}
               onChange={(e) => update({ englishName: e.target.value })}
               placeholder="SCB S&P 500 Index Fund"
+              disabled={known}
             />
           </FormRow>
 
@@ -174,6 +235,7 @@ export function HoldingSheet({
               value={values.thaiName}
               onChange={(e) => update({ thaiName: e.target.value })}
               placeholder="เอสซีบี เอสแอนด์พี 500"
+              disabled={known}
             />
           </FormRow>
 
@@ -202,6 +264,7 @@ export function HoldingSheet({
                 value={Number.isFinite(values.units) ? values.units : ""}
                 onChange={(e) => update({ units: Number.parseFloat(e.target.value) || 0 })}
                 placeholder="0"
+                disabled={known}
               />
             </FormRow>
             <FormRow label="Avg cost" hint="THB per unit/share">
@@ -212,6 +275,7 @@ export function HoldingSheet({
                 value={Number.isFinite(values.avgCost) ? values.avgCost : ""}
                 onChange={(e) => update({ avgCost: Number.parseFloat(e.target.value) || 0 })}
                 placeholder="0"
+                disabled={known}
               />
             </FormRow>
           </div>
@@ -223,6 +287,7 @@ export function HoldingSheet({
                   key={a.value}
                   type="button"
                   onClick={() => update({ assetClass: a.value })}
+                  disabled={known}
                   style={{
                     padding: "6px 12px",
                     borderRadius: 8,
@@ -232,7 +297,8 @@ export function HoldingSheet({
                     background:
                       values.assetClass === a.value ? "var(--accent-soft)" : "var(--paper)",
                     fontSize: 12.5,
-                    cursor: "pointer",
+                    cursor: known ? "not-allowed" : "pointer",
+                    opacity: known && values.assetClass !== a.value ? 0.5 : 1,
                   }}
                 >
                   {a.label}
@@ -248,6 +314,7 @@ export function HoldingSheet({
                 value={values.category}
                 onChange={(e) => update({ category: e.target.value })}
                 placeholder="US Equity"
+                disabled={known}
               />
             </FormRow>
             <FormRow label="Region" hint="US / TH / Global / EM">
@@ -256,6 +323,7 @@ export function HoldingSheet({
                 value={values.region}
                 onChange={(e) => update({ region: e.target.value })}
                 placeholder="US"
+                disabled={known}
               />
             </FormRow>
           </div>
@@ -269,6 +337,7 @@ export function HoldingSheet({
                 value={Number.isFinite(values.ter) ? values.ter : ""}
                 onChange={(e) => update({ ter: Number.parseFloat(e.target.value) || 0 })}
                 placeholder="0.45"
+                disabled={known}
               />
             </FormRow>
             <FormRow label="Source" hint="Where this came from">
@@ -336,6 +405,16 @@ export function HoldingSheet({
         busy={submitting}
         onConfirm={handleDelete}
         onCancel={() => setConfirmDelete(false)}
+      />
+
+      <ConfirmDialog
+        open={confirmPromote}
+        title={`This looks like ${catalogMatch?.ticker ?? values.ticker}`}
+        message={`We track ${catalogMatch?.englishName || catalogMatch?.ticker || "this fund"}. Use its official details and live price? Your units and cost stay; the price you entered is replaced by the live NAV.`}
+        confirmLabel="Use the fund"
+        busy={submitting}
+        onConfirm={promote}
+        onCancel={() => setConfirmPromote(false)}
       />
     </>
   );

@@ -6,9 +6,11 @@ import { ModelDonut } from "@/components/charts";
 import { FeedbackRow } from "@/components/FeedbackRow";
 import { FundDetailSheet } from "@/components/FundDetailSheet";
 import { type HoldingFormValues, HoldingSheet } from "@/components/HoldingSheet";
+import { RecentActivityPeek } from "@/components/history/RecentActivityPeek";
 import { Icon } from "@/components/Icon";
 import { AllocationDonut, DriftBars, NavChart } from "@/components/InteractiveCharts";
 import { Modal } from "@/components/Modal";
+import { KebabMenu } from "@/components/ui/KebabMenu";
 import {
   useModelPortfoliosView,
   usePortfolioView,
@@ -475,8 +477,10 @@ export interface PortfolioScreenProps {
   onOpenModels: () => void;
   onOpenChat: () => void;
   onOpenImport: () => void;
-  /** Open the Activity (transaction ledger) modal. */
+  /** Open the full Activity (transaction history) screen. */
   onOpenActivity?: () => void;
+  /** Open a holding's own record (the per-position drill-in screen). */
+  onOpenPosition?: (ticker: string) => void;
   /** Show the top-right kebab that opens the account menu (mobile only). */
   showMenu?: boolean;
 }
@@ -486,6 +490,7 @@ export function PortfolioScreen({
   onOpenModels,
   onOpenImport,
   onOpenActivity,
+  onOpenPosition,
   showMenu = true,
 }: PortfolioScreenProps) {
   // Active portfolio lives in the shared store so the right-rail PortfoliosPanel
@@ -1473,15 +1478,12 @@ export function PortfolioScreen({
         </div>
       )}
 
+      {onOpenActivity && <RecentActivityPeek onSeeAll={onOpenActivity} />}
+
       <div className="section-header" style={{ padding: "0 20px", marginBottom: 4, marginTop: 18 }}>
         <h3>Holdings</h3>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span className="link">{view.holdings.length} holdings</span>
-          {onOpenActivity && (
-            <button className="btn ghost sm" onClick={onOpenActivity} style={{ gap: 4 }}>
-              <Icon name="book" size={12} /> Activity
-            </button>
-          )}
           <button
             className="btn ghost sm"
             onClick={onOpenImport}
@@ -1608,16 +1610,17 @@ export function PortfolioScreen({
                 </div>
               </button>
               {editable && (
-                <button
-                  type="button"
-                  className="icon-btn quiet"
-                  aria-label={`Edit ${h.ticker}`}
-                  title={`Edit ${h.ticker}`}
-                  onClick={() => setHoldingSheet(h)}
-                  style={{ flexShrink: 0, alignSelf: "center", marginLeft: 12 }}
-                >
-                  <Icon name="pencil" size={12} />
-                </button>
+                <div style={{ marginLeft: 8, flexShrink: 0, alignSelf: "center" }}>
+                  <KebabMenu
+                    label={`${h.ticker} actions`}
+                    items={[
+                      ...(onOpenPosition
+                        ? [{ label: "View history", onClick: () => onOpenPosition(h.ticker) }]
+                        : []),
+                      { label: "Edit holding", onClick: () => setHoldingSheet(h) },
+                    ]}
+                  />
+                </div>
               )}
             </div>
           );
@@ -1693,6 +1696,15 @@ export function PortfolioScreen({
                 const h = detailHolding;
                 setDetailHolding(null);
                 setHoldingSheet(h);
+              }
+            : undefined
+        }
+        onHistory={
+          detailHolding && onOpenPosition
+            ? () => {
+                const t = detailHolding.ticker;
+                setDetailHolding(null);
+                onOpenPosition(t);
               }
             : undefined
         }

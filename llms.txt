@@ -23,6 +23,7 @@ root so they resolve when browsing the source.
 - [Local development](./docs/how-to/local-development.md): Env setup, npm scripts, seeding, tests, pre-commit hook.
 - [Import a portfolio](./docs/how-to/import-a-portfolio.md): CSV, image OCR, and manual entry.
 - [Architecture](./docs/explanation/architecture.md): System shape, request lifecycle, demo/owner DB routing, where everything lives.
+- [Balances and History](./docs/explanation/balances-and-history.md): How a Balance and a trade fit together — the one-ledger model, cost-basis-delta math with worked examples, self-healing edits, custom-asset pricing, and the History/entry/Balance vocabulary.
 - [Design principles](./docs/explanation/design-principles.md): Secure-by-default, the "Advisor" voice, single-owner → multi-user.
 - [Portfolio health](./docs/explanation/portfolio-health.md): Why the Portfolio screen leads with a plain-language headline + named checks instead of a 0–100 grade, and how the diversification check measures underlying concentration (single-name overlap + target-relative region) honestly on partial look-through data.
 - [Memory feature](./docs/explanation/memory.md): Long-term memory + chat-session lifecycle design.

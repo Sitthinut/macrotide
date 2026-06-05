@@ -18,9 +18,9 @@ themselves are the source of truth for exact request/response shapes.
 | `/api/buckets/[id]` | GET, PATCH, DELETE | Read / update / delete a bucket |
 | `/api/holdings` | GET, POST | List positions / add one. POST writes an `opening` anchor to the ledger; the holding is its projection ([ADR 0004](../explanation/decisions/0004-unified-ledger-positions-derived.md)) |
 | `/api/holdings/[id]` | GET, PATCH, DELETE | Read / edit / delete. PATCH edits the single backing event in place (or appends a `snapshot` for multi-event positions); metadata updates the row; DELETE removes the ticker's ledger events |
-| `/api/transactions` | GET, POST | List / batch-add ledger transactions (bucket-scoped; sign derived from `kind`). Every write rebuilds the affected buckets' derived holdings |
-| `/api/transactions/[id]` | PATCH, DELETE | Edit / delete a single ledger event (the Activity inline-edit path); rebuilds the bucket's holdings. Amount sign is re-derived server-side from `kind` |
-| `/api/transactions/analytics` | GET | Realized gains, money-weighted return (XIRR), cost-basis timeline |
+| `/api/transactions` | GET, POST | List / batch-add ledger transactions (bucket-scoped). POST accepts trade deltas **and** position anchors (`opening`/`snapshot`, both shown as a "Balance"); an anchor or a split may carry `amount` 0. An optional per-row `marketPrice` records the asset's current price (custom-asset pricing). Repeat anchors for a fund auto-promote (the first is `opening`, later ones become `snapshot`) so a later balance re-bases units without double-counting. Sign derived from `kind`; every write rebuilds the affected buckets' derived holdings |
+| `/api/transactions/[id]` | PATCH, DELETE | Edit / delete a single ledger event (the inline-edit path); rebuilds the bucket's holdings. PATCH also accepts `marketPrice` (a Balance's current price). Amount sign is re-derived server-side from `kind` |
+| `/api/transactions/analytics` | GET | Realized gains, money-weighted return (XIRR), cost-basis timeline. Scoped to the caller's buckets; an optional `?ticker=` narrows it to one instrument for a Position page |
 | `/api/plan` | GET, PUT | Read / replace the investment plan (markdown) |
 | `/api/plan/edit` | POST | Apply an Advisor-proposed plan edit (`applyPlanEdit` + upsert) |
 | `/api/journal` | GET, POST | List / create journal entries |
