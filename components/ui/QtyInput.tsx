@@ -40,19 +40,23 @@ export function QtyInput({
 }: QtyInputProps) {
   const p = Number(price);
   const hasPrice = Number.isFinite(p) && p > 0;
-  // null = entering units; a string = entering a ฿ value (the raw text typed). A
-  // row seeded value-only (a ฿ total, no units) opens in ฿ mode showing that total.
-  const [baht, setBaht] = useState<string | null>(() =>
-    value?.trim() && !units.trim() ? value : null,
-  );
+  // null = entering units; a string = entering a ฿ value (the raw text typed). The
+  // mode is inferred from the row: a non-empty ฿ `value` means the user is in ฿ mode
+  // (units mode always clears `value`, so `value` set ⟺ ฿ mode). This survives
+  // collapse/reopen — the editor remounts and reads the mode back off the row.
+  const [baht, setBaht] = useState<string | null>(() => (value?.trim() ? value : null));
   const inBaht = baht !== null;
 
   const onBaht = (v: string) => {
     setBaht(v);
     onValue?.(v);
+    // Keep units in sync as the DERIVED field: value ÷ price when we have a price,
+    // else cleared (the server derives units from value ÷ NAV(date) at save). Either
+    // way, never leave a stale hand-typed unit count behind — it would be saved
+    // instead of the ฿ total and silently win.
     if (v.trim() === "") onUnits("");
     else if (hasPrice) onUnits(round(Number(v) / p, 6));
-    // No price → leave units empty; the lifted ฿ value carries to the server.
+    else onUnits("");
   };
   const onUnitsText = (v: string) => {
     onUnits(v);
@@ -62,11 +66,19 @@ export function QtyInput({
   };
   const toggle = () => {
     if (inBaht) {
+      // → units mode: units is canonical; drop the ฿ value so it can't override.
       setBaht(null);
       if (value?.trim()) onValue?.("");
     } else {
-      // Entering ฿ mode: prefill from the stored value, else units × price.
-      setBaht(value?.trim() ? value : hasPrice && units.trim() ? round(Number(units) * p, 2) : "");
+      // → ฿ mode: prefill from the stored value, else units × price. Persist a
+      // non-empty prefill as the canonical ฿ value so the mode survives reopen.
+      const prefill = value?.trim()
+        ? value
+        : hasPrice && units.trim()
+          ? round(Number(units) * p, 2)
+          : "";
+      setBaht(prefill);
+      if (prefill) onValue?.(prefill);
     }
   };
 

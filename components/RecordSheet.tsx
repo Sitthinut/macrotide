@@ -848,11 +848,11 @@ function DraftRow({
       : row.units.trim() && row.price.trim()
         ? baht(Number(row.units) * Number(row.price))
         : "";
-  // Only flag a missing cost once there's actually a fund on the row — and NOT on a
-  // value-driven Balance, where avg cost is optional/derived (flagging it there
-  // contradicts the field's own "optional" framing). A units Balance with no cost
-  // still gets the nudge: its gains stay blank until a cost is added.
-  const costUnknown = anchor && hasTicker && !row.price.trim() && !(Number(row.value) > 0);
+  // A quiet, CONSISTENT heads-up that this Balance has no cost basis yet (so gains
+  // stay blank until one is added) — shown the same way whether you recorded units
+  // or a ฿ total. Cost basis = a per-unit avg cost OR an invested total (an import
+  // carrying value + P/L). It's a muted hint, not a warning: avg cost is optional.
+  const costUnknown = anchor && hasTicker && !row.price.trim() && !(Number(row.costTotal) > 0);
   return (
     <div className="holding" style={{ display: "flex", gap: 4 }}>
       <button
@@ -884,7 +884,7 @@ function DraftRow({
           </span>
           <span className="sub" style={{ display: "block" }}>
             {sub.join(" · ") || "Tap to fill in"}
-            {costUnknown && <span style={{ color: "var(--amber)" }}> · cost not recorded</span>}
+            {costUnknown && <span style={{ color: "var(--muted-2)" }}> · no cost yet</span>}
           </span>
         </span>
         <span className="value">{amt}</span>
@@ -922,6 +922,9 @@ function RowEditor({
   // A Balance recorded by its ฿ value (not a unit count): avg cost is optional here
   // — units (and any cost) are derived from the value, so the cost field steps back.
   const anchorValueDriven = anchor && Number(row.value) > 0;
+  // A custom (self-priced) asset has no live feed — its current price is NEEDED to
+  // value the holding, not optional like it is for a catalog fund (live NAV).
+  const isCustom = anchor && (row.quoteSource ?? inferQuoteSource(row.ticker)) === "manual";
   const cls = `rec-edit${anchor ? " is-anchor" : amountOnly ? " is-flow" : ""}`;
   return (
     <div className="ledger-edit-card">
@@ -1055,16 +1058,23 @@ function RowEditor({
             {anchor ? (
               <label className="rec-field">
                 <span className="rec-label">
-                  Current price<span className="rec-opt"> · optional</span>
+                  Current price
+                  <span className="rec-opt">{isCustom ? " · needed" : " · optional"}</span>
                 </span>
                 <input
                   value={row.currentPrice ?? ""}
                   onChange={(e) => onChange({ currentPrice: e.target.value })}
-                  placeholder="Optional"
+                  placeholder={isCustom ? "Price" : "Optional"}
                   inputMode="decimal"
                   aria-label="Current price"
-                  data-optional=""
-                  title="Today's price per unit. Only needed for a custom asset we can't price live — for a known fund we use the live NAV."
+                  // Optional for a catalog fund (live NAV); for a custom asset it's the
+                  // only way to value the holding, so it's not marked optional there.
+                  data-optional={isCustom ? undefined : ""}
+                  title={
+                    isCustom
+                      ? "This custom asset has no live price — set its current price to value the holding."
+                      : "Today's price per unit. Only needed for a custom asset we can't price live — for a known fund we use the live NAV."
+                  }
                 />
               </label>
             ) : (
