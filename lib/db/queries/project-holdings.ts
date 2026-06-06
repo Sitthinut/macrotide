@@ -1,9 +1,14 @@
 import "server-only";
 import { and, eq } from "drizzle-orm";
-import { type ProjectionEvent, projectPositions } from "@/lib/portfolio/project-positions";
+import {
+  type ProjectedPosition,
+  type ProjectionEvent,
+  projectPositions,
+} from "@/lib/portfolio/project-positions";
 import { getDb } from "../context";
 import { holdings, transactions } from "../schema";
 import type { Holding } from "./holdings";
+import { foldableEvents } from "./resolve-derived-units";
 import type { Transaction, TransactionInsert } from "./transactions";
 
 // Holdings-as-projection orchestration (ADR 0004). The ledger (`transactions`)
@@ -34,16 +39,36 @@ function toProjectionEvent(r: Transaction): ProjectionEvent {
 }
 
 /**
+ * Fold one bucket's ledger into its derived positions (one per held ticker) —
+ * the single source of position truth, shared by the read path (holdings reads
+ * overlay these live) and the write path (rebuild persists row existence +
+ * metadata). Facts-only: the missing unit count (value-only Balances + amount-only
+ * trades) is derived from NAV(date) here, and an anchor we still can't price is
+ * DROPPED (foldableEvents) so it never wipes a position by folding as zero.
+ */
+export function projectBucketPositions(bucketId: string): ProjectedPosition[] {
+  const events = getDb()
+    .select()
+    .from(transactions)
+    .where(eq(transactions.bucketId, bucketId))
+    .all();
+  return projectPositions(foldableEvents(events).map(toProjectionEvent), DEFAULT_METHOD);
+}
+
+/**
  * Rebuild the derived `holdings` rows for one bucket from its ledger. Positions
  * (units, avgCost) come from the ledger; instrument metadata (thaiName,
  * category, assetClass, region, ter, color) is preserved from the existing row.
  * A position that nets to zero units is removed. Idempotent and deterministic:
  * running it twice on the same ledger yields the same rows.
+ *
+ * The persisted units/avgCost are a write-time snapshot for row existence and a
+ * fallback; the live read path (`listHoldings`/`getHolding`) re-folds and overlays
+ * fresh figures, so reads never serve a position frozen at the last write.
  */
 export function rebuildHoldingsForBucket(bucketId: string): void {
   const db = getDb();
-  const events = db.select().from(transactions).where(eq(transactions.bucketId, bucketId)).all();
-  const positions = projectPositions(events.map(toProjectionEvent), DEFAULT_METHOD);
+  const positions = projectBucketPositions(bucketId);
 
   const existing = db.select().from(holdings).where(eq(holdings.bucketId, bucketId)).all();
   const byTicker = new Map(existing.map((h) => [h.ticker, h]));

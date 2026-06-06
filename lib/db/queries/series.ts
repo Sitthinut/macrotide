@@ -2,8 +2,9 @@ import { and, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { inferHoldingCurrency } from "@/lib/market/currency";
 import { buildFxConverter } from "@/lib/market/fx";
 import { demoHoldingSeries } from "@/lib/mock/demo-history-read";
-import { getAppDb, getMarketDb, isDemoRequest, type MarketDb } from "../context";
-import { fundCatalog, holdings, navHistory } from "../schema";
+import { getMarketDb, isDemoRequest, type MarketDb } from "../context";
+import { fundCatalog, navHistory } from "../schema";
+import { listHoldings } from "./holdings";
 
 export type SeriesRange = "1mo" | "3mo" | "6mo" | "1y" | "5y" | "max";
 
@@ -177,11 +178,13 @@ export async function getPortfolioSeries(
   // Cross-domain read: holdings live in app.db, their NAV series in market.db.
   // There is no SQL join — we read each side and join app-side on the soft
   // `${quoteSource}:${ticker}` cache key.
-  const appDb = getAppDb();
   const marketDb = getMarketDb();
   const since = rangeStartDate(range);
 
-  const allHoldings = appDb.select().from(holdings).all();
+  // Read-through fold (ADR 0004): listHoldings overlays live units/cost from the
+  // ledger, so the value-over-time chart sums fresh units × NAV — consistent with the
+  // holdings list and analytics, never a position frozen at the last write.
+  const allHoldings = listHoldings();
   if (allHoldings.length === 0) {
     return {
       aggregate: [],
