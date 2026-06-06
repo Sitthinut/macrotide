@@ -588,18 +588,21 @@ export function catalogQuoteSource(tickers: string[]): Map<string, QuoteSource> 
   const db = getMarketDb();
   // A symbol is a real Thai fund if it's a priceable share-class ticker OR a parent
   // fund abbreviation (single-class funds expose the parent abbr as the holdable
-  // ticker; matching both also covers a partially-derived catalog).
+  // ticker; matching both also covers a partially-derived catalog). Match
+  // CASE-INSENSITIVELY: catalog tickers are mixed-case (K-FIXED-A upper, the ttb
+  // "tsp1-preserver-SSF" funds lower), and `cleaned` is upper-cased — so compare
+  // upper(ticker) or a lowercase code would never hit and would wrongly read custom.
   const hits = new Set<string>();
   for (const r of db
     .select({ ticker: fundShareClasses.ticker })
     .from(fundShareClasses)
-    .where(inArray(fundShareClasses.ticker, cleaned))
+    .where(inArray(sql`upper(${fundShareClasses.ticker})`, cleaned))
     .all())
     hits.add(r.ticker.toUpperCase());
   for (const r of db
     .select({ abbr: fundCatalog.abbrName })
     .from(fundCatalog)
-    .where(inArray(fundCatalog.abbrName, cleaned))
+    .where(inArray(sql`upper(${fundCatalog.abbrName})`, cleaned))
     .all())
     if (r.abbr) hits.add(r.abbr.toUpperCase());
   // In the catalog → a real fund; otherwise → custom. Nothing else.

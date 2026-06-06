@@ -924,6 +924,13 @@ function RowEditor({
   // A custom (self-priced) asset has no live feed — its current price is NEEDED to
   // value the holding, not optional like it is for a catalog fund (live NAV).
   const isCustom = anchor && (row.quoteSource ?? "manual") === "manual";
+  // The current-price cue only resolves once there's a symbol to judge: until then
+  // no cue (just "Price"); a custom symbol reads "needed", a catalog fund "optional".
+  const priceCue: "optional" | "needed" | null = !row.ticker.trim()
+    ? null
+    : isCustom
+      ? "needed"
+      : "optional";
   const cls = `rec-edit${anchor ? " is-anchor" : amountOnly ? " is-flow" : ""}`;
   return (
     <div className="ledger-edit-card">
@@ -1055,17 +1062,23 @@ function RowEditor({
               <label className="rec-field">
                 <span className="rec-label">
                   Current price
-                  <span className="rec-opt">{isCustom ? " · needed" : " · optional"}</span>
+                  {priceCue && <span className="rec-opt"> · {priceCue}</span>}
                 </span>
                 <input
                   value={row.currentPrice ?? ""}
                   onChange={(e) => onChange({ currentPrice: e.target.value })}
-                  placeholder={isCustom ? "Price" : "Optional"}
+                  // Placeholder mirrors the label cue: "Price" until a symbol resolves,
+                  // then "Optional" (catalog fund, live NAV) or "Needed" (custom asset).
+                  placeholder={
+                    priceCue === "needed"
+                      ? "Needed"
+                      : priceCue === "optional"
+                        ? "Optional"
+                        : "Price"
+                  }
                   inputMode="decimal"
                   aria-label="Current price"
-                  // Optional for a catalog fund (live NAV); for a custom asset it's the
-                  // only way to value the holding, so it's not marked optional there.
-                  data-optional={isCustom ? undefined : ""}
+                  data-optional={priceCue === "optional" ? "" : undefined}
                   title={
                     isCustom
                       ? "This custom asset has no live price — set its current price to value the holding."

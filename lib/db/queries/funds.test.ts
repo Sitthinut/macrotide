@@ -658,5 +658,27 @@ describe("retail-availability gate + zero-TER sort (#117)", () => {
         );
       });
     });
+
+    it("hits a catalog ticker stored in LOWERCASE (the resolver upper-cases the lookup)", () => {
+      withDb(() => {
+        // Some real funds are catalogued lowercase; the lookup must still match or
+        // they'd wrongly read as custom despite being priceable.
+        upsertFund(fund("EXAMPLELOWER", { abbrName: "example-lower-a" }));
+        upsertShareClasses([
+          {
+            projId: "EXAMPLELOWER",
+            className: "main",
+            ticker: "example-lower-a",
+            investorType: "retail",
+          },
+        ]);
+        expect(catalogQuoteSource(["example-lower-a"]).get("EXAMPLE-LOWER-A")).toBe(
+          "thai_mutual_fund",
+        );
+        expect(catalogQuoteSource(["EXAMPLE-LOWER-A"]).get("EXAMPLE-LOWER-A")).toBe(
+          "thai_mutual_fund",
+        );
+      });
+    });
   });
 });
