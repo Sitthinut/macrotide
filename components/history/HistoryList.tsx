@@ -8,18 +8,18 @@
 // record). Holdings are a projection of this ledger, so every write re-invalidates
 // holdings + portfolio views.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EventLine } from "@/components/history/EventLine";
 import { Icon } from "@/components/Icon";
 import { SymbolCombobox } from "@/components/portfolio/SymbolCombobox";
-import { QtyInput } from "@/components/ui/QtyInput";
+import { QtyInput, qtyDefaultMode } from "@/components/ui/QtyInput";
 import { Stat } from "@/components/ui/Stat";
-import { mergeWithHoldings, type TickerSuggestion } from "@/lib/data/known-funds";
+import { mergeWithHoldings, type TickerSuggestion } from "@/lib/data/known-holdings";
 import type { Transaction } from "@/lib/db/queries/transactions";
 import { useHoldings } from "@/lib/fetchers/portfolio";
+import { cachedQuoteSource, resolveQuoteSources } from "@/lib/fetchers/quote-source";
 import { invalidate, useResource } from "@/lib/fetchers/swr";
-import { inferQuoteSource } from "@/lib/market/infer-quote-source";
 import type { QuoteSource } from "@/lib/market/sources";
 import type { TxnKind } from "@/lib/portfolio/lots";
 import type { TransactionAnalytics } from "@/lib/portfolio/transaction-analytics";
@@ -53,6 +53,8 @@ interface Draft {
   kind: TxnKind;
   ticker: string;
   units: string;
+  /** A Balance's stated current ฿ VALUE (units derive from value ÷ NAV at the fold). */
+  value: string;
   pricePerUnit: string;
   /** A Balance's current market price per unit (for custom-asset valuation). */
   marketPrice: string;
@@ -69,6 +71,7 @@ function blankDraft(): Draft {
     kind: "buy",
     ticker: "",
     units: "",
+    value: "",
     pricePerUnit: "",
     marketPrice: "",
     fee: "",
@@ -82,6 +85,7 @@ function draftFromTxn(t: Transaction): Draft {
     kind: t.kind as TxnKind,
     ticker: t.ticker,
     units: t.units != null ? String(t.units) : "",
+    value: t.value != null ? String(t.value) : "",
     pricePerUnit: t.pricePerUnit != null ? String(t.pricePerUnit) : "",
     marketPrice: t.marketPrice != null ? String(t.marketPrice) : "",
     fee: t.fee != null ? String(t.fee) : "",
@@ -174,27 +178,39 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
     try {
       let payload: Record<string, unknown>;
       if (anchor) {
-        const u = draft.units.trim() === "" ? null : Number(draft.units);
-        if (u == null || !Number.isFinite(u) || u <= 0) {
-          setRowError("A starting balance needs a positive number of units.");
-          setBusy(false);
-          return;
-        }
-        payload = {
-          tradeDate: draft.tradeDate,
-          kind: draft.kind,
-          ticker: draft.ticker.trim(),
-          units: u,
-          pricePerUnit: draft.pricePerUnit.trim() === "" ? null : Number(draft.pricePerUnit),
-          marketPrice: draft.marketPrice.trim() === "" ? null : Number(draft.marketPrice),
-          amount: 0,
-          quoteSource: draft.quoteSource || inferQuoteSource(draft.ticker),
-        };
-        if (!payload.tradeDate || !payload.ticker) {
+        // Facts-only Balance: a unit count OR a ฿ value (units derive at the fold). A
+        // custom asset with no NAV also needs a current price to find its units.
+        const hasUnits = draft.units.trim() !== "" && Number(draft.units) > 0;
+        const hasValue = draft.value.trim() !== "" && Number(draft.value) > 0;
+        if (!draft.tradeDate || !draft.ticker.trim()) {
           setRowError("Add a date and a symbol.");
           setBusy(false);
           return;
         }
+        if (!hasUnits && !hasValue) {
+          setRowError("A balance needs a unit count or a ฿ value.");
+          setBusy(false);
+          return;
+        }
+        const custom = (draft.quoteSource || "manual") === "manual";
+        if (hasValue && !hasUnits && custom && draft.marketPrice.trim() === "") {
+          setRowError("A custom asset needs a current price to value it.");
+          setBusy(false);
+          return;
+        }
+        const avg = draft.pricePerUnit.trim() === "" ? null : Number(draft.pricePerUnit);
+        payload = {
+          tradeDate: draft.tradeDate,
+          kind: draft.kind,
+          ticker: draft.ticker.trim(),
+          units: hasUnits ? Number(draft.units) : undefined,
+          value: !hasUnits && hasValue ? Number(draft.value) : undefined,
+          pricePerUnit: avg,
+          marketPrice: draft.marketPrice.trim() === "" ? null : Number(draft.marketPrice),
+          // Cost magnitude (units × avg cost) — the PATCH route signs it (cash out).
+          amount: hasUnits && avg != null ? Number(draft.units) * avg : 0,
+          quoteSource: draft.quoteSource || "manual",
+        };
       } else {
         const d = normalizeTxnDraft({
           tradeDate: draft.tradeDate,
@@ -204,9 +220,17 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
           pricePerUnit: draft.pricePerUnit,
           amount: draft.amount,
           fee: draft.fee,
+          quoteSource: (draft.quoteSource || undefined) as QuoteSource | undefined,
         });
         if (!d.ticker || d.needsDate || (d.kind !== "split" && d.needsAmount)) {
           setRowError("Add a date, a symbol, and an amount.");
+          setBusy(false);
+          return;
+        }
+        // A custom trade given cash but no count and no price folds to 0 units —
+        // reject it here exactly as the Add modal does (shared `unitsResolvable`).
+        if (d.kind !== "split" && !d.unitsResolvable) {
+          setRowError("Add a price so we can value this trade.");
           setBusy(false);
           return;
         }
@@ -216,7 +240,7 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
           ticker: d.ticker,
           units: d.units,
           pricePerUnit: d.pricePerUnit,
-          amount: d.kind === "split" ? 0 : d.amount,
+          amount: d.kind === "split" ? 0 : (d.amount ?? 0),
           fee: d.fee,
           quoteSource: draft.quoteSource || d.quoteSource,
         };
@@ -433,7 +457,9 @@ function TxnEditor({
   busy,
 }: {
   draft: Draft;
-  onChange: (d: Draft) => void;
+  // Accepts an updater so multiple patches in one handler compose (the QtyInput sets
+  // amount AND units back-to-back; a value-spread `set` would clobber the first).
+  onChange: (d: Draft | ((prev: Draft) => Draft)) => void;
   onSave: () => void;
   onCancel: () => void;
   onDelete?: () => void;
@@ -452,7 +478,35 @@ function TxnEditor({
     [holdings],
   );
 
-  const set = (patch: Partial<Draft>) => onChange({ ...draft, ...patch });
+  const set = (patch: Partial<Draft>) => onChange((prev) => ({ ...prev, ...patch }));
+
+  // Resolve a hand-TYPED symbol's source against the catalog (the same shared
+  // resolver the Add modal uses) so the badge matches across both editors — picking
+  // a suggestion already sets the source; this covers typing a catalog code without
+  // picking it. Skips a pinned (user-toggled) source. Reads/writes via the functional
+  // updater so a stale ticker in the debounced callback can't clobber a newer edit.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: ticker + lock are the inputs; onChange is stable (setDraft)
+  useEffect(() => {
+    const ticker = draft.ticker;
+    if (draft.quoteSourceLocked || !ticker.trim()) return;
+    const apply = () => {
+      const resolved = cachedQuoteSource(ticker);
+      if (!resolved) return;
+      onChange((prev) =>
+        prev.quoteSourceLocked || prev.ticker !== ticker || prev.quoteSource === resolved
+          ? prev
+          : { ...prev, quoteSource: resolved },
+      );
+    };
+    apply(); // apply an already-cached source immediately
+    const timer = setTimeout(() => {
+      void resolveQuoteSources([ticker]).then((gained) => {
+        if (gained) apply();
+      });
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [draft.ticker, draft.quoteSourceLocked]);
+
   const anchor = isAnchor(draft.kind);
   // Dividend / fee are pure ฿ flows — no units or price, just an amount.
   const amountOnly = draft.kind === "dividend" || draft.kind === "fee";
@@ -490,7 +544,7 @@ function TxnEditor({
           }
           onToggleSource={() => {
             // Cycle Thai fund → Stock/ETF → Custom (manual price).
-            const qs = (draft.quoteSource || inferQuoteSource(draft.ticker)) as QuoteSource;
+            const qs = (draft.quoteSource || "manual") as QuoteSource;
             const next: QuoteSource =
               qs === "thai_mutual_fund"
                 ? "market"
@@ -512,8 +566,14 @@ function TxnEditor({
           <>
             <QtyInput
               units={draft.units}
-              price={anchor ? draft.marketPrice || draft.pricePerUnit : draft.pricePerUnit}
+              // `value` is the real ฿ total (a trade's amount, a Balance's value) so the
+              // toggle has data to re-type. A saved row stores only the typed fact, so
+              // open in the mode that fact implies — Units when a count is present, else
+              // ฿ — via the shared `qtyDefaultMode` (the SAME rule the Add modal uses).
+              value={anchor ? draft.value : draft.amount}
+              defaultMode={qtyDefaultMode(draft.units)}
               onUnits={(v) => set({ units: v })}
+              onValue={(v) => set(anchor ? { value: v } : { amount: v })}
             />
             <input
               value={draft.pricePerUnit}

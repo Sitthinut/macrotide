@@ -1,5 +1,6 @@
 import "server-only";
 import { listFundQuotes } from "@/lib/db/queries/quotes";
+import { foldableEvents } from "@/lib/db/queries/resolve-derived-units";
 import type { Transaction } from "@/lib/db/queries/transactions";
 import { inferHoldingCurrency } from "@/lib/market/currency";
 import { buildFxConverter } from "@/lib/market/fx";
@@ -74,7 +75,12 @@ export async function computeTransactionAnalytics(
   opts: AnalyticsOptions,
 ): Promise<TransactionAnalytics> {
   const method = opts.method ?? "average";
-  const txns = rows.map(toLedgerTxn);
+  // Facts-only ledger: derive the missing unit count (value-only Balances +
+  // amount-only trades) from NAV(date) at read, so realized gains / IRR /
+  // value-over-time always reflect the latest NAV — never a unit count frozen at
+  // save (ADR 0004). An anchor still unpriceable is dropped (not folded as zero) so
+  // it can't wipe a position — foldableEvents matches the holdings projection.
+  const txns = foldableEvents(rows).map(toLedgerTxn);
 
   const lots = reduceLots(txns, method);
   const contributions = summarizeContributions(txns);

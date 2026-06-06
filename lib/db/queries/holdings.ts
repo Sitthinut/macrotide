@@ -1,35 +1,60 @@
 import { and, eq, inArray } from "drizzle-orm";
+import type { ProjectedPosition } from "@/lib/portfolio/project-positions";
 import { getDb } from "../context";
 import { holdings, transactions } from "../schema";
+import { projectBucketPositions } from "./project-holdings";
 
-export type Holding = typeof holdings.$inferSelect;
+/** The stored holdings row: instrument metadata + identity only — NO position. */
+export type HoldingRow = typeof holdings.$inferSelect;
 export type HoldingInsert = typeof holdings.$inferInsert;
 export type HoldingUpdate = Partial<Omit<HoldingInsert, "id" | "createdAt">>;
 
+/**
+ * A holding as the app reads it: the stored metadata row PLUS the live position
+ * (`units`/`avgCost`) folded from the ledger on read (ADR 0004). The position is
+ * never stored — the `holdings` table holds only the instrument metadata that has
+ * no home in the ledger (name, asset class, quote source, portfolio). So units,
+ * cost, value, gains, and weight always reflect the latest NAV and can't disagree
+ * with the analytics, which folds the same ledger.
+ */
+export type Holding = HoldingRow & { units: number; avgCost: number | null };
+
+/** Overlay the live fold onto stored rows. A row the ledger no longer folds to a
+ * held position is OMITTED — the fold, not the row, decides what you hold (a
+ * sold-out holding's row is already gone, deleted by the rebuild). */
+function overlayLive(rows: HoldingRow[]): Holding[] {
+  if (rows.length === 0) return [];
+  const buckets = new Set(rows.map((h) => h.bucketId));
+  const live = new Map<string, ProjectedPosition>();
+  for (const b of buckets)
+    for (const p of projectBucketPositions(b)) live.set(`${b} ${p.ticker}`, p);
+  const out: Holding[] = [];
+  for (const h of rows) {
+    const p = live.get(`${h.bucketId} ${h.ticker}`);
+    if (!p) continue;
+    out.push({
+      ...h,
+      units: p.units,
+      avgCost: p.avgCost,
+      acquiredOn: h.acquiredOn ?? p.acquiredOn,
+    });
+  }
+  return out;
+}
+
 export function listHoldings(bucketId?: string): Holding[] {
   const q = getDb().select().from(holdings);
-  return (bucketId ? q.where(eq(holdings.bucketId, bucketId)) : q).all();
+  const rows = (bucketId ? q.where(eq(holdings.bucketId, bucketId)) : q).all();
+  return overlayLive(rows);
 }
 
 export function getHolding(id: number): Holding | undefined {
-  return getDb().select().from(holdings).where(eq(holdings.id, id)).get();
-}
-
-export function createHolding(input: HoldingInsert): Holding {
-  return getDb().insert(holdings).values(input).returning().get();
-}
-
-export function updateHolding(id: number, patch: HoldingUpdate): Holding | undefined {
-  return getDb()
-    .update(holdings)
-    .set({ ...patch, updatedAt: new Date().toISOString() })
-    .where(eq(holdings.id, id))
-    .returning()
-    .get();
-}
-
-export function deleteHolding(id: number): void {
-  getDb().delete(holdings).where(eq(holdings.id, id)).run();
+  const row = getDb().select().from(holdings).where(eq(holdings.id, id)).get();
+  if (!row) return undefined;
+  // Load by id even when the ledger folds to no position (units 0) — the metadata
+  // row exists and may need editing.
+  const p = projectBucketPositions(row.bucketId).find((x) => x.ticker === row.ticker);
+  return { ...row, units: p?.units ?? 0, avgCost: p?.avgCost ?? null };
 }
 
 /**

@@ -37,6 +37,10 @@ const txnInput = z
     // The asset's current/market price per unit (a Balance's "current price").
     // Trades derive their own from the execution price, so this is optional.
     marketPrice: z.number().finite().nonnegative().nullish(),
+    // A Balance's stated current ฿ VALUE, when the source shows value not units
+    // (the Thai-app case). Units are DERIVED from value ÷ NAV(tradeDate) here —
+    // never required as input (#130). Ignored once `units` is given.
+    value: z.number().finite().nonnegative().nullish(),
     amount: z.number().finite().nonnegative(),
     fee: z.number().finite().nonnegative().nullish(),
     quoteSource: z.string().trim().min(1).max(40).default("market"),
@@ -45,12 +49,18 @@ const txnInput = z
     note: z.string().trim().max(500).optional(),
     source: z.string().trim().max(120).optional(),
   })
-  // A cash-moving event must carry a positive amount; a split and the position
-  // anchors (opening/snapshot) carry no cash, so their amount is zero.
-  .refine((r) => r.kind === "split" || isAnchorKind(r.kind) || r.amount > 0, {
-    message: "amount must be greater than zero for a cash transaction",
-    path: ["amount"],
-  });
+  // A cash-moving trade must carry the money fact: a positive ฿ `amount`, OR a unit
+  // count (a units-only trade — its amount derives from units × NAV(date) at the fold,
+  // the symmetric twin of an amount-only trade deriving units). Splits and the
+  // position anchors (opening/snapshot) carry no cash, so their amount is zero.
+  .refine(
+    (r) =>
+      r.kind === "split" ||
+      isAnchorKind(r.kind) ||
+      r.amount > 0 ||
+      (r.units != null && r.units > 0),
+    { message: "a trade needs a ฿ amount or a unit count", path: ["amount"] },
+  );
 
 const postBody = z.object({
   bucketId: z.string().trim().min(1),
@@ -105,9 +115,16 @@ export async function POST(req: Request) {
       .map((t) => t.ticker);
     const kinds = promoteAnchorKinds(alreadyAnchored, transactions);
 
+    // FACTS-ONLY LEDGER (ADR 0004). The route does NO derivation — it stores only the
+    // money facts the user gave: a read `units`, a Balance's ฿ `value`, or a trade's ฿
+    // `amount`. The missing unit count (a value-only Balance, or an amount-only trade)
+    // is derived from value/amount ÷ NAV(tradeDate) at the projection fold
+    // (lib/db/queries/resolve-derived-units.ts), so it self-corrects when that date's
+    // NAV lands or is corrected — no estimate is ever frozen here.
     const importBatchId = randomUUID();
     const rows: TransactionInsert[] = transactions.map((t, i) => {
       const kind = kinds[i];
+      const anchor = isAnchorKind(kind);
       return {
         bucketId,
         ticker: t.ticker,
@@ -115,11 +132,15 @@ export async function POST(req: Request) {
         quoteSource: t.quoteSource,
         kind,
         tradeDate: t.tradeDate,
+        // A read unit count is a fact; a value-only Balance / amount-only trade leaves
+        // it NULL for the fold to derive.
         units: t.units ?? null,
+        // The stated current value — the fact for a value-only Balance; NULL otherwise.
+        value: anchor ? (t.value ?? null) : null,
         pricePerUnit: t.pricePerUnit ?? null,
-        // The asset's market price at this date. A Balance supplies its own
-        // ("current price"); a trade's execution price doubles as its market point.
-        marketPrice: t.marketPrice ?? (isAnchorKind(kind) ? null : (t.pricePerUnit ?? null)),
+        // A Balance's user-entered current price; a trade's execution price (if given)
+        // doubles as its market point. Never a value derived from units here.
+        marketPrice: t.marketPrice ?? (anchor ? null : (t.pricePerUnit ?? null)),
         // Authoritative sign applied here from the (possibly promoted) kind.
         amount: signedAmount(kind, t.amount),
         fee: t.fee ?? null,

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { withDb } from "@/lib/api/with-db";
 import { listBuckets } from "@/lib/db/queries/buckets";
 import { deleteTransaction, updateTransaction } from "@/lib/db/queries/transactions";
-import { LEDGER_KINDS, signedAmount } from "@/lib/portfolio/txn-import";
+import { isAnchorKind, LEDGER_KINDS, signedAmount } from "@/lib/portfolio/txn-import";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,10 +12,10 @@ export const dynamic = "force-dynamic";
 // view (ADR 0004). Editing or deleting an event rebuilds the bucket's derived
 // holdings. Scoped through the caller's buckets (transactions have no user_id).
 //
-// `amount` is derived server-side from the kind so the stored sign can't
-// disagree with it: a snapshot moves no cash (0); a costed opening is the cost
-// out (−units×price); a delta uses signedAmount(kind, magnitude). The client
-// sends a POSITIVE magnitude, exactly like POST /api/transactions.
+// FACTS-ONLY (mirrors POST /api/transactions): the edit stores only the money fact
+// — a read `units`, a Balance's ฿ `value`, or a trade's ฿ `amount` (a positive
+// magnitude the server signs by kind). The missing side (a value-only Balance, an
+// amount-only or units-only trade) derives at the projection fold, never frozen here.
 const patchBody = z
   .object({
     tradeDate: z.string().regex(/^\d{4}-\d{2}-\d{2}/, "tradeDate must be ISO (YYYY-MM-DD)"),
@@ -25,28 +25,22 @@ const patchBody = z
     units: z.number().finite().nonnegative().nullish(),
     pricePerUnit: z.number().finite().nonnegative().nullish(),
     marketPrice: z.number().finite().nonnegative().nullish(),
+    // A Balance's stated current ฿ VALUE (units derive from value ÷ NAV(date) at the fold).
+    value: z.number().finite().nonnegative().nullish(),
     amount: z.number().finite().nonnegative().default(0),
     fee: z.number().finite().nonnegative().nullish(),
     quoteSource: z.string().trim().min(1).max(40),
   })
-  // A cash-moving delta needs a positive amount; anchors and splits may be 0.
+  // A trade needs the money fact: a positive ฿ amount OR a unit count (units-only
+  // trades derive their amount from NAV). Anchors and splits may carry amount 0.
   .refine(
-    (r) => r.kind === "split" || r.kind === "opening" || r.kind === "snapshot" || r.amount > 0,
-    { message: "amount must be greater than zero for a cash transaction", path: ["amount"] },
+    (r) =>
+      r.kind === "split" ||
+      isAnchorKind(r.kind) ||
+      r.amount > 0 ||
+      (r.units != null && r.units > 0),
+    { message: "a trade needs a ฿ amount or a unit count", path: ["amount"] },
   );
-
-/** Derive the stored signed THB amount from the kind (never trust a client sign). */
-function deriveAmount(
-  kind: string,
-  magnitude: number,
-  units: number | null,
-  price: number | null,
-): number {
-  if (kind === "snapshot") return 0;
-  if (kind === "opening") return price != null && units != null ? -(units * price) : 0;
-  // deltas: buy/sell/dividend/fee/split/reinvest
-  return signedAmount(kind as Parameters<typeof signedAmount>[0], magnitude);
-}
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -72,18 +66,21 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   return withDb(() => {
     const owned = listBuckets().map((b) => b.id);
-    const units = t.units ?? null;
+    const anchor = isAnchorKind(t.kind);
     const pricePerUnit = t.pricePerUnit ?? null;
     const updated = updateTransaction(numId, owned, {
       tradeDate: t.tradeDate,
       kind: t.kind,
       ticker: t.ticker,
       englishName: t.englishName ?? null,
-      units,
+      // Facts: a read unit count, else NULL for the fold to derive.
+      units: t.units ?? null,
+      // The stated current value — the fact for a value-only Balance; NULL otherwise.
+      value: anchor ? (t.value ?? null) : null,
       pricePerUnit,
-      marketPrice:
-        t.marketPrice ?? (t.kind === "opening" || t.kind === "snapshot" ? null : pricePerUnit),
-      amount: deriveAmount(t.kind, t.amount, units, pricePerUnit),
+      marketPrice: t.marketPrice ?? (anchor ? null : pricePerUnit),
+      // Client sends a positive magnitude; sign it by the (possibly anchor) kind.
+      amount: signedAmount(t.kind, t.amount),
       fee: t.fee ?? null,
       quoteSource: t.quoteSource,
     });

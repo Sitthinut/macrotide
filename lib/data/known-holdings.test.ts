@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  filterKnownTickers,
-  KNOWN_TICKERS,
-  mergeWithHoldings,
-  type TickerSuggestion,
-} from "./known-funds";
+import { filterKnownTickers, mergeWithHoldings, type TickerSuggestion } from "./known-holdings";
 
 const sample: TickerSuggestion[] = [
   { ticker: "K-FIXED-A", name: "K Fixed Income Fund — A", quote_source: "thai_mutual_fund" },
@@ -36,9 +31,6 @@ describe("filterKnownTickers", () => {
   });
 
   it("ranks ticker-prefix matches above name-substring matches", () => {
-    // Query "K" — prefix-matches K-FIXED-A and K-USA-A(A); also substring in
-    // none of the other names. Both ticker-prefix entries should rank before
-    // any name-only matches.
     const out = filterKnownTickers(sample, "K");
     expect(out[0].ticker.startsWith("K")).toBe(true);
     expect(out[1].ticker.startsWith("K")).toBe(true);
@@ -53,10 +45,15 @@ describe("filterKnownTickers", () => {
     expect(filterKnownTickers(sample, "zzz-nonexistent")).toEqual([]);
   });
 
-  it("surfaces holdings entries ahead of static entries within the same match tier", () => {
+  it("surfaces holdings entries ahead of others within the same match tier", () => {
     const list: TickerSuggestion[] = [
       { ticker: "AAPL", name: "Apple Inc.", quote_source: "market" },
-      { ticker: "APPLE-FUND", name: "Apple Fund", quote_source: "thai_mutual_fund", fromHoldings: true },
+      {
+        ticker: "APPLE-FUND",
+        name: "Apple Fund",
+        quote_source: "thai_mutual_fund",
+        fromHoldings: true,
+      },
     ];
     const out = filterKnownTickers(list, "apple");
     expect(out[0].ticker).toBe("APPLE-FUND");
@@ -64,13 +61,11 @@ describe("filterKnownTickers", () => {
 });
 
 describe("mergeWithHoldings", () => {
-  it("returns the static list when no holdings are provided", () => {
-    const out = mergeWithHoldings([]);
-    expect(out).toHaveLength(KNOWN_TICKERS.length);
-    expect(out.every((e) => e.fromHoldings !== true)).toBe(true);
+  it("returns an empty list when no holdings are provided (no static seed)", () => {
+    expect(mergeWithHoldings([])).toEqual([]);
   });
 
-  it("places holdings entries before the static list", () => {
+  it("maps each holding to a suggestion tagged fromHoldings", () => {
     const out = mergeWithHoldings([
       { ticker: "MY-FUND", englishName: "My Custom Fund", quoteSource: "thai_mutual_fund" },
     ]);
@@ -82,17 +77,7 @@ describe("mergeWithHoldings", () => {
     });
   });
 
-  it("dedupes when a holding ticker also appears in the static list", () => {
-    const out = mergeWithHoldings([
-      { ticker: "AAPL", englishName: "Apple (my entry)", quoteSource: "market" },
-    ]);
-    const apples = out.filter((e) => e.ticker.toUpperCase() === "AAPL");
-    expect(apples).toHaveLength(1);
-    expect(apples[0].name).toBe("Apple (my entry)");
-    expect(apples[0].fromHoldings).toBe(true);
-  });
-
-  it("dedupes duplicate holdings tickers (case-insensitive)", () => {
+  it("dedupes duplicate holdings tickers (case-insensitive, first wins)", () => {
     const out = mergeWithHoldings([
       { ticker: "K-FIXED-A", englishName: "First", quoteSource: "thai_mutual_fund" },
       { ticker: "k-fixed-a", englishName: "Second", quoteSource: "thai_mutual_fund" },
@@ -102,10 +87,12 @@ describe("mergeWithHoldings", () => {
     expect(matches[0].name).toBe("First");
   });
 
-  it("narrows unrecognised quote_source values to market", () => {
-    const out = mergeWithHoldings([
-      { ticker: "WEIRD", englishName: "Weird", quoteSource: "something-else" },
-    ]);
-    expect(out[0].quote_source).toBe("market");
+  it("preserves market and manual (custom) sources; narrows anything unrecognised to custom", () => {
+    expect(mergeWithHoldings([{ ticker: "VOO", englishName: "ETF", quoteSource: "market" }])[0]
+      .quote_source).toBe("market");
+    expect(mergeWithHoldings([{ ticker: "GOLD", englishName: "Gold", quoteSource: "manual" }])[0]
+      .quote_source).toBe("manual");
+    expect(mergeWithHoldings([{ ticker: "WEIRD", englishName: "Weird", quoteSource: "x" }])[0]
+      .quote_source).toBe("manual");
   });
 });

@@ -48,26 +48,49 @@ inline before saving:
 - **Add a row** — type a row directly. Best for a handful of positions, or
   correcting an import.
 
-As you type a symbol, the field autocompletes against the known-fund catalog,
-filling in the name and asset class where it can. Duplicate symbols are de-duped
-into the existing row for review rather than creating a second row. Quantity is
-required to save a row; average cost is optional.
+As you type a symbol, the field autocompletes against the **real fund catalog**
+(plus the funds you already hold), filling in the name and asset class where it
+can. The same catalog is the single authority for each row's **price source**
+badge: a symbol the catalog knows reads as a Thai fund; anything it doesn't is a
+**custom** (self-priced) asset. There's no shape guessing and no hard-coded list —
+when stocks/ETFs join the catalog they resolve the same way (you can still flip the
+badge per row to force one). Duplicate symbols are de-duped into the
+existing row for review rather than creating a second row. To save a
+Balance you give it **either a unit count or a ฿ value** (the app derives units
+from the value — see below); average cost stays optional. For the exact input
+shapes a Balance or a trade accepts and how each resolves, see
+[What each row accepts](../explanation/balances-and-history.md#what-each-row-accepts--the-input-combinations).
 
 ### Units or ฿ Total
 
 The quantity field has a **Units ↔ ฿ Total** switcher. You hold the canonical
 **units**, but you can instead type a **฿ total** and the app derives units from
-the row's price (a trade's price, or a Balance's current price / average cost).
-This matches Thai broker apps that show a holding's value rather than its unit
-count. When there's no price on the row yet, ฿ entry waits for one.
+the price on the row's own date — a trade's execution price, a Balance's current
+price, or the fund's NAV on that date. This works for a Balance (the ฿ value your
+broker app shows) *and* a buy/sell (the ฿ amount you spent or received), so you
+never have to hunt down a unit count. The divisor is always a *current* price,
+never your average cost (average cost is what you paid; it sets the cost basis,
+not the unit count). If there's no price on the row and no NAV on file for its
+date, the app keeps the ฿ total — a Balance asks you for a unit count; a trade
+saves and flags that it needs one.
 
 ### Image OCR details
 
-Most Thai broker apps show market value + allocation %, not units. Where a fund's
-NAV is on file, the importer derives units (`value ÷ NAV`) and average cost and
-marks them estimated (dashed field); rows it can't derive are highlighted for you
-to fill in. Upload several screenshots and the rows merge (a later detail-view
-shot backfills exact figures over an earlier summary).
+Most Thai broker apps show a holding's market **value**, not its unit count. When
+the value is all the source gives, the importer records a **value-only Balance**:
+the row opens showing the ฿ value you recognise, and units are derived from
+`value ÷ NAV(date)` at the fold — so you're never shown a long unit count nobody typed.
+Average cost is **optional** on these rows (it steps back, muted). If the source also
+shows an **invested total** (ยอดเงินลงทุน / มูลค่าต้นทุน) — or a current value plus a
+P/L you can subtract — the importer keeps that ฿ total as the **cost fact**; the
+per-unit average cost is then *derived* from `cost total ÷ units` at the fold, never
+frozen on the row (so it self-corrects with NAV, like units do). It never invents a
+per-unit cost by dividing by a NAV-derived unit count. When the source *does* print
+the unit count and a per-unit cost (a detail view, say), those are read and shown as
+plain facts. It prices each row off the NAV on the snapshot's **own date**
+(falling back to the latest NAV), so a statement you import for a past date doesn't
+drift against today's price. Upload several screenshots and the rows merge (a later
+detail-view shot backfills exact figures over an earlier summary).
 
 Requirements and behavior:
 

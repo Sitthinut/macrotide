@@ -1,12 +1,7 @@
 import "server-only";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { generateText } from "ai";
-import { inferQuoteSource } from "@/lib/market/infer-quote-source";
 import type { QuoteSource } from "@/lib/market/sources";
-
-// Re-exported so server callers (route, deriveRow) keep importing it from here.
-// The implementation lives in a client-safe module so the UI can share it.
-export { inferQuoteSource };
 
 /**
  * Image OCR for the "Add holdings" flow. The user uploads a broker-app
@@ -72,6 +67,12 @@ export interface ExtractedRow {
   value?: number;
   /** Unrealised profit/loss in THB, if shown (negative for a loss). */
   pl?: number;
+  /**
+   * Amount invested / cost-basis TOTAL in THB, if shown (ยอดเงินลงทุน / มูลค่าต้นทุน).
+   * A ฿ TOTAL, never per-unit — distinct from `avgCost`. This is a read FACT; the
+   * per-unit avg cost is DERIVED from it ÷ units at the fold, never frozen here.
+   */
+  costTotal?: number;
 }
 
 /**
@@ -81,7 +82,7 @@ export interface ExtractedRow {
  */
 export interface DerivedRow extends ExtractedRow {
   quoteSource: QuoteSource;
-  /** True when `units`/`avgCost` were computed (value÷NAV), not read from the image. */
+  /** True when the unit count was computed (value÷NAV), not read from the image. */
   estimated: boolean;
   /** True when we couldn't derive units (no NAV on file) — UI asks the user to type them. */
   needsUnits: boolean;
@@ -127,20 +128,25 @@ If the image contains no readable text at all, return an empty string.`;
 // which several capable models silently fail — see the note above).
 const EXTRACT_PROMPT = `You are reading a screenshot of a Thai mutual-fund / brokerage portfolio. Extract EVERY fund holding as a JSON array — output ONLY the array, no prose, no markdown code fences.
 
-Each element has these keys (include a key ONLY if that value is actually visible for that row; omit keys you cannot read — never guess):
+Each element has these keys (include a key ONLY if that value is actually visible for that row; omit keys you cannot read — never guess). Thai broker apps vary, so match by MEANING using these labels:
 - "ticker": the fund code exactly as printed (e.g. "K-USA-A(A)", "SCBSP500-A", "TLFVMR-ASIAX")
 - "englishName": the English fund name if shown as a subtitle
-- "units": number of units held
-- "nav": price or NAV per unit
-- "avgCost": average cost per unit
-- "value": market value of the position (the large baht amount)
-- "pl": unrealised profit/loss in baht (negative if it is red or has a minus sign)
+- "units": the holding's unit count — Thai "จำนวนหน่วย" / "หน่วย", English "units"
+- "nav": the CURRENT price per unit — Thai "NAV ปัจจุบัน" / "มูลค่าหน่วยลงทุน", English "NAV" / "price"
+- "avgCost": the AVERAGE COST PER UNIT you paid — Thai "NAV ต้นทุน" / "ต้นทุนต่อหน่วย", English "cost NAV" / "average cost" (a small per-unit number like 11.2912)
+- "value": the CURRENT market value of the position — Thai "มูลค่าปัจจุบัน" / "มูลค่า", English "current value" / "market value" (the large baht amount)
+- "pl": the unrealised profit/loss in baht — Thai "กำไร/ขาดทุน", English "P/L" (negative if it is red or has a minus sign)
+- "costTotal": the amount INVESTED / cost-basis TOTAL in baht — Thai "ยอดเงินลงทุน" / "มูลค่าต้นทุน", English "amount invested" / "cost" — a large baht TOTAL (like the current value), NEVER a small per-unit number. Read it when the row shows it alongside the current value.
+
+WHAT IS NOT A FIELD — avoid these specific mistakes:
+- A "N unit" / "N units" count shown in a SECTION or CATEGORY HEADER (e.g. "LTF — 1 unit", "กองทุนรวมทั่วไป — 1 unit", "RMF — 2 units") is the NUMBER OF FUNDS in that section, NOT a holding's unit count. NEVER read it as "units".
+- Keep the three baht figures distinct: "value" is the CURRENT value, "costTotal" is the INVESTED total, and they are NOT "avgCost". "avgCost" is ONLY a small per-unit cost NAV (e.g. 11.2912) — leave it out unless that per-unit figure is actually printed; never put an invested TOTAL into "avgCost".
 
 CRITICAL number rules — read every digit and decimal EXACTLY as printed:
 - The ฿ symbol is a CURRENCY MARKER, never a digit. "฿18.4521" is 18.4521, NOT 818.4521. Strip it.
 - Remove thousands-separator commas: "719,193.85" → 719193.85.
 - Never round, pad, or normalise. Output plain JSON numbers (no quotes, no ฿, no commas, no % sign).
-- Do NOT include portfolio totals, headers, "cash", or summary rows as holdings.
+- Do NOT include portfolio totals, section headers, "cash", or summary rows as holdings.
 
 If the image shows no portfolio at all, return [].`;
 
@@ -367,14 +373,41 @@ export async function classifyImportImage(
   const fallbackEnv = process.env.OCR_FALLBACK_MODEL?.trim();
   const fallback = fallbackEnv ?? (process.env.OCR_MODEL ? null : DEFAULT_OCR_FALLBACK_MODEL);
 
+  let result: ImportClassification;
   try {
-    return await classifyWith(apiKey, primary, input, ctx);
+    result = await classifyWith(apiKey, primary, input, ctx);
   } catch (err) {
     if (err instanceof OcrProviderUnavailableError && fallback && fallback !== primary) {
-      return await classifyWith(apiKey, fallback, input, ctx);
+      result = await classifyWith(apiKey, fallback, input, ctx);
+    } else {
+      throw err;
     }
-    throw err;
   }
+  // Deterministic safety net: a "right now" broker snapshot often shows no date in
+  // the image, and the model doesn't reliably read a YYYYMMDD date out of the file
+  // name — so backfill asOf from the file name when the model left it null. The
+  // date matters: a value-only Balance derives its units from NAV on this date.
+  if (!result.asOf && ctx?.filename) {
+    const fromName = dateFromFilename(ctx.filename);
+    if (fromName) return { ...result, asOf: fromName };
+  }
+  return result;
+}
+
+/**
+ * Parse a YYYY-MM-DD / YYYY_MM_DD or packed YYYYMMDD date embedded in a file name
+ * (e.g. "Screenshot_20260530_134416.jpg" → "2026-05-30"). Rejects implausible
+ * month/day; returns null when there's no plausible date. Exported for tests.
+ */
+export function dateFromFilename(name: string): string | null {
+  const m =
+    name.match(/(20\d{2})[-_](\d{2})[-_](\d{2})/) ??
+    name.match(/(?<!\d)(20\d{2})(\d{2})(\d{2})(?!\d)/);
+  if (!m) return null;
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  return `${m[1]}-${m[2]}-${m[3]}`;
 }
 
 async function classifyWith(
@@ -630,11 +663,13 @@ export function parseExtractedRows(text: string): ExtractedRow[] {
     const avgCost = coerceNumber(o.avgCost);
     const value = coerceNumber(o.value);
     const pl = coerceNumber(o.pl);
+    const costTotal = coerceNumber(o.costTotal);
     if (units !== null) row.units = units;
     if (nav !== null) row.nav = nav;
     if (avgCost !== null) row.avgCost = avgCost;
     if (value !== null) row.value = value;
     if (pl !== null) row.pl = pl;
+    if (costTotal !== null) row.costTotal = costTotal;
     rows.push(row);
   }
   return rows;
@@ -645,17 +680,25 @@ export function parseExtractedRows(text: string): ExtractedRow[] {
  * from market data. Pure + synchronous so it's unit-testable; the route looks
  * up `nav` (via `listFundQuotes`) and passes it in.
  *
- * Precedence: trust what the image showed. Only derive a missing field.
- *  - units   = value ÷ nav           (when units absent but value + nav present)
- *  - avgCost = (value − pl) ÷ units   (cost basis = current value minus gain)
+ * Precedence: trust what the image showed. Only derive a missing field — and
+ * derive only the UNIT COUNT off NAV, never a money fact:
+ *  - units     = value ÷ nav        (when units absent but value + nav present)
+ *  - costTotal = value − pl         (the invested ฿ TOTAL, when not read directly)
  *
- * `estimated` flags any derived field so the UI can mark it and invite the
+ * We do NOT fabricate a per-unit avg cost here: that would mean dividing the
+ * invested total by the NAV-derived unit count and freezing a NAV-dependent figure
+ * (facts-only, ADR 0004). The invested total is a fact (read, or value−pl of two
+ * read facts); the per-unit avg cost is DERIVED from costTotal ÷ units at the fold.
+ *
+ * `estimated` flags the NAV-derived unit count so the UI can mark it and invite the
  * user to make it exact. `needsUnits` means we still have no units (no NAV on
  * file and none on the image) — the confirmation table asks the user to type
  * them, ideally from the fund's detail screen.
  */
 export function deriveRow(row: ExtractedRow, nav: number | undefined): DerivedRow {
-  const quoteSource = inferQuoteSource(row.ticker);
+  // Default to a custom asset; deriveRowsWithNav overlays the real catalog source
+  // (the single authority) — no shape guessing here.
+  const quoteSource: QuoteSource = "manual";
   const out: DerivedRow = { ...row, quoteSource, estimated: false, needsUnits: false };
 
   // Prefer the NAV printed on the image; fall back to market-data NAV.
@@ -665,22 +708,24 @@ export function deriveRow(row: ExtractedRow, nav: number | undefined): DerivedRo
     out.estimated = true;
   }
 
+  // Derived figures are estimates off the NAV, so round to a sane precision (4 dp
+  // for units / per-unit cost) — a raw float like 18388.007604741964 reads as
+  // fabricated. A value READ from the image is never rounded.
+  const round4 = (n: number) => Math.round(n * 1e4) / 1e4;
+
   if (out.units === undefined && out.value !== undefined && effNav) {
-    out.units = out.value / effNav;
+    out.units = round4(out.value / effNav);
     out.estimated = true;
   }
 
-  if (
-    out.avgCost === undefined &&
-    out.units !== undefined &&
-    out.units > 0 &&
-    out.value !== undefined
-  ) {
-    const costBasis = out.value - (out.pl ?? 0);
-    if (costBasis > 0) {
-      out.avgCost = costBasis / out.units;
-      out.estimated = true;
-    }
+  // Carry the invested ฿ TOTAL as a fact (read directly, or reconstructed from the
+  // two read figures value − pl). NOT a per-unit avg cost: the per-unit figure is
+  // derived from costTotal ÷ units at the fold, so it self-corrects with NAV and is
+  // never frozen here. Round ฿ to satang. When P/L isn't shown we can't know the
+  // cost — leave it absent rather than assuming zero gain (costTotal = value).
+  if (out.costTotal === undefined && out.value !== undefined && out.pl !== undefined) {
+    const costTotal = Math.round((out.value - out.pl) * 100) / 100;
+    if (costTotal > 0) out.costTotal = costTotal;
   }
 
   out.needsUnits = out.units === undefined || out.units <= 0;

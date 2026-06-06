@@ -33,9 +33,9 @@ vi.mock("@ai-sdk/openai-compatible", () => ({
 }));
 
 import {
+  dateFromFilename,
   deriveRow,
   extractHoldingsFromImage,
-  inferQuoteSource,
   isAllowedMimeType,
   OcrProviderUnavailableError,
   parseClassification,
@@ -55,47 +55,6 @@ afterEach(() => {
   delete process.env.OPENROUTER_API_KEY;
   delete process.env.OCR_MODEL;
   delete process.env.OCR_FALLBACK_MODEL;
-});
-
-describe("inferQuoteSource", () => {
-  it("treats Thai fund share-class shapes as thai_mutual_fund", () => {
-    expect(inferQuoteSource("K-FIXED-A")).toBe("thai_mutual_fund");
-    expect(inferQuoteSource("HIDIV-D")).toBe("thai_mutual_fund");
-    expect(inferQuoteSource("SCBS&P500-A")).toBe("thai_mutual_fund");
-    expect(inferQuoteSource("k-fixed-a")).toBe("thai_mutual_fund"); // case-insensitive
-  });
-
-  it("keeps known stock/ETF/index seeds on market, but defaults unknown symbols to custom", () => {
-    // Tickers in the seed catalog keep their tagged source.
-    expect(inferQuoteSource("AAPL")).toBe("market");
-    expect(inferQuoteSource("PTT.BK")).toBe("market");
-    expect(inferQuoteSource("^GSPC")).toBe("market");
-    expect(inferQuoteSource("THB=X")).toBe("market");
-    expect(inferQuoteSource("QQQ")).toBe("market");
-    // Unknown bare tickers default to a CUSTOM (manual-priced) asset — we can't
-    // price an arbitrary symbol, so don't assume the ETF chain.
-    expect(inferQuoteSource("KFIXED")).toBe("manual"); // no hyphen, not a known AMC prefix
-    for (const t of ["SPY", "THD", "ACWI", "ZZUNLISTED"]) {
-      expect(inferQuoteSource(t)).toBe("manual");
-    }
-  });
-
-  it("tags Thai funds the old shape-only regex missed", () => {
-    // Parenthetical share class — parens weren't in the old character class.
-    expect(inferQuoteSource("K-GOLD-A(A)")).toBe("thai_mutual_fund");
-    // No-hyphen AMC codes — fell through to market under shape-only rules.
-    expect(inferQuoteSource("SCBCOMP")).toBe("thai_mutual_fund");
-    expect(inferQuoteSource("KFS100SSFX")).toBe("thai_mutual_fund");
-    // Hyphen / ampersand fund codes stay Thai funds.
-    for (const t of ["TLFVMR-ASIAX", "KF-LATAM", "KF-SET50-L", "KT-BOND"]) {
-      expect(inferQuoteSource(t)).toBe("thai_mutual_fund");
-    }
-  });
-
-  it("honours the seed catalog by membership (case-insensitive)", () => {
-    expect(inferQuoteSource("^set.bk")).toBe("market");
-    expect(inferQuoteSource("ptt.bk")).toBe("market");
-  });
 });
 
 describe("isAllowedMimeType", () => {
@@ -271,7 +230,10 @@ describe("deriveRow", () => {
     expect(row.units).toBeCloseTo(6461.5162, 3);
     expect(row.estimated).toBe(true);
     expect(row.needsUnits).toBe(false);
-    expect(row.avgCost).toBeCloseTo((646151.62 - 137993.6) / 6461.5162, 3);
+    // Facts-only: carry the invested TOTAL (value − pl) as a fact, never a fabricated
+    // per-unit avg cost (that would freeze a NAV-derived figure — it derives at the fold).
+    expect(row.costTotal).toBeCloseTo(646151.62 - 137993.6, 2);
+    expect(row.avgCost).toBeUndefined();
   });
 
   it("prefers the NAV printed on the image over market NAV", () => {
@@ -296,11 +258,54 @@ describe("deriveRow", () => {
     expect(row.needsUnits).toBe(true);
   });
 
-  it("routes the quoteSource from the ticker shape", () => {
-    expect(deriveRow({ ticker: "K-FIXED-A", units: 1 }, undefined).quoteSource).toBe(
-      "thai_mutual_fund",
-    );
-    expect(deriveRow({ ticker: "AAPL", units: 1 }, undefined).quoteSource).toBe("market");
+  it("defaults the quoteSource to custom — the catalog overlay (in derive-rows) decides", () => {
+    // deriveRow is pure + catalog-free: no shape guessing. deriveRowsWithNav overlays
+    // the real catalog source, so a real fund reads as a Thai fund there, not here.
+    expect(deriveRow({ ticker: "K-FIXED-A", units: 1 }, undefined).quoteSource).toBe("manual");
+    expect(deriveRow({ ticker: "AAPL", units: 1 }, undefined).quoteSource).toBe("manual");
+  });
+
+  it("rounds derived units to 4 dp and carries the invested total as a fact", () => {
+    // value 1000 ÷ NAV 7 = 142.857142857… → 142.8571 (no fabricated precision).
+    // Cost rides as the invested TOTAL (value − pl = 900), NOT a per-unit avg cost.
+    const row = deriveRow({ ticker: "EXAMPLE-FUND-A", value: 1000, pl: 100 }, 7);
+    expect(row.units).toBe(142.8571);
+    expect(row.costTotal).toBe(900);
+    expect(row.avgCost).toBeUndefined();
+    // never a raw 15-digit float
+    expect(String(row.units)).not.toMatch(/\d{6,}/);
+  });
+
+  it("reads an invested cost TOTAL directly when the image shows it", () => {
+    // costTotal printed on the row → kept verbatim (not recomputed from pl).
+    const row = deriveRow({ ticker: "EXAMPLE-FUND-A", value: 1000, costTotal: 880 }, 7);
+    expect(row.costTotal).toBe(880);
+    expect(row.avgCost).toBeUndefined();
+  });
+
+  it("leaves cost unknown when neither P/L nor an invested total is shown", () => {
+    // No way to know the cost basis from value alone — don't assume zero gain.
+    const row = deriveRow({ ticker: "EXAMPLE-FUND-A", value: 1000 }, 7);
+    expect(row.costTotal).toBeUndefined();
+    expect(row.avgCost).toBeUndefined();
+  });
+});
+
+describe("dateFromFilename", () => {
+  it("parses a packed YYYYMMDD date from a screenshot name", () => {
+    expect(dateFromFilename("Screenshot_20260530_134416_iFund.jpg")).toBe("2026-05-30");
+  });
+  it("parses a dashed / underscored YYYY-MM-DD date", () => {
+    expect(dateFromFilename("port-2026-05-30.png")).toBe("2026-05-30");
+    expect(dateFromFilename("2026_05_30 export.jpg")).toBe("2026-05-30");
+  });
+  it("ignores a trailing time block and other digit runs", () => {
+    // 134416 (a time) must not be read as a date; only the 2026-prefixed run is.
+    expect(dateFromFilename("Screenshot_20260530_134416.jpg")).toBe("2026-05-30");
+  });
+  it("rejects an implausible month/day and a name with no date", () => {
+    expect(dateFromFilename("20261345.jpg")).toBeNull(); // month 13
+    expect(dateFromFilename("holdings.jpg")).toBeNull();
   });
 });
 

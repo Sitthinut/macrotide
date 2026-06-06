@@ -3629,13 +3629,38 @@ textarea.sheet-input {
 .rec-edit {
   display: grid;
   gap: 6px;
-  align-items: center;
+  /* Each cell stacks a small caption over its control (so a field stays legible
+     when it's pre-filled — from a paste, an import, or the Advisor); align the
+     captions in a row at the top. */
+  align-items: start;
   /* Type + Date stay fixed (their controls have an intrinsic width); the rest
      flex so the row fills the modal's full width on any desktop size without
      any single field stretching too far. */
   grid-template-columns:
     98px 124px minmax(120px, 1.6fr) minmax(70px, 1fr)
     minmax(72px, 1fr) minmax(60px, 0.9fr);
+}
+/* One field cell: a caption above its control. */
+.rec-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.rec-label {
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--muted);
+  padding-left: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The muted "· optional" suffix — a quiet cue, not a warning. */
+.rec-opt {
+  color: var(--muted-2);
+  font-weight: 400;
 }
 /* Amount-only kinds (dividend / fee): Type · Date · Symbol · ฿ amount. */
 .rec-edit.is-flow {
@@ -3663,6 +3688,26 @@ textarea.sheet-input {
 }
 .rec-edit input:focus,
 .rec-edit select:focus {
+  border-color: var(--accent);
+}
+/* An optional field (avg cost, current price, fee): a dashed border is the quiet
+   "you can skip this" cue — but a value you DO type reads as a normal fact (the
+   caption already says "· optional"), so don't mute the text or hollow the field. */
+.rec-edit input[data-optional] {
+  border-style: dashed;
+  border-color: var(--line);
+}
+.rec-edit input[data-optional]::placeholder {
+  color: var(--muted-2);
+}
+/* A pre-filled figure that was DERIVED from the value (not read off the source) —
+   dashed + amber tint so the user knows it's an estimate to verify, not a fact. */
+.rec-edit input[data-estimated] {
+  border-style: dashed;
+  border-color: var(--amber);
+  color: var(--muted);
+}
+.rec-edit input[data-estimated]:focus {
   border-color: var(--accent);
 }
 /* When the editor card itself is too narrow to hold the one-line grid (a narrow

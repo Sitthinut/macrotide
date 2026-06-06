@@ -20,7 +20,7 @@ import {
   upsertFund,
   upsertFundFees,
 } from "../db/queries/funds";
-import { createHolding } from "../db/queries/holdings";
+import { createHoldingViaLedger } from "../db/queries/project-holdings";
 import * as schema from "../db/schema";
 import { feeCreepKey } from "./action-item-key";
 import { computeFeeCreep } from "./fee-creep";
@@ -64,8 +64,20 @@ function seededCtx(overrides: Partial<Pick<DbContext, "isDemo" | "sessionId" | "
     upsertFund(fund("PRICEY2"));
     upsertFund(fund("CHEAP"));
     upsertFundFees([ter("PRICEY", 1.2), ter("PRICEY2", 1.0), ter("CHEAP", 0.3)]);
-    createHolding({ bucketId: "b1", ticker: "PRICEY", englishName: "p", units: 1 });
-    createHolding({ bucketId: "b1", ticker: "PRICEY2", englishName: "p2", units: 1 });
+    createHoldingViaLedger({
+      bucketId: "b1",
+      ticker: "PRICEY",
+      englishName: "p",
+      units: 1,
+      quoteSource: "thai_mutual_fund",
+    });
+    createHoldingViaLedger({
+      bucketId: "b1",
+      ticker: "PRICEY2",
+      englishName: "p2",
+      units: 1,
+      quoteSource: "thai_mutual_fund",
+    });
   });
   return ctx;
 }

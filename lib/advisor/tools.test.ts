@@ -6,10 +6,13 @@ import { describe, expect, it } from "vitest";
 import { freshMarketDb } from "@/tests/db-helpers";
 import { runWithDbContext } from "../db/context";
 import { createBucket } from "../db/queries/buckets";
-import { createHolding, listHoldings } from "../db/queries/holdings";
+import { upsertFund } from "../db/queries/funds";
+import { listHoldings } from "../db/queries/holdings";
 import { listJournalEntries } from "../db/queries/journal";
 import { getPlan, upsertPlan } from "../db/queries/plan";
+import { createHoldingViaLedger } from "../db/queries/project-holdings";
 import { upsertFundQuote } from "../db/queries/quotes";
+import { upsertShareClasses } from "../db/queries/share-classes";
 import { insertTransactions } from "../db/queries/transactions";
 import * as schema from "../db/schema";
 import { persistPlanEdit } from "../portfolio/apply-plan-edit";
@@ -68,20 +71,22 @@ describe("advisor tools — read_portfolio", () => {
     const out = (await withFresh(async () => {
       createBucket(BUCKET);
       // value = units * avgCost (no quote seeded → falls back to avgCost).
-      createHolding({
+      createHoldingViaLedger({
         bucketId: "core",
         ticker: "VOO",
         englishName: "S&P 500",
+        quoteSource: "market",
         units: 100,
         avgCost: 6, // value 600
         assetClass: "equity",
         region: "US",
         ter: 0.03,
       });
-      createHolding({
+      createHoldingViaLedger({
         bucketId: "core",
         ticker: "BND",
         englishName: "Total Bond",
+        quoteSource: "market",
         units: 100,
         avgCost: 4, // value 400
         assetClass: "bond",
@@ -337,12 +342,26 @@ describe("advisor tools — propose_holdings_import", () => {
   it("derives units from market NAV and returns the holdingsImport payload (no DB write)", async () => {
     const result = await withFresh(async () => {
       createBucket(BUCKET);
-      // NAV keyed by the composite source:TICKER, same as the importer.
+      // NAV keyed by the composite source:TICKER, same as the importer (a catalog
+      // fund resolves to thai_mutual_fund).
       upsertFundQuote({
-        ticker: quoteCacheKey("K-USA-A"),
+        ticker: quoteCacheKey("thai_mutual_fund", "K-USA-A"),
         nav: 20,
         updatedAt: new Date().toISOString(),
       });
+      // Catalog-confirm the fund so the DB-backed source check reads it as a Thai
+      // fund (a priced production fund is always in the catalog).
+      upsertFund({
+        projId: "K-USA-A",
+        abbrName: "K-USA-A",
+        englishName: "K-USA-A",
+        assetClass: "equity",
+        fundType: "Equity",
+        status: "active",
+      });
+      upsertShareClasses([
+        { projId: "K-USA-A", className: "main", ticker: "K-USA-A", investorType: "retail" },
+      ]);
       const tools = createAdvisorTools({ userId: null });
       const out = (await run(tools.propose_holdings_import, {
         rows: [

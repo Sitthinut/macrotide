@@ -13,6 +13,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { isIndexStyle } from "../../market/fund-classify";
 import { type FeeType, TER_FEE_TYPE } from "../../market/fund-fees";
 import { compareClassesForList } from "../../market/share-class-select";
+import type { QuoteSource } from "../../market/sources";
 import { searchFundIds } from "../../search/fund-index";
 import { getMarketDb } from "../context";
 import { fundCatalog, fundFees, fundQuotes, fundShareClasses, navHistory } from "../schema";
@@ -570,6 +571,43 @@ export function getCheaperAlternatives(projId: string, limit = 5): FundWithTer[]
         f.investRegion === ref.investRegion,
     )
     .slice(0, limit);
+}
+
+/**
+ * Resolve each ticker's `quote_source` against the REAL fund catalog — the SINGLE
+ * authority for both the importer's source badge and the autocomplete suggestions.
+ * A ticker in `fund_share_classes` / `fund_catalog` is a real, priceable fund;
+ * anything else is a `manual` (custom, self-priced) asset. No shape heuristic and no
+ * static seed — when stocks / ETFs / etc. join the catalog they resolve here the
+ * same way (today the catalog holds Thai funds only). Keys are UPPER-CASED tickers.
+ */
+export function catalogQuoteSource(tickers: string[]): Map<string, QuoteSource> {
+  const out = new Map<string, QuoteSource>();
+  const cleaned = [...new Set(tickers.map((t) => t.trim().toUpperCase()).filter(Boolean))];
+  if (cleaned.length === 0) return out;
+  const db = getMarketDb();
+  // A symbol is a real Thai fund if it's a priceable share-class ticker OR a parent
+  // fund abbreviation (single-class funds expose the parent abbr as the holdable
+  // ticker; matching both also covers a partially-derived catalog). Match
+  // CASE-INSENSITIVELY: catalog tickers are mixed-case (K-FIXED-A upper, the ttb
+  // "tsp1-preserver-SSF" funds lower), and `cleaned` is upper-cased — so compare
+  // upper(ticker) or a lowercase code would never hit and would wrongly read custom.
+  const hits = new Set<string>();
+  for (const r of db
+    .select({ ticker: fundShareClasses.ticker })
+    .from(fundShareClasses)
+    .where(inArray(sql`upper(${fundShareClasses.ticker})`, cleaned))
+    .all())
+    hits.add(r.ticker.toUpperCase());
+  for (const r of db
+    .select({ abbr: fundCatalog.abbrName })
+    .from(fundCatalog)
+    .where(inArray(sql`upper(${fundCatalog.abbrName})`, cleaned))
+    .all())
+    if (r.abbr) hits.add(r.abbr.toUpperCase());
+  // In the catalog → a real fund; otherwise → custom. Nothing else.
+  for (const t of cleaned) out.set(t, hits.has(t) ? "thai_mutual_fund" : "manual");
+  return out;
 }
 
 /** Look up catalog rows for a set of fund symbols (e.g. the user's holdings). */

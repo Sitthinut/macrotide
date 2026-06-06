@@ -57,8 +57,10 @@ export const holdings = sqliteTable(
     category: text("category"),
     assetClass: text("asset_class"),
     region: text("region"),
-    units: real("units").notNull(),
-    avgCost: real("avg_cost"),
+    // NOTE: a holding's POSITION (units, avg cost) is NOT stored — it is folded
+    // from the `transactions` ledger on read (ADR 0004; listHoldings/getHolding).
+    // The row holds only instrument metadata + ledger-carried identity. Never
+    // re-add units/avg_cost columns: they'd be a stale copy of regenerable math.
     ter: real("ter"),
     color: text("color"),
     /** Brokerage / import provenance — free-text, displayed in UI. */
@@ -121,7 +123,9 @@ export const transactions = sqliteTable(
      * drift onto the wrong UTC day.
      */
     tradeDate: text("trade_date").notNull(),
-    // Nullable: a cash dividend / standalone fee has no units.
+    // Nullable: a cash dividend / standalone fee has no units. For a value-only
+    // Balance (the Thai-app case) units are LEFT NULL and DERIVED at the projection
+    // fold from `value ÷ NAV(tradeDate)` — never frozen here. See `value` below.
     units: real("units"),
     // Native-currency NAV/price at execution. Derivable for display; not the
     // primary money field.
@@ -162,6 +166,15 @@ export const transactions = sqliteTable(
     importBatchId: text("import_batch_id"),
     createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
     updatedAt: text("updated_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
+    /**
+     * The Balance's stated current ฿ VALUE, when the source shows value not units
+     * (the Thai-app case). The FACT we store; `units` is then DERIVED from
+     * `value ÷ NAV(tradeDate)` at the projection fold, so it self-corrects when that
+     * date's NAV lands or is corrected — never frozen here. Null on a unit-anchored
+     * Balance or any trade; only a value-only anchor carries it. (Facts-only ledger
+     * rule — see AGENTS.md § Ledger and ADR 0004.)
+     */
+    value: real("value"),
   },
   (table) => [index("idx_transactions_bucket").on(table.bucketId, table.tradeDate)],
 );

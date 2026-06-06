@@ -38,7 +38,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   return await withDb(async () => {
     const thread = getThread(id);
     if (!thread) return NextResponse.json({ error: "not_found" }, { status: 404 });
-    if (thread.title && thread.title.trim()) {
+    if (thread.title?.trim()) {
       // Idempotent — don't re-title an already-titled chat.
       return NextResponse.json({ title: thread.title, regenerated: false });
     }

@@ -18,13 +18,13 @@ import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import { SymbolCombobox } from "@/components/portfolio/SymbolCombobox";
 import { Combobox } from "@/components/ui/Combobox";
-import { QtyInput } from "@/components/ui/QtyInput";
-import { mergeWithHoldings, type TickerSuggestion } from "@/lib/data/known-funds";
+import { QtyInput, qtyDefaultMode } from "@/components/ui/QtyInput";
+import { mergeWithHoldings, type TickerSuggestion } from "@/lib/data/known-holdings";
 import { mergeSourceSuggestions } from "@/lib/data/sources";
 import { useBuckets, useHoldings } from "@/lib/fetchers/portfolio";
+import { cachedQuoteSource, resolveQuoteSources } from "@/lib/fetchers/quote-source";
 import { invalidate } from "@/lib/fetchers/swr";
 import { normalizeImage } from "@/lib/image-normalize";
-import { inferQuoteSource } from "@/lib/market/infer-quote-source";
 import type { QuoteSource } from "@/lib/market/sources";
 import type { TxnKind } from "@/lib/portfolio/lots";
 import type { ExtractedTxnRow, ImportDocType } from "@/lib/portfolio/ocr";
@@ -98,6 +98,17 @@ interface Row {
   /** A Balance's current market price per unit — used to value a custom asset
    * that has no live NAV. Empty for trades (their price doubles as the market). */
   currentPrice?: string;
+  /** A Balance's stated current ฿ VALUE when the source shows value not units
+   * (Thai-app case). Units are derived from value ÷ NAV(date) at save (#130) —
+   * carried here so a value-only row persists and reaches the server. */
+  value?: string;
+  /** A value-only Balance's invested ฿ cost-basis TOTAL (a fact, when the source
+   * shows it). Sent as the ledger `amount` magnitude so the cost reaches XIRR; the
+   * per-unit avg cost derives from it ÷ units at the fold — never frozen here. */
+  costTotal?: string;
+  /** True when units/avg-cost were DERIVED from a value (not read) — the editor
+   * marks those fields estimated so the user knows to verify. */
+  estimated?: boolean;
   fee: string;
   amount: string;
   quoteSource?: QuoteSource;
@@ -155,10 +166,13 @@ function draftToRow(d: ReturnType<typeof parseTxnPaste>[number]): Row {
 }
 
 // Map an OCR'd holdings row (snapshot screenshot) → a Starting-balance Row.
-// `asOf` is the snapshot date (from the file). Units/avg cost come from deriveRow
-// (value ÷ NAV) when a NAV is on file; a value-only row flags needs-units — the
-// value-based Balance model that fills it from value+cost is a follow-up task.
+// `asOf` is the snapshot date (from the file). Units READ off the source make a
+// units row; units DERIVED from a ฿ value (s.estimated — the Thai-app case) make a
+// VALUE-driven row: the Balance opens in ฿ mode showing the figure the user
+// recognises, and the server re-derives units from NAV(asOf) at save (#130) — we
+// don't headline a 5-decimal unit count nobody typed.
 function seedHoldingToRow(s: ImportSeedRow, asOf = ""): Row {
+  const readUnits = s.estimated !== true && s.units != null ? String(s.units) : "";
   return {
     id: nextId++,
     kind: "opening",
@@ -166,11 +180,18 @@ function seedHoldingToRow(s: ImportSeedRow, asOf = ""): Row {
     tradeDate: asOf || s.asOf || "",
     ticker: s.ticker,
     englishName: s.englishName,
-    units: s.units != null ? String(s.units) : "",
-    price: s.avgCost != null ? String(s.avgCost) : "",
+    units: readUnits,
+    // Seed an avg cost ONLY when it's a real per-unit figure read off the source —
+    // never a derived estimate (a value-only row's per-unit cost is derived at the
+    // fold from costTotal ÷ units, not frozen). The invested TOTAL rides on costTotal.
+    price: s.estimated !== true && s.avgCost != null ? String(s.avgCost) : "",
+    // Carry the ฿ value whenever units aren't shown (a derived or no-NAV row).
+    value: readUnits === "" && s.value != null ? String(s.value) : "",
+    costTotal: s.costTotal != null ? String(s.costTotal) : "",
+    estimated: s.estimated,
     fee: "",
     amount: "",
-    quoteSource: s.quoteSource ?? inferQuoteSource(s.ticker),
+    quoteSource: s.quoteSource ?? "manual",
     provenance: "image",
   };
 }
@@ -188,7 +209,7 @@ function seedTxnToRow(e: ExtractedTxnRow, asOf = ""): Row {
     price: e.pricePerUnit != null ? String(e.pricePerUnit) : "",
     fee: e.fee != null ? String(e.fee) : "",
     amount: e.amount != null ? String(e.amount) : "",
-    quoteSource: inferQuoteSource(e.ticker),
+    quoteSource: "manual",
     provenance: "image",
   };
 }
@@ -429,6 +450,39 @@ export function RecordSheet({
     setEditing(r.id);
   };
 
+  // Resolve each row's price source against the REAL fund catalog (in the catalog →
+  // its fund source, else custom) so the badge is right on the fly for ANY typed or
+  // imported symbol. Skips rows the user pinned; debounced + cached (the shared
+  // resolver the History editor uses too) so it fires once per new symbol and
+  // converges, only patching when the source actually differs.
+  useEffect(() => {
+    const applyCached = () =>
+      setRows((prev) => {
+        let changed = false;
+        const next = prev.map((r) => {
+          if (r.quoteSourceLocked || !r.ticker.trim()) return r;
+          const resolved = cachedQuoteSource(r.ticker);
+          if (resolved && resolved !== r.quoteSource) {
+            changed = true;
+            return { ...r, quoteSource: resolved };
+          }
+          return r;
+        });
+        return changed ? next : prev;
+      });
+
+    applyCached(); // paint anything already cached immediately
+    const tickers = rows
+      .filter((r) => r.ticker.trim() && !r.quoteSourceLocked)
+      .map((r) => r.ticker);
+    const timer = setTimeout(() => {
+      void resolveQuoteSources(tickers).then((gained) => {
+        if (gained) applyCached();
+      });
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [rows]);
+
   const patch = (id: number, p: Partial<Row>) =>
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...p } : r)));
   const removeRow = (id: number) => {
@@ -438,7 +492,17 @@ export function RecordSheet({
 
   const valid = (r: Row): boolean => {
     if (!r.ticker.trim()) return false;
-    if (isAnchor(r.kind)) return Number(r.units) > 0;
+    if (isAnchor(r.kind)) {
+      // A Balance is ready with a unit count OR a ฿ value (units derive from value ÷
+      // NAV). But a CUSTOM asset has no NAV, so a value-only custom Balance also needs
+      // a current price to divide by — without it units can't be found and it'd vanish.
+      const hasUnits = Number(r.units) > 0;
+      const hasValue = Number(r.value) > 0;
+      if (!hasUnits && !hasValue) return false;
+      const custom = (r.quoteSource ?? "manual") === "manual";
+      if (hasValue && !hasUnits && custom && !r.currentPrice?.trim()) return false;
+      return true;
+    }
     const d = normalizeTxnDraft({
       tradeDate: r.tradeDate,
       kind: r.kind,
@@ -447,8 +511,15 @@ export function RecordSheet({
       pricePerUnit: r.price,
       amount: r.amount,
       fee: r.fee,
+      quoteSource: r.quoteSource,
     });
-    return !!d.ticker && !d.needsDate && (d.kind === "split" ? d.units != null : !d.needsAmount);
+    if (!d.ticker || d.needsDate) return false;
+    if (d.kind === "split") return d.units != null;
+    // A trade needs its cash AND units it can actually resolve: units entered, a price
+    // (units = amount ÷ price), or a feed-priced fund (NAV bridges them). A custom
+    // amount-only trade with no price would fold to 0 units — not ready. The same
+    // `unitsResolvable` gate runs in the History editor's save, so the two agree.
+    return !d.needsAmount && d.unitsResolvable;
   };
   const readyRows = rows.filter(valid);
 
@@ -465,18 +536,36 @@ export function RecordSheet({
     setError(null);
     try {
       const transactions = readyRows.map((r) => {
-        const quoteSource = r.quoteSource || inferQuoteSource(r.ticker);
+        const quoteSource = r.quoteSource || "manual";
         if (isAnchor(r.kind)) {
+          const hasUnits = Number(r.units) > 0;
+          const avg = r.price.trim() === "" ? null : Number(r.price);
+          // Persist a per-unit avg cost only when it's a real (read/typed) figure —
+          // never a derived estimate, which would freeze a NAV-dependent number
+          // (facts-only, ADR 0004). A value-only row's per-unit cost derives at the fold.
+          const realAvg = r.estimated ? null : avg;
+          // The cost magnitude (positive) for the ledger `amount`; the server signs it
+          // (opening = cash out, a restatement = 0) so a costed opening reaches XIRR.
+          // Units read → from the real avg cost; value-only → the invested total.
+          const costMagnitude =
+            hasUnits && realAvg != null
+              ? Number(r.units) * realAvg
+              : Number(r.costTotal) > 0
+                ? Number(r.costTotal)
+                : 0;
           return {
             tradeDate: r.tradeDate || new Date().toISOString().slice(0, 10),
             kind: r.kind,
             ticker: r.ticker.trim().toUpperCase(),
             englishName: r.englishName,
-            units: Number(r.units),
-            pricePerUnit: r.price.trim() === "" ? null : Number(r.price),
+            // Send units when read; otherwise omit and send the ฿ value so the
+            // server derives units from NAV(tradeDate) (#130).
+            units: hasUnits ? Number(r.units) : undefined,
+            value: !hasUnits && Number(r.value) > 0 ? Number(r.value) : undefined,
+            pricePerUnit: realAvg,
             // The Balance's current price → the asset's market-price point.
             marketPrice: r.currentPrice?.trim() ? Number(r.currentPrice) : undefined,
-            amount: 0,
+            amount: costMagnitude,
             quoteSource,
             source: source.trim() || undefined,
           };
@@ -489,6 +578,7 @@ export function RecordSheet({
           pricePerUnit: r.price,
           amount: r.amount,
           fee: r.fee,
+          quoteSource: r.quoteSource,
         });
         return {
           tradeDate: d.tradeDate,
@@ -508,6 +598,9 @@ export function RecordSheet({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ bucketId, transactions }),
       });
+      // Facts-only ledger (ADR 0004): a value-only Balance always saves — even with no
+      // NAV on its date yet — storing the ฿ value as the fact; its units derive at the
+      // fold when that date's NAV lands. So there's no "couldn't price it" reject here.
       if (!res.ok) throw new Error(String(res.status));
       const body = (await res.json()) as { count: number };
       invalidate(/^\/api\/transactions/);
@@ -742,20 +835,59 @@ function DraftRow({
   if (row.tradeDate) sub.push(fmtDate(row.tradeDate));
   if (row.units.trim()) sub.push(`${numFmt(row.units)}${anchor ? " units" : ""}`);
   if (row.price.trim()) sub.push(anchor ? `avg ฿${numFmt(row.price)}` : `@ ฿${numFmt(row.price)}`);
-  // Amount shown on the right: dividend/fee carry it directly; a trade derives it
-  // from units × price (there's no separate amount field anymore).
+  // Amount shown on the right: a typed ฿ total (`amount` — what a total-entered trade
+  // or a dividend/fee carries) wins; otherwise derive it from a units × price entry.
   const amountOnly = row.kind === "dividend" || row.kind === "fee";
   const amt = anchor
     ? ""
-    : amountOnly
-      ? row.amount.trim()
-        ? baht(Math.abs(Number(row.amount)))
-        : ""
-      : row.units.trim() && row.price.trim()
+    : row.amount.trim()
+      ? baht(Math.abs(Number(row.amount)))
+      : !amountOnly && row.units.trim() && row.price.trim()
         ? baht(Number(row.units) * Number(row.price))
         : "";
-  // Only flag a missing cost once there's actually a fund on the row.
-  const costUnknown = anchor && hasTicker && !row.price.trim();
+  // What this row still NEEDS to be saveable — kind-aware, mirroring the same checks
+  // as valid(). Surfaced amber in the subline so an incomplete row tells you the
+  // actual missing required field (not just cost). Only meaningful once a symbol is in.
+  let needs: string | null = null;
+  if (hasTicker) {
+    if (anchor) {
+      const hasUnits = Number(row.units) > 0;
+      const hasValue = Number(row.value) > 0;
+      const custom = (row.quoteSource ?? "manual") === "manual";
+      if (!hasUnits && !hasValue) needs = "needs units or a ฿ total";
+      // A value-only CUSTOM Balance has no NAV to find units from — it needs a current
+      // price (value ÷ price), else it can't be valued and wouldn't show.
+      else if (hasValue && custom && !row.currentPrice?.trim()) needs = "needs a current price";
+    } else {
+      const d = normalizeTxnDraft({
+        tradeDate: row.tradeDate,
+        kind: row.kind,
+        ticker: row.ticker,
+        units: row.units,
+        pricePerUnit: row.price,
+        amount: row.amount,
+        fee: row.fee,
+        quoteSource: row.quoteSource,
+      });
+      if (d.needsDate) needs = "needs a date";
+      else if (row.kind === "split") {
+        if (d.units == null) needs = "needs a split ratio";
+      } else if (d.needsAmount) {
+        // A units-only trade is fine on a feed-priced fund (amount derives from NAV);
+        // needsAmount stays true only when it can't — a custom asset with units still
+        // needs a price, and a row with neither units nor amount needs an amount.
+        needs = Number(row.units) > 0 ? "needs a price" : "needs an amount";
+      } else if (!d.unitsResolvable) {
+        // Cash is in, but a CUSTOM asset has no NAV and no price to turn it into units
+        // — without one it'd fold to 0 units. Prompt for the price (same gate as save).
+        needs = "needs a price";
+      }
+    }
+  }
+  // Cost is OPTIONAL — a softer nudge ("adding one unlocks gains"), shown only once the
+  // row is otherwise complete (so a required gap takes priority).
+  const costUnknown =
+    !needs && anchor && hasTicker && !row.price.trim() && !(Number(row.costTotal) > 0);
   return (
     <div className="holding" style={{ display: "flex", gap: 4 }}>
       <button
@@ -786,8 +918,13 @@ function DraftRow({
             {name || "New row"}
           </span>
           <span className="sub" style={{ display: "block" }}>
-            {sub.join(" · ") || "Tap to fill in"}
-            {costUnknown && <span style={{ color: "var(--amber)" }}> · cost not recorded</span>}
+            {/* No symbol yet → unfilled, regardless of a Balance's default date. */}
+            {hasTicker ? sub.join(" · ") || "Tap to fill in" : "Tap to fill in"}
+            {needs ? (
+              <span style={{ color: "var(--amber)" }}> · {needs}</span>
+            ) : costUnknown ? (
+              <span style={{ color: "var(--amber)" }}> · no cost yet</span>
+            ) : null}
           </span>
         </span>
         <span className="value">{amt}</span>
@@ -822,108 +959,191 @@ function RowEditor({
   const anchor = isAnchor(row.kind);
   // Dividend / fee are pure ฿ flows — no units or price, just an amount.
   const amountOnly = row.kind === "dividend" || row.kind === "fee";
+  // A Balance recorded by its ฿ value (not a unit count): avg cost is optional here
+  // — units (and any cost) are derived from the value, so the cost field steps back.
+  const anchorValueDriven = anchor && Number(row.value) > 0;
+  // A symbol priced by a live feed (a catalog fund, or a market ETF) makes its
+  // price / current-price OPTIONAL — we can value it without one. A custom asset or a
+  // not-yet-typed symbol shows NO cue (just "Price"), like the other required fields:
+  // we only ever flag "optional", never "needed".
+  const pricedByFeed = row.ticker.trim().length > 0 && (row.quoteSource ?? "manual") !== "manual";
+  // A TRADE's Price is optional ONLY for a feed-priced fund — the NAV bridges units ⇄
+  // amount, so whichever side you give (units or the ฿ amount), the other (and the
+  // price) is found. A CUSTOM asset has no NAV, so the price is the only bridge between
+  // its units and its cash — never optional there (without it, an amount becomes 0 units).
+  const tradePriceOptional =
+    !anchor && pricedByFeed && (Number(row.amount) > 0 || Number(row.units) > 0);
   const cls = `rec-edit${anchor ? " is-anchor" : amountOnly ? " is-flow" : ""}`;
   return (
     <div className="ledger-edit-card">
       <div className={cls}>
-        <select
-          value={row.kind}
-          onChange={(e) => {
-            const k = e.target.value as RowKind;
-            // Switching to a Balance with no date yet defaults it to today.
-            onChange({ kind: k, ...(isAnchor(k) && !row.tradeDate ? { tradeDate: today() } : {}) });
-          }}
-          aria-label="Type"
-        >
-          {typeSelectOptions(row.kind).map((o) => (
-            <option key={o.label} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <input
-          type="date"
-          value={row.tradeDate}
-          onChange={(e) => onChange({ tradeDate: e.target.value })}
-          aria-label={anchor ? "As-of date" : "Trade date"}
-        />
-        <SymbolCombobox
-          value={row.ticker}
-          quoteSource={row.quoteSource}
-          sourceLocked={row.quoteSourceLocked}
-          pool={tickers}
-          onChange={(text) =>
-            onChange({
-              ticker: text,
-              englishName: undefined,
-              // Editing the symbol re-infers the source unless the user pinned it.
-              ...(row.quoteSourceLocked ? {} : { quoteSource: undefined }),
-            })
-          }
-          onPick={(s) =>
-            onChange({
-              ticker: s.ticker,
-              englishName: s.name,
-              quoteSource: s.quoteSource,
-              quoteSourceLocked: false,
-            })
-          }
-          onToggleSource={() => {
-            // Cycle Thai fund → Stock/ETF → Custom (manual price).
-            const qs = row.quoteSource ?? inferQuoteSource(row.ticker);
-            const next: QuoteSource =
-              qs === "thai_mutual_fund"
-                ? "market"
-                : qs === "market"
-                  ? "manual"
-                  : "thai_mutual_fund";
-            onChange({ quoteSource: next, quoteSourceLocked: true });
-          }}
-        />
-        {amountOnly ? (
+        <label className="rec-field">
+          <span className="rec-label">Type</span>
+          <select
+            value={row.kind}
+            onChange={(e) => {
+              const k = e.target.value as RowKind;
+              // The ฿ total lives in `value` on a Balance, `amount` on a trade —
+              // carry it across when the type flips so a figure typed in ฿ mode
+              // survives the switch (and clear the field it left).
+              const toAnchor = isAnchor(k);
+              const ledgerMove =
+                toAnchor === anchor
+                  ? {}
+                  : toAnchor
+                    ? { value: row.amount, amount: "" }
+                    : { amount: row.value ?? "", value: "" };
+              onChange({
+                kind: k,
+                ...ledgerMove,
+                // Switching to a Balance with no date yet defaults it to today.
+                ...(toAnchor && !row.tradeDate ? { tradeDate: today() } : {}),
+              });
+            }}
+            aria-label="Type"
+          >
+            {typeSelectOptions(row.kind).map((o) => (
+              <option key={o.label} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="rec-field">
+          <span className="rec-label">{anchor ? "As-of date" : "Date"}</span>
           <input
-            value={row.amount}
-            onChange={(e) => onChange({ amount: e.target.value })}
-            placeholder="฿ amount"
-            inputMode="decimal"
-            aria-label="Amount in baht"
+            type="date"
+            value={row.tradeDate}
+            onChange={(e) => onChange({ tradeDate: e.target.value })}
+            aria-label={anchor ? "As-of date" : "Trade date"}
           />
+        </label>
+        <div className="rec-field">
+          <span className="rec-label">Symbol</span>
+          <SymbolCombobox
+            value={row.ticker}
+            quoteSource={row.quoteSource}
+            sourceLocked={row.quoteSourceLocked}
+            pool={tickers}
+            onChange={(text) =>
+              onChange({
+                ticker: text,
+                englishName: undefined,
+                // Editing the symbol re-infers the source unless the user pinned it.
+                ...(row.quoteSourceLocked ? {} : { quoteSource: undefined }),
+              })
+            }
+            onPick={(s) =>
+              onChange({
+                ticker: s.ticker,
+                englishName: s.name,
+                quoteSource: s.quoteSource,
+                quoteSourceLocked: false,
+              })
+            }
+            onToggleSource={() => {
+              // Cycle Thai fund → Stock/ETF → Custom (manual price).
+              const qs = row.quoteSource ?? "manual";
+              const next: QuoteSource =
+                qs === "thai_mutual_fund"
+                  ? "market"
+                  : qs === "market"
+                    ? "manual"
+                    : "thai_mutual_fund";
+              onChange({ quoteSource: next, quoteSourceLocked: true });
+            }}
+          />
+        </div>
+        {amountOnly ? (
+          <label className="rec-field">
+            <span className="rec-label">฿ Amount</span>
+            <input
+              value={row.amount}
+              onChange={(e) => onChange({ amount: e.target.value })}
+              placeholder="Amount"
+              inputMode="decimal"
+              aria-label="Amount in baht"
+            />
+          </label>
         ) : (
           <>
-            <QtyInput
-              units={row.units}
-              price={anchor ? row.currentPrice || row.price : row.price}
-              onUnits={(v) => onChange({ units: v })}
-            />
-            <input
-              value={row.price}
-              onChange={(e) => onChange({ price: e.target.value })}
-              placeholder={anchor ? "Avg cost" : "Price"}
-              inputMode="decimal"
-              aria-label={anchor ? "Average cost" : "Price"}
-              title={
-                anchor
-                  ? "Average cost you PAID per unit — not today's price (current value comes from the live NAV)."
-                  : undefined
-              }
-            />
+            <div className="rec-field">
+              <span className="rec-label">{anchor ? "Units or ฿ total" : "Units or ฿ amount"}</span>
+              <QtyInput
+                units={row.units}
+                // A Balance persists its ฿ figure in `value`; a trade in its `amount`
+                // (its authoritative money field) — so a total typed in ฿ mode survives
+                // collapse/expand and the server can derive units from it (#130). Reopen
+                // in the mode the stored fact implies, via the SAME helper History uses.
+                value={anchor ? row.value : row.amount}
+                defaultMode={qtyDefaultMode(row.units)}
+                onUnits={(v) => onChange({ units: v })}
+                onValue={(v) => onChange(anchor ? { value: v } : { amount: v })}
+              />
+            </div>
+            <label className="rec-field">
+              <span className="rec-label">
+                {anchor ? "Avg cost" : "Price"}
+                {/* Trade Price is optional once the ฿ amount is in (units derive from it).
+                    Avg cost on a Balance is never "optional" — encouraged via the nudge. */}
+                {tradePriceOptional && <span className="rec-opt"> · optional</span>}
+              </span>
+              <input
+                value={row.price}
+                onChange={(e) => onChange({ price: e.target.value, estimated: false })}
+                placeholder={tradePriceOptional ? "Optional" : anchor ? "What you paid" : "Price"}
+                inputMode="decimal"
+                aria-label={anchor ? "Average cost" : "Price"}
+                // Avg cost is NOT marked "optional": skippable, but adding it unlocks
+                // gains/return — so it reads as a normal field, and the row nudges
+                // (amber "no cost yet") when it's blank. A pre-filled figure DERIVED from
+                // the ฿ value is an estimate to verify (amber dashed, data-estimated).
+                data-optional={tradePriceOptional ? "" : undefined}
+                data-estimated={anchor && anchorValueDriven && row.estimated ? "" : undefined}
+                title={
+                  anchor
+                    ? "Average cost you PAID per unit — optional; left blank, your gains stay blank until you add it. Not today's price (current value comes from the live NAV)."
+                    : undefined
+                }
+              />
+            </label>
             {anchor ? (
-              <input
-                value={row.currentPrice ?? ""}
-                onChange={(e) => onChange({ currentPrice: e.target.value })}
-                placeholder="Current price"
-                inputMode="decimal"
-                aria-label="Current price"
-                title="Today's price per unit. Only needed for a custom asset we can't price live — for a known fund we use the live NAV."
-              />
+              <label className="rec-field">
+                <span className="rec-label">
+                  Current price
+                  {pricedByFeed && <span className="rec-opt"> · optional</span>}
+                </span>
+                <input
+                  value={row.currentPrice ?? ""}
+                  onChange={(e) => onChange({ currentPrice: e.target.value })}
+                  // Optional ONLY for a feed-priced symbol (live NAV); for a custom asset
+                  // it's required, but we don't mark required — just "Price", like the
+                  // other required fields. Placeholder mirrors the label.
+                  placeholder={pricedByFeed ? "Optional" : "Price"}
+                  inputMode="decimal"
+                  aria-label="Current price"
+                  data-optional={pricedByFeed ? "" : undefined}
+                  title={
+                    pricedByFeed
+                      ? "Today's price per unit — optional for a known fund (we use the live NAV)."
+                      : "Today's price per unit. For a custom asset with no live feed, set this to value the holding."
+                  }
+                />
+              </label>
             ) : (
-              <input
-                value={row.fee}
-                onChange={(e) => onChange({ fee: e.target.value })}
-                placeholder="Fee"
-                inputMode="decimal"
-                aria-label="Fee"
-              />
+              <label className="rec-field">
+                <span className="rec-label">
+                  Fee<span className="rec-opt"> · optional</span>
+                </span>
+                <input
+                  value={row.fee}
+                  onChange={(e) => onChange({ fee: e.target.value })}
+                  placeholder="Optional"
+                  inputMode="decimal"
+                  aria-label="Fee"
+                  data-optional=""
+                />
+              </label>
             )}
           </>
         )}

@@ -1,18 +1,17 @@
 "use client";
 
 // SymbolCombobox — the fund/ticker autocomplete, composed from the shared
-// Combobox. Same behavior as the original AddHoldingsSheet symbol field: the
-// user's own holdings + the static seed surface first, then live priceable
-// SHARE CLASSES from the SEC catalog (GET /api/fund-classes, ≥2 chars), each
-// tagged "· YOURS" / "· ACC" / "· DIV" so sibling classes are distinguishable.
-// The in-input price-source badge (TH ⇄ ETF) rides along.
+// Combobox. The user's own holdings surface first, then live priceable SHARE
+// CLASSES from the central catalog (GET /api/fund-classes, ≥2 chars), each tagged
+// "· YOURS" / "· ACC" / "· DIV" so sibling classes are distinguishable. There is NO
+// static seed: the catalog is the single authority for what exists and how it's
+// priced. The in-input price-source badge (Fund ⇄ Custom) rides along.
 
 import { useEffect, useMemo, useState } from "react";
 import { Combobox } from "@/components/ui/Combobox";
-import { filterKnownTickers, type TickerSuggestion } from "@/lib/data/known-funds";
+import { filterKnownTickers, type TickerSuggestion } from "@/lib/data/known-holdings";
 import type { ShareClassListItem } from "@/lib/db/queries/funds";
 import { useResource } from "@/lib/fetchers/swr";
-import { inferQuoteSource } from "@/lib/market/infer-quote-source";
 import type { QuoteSource } from "@/lib/market/sources";
 
 // Short labels for the in-input price-source badge — the asset class, not the
@@ -23,7 +22,7 @@ const TYPE_BADGE_CODES: Record<QuoteSource, string> = {
   manual: "Custom",
 };
 
-// One dropdown row — a local (holdings/seed) suggestion or a live catalog class.
+// One dropdown row — a holdings suggestion or a live catalog class.
 // `distributionPolicy` is present only for catalog rows (drives the Acc/Div tag).
 interface SymbolSuggestion {
   ticker: string;
@@ -45,7 +44,7 @@ export interface SymbolComboboxProps {
   quoteSource?: QuoteSource;
   /** Marks `quoteSource` as a deliberate choice (badge highlight) vs. an inference. */
   sourceLocked?: boolean;
-  /** Merged local pool — the user's holdings + the static seed. */
+  /** Local suggestion pool — the user's own holdings (live catalog merged in below). */
   pool: TickerSuggestion[];
   onChange: (ticker: string) => void;
   onPick: (s: SymbolPick) => void;
@@ -108,7 +107,8 @@ export function SymbolCombobox({
     return out;
   }, [local, catalog]);
 
-  const effective = quoteSource ?? inferQuoteSource(value);
+  // Unknown until the catalog resolver confirms it — custom by default, no shape guess.
+  const effective = quoteSource ?? "manual";
   const hasTicker = value.trim().length > 0;
 
   return (
