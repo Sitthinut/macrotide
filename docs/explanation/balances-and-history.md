@@ -49,6 +49,7 @@ these are how it *behaves* — kept current here.)
   | a unit count | `units` | — |
   | a value-only Balance | `value` | `units = value ÷ NAV(date)` |
   | an amount-only trade | `amount` | `units = amount ÷ NAV(date)` |
+  | a units-only trade | `units` | `amount = units × NAV(date)` |
   | a Balance's invested ฿ total | `amount` (the cost) | `average cost = cost total ÷ units` |
 
   A derived unit count is **never frozen into the record** — it's derived afresh
@@ -208,22 +209,24 @@ Two rules hold across the table:
 
 ### Trade — a dated buy / sell / dividend / fee / split / reinvest
 
-Give a date and the money facts the kind needs. A trade's **฿ amount is the
-authoritative figure** — units derive from it, never the other way round, so fees
-and rounding stay exact:
+Give a date and **either side of the trade** — a unit count or a ฿ amount — and the
+other derives at the fold (you transact at the fund's NAV). Whatever you typed is the
+stored fact; the derived side self-corrects with NAV:
 
-| Kind | You provide | Units become | Amount |
+| Kind | You provide | Units become | Amount becomes |
 |---|---|---|---|
 | buy / sell / reinvest | units + price | as entered | `units × price` (± fee) |
 | buy / sell / reinvest | units + ฿ amount | as entered | amount as entered |
 | buy / sell / reinvest | ฿ amount + price | `amount ÷ price` | as entered |
 | buy / sell / reinvest | **฿ amount** only | `amount ÷ NAV(date)` | as entered |
+| buy / sell / reinvest | **units** only *(a feed-priced fund)* | as entered | `units × NAV(date)` (± fee) |
 | dividend / fee | ฿ amount | — (a pure cash event) | as entered |
 | split | the ratio (2 = 2-for-1) | scaled by the ratio | — (moves no cash) |
 
-A row that can't be completed — a Balance with neither units nor value, or a trade
-with no amount and no way to derive one — isn't saved; the importer flags it so you
-can fill the missing fact rather than have one invented.
+A units-only trade needs a priceable fund (a custom asset has no NAV, so it still
+needs a price or amount). A row that can't be completed — a Balance with neither units
+nor value, or a custom-asset trade with no amount and no way to derive one — isn't
+saved; the importer flags it so you can fill the missing fact rather than invent one.
 
 ## Editing and deleting (self-healing)
 

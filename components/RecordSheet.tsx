@@ -519,6 +519,7 @@ export function RecordSheet({
       pricePerUnit: r.price,
       amount: r.amount,
       fee: r.fee,
+      quoteSource: r.quoteSource,
     });
     return !!d.ticker && !d.needsDate && (d.kind === "split" ? d.units != null : !d.needsAmount);
   };
@@ -579,6 +580,7 @@ export function RecordSheet({
           pricePerUnit: r.price,
           amount: r.amount,
           fee: r.fee,
+          quoteSource: r.quoteSource,
         });
         return {
           tradeDate: d.tradeDate,
@@ -863,14 +865,15 @@ function DraftRow({
         pricePerUnit: row.price,
         amount: row.amount,
         fee: row.fee,
+        quoteSource: row.quoteSource,
       });
       if (d.needsDate) needs = "needs a date";
       else if (row.kind === "split") {
         if (d.units == null) needs = "needs a split ratio";
       } else if (d.needsAmount) {
-        // Units alone can't value a trade (the ฿ amount comes from units × price, and
-        // a fund's NAV only derives units FROM an amount, never the reverse). So with
-        // units you still need a price; with neither, you need an amount.
+        // A units-only trade is fine on a feed-priced fund (amount derives from NAV);
+        // needsAmount stays true only when it can't — a custom asset with units still
+        // needs a price, and a row with neither units nor amount needs an amount.
         needs = Number(row.units) > 0 ? "needs a price" : "needs an amount";
       }
     }
@@ -958,10 +961,11 @@ function RowEditor({
   // not-yet-typed symbol shows NO cue (just "Price"), like the other required fields:
   // we only ever flag "optional", never "needed".
   const pricedByFeed = row.ticker.trim().length > 0 && (row.quoteSource ?? "manual") !== "manual";
-  // A TRADE's Price is optional only once the ฿ amount is in (then the amount is the
-  // money fact and units derive from it) — NOT merely because the fund is on a feed.
-  // Entering UNITS instead still needs the price to know the cost.
-  const tradePriceOptional = !anchor && Number(row.amount) > 0;
+  // A TRADE's Price is optional when the cash can be found without it: the ฿ amount is
+  // in (units derive from it), OR it's a feed-priced fund with units (the amount derives
+  // from units × NAV at the fold). A custom asset with units still needs the price.
+  const tradePriceOptional =
+    !anchor && (Number(row.amount) > 0 || (Number(row.units) > 0 && pricedByFeed));
   const cls = `rec-edit${anchor ? " is-anchor" : amountOnly ? " is-flow" : ""}`;
   return (
     <div className="ledger-edit-card">

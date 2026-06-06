@@ -130,6 +130,42 @@ describe("POST /api/transactions — facts-only ledger (ADR 0004)", () => {
     expect(heldUnits("EXAMPLE-FUND-B")).toBeCloseTo(40); // 1000 ÷ 25, not ÷ 20
   });
 
+  it("derives a UNITS-only buy's amount from units × NAV (symmetric twin)", async () => {
+    seedNav("thai_mutual_fund:EXAMPLE-FUND-B", [["2026-03-01", 20]]);
+    const { status, body } = await post([
+      {
+        tradeDate: "2026-03-01",
+        kind: "buy",
+        ticker: "EXAMPLE-FUND-B",
+        quoteSource: "thai_mutual_fund",
+        units: 50, // just units — no amount, no price
+        amount: 0,
+      },
+    ]);
+    expect(status).toBe(201);
+    // Ledger stores units as the fact; amount 0 (the fold fills it from NAV).
+    expect(body.inserted[0].units).toBeCloseTo(50);
+    expect(body.inserted[0].amount).toBe(0);
+    // The fold derives the cost: 50 × NAV(20) = ฿1000 → avg cost 20, units held.
+    expect(heldUnits("EXAMPLE-FUND-B")).toBeCloseTo(50);
+    expect(heldAvgCost("EXAMPLE-FUND-B")).toBeCloseTo(20);
+  });
+
+  it("a units-only buy with no NAV holds the units (cost stays unknown)", async () => {
+    const { status } = await post([
+      {
+        tradeDate: "2026-03-01",
+        kind: "buy",
+        ticker: "EXAMPLE-NONAV",
+        quoteSource: "thai_mutual_fund",
+        units: 50,
+        amount: 0,
+      },
+    ]);
+    expect(status).toBe(201);
+    expect(heldUnits("EXAMPLE-NONAV")).toBeCloseTo(50); // saved + held, no NAV to cost it
+  });
+
   it("saves a value-only Balance even with no NAV yet — the fact is kept, units derive when NAV lands", async () => {
     // No NAV seeded anywhere. The old behaviour rejected this (422); facts-only
     // SAVES the value fact, and the projection simply can't price it yet.

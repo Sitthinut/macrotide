@@ -67,7 +67,10 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 - **The ledger keeps the figure you saw; unit counts and cost self-correct.** When
   you record a Balance by its ฿ value, or a buy/sell by its ฿ amount, that money
   figure is stored as the fact; the unit count is derived from the NAV on that date
-  whenever your position is read, never frozen at save. So if that date's NAV
+  whenever your position is read, never frozen at save. A trade now works **from
+  either side** — give a buy/sell its unit count *or* its ฿ amount and the other is
+  filled from the NAV on its date (a unit-only trade needs a priceable fund), so you
+  can record "bought 50 units" without hunting down what you paid. So if that date's NAV
   arrives late or is later corrected, your units — and the value, gains, and return
   that flow from them — recompute to match, with no re-entry. The same now holds for
   **cost**: a value-only Balance that carries an invested ฿ total (an import showing

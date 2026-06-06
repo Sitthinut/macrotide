@@ -49,12 +49,18 @@ const txnInput = z
     note: z.string().trim().max(500).optional(),
     source: z.string().trim().max(120).optional(),
   })
-  // A cash-moving event must carry a positive amount; a split and the position
-  // anchors (opening/snapshot) carry no cash, so their amount is zero.
-  .refine((r) => r.kind === "split" || isAnchorKind(r.kind) || r.amount > 0, {
-    message: "amount must be greater than zero for a cash transaction",
-    path: ["amount"],
-  });
+  // A cash-moving trade must carry the money fact: a positive ฿ `amount`, OR a unit
+  // count (a units-only trade — its amount derives from units × NAV(date) at the fold,
+  // the symmetric twin of an amount-only trade deriving units). Splits and the
+  // position anchors (opening/snapshot) carry no cash, so their amount is zero.
+  .refine(
+    (r) =>
+      r.kind === "split" ||
+      isAnchorKind(r.kind) ||
+      r.amount > 0 ||
+      (r.units != null && r.units > 0),
+    { message: "a trade needs a ฿ amount or a unit count", path: ["amount"] },
+  );
 
 const postBody = z.object({
   bucketId: z.string().trim().min(1),

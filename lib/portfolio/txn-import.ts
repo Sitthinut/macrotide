@@ -170,7 +170,13 @@ export function normalizeTxnDraft(row: TxnDraftInput): TxnDraftRow {
     amount,
     fee,
     quoteSource,
-    needsAmount: kind !== "split" && (amount === null || amount <= 0),
+    // A units-only trade on a feed-priced fund (catalog / market) is NOT missing its
+    // amount — it derives from units × NAV(date) at the fold. A custom asset has no
+    // NAV, so units alone still needs a price (or the ฿ amount).
+    needsAmount:
+      kind !== "split" &&
+      (amount === null || amount <= 0) &&
+      !(units !== null && units > 0 && quoteSource !== "manual"),
     needsDate: tradeDate === "",
   };
 }

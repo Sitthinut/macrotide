@@ -1,5 +1,6 @@
 import "server-only";
-import { isAnchorKind } from "@/lib/portfolio/txn-import";
+import type { TxnKind } from "@/lib/portfolio/lots";
+import { isAnchorKind, signedAmount, signFor } from "@/lib/portfolio/txn-import";
 import { deriveUnits } from "@/lib/portfolio/value-ledger";
 import { listFundQuotes, navOnDate } from "./quotes";
 import type { Transaction } from "./transactions";
@@ -27,6 +28,16 @@ const needsUnits = (r: Transaction): boolean => {
     : DERIVABLE_TRADE.has(r.kind) && Math.abs(r.amount) > 0; // an amount-only trade
 };
 
+/**
+ * A units-only delta trade — the symmetric twin: it carries a unit count but no cash,
+ * so its ฿ amount derives from units × NAV(tradeDate) at the fold (you transact at the
+ * fund's NAV). Lets a catalog-fund buy/sell be just units, with the cash filled in.
+ */
+const needsTradeAmount = (r: Transaction): boolean =>
+  DERIVABLE_TRADE.has(r.kind) && r.units != null && r.units > 0 && Math.abs(r.amount) === 0;
+
+const isDerivable = (r: Transaction): boolean => needsUnits(r) || needsTradeAmount(r);
+
 /** The ฿ money fact a row's units derive from: a Balance's value, else the trade amount. */
 const moneyTotal = (r: Transaction): number =>
   isAnchorKind(r.kind) ? (r.value ?? 0) : Math.abs(r.amount);
@@ -38,7 +49,7 @@ const moneyTotal = (r: Transaction): number =>
  * market.db. Call before mapping rows into the pure lot engine (`reduceLots`).
  */
 export function resolveDerivedUnits(rows: readonly Transaction[]): Transaction[] {
-  const targets = rows.filter(needsUnits);
+  const targets = rows.filter(isDerivable);
   if (targets.length === 0) return [...rows];
 
   const keys = [...new Set(targets.map(cacheKey))];
@@ -49,9 +60,23 @@ export function resolveDerivedUnits(rows: readonly Transaction[]): Transaction[]
     navByDate.set(date, navOnDate(keys, date));
 
   return rows.map((r) => {
-    if (!needsUnits(r)) return r;
+    if (!isDerivable(r)) return r;
     const key = cacheKey(r);
     const nav = navByDate.get(r.tradeDate)?.get(key) ?? latest.get(key) ?? null;
+
+    // Units-only delta trade → derive the cash: units × (execution price ?? NAV), with
+    // the fee folded in like a normal trade, then signed by kind (buy = cash out). No
+    // price/NAV → leave amount 0 (the position holds units at unknown cost).
+    if (needsTradeAmount(r)) {
+      const price = r.pricePerUnit && r.pricePerUnit > 0 ? r.pricePerUnit : nav;
+      if (price == null) return r;
+      const kind = r.kind as TxnKind; // narrowed by needsTradeAmount (a delta trade)
+      const gross = (r.units as number) * price;
+      const f = r.fee ?? 0;
+      const magnitude = signFor(kind) < 0 ? gross + f : Math.max(0, gross - f);
+      return { ...r, amount: signedAmount(kind, magnitude) };
+    }
+
     const anchor = isAnchorKind(r.kind);
     // Balance: value ÷ NAV(date). Trade: amount ÷ (execution price ?? NAV(date)).
     const units = deriveUnits({
