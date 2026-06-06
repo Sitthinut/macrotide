@@ -848,10 +848,10 @@ function DraftRow({
       : row.units.trim() && row.price.trim()
         ? baht(Number(row.units) * Number(row.price))
         : "";
-  // A quiet, CONSISTENT heads-up that this Balance has no cost basis yet (so gains
-  // stay blank until one is added) — shown the same way whether you recorded units
-  // or a ฿ total. Cost basis = a per-unit avg cost OR an invested total (an import
-  // carrying value + P/L). It's a muted hint, not a warning: avg cost is optional.
+  // A CONSISTENT amber nudge that this Balance has no cost basis yet — adding one
+  // unlocks gains/return, so it's worth encouraging. Shown the same way whether you
+  // recorded units or a ฿ total. Cost basis = a per-unit avg cost OR an invested
+  // total (an import carrying value + P/L).
   const costUnknown = anchor && hasTicker && !row.price.trim() && !(Number(row.costTotal) > 0);
   return (
     <div className="holding" style={{ display: "flex", gap: 4 }}>
@@ -884,7 +884,7 @@ function DraftRow({
           </span>
           <span className="sub" style={{ display: "block" }}>
             {sub.join(" · ") || "Tap to fill in"}
-            {costUnknown && <span style={{ color: "var(--muted-2)" }}> · no cost yet</span>}
+            {costUnknown && <span style={{ color: "var(--amber)" }}> · no cost yet</span>}
           </span>
         </span>
         <span className="value">{amt}</span>
@@ -1033,20 +1033,17 @@ function RowEditor({
               />
             </div>
             <label className="rec-field">
-              <span className="rec-label">
-                {anchor ? "Avg cost" : "Price"}
-                {anchor && <span className="rec-opt"> · optional</span>}
-              </span>
+              <span className="rec-label">{anchor ? "Avg cost" : "Price"}</span>
               <input
                 value={row.price}
                 onChange={(e) => onChange({ price: e.target.value, estimated: false })}
-                placeholder={anchor ? "Optional" : "Price"}
+                placeholder={anchor ? "What you paid" : "Price"}
                 inputMode="decimal"
                 aria-label={anchor ? "Average cost" : "Price"}
-                // Avg cost is optional on every Balance (blank → gains blank until added);
-                // the field steps back (muted, dashed). A pre-filled figure DERIVED from
-                // the ฿ value is an estimate to verify (amber, data-estimated).
-                data-optional={anchor ? "" : undefined}
+                // Avg cost is NOT marked "optional": skippable, but adding it unlocks
+                // gains/return — so it reads as a normal field, and the row nudges
+                // (amber "no cost yet") when it's blank. A pre-filled figure DERIVED from
+                // the ฿ value is an estimate to verify (amber dashed, data-estimated).
                 data-estimated={anchor && anchorValueDriven && row.estimated ? "" : undefined}
                 title={
                   anchor

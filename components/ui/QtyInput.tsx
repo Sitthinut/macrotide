@@ -1,14 +1,14 @@
 "use client";
 
-// QtyInput — quantity entry with a units ↔ ฿ switcher. You hold the canonical
-// UNITS; the toggle lets you instead type a ฿ value, from which units are derived
-// (units = ฿ ÷ price). Useful because many Thai broker apps show a holding's
-// value, not its unit count. The price comes from the row (a trade's Price, or a
-// Balance's current price / avg cost); when there's no price yet, ฿ entry can't
-// derive units LOCALLY — so it lifts the raw ฿ total up via `onValue`, and the
-// server derives units from value ÷ NAV(date) at save (the value-only Balance
-// case, #130). A row that arrives value-only (a ฿ total, no units) opens in ฿
-// mode so the figure the user actually has is what they see.
+// QtyInput — quantity entry with a units ↔ ฿ switcher. ONE number in ONE box; the
+// toggle is a TYPE BADGE on what you typed (Units or ฿ Total), not a converter:
+// flipping it keeps your figure and just re-reads it as the other kind, so picking
+// the wrong type is a one-tap fix. Useful because many Thai broker apps show a
+// holding's value, not its unit count. The canonical field follows the badge — Units
+// → `units`; Total → `value` (a trade's `amount`) with units DERIVED (฿ ÷ price). When
+// there's no price, ฿ entry can't derive units locally, so the raw ฿ total lifts up
+// via `onValue` and the server derives units from value ÷ NAV(date) at save (the
+// value-only Balance case, #130). A row that arrives value-only opens in ฿ mode.
 
 import { useState } from "react";
 
@@ -40,53 +40,40 @@ export function QtyInput({
 }: QtyInputProps) {
   const p = Number(price);
   const hasPrice = Number.isFinite(p) && p > 0;
-  // null = entering units; a string = entering a ฿ value (the raw text typed). The
-  // mode is inferred from the row: a non-empty ฿ `value` means the user is in ฿ mode
-  // (units mode always clears `value`, so `value` set ⟺ ฿ mode). This survives
-  // collapse/reopen — the editor remounts and reads the mode back off the row.
-  const [baht, setBaht] = useState<string | null>(() => (value?.trim() ? value : null));
-  const inBaht = baht !== null;
+  // ONE number in ONE box; the Units ↔ ฿ Total toggle just RE-TYPES it — like a type
+  // badge on what you entered. Flipping the toggle keeps your figure (no convert, no
+  // clear), so picking the wrong kind is a one-tap fix. The mode is inferred from the
+  // row so it survives collapse/reopen: a non-empty ฿ `value` means Total mode (Units
+  // mode always clears `value`, so value set ⟺ Total).
+  const [mode, setMode] = useState<"units" | "total">(() => (value?.trim() ? "total" : "units"));
+  const inBaht = mode === "total";
+  const text = inBaht ? (value ?? "") : units;
 
-  const onBaht = (v: string) => {
-    setBaht(v);
-    onValue?.(v);
-    // Keep units in sync as the DERIVED field: value ÷ price when we have a price,
-    // else cleared (the server derives units from value ÷ NAV(date) at save). Either
-    // way, never leave a stale hand-typed unit count behind — it would be saved
-    // instead of the ฿ total and silently win.
-    if (v.trim() === "") onUnits("");
-    else if (hasPrice) onUnits(round(Number(v) / p, 6));
-    else onUnits("");
-  };
-  const onUnitsText = (v: string) => {
-    onUnits(v);
-    // Typing a unit count makes units canonical — drop any lingering ฿ value so the
-    // server doesn't try to re-derive from a stale total.
-    if (value?.trim()) onValue?.("");
-  };
-  const toggle = () => {
-    if (inBaht) {
-      // → units mode: units is canonical; drop the ฿ value so it can't override.
-      setBaht(null);
-      if (value?.trim()) onValue?.("");
+  // Write the typed number to its canonical field and keep the OTHER as the DERIVED
+  // one: in Total mode, units = ฿ ÷ price (or cleared when there's no price — the
+  // server then derives units from value ÷ NAV(date) at save), never a stale count;
+  // in Units mode, the ฿ value is cleared so it can't override on save.
+  const apply = (v: string, m: "units" | "total") => {
+    if (m === "total") {
+      onValue?.(v);
+      onUnits(v.trim() === "" ? "" : hasPrice ? round(Number(v) / p, 6) : "");
     } else {
-      // → ฿ mode: prefill from the stored value, else units × price. Persist a
-      // non-empty prefill as the canonical ฿ value so the mode survives reopen.
-      const prefill = value?.trim()
-        ? value
-        : hasPrice && units.trim()
-          ? round(Number(units) * p, 2)
-          : "";
-      setBaht(prefill);
-      if (prefill) onValue?.(prefill);
+      onUnits(v);
+      if (value?.trim()) onValue?.("");
     }
+  };
+
+  const toggle = () => {
+    const next = inBaht ? "units" : "total";
+    setMode(next);
+    apply(text, next); // re-type the SAME number as the new kind — don't clear it
   };
 
   return (
     <div className="qty-input">
       <input
-        value={inBaht ? (baht ?? "") : units}
-        onChange={(e) => (inBaht ? onBaht(e.target.value) : onUnitsText(e.target.value))}
+        value={text}
+        onChange={(e) => apply(e.target.value, mode)}
         placeholder={inBaht ? "฿ total" : "Units"}
         inputMode="decimal"
         aria-label={inBaht ? "Total in baht" : ariaLabel}
@@ -96,7 +83,9 @@ export function QtyInput({
         type="button"
         className="qty-input__toggle"
         title={
-          inBaht ? "Entering the ฿ total — tap for units" : "Entering units — tap for the ฿ total"
+          inBaht
+            ? "This figure is the ฿ total — tap to read it as units"
+            : "This figure is units — tap to read it as the ฿ total"
         }
         aria-label="Switch between units and total"
         onMouseDown={(e) => e.preventDefault()}
