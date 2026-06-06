@@ -508,9 +508,17 @@ export function RecordSheet({
 
   const valid = (r: Row): boolean => {
     if (!r.ticker.trim()) return false;
-    // A Balance is ready with either a unit count OR a stated ฿ value — the server
-    // derives units from value ÷ NAV(date) when only the value is given (#130).
-    if (isAnchor(r.kind)) return Number(r.units) > 0 || Number(r.value) > 0;
+    if (isAnchor(r.kind)) {
+      // A Balance is ready with a unit count OR a ฿ value (units derive from value ÷
+      // NAV). But a CUSTOM asset has no NAV, so a value-only custom Balance also needs
+      // a current price to divide by — without it units can't be found and it'd vanish.
+      const hasUnits = Number(r.units) > 0;
+      const hasValue = Number(r.value) > 0;
+      if (!hasUnits && !hasValue) return false;
+      const custom = (r.quoteSource ?? "manual") === "manual";
+      if (hasValue && !hasUnits && custom && !r.currentPrice?.trim()) return false;
+      return true;
+    }
     const d = normalizeTxnDraft({
       tradeDate: r.tradeDate,
       kind: r.kind,
@@ -855,7 +863,13 @@ function DraftRow({
   let needs: string | null = null;
   if (hasTicker) {
     if (anchor) {
-      if (!(Number(row.units) > 0) && !(Number(row.value) > 0)) needs = "needs units or a ฿ total";
+      const hasUnits = Number(row.units) > 0;
+      const hasValue = Number(row.value) > 0;
+      const custom = (row.quoteSource ?? "manual") === "manual";
+      if (!hasUnits && !hasValue) needs = "needs units or a ฿ total";
+      // A value-only CUSTOM Balance has no NAV to find units from — it needs a current
+      // price (value ÷ price), else it can't be valued and wouldn't show.
+      else if (hasValue && custom && !row.currentPrice?.trim()) needs = "needs a current price";
     } else {
       const d = normalizeTxnDraft({
         tradeDate: row.tradeDate,

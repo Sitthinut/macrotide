@@ -78,12 +78,14 @@ export function resolveDerivedUnits(rows: readonly Transaction[]): Transaction[]
     }
 
     const anchor = isAnchorKind(r.kind);
-    // Balance: value ÷ NAV(date). Trade: amount ÷ (execution price ?? NAV(date)).
+    // Balance: value ÷ NAV(date), falling back to the row's own current price
+    // (`marketPrice`) — that's how a CUSTOM/self-priced asset with no NAV gets valued.
+    // Trade: amount ÷ (execution price ?? NAV(date)).
     const units = deriveUnits({
       units: null,
       total: moneyTotal(r),
       price: anchor ? null : (r.pricePerUnit ?? null),
-      navOnDate: nav,
+      navOnDate: anchor ? (nav ?? r.marketPrice ?? null) : nav,
     }).units;
     if (units == null) return r; // no NAV anywhere → leave unresolved (units pending)
     if (!anchor) return { ...r, units }; // a trade's cost basis is its `amount`; no avg cost to set

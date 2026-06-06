@@ -285,6 +285,26 @@ describe("POST /api/transactions — facts-only ledger (ADR 0004)", () => {
     expect(heldUnits("EXAMPLE-FUND-A")).toBeCloseTo(20000); // 200000 ÷ 10
   });
 
+  it("values a CUSTOM value-only Balance from its current price (no NAV)", async () => {
+    // A self-priced asset has no NAV; its units come from value ÷ the current price.
+    const { status, body } = await post([
+      {
+        tradeDate: "2026-03-01",
+        kind: "opening",
+        ticker: "MYSTERY",
+        quoteSource: "manual",
+        value: 50000,
+        marketPrice: 25, // the current price the user gave
+        amount: 0,
+      },
+    ]);
+    expect(status).toBe(201);
+    expect(body.inserted[0].value).toBe(50000);
+    expect(body.inserted[0].units).toBeNull();
+    // 50000 ÷ 25 = 2000 units, held and valued off the current price.
+    expect(heldUnits("MYSTERY")).toBeCloseTo(2000);
+  });
+
   it("passes a normal units+price buy through untouched", async () => {
     const { status, body } = await post([
       {
