@@ -223,10 +223,14 @@ stored fact; the derived side self-corrects with NAV:
 | dividend / fee | ฿ amount | — (a pure cash event) | as entered |
 | split | the ratio (2 = 2-for-1) | scaled by the ratio | — (moves no cash) |
 
-A units-only trade needs a priceable fund (a custom asset has no NAV, so it still
-needs a price or amount). A row that can't be completed — a Balance with neither units
-nor value, or a custom-asset trade with no amount and no way to derive one — isn't
-saved; the importer flags it so you can fill the missing fact rather than invent one.
+On a feed-priced fund the NAV bridges units and cash, so **either side alone** is
+enough. A **custom** asset has no NAV, so neither side alone can find the other: a
+custom trade needs a **price** (or both the unit count and the ฿ amount) to tie its
+units and cash together — a ฿ amount on its own can't become units, and units on
+their own can't become cash. A row that can't be completed — a Balance with neither
+units nor value, or a custom-asset trade that gives only one side with no price —
+isn't saved; the importer flags it so you can fill the missing fact rather than
+invent one.
 
 ## Editing and deleting (self-healing)
 
