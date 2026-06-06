@@ -22,6 +22,7 @@ behind it. Read these to build a mental model, not to complete a task.
 | [research/llm-platform-primitives.md](./research/llm-platform-primitives.md) | Prior-art survey: how providers expose tool calling, system prompts, reasoning tokens, citations/structured output |
 | [research/context-and-caching.md](./research/context-and-caching.md) | Prior-art survey: prompt caching cost/latency math + context-window management / progressive loading |
 | [research/agent-evals.md](./research/agent-evals.md) | Prior-art survey: how to evaluate a tool-using agent — the task/harness/grader triple, deterministic vs LLM-judge graders, `pass^k`, dead-end metrics; evidence behind `scripts/eval` |
+| [research/design-systems.md](./research/design-systems.md) | Prior-art survey: keeping a design system consistent and human/AI-foolproof — tokens, typed component APIs, lint/CI gates, agent guardrails (DESIGN.md, MCP, AGENTS.md), small-team governance |
 
 A feature's deep dive lives here as a single doc; the research that informed it
 sits beneath it in [research/](./research). Both are understanding-oriented, so

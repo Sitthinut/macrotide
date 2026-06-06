@@ -69,6 +69,7 @@ Feature deep dives and the prior-art research behind them live under
 | [research/llm-platform-primitives.md](./explanation/research/llm-platform-primitives.md) | Prior-art survey: tool calling, system prompts, reasoning tokens, structured output across providers |
 | [research/context-and-caching.md](./explanation/research/context-and-caching.md) | Prior-art survey: prompt caching + context-window management / progressive loading |
 | [research/agent-evals.md](./explanation/research/agent-evals.md) | Prior-art survey: evaluating tool-using agents — graders, `pass^k`, dead-end metrics; evidence behind `scripts/eval` |
+| [research/design-systems.md](./explanation/research/design-systems.md) | Prior-art survey: keeping a design system consistent + human/AI-foolproof — tokens, typed component APIs, lint/CI gates, agent guardrails, governance |
 
 ### Project status & process (repo root)
 | Doc | Role |
