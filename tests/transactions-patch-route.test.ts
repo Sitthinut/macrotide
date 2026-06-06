@@ -136,4 +136,38 @@ describe("PATCH /api/transactions/[id] — facts-only edit parity", () => {
     expect(stored().amount).toBe(0); // the fact is units; amount derives at the fold
     expect(heldUnits("EXAMPLE-FUND-B")).toBeCloseTo(50);
   });
+
+  it("edits a trade into a cash dividend (฿ amount, units NULL, no position)", async () => {
+    const id = seedBuy("EXAMPLE-FUND-B");
+    const { status } = await patch(id, {
+      tradeDate: "2026-03-01",
+      kind: "dividend",
+      ticker: "EXAMPLE-FUND-B",
+      quoteSource: "thai_mutual_fund",
+      amount: 500,
+    });
+    expect(status).toBe(200);
+    expect(stored().kind).toBe("dividend");
+    expect(stored().units).toBeNull();
+    expect(stored().amount).toBe(500); // cash in (positive)
+    expect(heldUnits("EXAMPLE-FUND-B")).toBeUndefined(); // the only event is a cash dividend
+  });
+
+  it("edits a trade into a split (units = ratio, amount 0)", async () => {
+    const id = seedBuy("EXAMPLE-FUND-B"); // 10 units
+    const { status } = await patch(id, {
+      tradeDate: "2026-03-01",
+      kind: "split",
+      ticker: "EXAMPLE-FUND-B",
+      quoteSource: "thai_mutual_fund",
+      units: 3, // 3-for-1
+      amount: 0,
+    });
+    expect(status).toBe(200);
+    expect(stored().kind).toBe("split");
+    expect(stored().amount).toBe(0); // a split moves no cash
+    // The seed buy was replaced by a split with no prior position on this ticker, so
+    // a split alone rebases nothing — it holds no units.
+    expect(heldUnits("EXAMPLE-FUND-B")).toBeUndefined();
+  });
 });

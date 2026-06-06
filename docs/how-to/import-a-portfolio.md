@@ -71,8 +71,11 @@ broker app shows) *and* a buy/sell (the ฿ amount you spent or received), so yo
 never have to hunt down a unit count. The divisor is always a *current* price,
 never your average cost (average cost is what you paid; it sets the cost basis,
 not the unit count). If there's no price on the row and no NAV on file for its
-date, the app keeps the ฿ total — a Balance asks you for a unit count; a trade
-saves and flags that it needs one.
+date, the app keeps the ฿ total: a Balance asks you for a unit count, a
+feed-priced fund saves and flags that units are pending (they fill in once its
+NAV lands), and a **custom** (self-priced) asset asks for a price — it has no NAV
+to derive units from. Cash-only entries are exempt: a dividend or fee needs only
+its ฿ amount, and a split needs only its ratio.
 
 ### Image OCR details
 

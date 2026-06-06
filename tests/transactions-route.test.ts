@@ -347,4 +347,158 @@ describe("POST /api/transactions — facts-only ledger (ADR 0004)", () => {
     expect(status).toBe(201);
     expect(body.inserted[0].units).toBeCloseTo(10);
   });
+
+  // ── Remaining matrix kinds (#135): sell / reinvest / dividend / fee / split /
+  //    restatement — each posted as the Add modal would, asserting the fold result.
+  it("a restatement (second anchor → snapshot) re-bases units without double-counting", async () => {
+    seedNav("thai_mutual_fund:EXAMPLE-FUND-A", [
+      ["2026-03-01", 12.5],
+      ["2026-06-01", 10],
+    ]);
+    await post([
+      {
+        tradeDate: "2026-03-01",
+        kind: "opening",
+        ticker: "EXAMPLE-FUND-A",
+        quoteSource: "thai_mutual_fund",
+        value: 200000,
+        amount: 0,
+      },
+    ]);
+    expect(heldUnits("EXAMPLE-FUND-A")).toBeCloseTo(16000); // 200000 ÷ 12.5
+    // A LATER anchor on the same fund is auto-promoted to a restatement (snapshot):
+    // it asserts the new absolute balance, it does NOT add to the old one.
+    await post([
+      {
+        tradeDate: "2026-06-01",
+        kind: "opening",
+        ticker: "EXAMPLE-FUND-A",
+        quoteSource: "thai_mutual_fund",
+        value: 300000,
+        amount: 0,
+      },
+    ]);
+    expect(heldUnits("EXAMPLE-FUND-A")).toBeCloseTo(30000); // 300000 ÷ 10, NOT 16000 + 30000
+  });
+
+  it("folds a sell — units leave the position at NAV", async () => {
+    seedNav("thai_mutual_fund:EXAMPLE-FUND-B", [["2026-03-01", 10]]);
+    await post([
+      {
+        tradeDate: "2026-03-01",
+        kind: "buy",
+        ticker: "EXAMPLE-FUND-B",
+        quoteSource: "thai_mutual_fund",
+        units: 100,
+        pricePerUnit: 10,
+        amount: 1000,
+      },
+    ]);
+    await post([
+      {
+        tradeDate: "2026-03-01",
+        kind: "sell",
+        ticker: "EXAMPLE-FUND-B",
+        quoteSource: "thai_mutual_fund",
+        amount: 300, // ฿ out ÷ NAV(10) = 30 units sold
+      },
+    ]);
+    expect(heldUnits("EXAMPLE-FUND-B")).toBeCloseTo(70); // 100 − 30
+  });
+
+  it("folds a reinvest — amount-only adds units at NAV", async () => {
+    seedNav("thai_mutual_fund:EXAMPLE-FUND-B", [["2026-03-01", 10]]);
+    await post([
+      {
+        tradeDate: "2026-03-01",
+        kind: "buy",
+        ticker: "EXAMPLE-FUND-B",
+        quoteSource: "thai_mutual_fund",
+        units: 100,
+        pricePerUnit: 10,
+        amount: 1000,
+      },
+    ]);
+    await post([
+      {
+        tradeDate: "2026-03-01",
+        kind: "reinvest",
+        ticker: "EXAMPLE-FUND-B",
+        quoteSource: "thai_mutual_fund",
+        amount: 100, // ÷ NAV(10) = 10 units reinvested
+      },
+    ]);
+    expect(heldUnits("EXAMPLE-FUND-B")).toBeCloseTo(110); // 100 + 10
+  });
+
+  it("saves a CUSTOM cash dividend (฿ amount, no units) without fabricating a position", async () => {
+    // A pure cash event on a self-priced asset: units NULL, no NAV, and it must NOT
+    // create a holding. The shared gate now accepts this (dividends/fees are exempt
+    // from the units-resolvable check); the fold treats it as income only.
+    const { status, body } = await post([
+      {
+        tradeDate: "2026-03-01",
+        kind: "dividend",
+        ticker: "EXAMPLE-CASH",
+        quoteSource: "manual",
+        amount: 500,
+      },
+    ]);
+    expect(status).toBe(201);
+    expect(body.inserted[0].units).toBeNull();
+    expect(body.inserted[0].amount).toBe(500); // cash in (positive)
+    expect(heldUnits("EXAMPLE-CASH")).toBeUndefined(); // no position created
+  });
+
+  it("folds a fee — cash out, no unit change", async () => {
+    seedNav("thai_mutual_fund:EXAMPLE-FUND-B", [["2026-03-01", 10]]);
+    await post([
+      {
+        tradeDate: "2026-03-01",
+        kind: "buy",
+        ticker: "EXAMPLE-FUND-B",
+        quoteSource: "thai_mutual_fund",
+        units: 100,
+        pricePerUnit: 10,
+        amount: 1000,
+      },
+    ]);
+    const { body } = await post([
+      {
+        tradeDate: "2026-03-01",
+        kind: "fee",
+        ticker: "EXAMPLE-FUND-B",
+        quoteSource: "thai_mutual_fund",
+        amount: 50,
+      },
+    ]);
+    expect(body.inserted[0].units).toBeNull();
+    expect(body.inserted[0].amount).toBe(-50); // cash out (negative)
+    expect(heldUnits("EXAMPLE-FUND-B")).toBeCloseTo(100); // units untouched
+  });
+
+  it("folds a split — the units field carries the post:pre ratio", async () => {
+    await post([
+      {
+        tradeDate: "2026-03-01",
+        kind: "buy",
+        ticker: "EXAMPLE-FUND-C",
+        quoteSource: "thai_mutual_fund",
+        units: 100,
+        pricePerUnit: 10,
+        amount: 1000,
+      },
+    ]);
+    await post([
+      {
+        tradeDate: "2026-03-02",
+        kind: "split",
+        ticker: "EXAMPLE-FUND-C",
+        quoteSource: "thai_mutual_fund",
+        units: 2, // 2-for-1 ratio, no cash
+        amount: 0,
+      },
+    ]);
+    expect(heldUnits("EXAMPLE-FUND-C")).toBeCloseTo(200); // 100 × 2
+  });
 });
