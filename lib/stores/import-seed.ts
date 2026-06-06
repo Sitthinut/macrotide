@@ -28,6 +28,8 @@ export interface ImportSeedRow {
   avgCost?: number;
   value?: number;
   pl?: number;
+  /** Invested ฿ cost-basis TOTAL (a fact); the per-unit avg cost derives at the fold. */
+  costTotal?: number;
   quoteSource?: QuoteSource;
   estimated?: boolean;
   needsUnits?: boolean;

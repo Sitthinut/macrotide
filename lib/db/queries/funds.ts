@@ -12,7 +12,9 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { isIndexStyle } from "../../market/fund-classify";
 import { type FeeType, TER_FEE_TYPE } from "../../market/fund-fees";
+import { inferQuoteSource, seedQuoteSource } from "../../market/infer-quote-source";
 import { compareClassesForList } from "../../market/share-class-select";
+import type { QuoteSource } from "../../market/sources";
 import { searchFundIds } from "../../search/fund-index";
 import { getMarketDb } from "../context";
 import { fundCatalog, fundFees, fundQuotes, fundShareClasses, navHistory } from "../schema";
@@ -570,6 +572,57 @@ export function getCheaperAlternatives(projId: string, limit = 5): FundWithTer[]
         f.investRegion === ref.investRegion,
     )
     .slice(0, limit);
+}
+
+/**
+ * Resolve each ticker's `quote_source` against the REAL fund catalog — not just the
+ * client-side shape/seed heuristic. A ticker that exists in `fund_share_classes` is
+ * a Thai mutual fund (authoritative). Anything not in the catalog falls back to
+ * {@link inferQuoteSource} (shape + the client seed), so a market-shaped code
+ * (`PTT.BK`, `^GSPC`) stays `market` and an unknown one stays `manual` (custom) —
+ * instead of a hyphenated non-fund defaulting to "Fund". Powers the importer's
+ * on-the-fly source badge, the seeded-import stamp, and the save-time backstop.
+ * Keys in the returned map are the UPPER-CASED tickers.
+ */
+export function catalogQuoteSource(tickers: string[]): Map<string, QuoteSource> {
+  const out = new Map<string, QuoteSource>();
+  const cleaned = [...new Set(tickers.map((t) => t.trim().toUpperCase()).filter(Boolean))];
+  if (cleaned.length === 0) return out;
+  const db = getMarketDb();
+  // A symbol is a real Thai fund if it's a priceable share-class ticker OR a parent
+  // fund abbreviation (single-class funds expose the parent abbr as the holdable
+  // ticker; matching both also covers a partially-derived catalog).
+  const hits = new Set<string>();
+  for (const r of db
+    .select({ ticker: fundShareClasses.ticker })
+    .from(fundShareClasses)
+    .where(inArray(fundShareClasses.ticker, cleaned))
+    .all())
+    hits.add(r.ticker.toUpperCase());
+  for (const r of db
+    .select({ abbr: fundCatalog.abbrName })
+    .from(fundCatalog)
+    .where(inArray(fundCatalog.abbrName, cleaned))
+    .all())
+    if (r.abbr) hits.add(r.abbr.toUpperCase());
+  for (const t of cleaned) {
+    if (hits.has(t)) {
+      out.set(t, "thai_mutual_fund"); // a real catalog fund — authoritative
+      continue;
+    }
+    const seed = seedQuoteSource(t);
+    if (seed) {
+      out.set(t, seed); // confirmed by the client seed (e.g. PTT.BK → market)
+      continue;
+    }
+    // Not in the catalog or the seed: a shape-derived "fund" guess (hyphenated code)
+    // is UNconfirmed, so demote it to a custom asset rather than masquerading as a
+    // fund we can't price; a market-shaped (PTT.BK, ^GSPC) or already-custom guess
+    // passes through.
+    const guess = inferQuoteSource(t);
+    out.set(t, guess === "thai_mutual_fund" ? "manual" : guess);
+  }
+  return out;
 }
 
 /** Look up catalog rows for a set of fund symbols (e.g. the user's holdings). */

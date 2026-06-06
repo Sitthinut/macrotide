@@ -624,9 +624,10 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
         ),
     }),
     execute: async ({ rows, source, note, asOf }) => {
-      // Derive units/avgCost from the latest NAV (shared with POST
-      // /api/import/image via lib/portfolio/derive-rows.ts), so the in-chat table
-      // and the importer agree. The `holdingsImport` field carries the shape
+      // Derive units/avgCost from the NAV on the snapshot's own date (#130),
+      // falling back to the latest NAV (shared with POST /api/import/image via
+      // lib/portfolio/derive-rows.ts), so the in-chat table and the importer agree
+      // and a dated snapshot's units don't drift. The `holdingsImport` field carries the shape
       // ChatScreen's HoldingsImportCard expects; the client picks it off the
       // stream and renders the table. No DB mutation here — saving happens in the
       // importer the user opens.
@@ -639,7 +640,7 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
         value: r.value,
         pl: r.pl,
       }));
-      const derived = deriveRowsWithNav(extracted);
+      const derived = deriveRowsWithNav(extracted, asOf);
       // Honor an explicit per-row quoteSource override; otherwise keep the
       // ticker-inferred default deriveRow chose.
       const out = derived.map((d, i) => {

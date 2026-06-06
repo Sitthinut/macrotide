@@ -3665,6 +3665,27 @@ textarea.sheet-input {
 .rec-edit select:focus {
   border-color: var(--accent);
 }
+/* A value-driven Balance derives units from its ฿ value, so avg cost is OPTIONAL —
+   the field steps back (muted, dashed) instead of reading like a required input. */
+.rec-edit input[data-optional] {
+  border-style: dashed;
+  border-color: var(--line-soft);
+  background: transparent;
+  color: var(--muted);
+}
+.rec-edit input[data-optional]::placeholder {
+  color: var(--muted-2);
+}
+/* A pre-filled figure that was DERIVED from the value (not read off the source) —
+   dashed + amber tint so the user knows it's an estimate to verify, not a fact. */
+.rec-edit input[data-estimated] {
+  border-style: dashed;
+  border-color: var(--amber);
+  color: var(--muted);
+}
+.rec-edit input[data-estimated]:focus {
+  border-color: var(--accent);
+}
 /* When the editor card itself is too narrow to hold the one-line grid (a narrow
    modal, or the History column with the sidebar open), stack to two columns —
    driven by the card's width, not the viewport. */

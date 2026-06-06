@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { makeTestDbContext } from "@/tests/db-helpers";
-import { runWithDbContext } from "../db/context";
+import { getMarketDb, runWithDbContext } from "../db/context";
+import { upsertFund } from "../db/queries/funds";
 import { upsertFundQuote } from "../db/queries/quotes";
+import { upsertShareClasses } from "../db/queries/share-classes";
+import { navHistory } from "../db/schema";
 import { deriveRowsWithNav, quoteCacheKey } from "./derive-rows";
 import type { DerivedRow, ExtractedRow } from "./ocr";
 
@@ -11,6 +14,26 @@ function withDb<T>(fn: () => T): T {
 
 function seedNav(ticker: string, nav: number): void {
   upsertFundQuote({ ticker: quoteCacheKey(ticker), nav, updatedAt: new Date().toISOString() });
+}
+
+// Make a ticker a real catalog fund so the DB-backed source check confirms it as
+// thai_mutual_fund (a priced production fund is always in the catalog).
+function seedCatalogFund(ticker: string): void {
+  upsertFund({
+    projId: ticker,
+    abbrName: ticker,
+    englishName: ticker,
+    assetClass: "equity",
+    fundType: "Equity",
+    status: "active",
+  });
+  upsertShareClasses([{ projId: ticker, className: "main", ticker, investorType: "retail" }]);
+}
+
+function seedNavHistory(ticker: string, rows: [string, number][]): void {
+  const db = getMarketDb();
+  const key = quoteCacheKey(ticker);
+  for (const [date, nav] of rows) db.insert(navHistory).values({ ticker: key, date, nav }).run();
 }
 
 describe("quoteCacheKey", () => {
@@ -27,9 +50,10 @@ describe("deriveRowsWithNav", () => {
     expect(deriveRowsWithNav([])).toEqual([]);
   });
 
-  it("derives units + avgCost from market NAV when only value is shown", () => {
+  it("derives units from market NAV and carries the invested total when only value is shown", () => {
     const rows = withDb(() => {
       seedNav("K-USA-A", 20); // value 1000 ÷ NAV 20 = 50 units
+      seedCatalogFund("K-USA-A"); // catalog-confirmed → source reads as a Thai fund
       const extracted: ExtractedRow[] = [{ ticker: "K-USA-A", value: 1000, pl: 100 }];
       return deriveRowsWithNav(extracted) as DerivedRow[];
     });
@@ -39,8 +63,10 @@ describe("deriveRowsWithNav", () => {
     expect(r.estimated).toBe(true);
     expect(r.needsUnits).toBe(false);
     expect(r.quoteSource).toBe("thai_mutual_fund");
-    // avgCost = (value − pl) / units = (1000 − 100) / 50 = 18
-    expect(r.avgCost).toBeCloseTo(18);
+    // Facts-only: the invested TOTAL (value − pl = 900) is the fact; the per-unit avg
+    // cost is derived at the fold (900 ÷ units), never frozen on the imported row.
+    expect(r.costTotal).toBeCloseTo(900);
+    expect(r.avgCost).toBeUndefined();
   });
 
   it("trusts units/avgCost printed on the image — derives nothing", () => {
@@ -63,5 +89,31 @@ describe("deriveRowsWithNav", () => {
     });
     expect(rows[0].units).toBeUndefined();
     expect(rows[0].needsUnits).toBe(true);
+  });
+
+  it("prices a dated snapshot off NAV(asOf), not today's moving NAV (#130)", () => {
+    const rows = withDb(() => {
+      // Latest quote drifted to 25, but on the snapshot's own date NAV was 20.
+      seedNav("K-USA-A", 25);
+      seedNavHistory("K-USA-A", [
+        ["2026-01-01", 18],
+        ["2026-02-01", 20],
+        ["2026-03-01", 25],
+      ]);
+      const extracted: ExtractedRow[] = [{ ticker: "K-USA-A", value: 1000 }];
+      return deriveRowsWithNav(extracted, "2026-02-15") as DerivedRow[];
+    });
+    // 1000 ÷ NAV(2026-02-01)=20 → 50 units, NOT 1000 ÷ latest 25 = 40.
+    expect(rows[0].units).toBeCloseTo(50);
+    expect(rows[0].needsUnits).toBe(false);
+  });
+
+  it("falls back to the latest quote when no dated NAV is on file for asOf", () => {
+    const rows = withDb(() => {
+      seedNav("K-USA-A", 25); // only a latest quote, no nav_history
+      const extracted: ExtractedRow[] = [{ ticker: "K-USA-A", value: 1000 }];
+      return deriveRowsWithNav(extracted, "2026-02-15") as DerivedRow[];
+    });
+    expect(rows[0].units).toBeCloseTo(40); // 1000 ÷ 25
   });
 });

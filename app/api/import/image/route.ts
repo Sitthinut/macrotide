@@ -129,9 +129,10 @@ export async function POST(req: Request) {
       }
 
       const extracted = await extractStructuredHoldings({ data: buffer, mimeType });
-      // Derive units/avgCost from the latest NAV (shared with the advisor's
+      // Derive units/avgCost from the NAV on the snapshot's own date (#130),
+      // falling back to the latest NAV (shared with the advisor's
       // propose_holdings_import tool — see lib/portfolio/derive-rows.ts).
-      const holdings = deriveRowsWithNav(extracted);
+      const holdings = deriveRowsWithNav(extracted, asOf ?? undefined);
       return NextResponse.json({ docType, confidence, asOf, holdings }, { status: 200 });
     } catch (err) {
       if (err instanceof OcrProviderUnavailableError) {

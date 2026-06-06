@@ -12,6 +12,7 @@ import { freshMarketDb } from "@/tests/db-helpers";
 import { type DbContext, getMarketDb, runWithDbContext } from "../context";
 import * as schema from "../schema";
 import {
+  catalogQuoteSource,
   type FundFeeInsert,
   type FundInsert,
   findFunds,
@@ -594,6 +595,66 @@ describe("retail-availability gate + zero-TER sort (#117)", () => {
         { projId: "PRIVF", className: "PRV", ticker: "PRV", investorType: "retail" },
       ]);
       expect(findShareClasses({ includeNonRetail: true }).map((c) => c.ticker)).toContain("PRV");
+    });
+  });
+
+  describe("catalogQuoteSource — DB-backed source detection", () => {
+    it("tags a catalog share-class ticker as a Thai mutual fund (authoritative)", () => {
+      withDb(() => {
+        upsertFund(fund("EXAMPLEFUND"));
+        upsertShareClasses([
+          {
+            projId: "EXAMPLEFUND",
+            className: "main",
+            ticker: "EXAMPLE-FUND-A",
+            investorType: "retail",
+          },
+        ]);
+        expect(catalogQuoteSource(["EXAMPLE-FUND-A"]).get("EXAMPLE-FUND-A")).toBe(
+          "thai_mutual_fund",
+        );
+      });
+    });
+
+    it("recognizes a single-class fund by its parent abbr (no share-class row)", () => {
+      withDb(() => {
+        // Only the parent catalog row exists (a single-class fund exposes its abbr
+        // as the holdable ticker) — still authoritative as a Thai fund.
+        upsertFund(fund("SOLOFUND", { abbrName: "SOLOFUND" }));
+        expect(catalogQuoteSource(["SOLOFUND"]).get("SOLOFUND")).toBe("thai_mutual_fund");
+      });
+    });
+
+    it("does NOT let a hyphenated NON-catalog code masquerade as a fund", () => {
+      withDb(() => {
+        // Nothing seeded → not in the catalog. The heuristic would guess "Fund" off
+        // the hyphen; the catalog check overrides that to custom (manual).
+        expect(catalogQuoteSource(["NOT-A-REAL-FUND"]).get("NOT-A-REAL-FUND")).toBe("manual");
+      });
+    });
+
+    it("leaves a market-shaped symbol on the market source", () => {
+      withDb(() => {
+        expect(catalogQuoteSource(["PTT.BK"]).get("PTT.BK")).toBe("market");
+        expect(catalogQuoteSource(["^GSPC"]).get("^GSPC")).toBe("market");
+      });
+    });
+
+    it("is case-insensitive and keys by the upper-cased ticker", () => {
+      withDb(() => {
+        upsertFund(fund("EXAMPLEFUND"));
+        upsertShareClasses([
+          {
+            projId: "EXAMPLEFUND",
+            className: "main",
+            ticker: "EXAMPLE-FUND-A",
+            investorType: "retail",
+          },
+        ]);
+        expect(catalogQuoteSource(["example-fund-a"]).get("EXAMPLE-FUND-A")).toBe(
+          "thai_mutual_fund",
+        );
+      });
     });
   });
 });

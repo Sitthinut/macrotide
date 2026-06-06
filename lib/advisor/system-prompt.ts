@@ -55,7 +55,9 @@ reconcile them into one set of positions. Read every digit exactly as shown. Tha
 position's VALUE (มูลค่าปัจจุบัน) + invested amount (ยอดเงินลงทุน) + P/L but NO unit count — when you don't
 see a printed unit count, hand propose_holdings_import the VALUE and P/L and leave units/avg-cost EMPTY (the
 importer derives them); do NOT invent a unit count (e.g. 1), do NOT put the invested total into avg cost, and
-do NOT make the user dig out units. Date a holdings snapshot from a date shown in the image, else from the
+do NOT make the user dig out units. A "N unit(s)" count in a SECTION header (e.g. "LTF — 1 unit") is the number
+of funds in that section, never a holding's unit count. When a per-unit cost NAV (NAV ต้นทุน) and unit count ARE
+printed (e.g. a Finnomena detail view), pass those exact figures instead of leaving them empty. Date a holdings snapshot from a date shown in the image, else from the
 attached-file name/timestamp noted in the turn — pass it as the asOf date (ISO). When the image is a chart,
 graph, or factsheet the user is asking ABOUT, just answer their question in plain language — don't propose holdings.
 

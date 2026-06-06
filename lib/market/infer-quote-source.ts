@@ -28,6 +28,15 @@ const THAI_AMC_PREFIXES = ["SCB", "KFS"] as const;
  * plain ETF tickers (SPY) are market. This only sets the *default* in the
  * editable confirmation table — the user can still flip the source per row.
  */
+/**
+ * The CONFIRMED source for a ticker from the client seed catalog, or undefined if
+ * it isn't a seed entry. Lets a DB-backed resolver tell a *confirmed* fund/market
+ * symbol apart from a mere shape guess (a hyphen alone isn't proof of a fund).
+ */
+export function seedQuoteSource(ticker: string): QuoteSource | undefined {
+  return KNOWN_QUOTE_SOURCE.get(ticker.trim().toUpperCase());
+}
+
 export function inferQuoteSource(ticker: string): QuoteSource {
   const t = ticker.trim().toUpperCase();
   const known = KNOWN_QUOTE_SOURCE.get(t);

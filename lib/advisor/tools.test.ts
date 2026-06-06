@@ -6,10 +6,12 @@ import { describe, expect, it } from "vitest";
 import { freshMarketDb } from "@/tests/db-helpers";
 import { runWithDbContext } from "../db/context";
 import { createBucket } from "../db/queries/buckets";
+import { upsertFund } from "../db/queries/funds";
 import { createHolding, listHoldings } from "../db/queries/holdings";
 import { listJournalEntries } from "../db/queries/journal";
 import { getPlan, upsertPlan } from "../db/queries/plan";
 import { upsertFundQuote } from "../db/queries/quotes";
+import { upsertShareClasses } from "../db/queries/share-classes";
 import { insertTransactions } from "../db/queries/transactions";
 import * as schema from "../db/schema";
 import { persistPlanEdit } from "../portfolio/apply-plan-edit";
@@ -343,6 +345,19 @@ describe("advisor tools — propose_holdings_import", () => {
         nav: 20,
         updatedAt: new Date().toISOString(),
       });
+      // Catalog-confirm the fund so the DB-backed source check reads it as a Thai
+      // fund (a priced production fund is always in the catalog).
+      upsertFund({
+        projId: "K-USA-A",
+        abbrName: "K-USA-A",
+        englishName: "K-USA-A",
+        assetClass: "equity",
+        fundType: "Equity",
+        status: "active",
+      });
+      upsertShareClasses([
+        { projId: "K-USA-A", className: "main", ticker: "K-USA-A", investorType: "retail" },
+      ]);
       const tools = createAdvisorTools({ userId: null });
       const out = (await run(tools.propose_holdings_import, {
         rows: [

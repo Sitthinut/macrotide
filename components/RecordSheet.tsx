@@ -98,6 +98,17 @@ interface Row {
   /** A Balance's current market price per unit — used to value a custom asset
    * that has no live NAV. Empty for trades (their price doubles as the market). */
   currentPrice?: string;
+  /** A Balance's stated current ฿ VALUE when the source shows value not units
+   * (Thai-app case). Units are derived from value ÷ NAV(date) at save (#130) —
+   * carried here so a value-only row persists and reaches the server. */
+  value?: string;
+  /** A value-only Balance's invested ฿ cost-basis TOTAL (a fact, when the source
+   * shows it). Sent as the ledger `amount` magnitude so the cost reaches XIRR; the
+   * per-unit avg cost derives from it ÷ units at the fold — never frozen here. */
+  costTotal?: string;
+  /** True when units/avg-cost were DERIVED from a value (not read) — the editor
+   * marks those fields estimated so the user knows to verify. */
+  estimated?: boolean;
   fee: string;
   amount: string;
   quoteSource?: QuoteSource;
@@ -155,10 +166,13 @@ function draftToRow(d: ReturnType<typeof parseTxnPaste>[number]): Row {
 }
 
 // Map an OCR'd holdings row (snapshot screenshot) → a Starting-balance Row.
-// `asOf` is the snapshot date (from the file). Units/avg cost come from deriveRow
-// (value ÷ NAV) when a NAV is on file; a value-only row flags needs-units — the
-// value-based Balance model that fills it from value+cost is a follow-up task.
+// `asOf` is the snapshot date (from the file). Units READ off the source make a
+// units row; units DERIVED from a ฿ value (s.estimated — the Thai-app case) make a
+// VALUE-driven row: the Balance opens in ฿ mode showing the figure the user
+// recognises, and the server re-derives units from NAV(asOf) at save (#130) — we
+// don't headline a 5-decimal unit count nobody typed.
 function seedHoldingToRow(s: ImportSeedRow, asOf = ""): Row {
+  const readUnits = s.estimated !== true && s.units != null ? String(s.units) : "";
   return {
     id: nextId++,
     kind: "opening",
@@ -166,8 +180,15 @@ function seedHoldingToRow(s: ImportSeedRow, asOf = ""): Row {
     tradeDate: asOf || s.asOf || "",
     ticker: s.ticker,
     englishName: s.englishName,
-    units: s.units != null ? String(s.units) : "",
-    price: s.avgCost != null ? String(s.avgCost) : "",
+    units: readUnits,
+    // Seed an avg cost ONLY when it's a real per-unit figure read off the source —
+    // never a derived estimate (a value-only row's per-unit cost is derived at the
+    // fold from costTotal ÷ units, not frozen). The invested TOTAL rides on costTotal.
+    price: s.estimated !== true && s.avgCost != null ? String(s.avgCost) : "",
+    // Carry the ฿ value whenever units aren't shown (a derived or no-NAV row).
+    value: readUnits === "" && s.value != null ? String(s.value) : "",
+    costTotal: s.costTotal != null ? String(s.costTotal) : "",
+    estimated: s.estimated,
     fee: "",
     amount: "",
     quoteSource: s.quoteSource ?? inferQuoteSource(s.ticker),
@@ -429,6 +450,56 @@ export function RecordSheet({
     setEditing(r.id);
   };
 
+  // Resolve each row's price source against the REAL fund catalog (a catalog fund →
+  // "Fund", a market-shaped code → "Stock/ETF", else custom) so the badge is right
+  // on the fly for ANY typed/imported symbol — not just the client seed list the
+  // shape heuristic falls back to. Skips rows the user pinned; debounced + cached so
+  // it fires once per new symbol and converges (only patches when the source differs).
+  const sourceCache = useRef(new Map<string, QuoteSource>());
+  useEffect(() => {
+    const applyCached = () =>
+      setRows((prev) => {
+        let changed = false;
+        const next = prev.map((r) => {
+          if (r.quoteSourceLocked || !r.ticker.trim()) return r;
+          const resolved = sourceCache.current.get(r.ticker.trim().toUpperCase());
+          if (resolved && resolved !== r.quoteSource) {
+            changed = true;
+            return { ...r, quoteSource: resolved };
+          }
+          return r;
+        });
+        return changed ? next : prev;
+      });
+
+    const pending = [
+      ...new Set(
+        rows
+          .filter((r) => r.ticker.trim() && !r.quoteSourceLocked)
+          .map((r) => r.ticker.trim().toUpperCase())
+          .filter((t) => !sourceCache.current.has(t)),
+      ),
+    ];
+    if (pending.length === 0) {
+      applyCached();
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `/api/quote-source?tickers=${encodeURIComponent(pending.join(","))}`,
+        );
+        if (!res.ok) return;
+        const map = (await res.json()) as Record<string, QuoteSource>;
+        for (const [t, s] of Object.entries(map)) sourceCache.current.set(t.toUpperCase(), s);
+        applyCached();
+      } catch {
+        // Best-effort — on failure the shape-heuristic default badge stands.
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [rows]);
+
   const patch = (id: number, p: Partial<Row>) =>
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...p } : r)));
   const removeRow = (id: number) => {
@@ -438,7 +509,9 @@ export function RecordSheet({
 
   const valid = (r: Row): boolean => {
     if (!r.ticker.trim()) return false;
-    if (isAnchor(r.kind)) return Number(r.units) > 0;
+    // A Balance is ready with either a unit count OR a stated ฿ value — the server
+    // derives units from value ÷ NAV(date) when only the value is given (#130).
+    if (isAnchor(r.kind)) return Number(r.units) > 0 || Number(r.value) > 0;
     const d = normalizeTxnDraft({
       tradeDate: r.tradeDate,
       kind: r.kind,
@@ -467,16 +540,34 @@ export function RecordSheet({
       const transactions = readyRows.map((r) => {
         const quoteSource = r.quoteSource || inferQuoteSource(r.ticker);
         if (isAnchor(r.kind)) {
+          const hasUnits = Number(r.units) > 0;
+          const avg = r.price.trim() === "" ? null : Number(r.price);
+          // Persist a per-unit avg cost only when it's a real (read/typed) figure —
+          // never a derived estimate, which would freeze a NAV-dependent number
+          // (facts-only, ADR 0004). A value-only row's per-unit cost derives at the fold.
+          const realAvg = r.estimated ? null : avg;
+          // The cost magnitude (positive) for the ledger `amount`; the server signs it
+          // (opening = cash out, a restatement = 0) so a costed opening reaches XIRR.
+          // Units read → from the real avg cost; value-only → the invested total.
+          const costMagnitude =
+            hasUnits && realAvg != null
+              ? Number(r.units) * realAvg
+              : Number(r.costTotal) > 0
+                ? Number(r.costTotal)
+                : 0;
           return {
             tradeDate: r.tradeDate || new Date().toISOString().slice(0, 10),
             kind: r.kind,
             ticker: r.ticker.trim().toUpperCase(),
             englishName: r.englishName,
-            units: Number(r.units),
-            pricePerUnit: r.price.trim() === "" ? null : Number(r.price),
+            // Send units when read; otherwise omit and send the ฿ value so the
+            // server derives units from NAV(tradeDate) (#130).
+            units: hasUnits ? Number(r.units) : undefined,
+            value: !hasUnits && Number(r.value) > 0 ? Number(r.value) : undefined,
+            pricePerUnit: realAvg,
             // The Balance's current price → the asset's market-price point.
             marketPrice: r.currentPrice?.trim() ? Number(r.currentPrice) : undefined,
-            amount: 0,
+            amount: costMagnitude,
             quoteSource,
             source: source.trim() || undefined,
           };
@@ -508,6 +599,9 @@ export function RecordSheet({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ bucketId, transactions }),
       });
+      // Facts-only ledger (ADR 0004): a value-only Balance always saves — even with no
+      // NAV on its date yet — storing the ฿ value as the fact; its units derive at the
+      // fold when that date's NAV lands. So there's no "couldn't price it" reject here.
       if (!res.ok) throw new Error(String(res.status));
       const body = (await res.json()) as { count: number };
       invalidate(/^\/api\/transactions/);
@@ -822,6 +916,9 @@ function RowEditor({
   const anchor = isAnchor(row.kind);
   // Dividend / fee are pure ฿ flows — no units or price, just an amount.
   const amountOnly = row.kind === "dividend" || row.kind === "fee";
+  // A Balance recorded by its ฿ value (not a unit count): avg cost is optional here
+  // — units (and any cost) are derived from the value, so the cost field steps back.
+  const anchorValueDriven = anchor && Number(row.value) > 0;
   const cls = `rec-edit${anchor ? " is-anchor" : amountOnly ? " is-flow" : ""}`;
   return (
     <div className="ledger-edit-card">
@@ -830,8 +927,22 @@ function RowEditor({
           value={row.kind}
           onChange={(e) => {
             const k = e.target.value as RowKind;
-            // Switching to a Balance with no date yet defaults it to today.
-            onChange({ kind: k, ...(isAnchor(k) && !row.tradeDate ? { tradeDate: today() } : {}) });
+            // The ฿ total lives in `value` on a Balance, `amount` on a trade —
+            // carry it across when the type flips so a figure typed in ฿ mode
+            // survives the switch (and clear the field it left).
+            const toAnchor = isAnchor(k);
+            const ledgerMove =
+              toAnchor === anchor
+                ? {}
+                : toAnchor
+                  ? { value: row.amount, amount: "" }
+                  : { amount: row.value ?? "", value: "" };
+            onChange({
+              kind: k,
+              ...ledgerMove,
+              // Switching to a Balance with no date yet defaults it to today.
+              ...(toAnchor && !row.tradeDate ? { tradeDate: today() } : {}),
+            });
           }}
           aria-label="Type"
         >
@@ -893,17 +1004,28 @@ function RowEditor({
             <QtyInput
               units={row.units}
               price={anchor ? row.currentPrice || row.price : row.price}
+              // A Balance persists its ฿ figure in `value`; a trade in its `amount`
+              // (its authoritative money field) — so a total typed in ฿ mode survives
+              // collapse/expand and the server can derive units from it (#130).
+              value={anchor ? row.value : row.amount}
               onUnits={(v) => onChange({ units: v })}
+              onValue={(v) => onChange(anchor ? { value: v } : { amount: v })}
             />
             <input
               value={row.price}
-              onChange={(e) => onChange({ price: e.target.value })}
-              placeholder={anchor ? "Avg cost" : "Price"}
+              onChange={(e) => onChange({ price: e.target.value, estimated: false })}
+              placeholder={
+                anchor ? (anchorValueDriven ? "Avg cost · optional" : "Avg cost") : "Price"
+              }
               inputMode="decimal"
               aria-label={anchor ? "Average cost" : "Price"}
+              // A value-driven Balance derives its cost from the value — the field is
+              // optional here, and a pre-filled figure is an estimate (shown dashed).
+              data-optional={anchor && anchorValueDriven ? "" : undefined}
+              data-estimated={anchor && anchorValueDriven && row.estimated ? "" : undefined}
               title={
                 anchor
-                  ? "Average cost you PAID per unit — not today's price (current value comes from the live NAV)."
+                  ? "Average cost you PAID per unit — optional; left blank, your gains stay blank until you add it. Not today's price (current value comes from the live NAV)."
                   : undefined
               }
             />
