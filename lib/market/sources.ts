@@ -27,3 +27,19 @@ export const DEFAULT_QUOTE_SOURCE: QuoteSource = "market";
 export function isQuoteSource(value: unknown): value is QuoteSource {
   return typeof value === "string" && (QUOTE_SOURCES as readonly string[]).includes(value);
 }
+
+/**
+ * The composite cache key for the `fund_quotes` / `nav_history` tables:
+ * `${source}:${TICKER}`. The ticker is normalized to trimmed UPPER case so the
+ * SAME row is hit no matter where the ticker came from — a lowercase-cataloged
+ * fund (ttb SSF/RMF family) and the always-uppercased ledger ticker must resolve
+ * to one key, or a value-only Balance can never find its NAV and silently drops
+ * from holdings (#134). The source is a fixed lowercase taxonomy value and is
+ * left as-is; only the ticker is normalized.
+ *
+ * Every writer and reader of those tables MUST build the key through here — the
+ * casing only stays consistent if there is exactly one builder.
+ */
+export function quoteCacheKey(source: string, ticker: string): string {
+  return `${source}:${ticker.trim().toUpperCase()}`;
+}

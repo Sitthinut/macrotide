@@ -4,6 +4,7 @@ import { foldableEvents } from "@/lib/db/queries/resolve-derived-units";
 import type { Transaction } from "@/lib/db/queries/transactions";
 import { inferHoldingCurrency } from "@/lib/market/currency";
 import { buildFxConverter } from "@/lib/market/fx";
+import { quoteCacheKey } from "@/lib/market/sources";
 import { type ContributionSummary, summarizeContributions } from "./contributions";
 import {
   type BasisPoint,
@@ -100,7 +101,9 @@ export async function computeTransactionAnalytics(
     marketValue = 0;
     ({ irr, irrUnavailable } = solveIrr(txns, null, opts.asOf));
   } else {
-    const cacheKeys = held.map((p) => `${sourceByTicker.get(p.ticker) ?? "market"}:${p.ticker}`);
+    const cacheKeys = held.map((p) =>
+      quoteCacheKey(sourceByTicker.get(p.ticker) ?? "market", p.ticker),
+    );
     const navByKey = new Map<string, number>();
     for (const q of listFundQuotes(cacheKeys)) {
       if (q.nav > 0) navByKey.set(q.ticker, q.nav);
@@ -122,7 +125,9 @@ export async function computeTransactionAnalytics(
     for (const p of held) {
       const source = sourceByTicker.get(p.ticker) ?? "market";
       const nav =
-        source === "manual" ? manualPrice.get(p.ticker) : navByKey.get(`${source}:${p.ticker}`);
+        source === "manual"
+          ? manualPrice.get(p.ticker)
+          : navByKey.get(quoteCacheKey(source, p.ticker));
       const rate = fx.rateOn(inferHoldingCurrency(source, p.ticker), opts.asOf);
       if (nav === undefined || rate === null) {
         unpriced.push(p.ticker);

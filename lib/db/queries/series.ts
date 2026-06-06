@@ -1,6 +1,7 @@
 import { and, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { inferHoldingCurrency } from "@/lib/market/currency";
 import { buildFxConverter } from "@/lib/market/fx";
+import { quoteCacheKey } from "@/lib/market/sources";
 import { demoHoldingSeries } from "@/lib/mock/demo-history-read";
 import { getMarketDb, isDemoRequest, type MarketDb } from "../context";
 import { fundCatalog, navHistory } from "../schema";
@@ -94,7 +95,7 @@ function demoNavRows(
   const seen = new Set<string>();
   const rows: { ticker: string; date: string; nav: number }[] = [];
   for (const h of allHoldings) {
-    const key = `${h.quoteSource}:${h.ticker}`;
+    const key = quoteCacheKey(h.quoteSource, h.ticker);
     if (seen.has(key)) continue;
     seen.add(key);
     if (!h.units) continue;
@@ -201,7 +202,9 @@ export async function getPortfolioSeries(
   const heldTickers = Array.from(new Set(allHoldings.map((h) => h.ticker)));
   const hasDistributingHolding = holdsDistributingFund(marketDb, heldTickers);
 
-  const cacheKeys = Array.from(new Set(allHoldings.map((h) => `${h.quoteSource}:${h.ticker}`)));
+  const cacheKeys = Array.from(
+    new Set(allHoldings.map((h) => quoteCacheKey(h.quoteSource, h.ticker))),
+  );
 
   // DEMO MODE: source NAV history from the committed fixture instead of
   // market.db. The fixture holds ~5y of TOTAL value per holding (units × NAV,
@@ -287,7 +290,7 @@ export async function getPortfolioSeries(
       let value = 0;
       let anyValue = false;
       for (const h of bucketHoldings) {
-        const key = `${h.quoteSource}:${h.ticker}`;
+        const key = quoteCacheKey(h.quoteSource, h.ticker);
         const nav = filled.get(key)?.get(d);
         if (nav === undefined) continue;
         // Convert native value → THB at this date's rate. A null rate (cold FX

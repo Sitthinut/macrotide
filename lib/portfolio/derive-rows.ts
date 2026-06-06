@@ -1,8 +1,13 @@
 import "server-only";
 import { catalogQuoteSource } from "@/lib/db/queries/funds";
 import { listFundQuotes, navOnDate } from "@/lib/db/queries/quotes";
-import type { QuoteSource } from "@/lib/market/sources";
+import { type QuoteSource, quoteCacheKey } from "@/lib/market/sources";
 import { type DerivedRow, deriveRow, type ExtractedRow } from "./ocr";
+
+// The composite `${source}:${TICKER}` cache key for `fund_quotes` / `nav_history`
+// is canonical in lib/market/sources.ts — re-exported here for the existing
+// callers and tests that import it from this module.
+export { quoteCacheKey };
 
 // Shared NAV-derivation for extracted holding rows. Both the image-import route
 // (POST /api/import/image) and the advisor's `propose_holdings_import` tool turn
@@ -14,16 +19,6 @@ import { type DerivedRow, deriveRow, type ExtractedRow } from "./ocr";
 // (fund_quotes) when no dated NAV is on file (or no date was read). Rows we still
 // can't price come back with `needsUnits` set so the UI asks the user to fill them
 // in. See deriveRow (lib/portfolio/ocr.ts) for the per-row precedence rules.
-
-/**
- * Build the composite `${source}:${TICKER}` cache key used by `fund_quotes`
- * (lib/market/cache.ts) — the SAME key `deriveRow` consumers must look up by, so
- * the NAV lookup actually hits. The source comes from the catalog (see
- * `deriveRowsWithNav`), not a shape guess. Exported for tests.
- */
-export function quoteCacheKey(source: QuoteSource, ticker: string): string {
-  return `${source}:${ticker.trim().toUpperCase()}`;
-}
 
 /**
  * Derive units/avgCost for each extracted row from the NAV on the snapshot's own
