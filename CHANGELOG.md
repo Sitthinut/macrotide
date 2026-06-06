@@ -25,7 +25,10 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   before saving. A symbol field autocompletes against the known-fund catalog, and
   a quantity switcher lets you enter either **Units** or a **฿ Total** (units are
   derived from the price), matching Thai broker apps that show value rather than
-  unit count.
+  unit count. The Add modal and the History editor now share one validity gate, so
+  they accept and reject every balance/trade combination identically — including
+  cash-only dividends and fees on a self-priced custom asset, which can now be
+  recorded with just a ฿ amount.
 - **A full-screen History view and a per-fund Position page.** History reads the
   whole ledger as a money story — recent activity, balances grouped under their
   own header, and KPI cards (Return · Invested · Realized · Income) — and every

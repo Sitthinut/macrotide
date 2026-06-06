@@ -29,7 +29,13 @@ import type { QuoteSource } from "@/lib/market/sources";
 import type { TxnKind } from "@/lib/portfolio/lots";
 import type { ExtractedTxnRow, ImportDocType } from "@/lib/portfolio/ocr";
 import { TXN_KIND_HELP, TXN_KIND_LABEL, typeSelectOptions } from "@/lib/portfolio/txn-display";
-import { normalizeDate, normalizeTxnDraft, parseTxnPaste } from "@/lib/portfolio/txn-import";
+import {
+  normalizeDate,
+  normalizeTxnDraft,
+  parseTxnPaste,
+  type RowInvalidReason,
+  rowValidity,
+} from "@/lib/portfolio/txn-import";
 import type { ImportSeedRow } from "@/lib/stores/import-seed";
 
 // "opening" is the Starting balance (snapshot anchor); the rest are trade deltas.
@@ -70,6 +76,18 @@ const TONE: Record<RowKind, string> = {
 };
 
 const isAnchor = (k: RowKind): boolean => k === "opening" || k === "snapshot";
+
+/** Shared-gate reason → this surface's terse inline nudge (the Add modal's voice).
+ *  `missing-ticker` is handled by the caller (no nudge — fill the symbol first). */
+const NEEDS_NUDGE: Record<RowInvalidReason, string> = {
+  "missing-ticker": "",
+  "missing-date": "needs a date",
+  "missing-amount": "needs an amount",
+  "missing-ratio": "needs a split ratio",
+  "needs-price": "needs a price",
+  "balance-needs-figure": "needs units or a ฿ total",
+  "custom-needs-price": "needs a current price",
+};
 const baht = (n: number): string => `฿${Math.round(n).toLocaleString("en-US")}`;
 // "2026-06-05" → "Jun 5, 2026" (no leading zero). Raw string back if not ISO.
 const fmtDate = (iso: string): string => {
@@ -490,37 +508,21 @@ export function RecordSheet({
     if (editing === id) setEditing(null);
   };
 
-  const valid = (r: Row): boolean => {
-    if (!r.ticker.trim()) return false;
-    if (isAnchor(r.kind)) {
-      // A Balance is ready with a unit count OR a ฿ value (units derive from value ÷
-      // NAV). But a CUSTOM asset has no NAV, so a value-only custom Balance also needs
-      // a current price to divide by — without it units can't be found and it'd vanish.
-      const hasUnits = Number(r.units) > 0;
-      const hasValue = Number(r.value) > 0;
-      if (!hasUnits && !hasValue) return false;
-      const custom = (r.quoteSource ?? "manual") === "manual";
-      if (hasValue && !hasUnits && custom && !r.currentPrice?.trim()) return false;
-      return true;
-    }
-    const d = normalizeTxnDraft({
+  // A row is ready iff the shared gate accepts it — the SAME predicate the History
+  // editor's save() runs, so the Add modal and History accept/reject identically.
+  const valid = (r: Row): boolean =>
+    rowValidity({
       tradeDate: r.tradeDate,
       kind: r.kind,
       ticker: r.ticker,
       units: r.units,
+      value: r.value,
       pricePerUnit: r.price,
       amount: r.amount,
       fee: r.fee,
       quoteSource: r.quoteSource,
-    });
-    if (!d.ticker || d.needsDate) return false;
-    if (d.kind === "split") return d.units != null;
-    // A trade needs its cash AND units it can actually resolve: units entered, a price
-    // (units = amount ÷ price), or a feed-priced fund (NAV bridges them). A custom
-    // amount-only trade with no price would fold to 0 units — not ready. The same
-    // `unitsResolvable` gate runs in the History editor's save, so the two agree.
-    return !d.needsAmount && d.unitsResolvable;
-  };
+      currentPrice: r.currentPrice,
+    }).ok;
   const readyRows = rows.filter(valid);
 
   const submit = async () => {
@@ -845,45 +847,23 @@ function DraftRow({
       : !amountOnly && row.units.trim() && row.price.trim()
         ? baht(Number(row.units) * Number(row.price))
         : "";
-  // What this row still NEEDS to be saveable — kind-aware, mirroring the same checks
-  // as valid(). Surfaced amber in the subline so an incomplete row tells you the
-  // actual missing required field (not just cost). Only meaningful once a symbol is in.
-  let needs: string | null = null;
-  if (hasTicker) {
-    if (anchor) {
-      const hasUnits = Number(row.units) > 0;
-      const hasValue = Number(row.value) > 0;
-      const custom = (row.quoteSource ?? "manual") === "manual";
-      if (!hasUnits && !hasValue) needs = "needs units or a ฿ total";
-      // A value-only CUSTOM Balance has no NAV to find units from — it needs a current
-      // price (value ÷ price), else it can't be valued and wouldn't show.
-      else if (hasValue && custom && !row.currentPrice?.trim()) needs = "needs a current price";
-    } else {
-      const d = normalizeTxnDraft({
-        tradeDate: row.tradeDate,
-        kind: row.kind,
-        ticker: row.ticker,
-        units: row.units,
-        pricePerUnit: row.price,
-        amount: row.amount,
-        fee: row.fee,
-        quoteSource: row.quoteSource,
-      });
-      if (d.needsDate) needs = "needs a date";
-      else if (row.kind === "split") {
-        if (d.units == null) needs = "needs a split ratio";
-      } else if (d.needsAmount) {
-        // A units-only trade is fine on a feed-priced fund (amount derives from NAV);
-        // needsAmount stays true only when it can't — a custom asset with units still
-        // needs a price, and a row with neither units nor amount needs an amount.
-        needs = Number(row.units) > 0 ? "needs a price" : "needs an amount";
-      } else if (!d.unitsResolvable) {
-        // Cash is in, but a CUSTOM asset has no NAV and no price to turn it into units
-        // — without one it'd fold to 0 units. Prompt for the price (same gate as save).
-        needs = "needs a price";
-      }
-    }
-  }
+  // What this row still NEEDS to be saveable — the SHARED gate's reason (the same
+  // predicate valid() runs), mapped to a terse inline fragment. One source of truth,
+  // so the nudge can't drift from what actually blocks the save. Surfaced amber in the
+  // subline. A missing symbol shows nothing — the ticker field is the obvious next step.
+  const gate = rowValidity({
+    tradeDate: row.tradeDate,
+    kind: row.kind,
+    ticker: row.ticker,
+    units: row.units,
+    value: row.value,
+    pricePerUnit: row.price,
+    amount: row.amount,
+    fee: row.fee,
+    quoteSource: row.quoteSource,
+    currentPrice: row.currentPrice,
+  });
+  const needs = gate.ok || gate.reason === "missing-ticker" ? null : NEEDS_NUDGE[gate.reason];
   // Cost is OPTIONAL — a softer nudge ("adding one unlocks gains"), shown only once the
   // row is otherwise complete (so a required gap takes priority).
   const costUnknown =

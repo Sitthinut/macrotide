@@ -189,6 +189,90 @@ export function normalizeTxnDraft(row: TxnDraftInput): TxnDraftRow {
 }
 
 /**
+ * Why a draft row isn't ready to save — the single SEMANTIC source of truth both
+ * inline editors map to their own copy (the Add modal's terse row nudge vs the
+ * History editor's full-sentence error). One reason → one piece of guidance, so
+ * the two surfaces can word it differently but never advise differently.
+ */
+export type RowInvalidReason =
+  | "missing-ticker"
+  | "missing-date"
+  /** A trade with no figure at all — needs an amount (or units). */
+  | "missing-amount"
+  /** A split with no post:pre ratio (its `units`). */
+  | "missing-ratio"
+  /** A trade carries a figure but is a custom asset with no price to bridge
+   *  units ↔ cash (units-only or amount-only): it needs a price. */
+  | "needs-price"
+  /** An anchor (Balance) with neither a unit count nor a ฿ value. */
+  | "balance-needs-figure"
+  /** A value-only custom Balance with no current price to value it. */
+  | "custom-needs-price";
+
+/**
+ * Input to {@link rowValidity}: a draft's loose fields plus the two anchor-only
+ * extras the editors hold separately — a Balance's stated ฿ `value` and a
+ * custom asset's `currentPrice` (RecordSheet's `currentPrice` / History's
+ * `marketPrice`) used to value a value-only custom Balance.
+ */
+export interface RowValidityInput extends TxnDraftInput {
+  value?: number | string | null;
+  currentPrice?: number | string | null;
+}
+
+/**
+ * The SINGLE accept/reject gate shared by both inline editors (the Add modal's
+ * `valid()` and the History editor's `save()`), so they accept and reject every
+ * balance/trade combination identically. Anchors and deltas branch here once:
+ *  - Anchor (Balance): needs a ticker, a date, and a figure (units OR ฿ value).
+ *    A value-only CUSTOM Balance also needs a current price — it has no NAV, so
+ *    without one its units can't be found and the position would vanish.
+ *  - Delta (trade): needs a ticker and a date; a split is ready with a ratio
+ *    (units); any other trade needs a usable amount AND units it can resolve at
+ *    the fold (a count, an execution price, or a feed-priced fund) — a custom
+ *    amount-only trade with no price folds to 0 units and is rejected.
+ */
+export function rowValidity(
+  row: RowValidityInput,
+): { ok: true } | { ok: false; reason: RowInvalidReason } {
+  const ticker = (row.ticker ?? "").trim();
+  if (!ticker) return { ok: false, reason: "missing-ticker" };
+
+  if (isAnchorKind(row.kind)) {
+    if (normalizeDate(row.tradeDate ?? "") === "") return { ok: false, reason: "missing-date" };
+    const units = numOrNull(row.units);
+    const value = numOrNull(row.value);
+    const hasUnits = units !== null && units > 0;
+    const hasValue = value !== null && value > 0;
+    if (!hasUnits && !hasValue) return { ok: false, reason: "balance-needs-figure" };
+    const custom = (row.quoteSource ?? "manual") === "manual";
+    const hasPrice = numOrNull(row.currentPrice) !== null;
+    if (hasValue && !hasUnits && custom && !hasPrice)
+      return { ok: false, reason: "custom-needs-price" };
+    return { ok: true };
+  }
+
+  const d = normalizeTxnDraft(row);
+  if (d.needsDate) return { ok: false, reason: "missing-date" };
+  // A split moves no cash but needs its ratio (units); a unit-less split is a no-op.
+  if (d.kind === "split")
+    return d.units != null ? { ok: true } : { ok: false, reason: "missing-ratio" };
+  const hasUnits = d.units != null && d.units > 0;
+  if (d.needsAmount) {
+    // No resolvable cash. With units already typed, what's missing is a PRICE (a
+    // custom asset has no NAV to value them); with nothing typed, a figure.
+    return { ok: false, reason: hasUnits ? "needs-price" : "missing-amount" };
+  }
+  // Dividends and fees are pure CASH events — no position change, so there are no
+  // units to resolve. Like a split, they're exempt from the units-resolvable gate
+  // (otherwise a custom-asset cash dividend with only a ฿ amount can't be entered).
+  if (d.kind === "dividend" || d.kind === "fee") return { ok: true };
+  // A figure is present but it's a custom asset with no price to turn ฿ ↔ units.
+  if (!d.unitsResolvable) return { ok: false, reason: "needs-price" };
+  return { ok: true };
+}
+
+/**
  * Parse pasted text / CSV into draft transaction rows. Tolerant of comma, tab,
  * or whitespace delimiters and an optional header row; columns map by header
  * name when a header is present, else positionally as

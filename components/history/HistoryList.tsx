@@ -24,12 +24,31 @@ import type { QuoteSource } from "@/lib/market/sources";
 import type { TxnKind } from "@/lib/portfolio/lots";
 import type { TransactionAnalytics } from "@/lib/portfolio/transaction-analytics";
 import { TXN_KIND_HELP, typeSelectOptions } from "@/lib/portfolio/txn-display";
-import { normalizeTxnDraft } from "@/lib/portfolio/txn-import";
+import { normalizeTxnDraft, type RowInvalidReason, rowValidity } from "@/lib/portfolio/txn-import";
 
 type AnalyticsResponse = TransactionAnalytics & { transactionCount: number };
 
 function isAnchor(k: TxnKind): boolean {
   return k === "opening" || k === "snapshot";
+}
+
+/** Map the shared validity gate's reason to this editor's copy — full sentences (the
+ *  History editor's voice), distinct from the Add modal's terse row nudge. */
+function rowErrorMessage(reason: RowInvalidReason, anchor: boolean): string {
+  switch (reason) {
+    case "balance-needs-figure":
+      return "A balance needs a unit count or a ฿ value.";
+    case "custom-needs-price":
+      return "A custom asset needs a current price to value it.";
+    case "needs-price":
+      return "Add a price so we can value this trade.";
+    case "missing-ratio":
+      return "Add the split ratio (e.g. 2 for a 2-for-1).";
+    case "missing-amount":
+      return "Add a date, a symbol, and an amount.";
+    default: // missing-ticker / missing-date
+      return anchor ? "Add a date and a symbol." : "Add a date, a symbol, and an amount.";
+  }
 }
 
 const baht = (n: number): string => `฿${Math.round(n).toLocaleString("en-US")}`;
@@ -175,29 +194,31 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
     setBusy(true);
     setRowError(null);
     const anchor = isAnchor(draft.kind);
+    // The SAME accept/reject gate the Add modal runs, so the two editors agree on
+    // every combination; map the reason to this editor's copy. (History's custom
+    // current price rides on `marketPrice`.)
+    const gate = rowValidity({
+      tradeDate: draft.tradeDate,
+      kind: draft.kind,
+      ticker: draft.ticker,
+      units: draft.units,
+      value: draft.value,
+      pricePerUnit: draft.pricePerUnit,
+      amount: draft.amount,
+      fee: draft.fee,
+      quoteSource: (draft.quoteSource || undefined) as QuoteSource | undefined,
+      currentPrice: draft.marketPrice,
+    });
+    if (!gate.ok) {
+      setRowError(rowErrorMessage(gate.reason, anchor));
+      setBusy(false);
+      return;
+    }
     try {
       let payload: Record<string, unknown>;
       if (anchor) {
-        // Facts-only Balance: a unit count OR a ฿ value (units derive at the fold). A
-        // custom asset with no NAV also needs a current price to find its units.
         const hasUnits = draft.units.trim() !== "" && Number(draft.units) > 0;
         const hasValue = draft.value.trim() !== "" && Number(draft.value) > 0;
-        if (!draft.tradeDate || !draft.ticker.trim()) {
-          setRowError("Add a date and a symbol.");
-          setBusy(false);
-          return;
-        }
-        if (!hasUnits && !hasValue) {
-          setRowError("A balance needs a unit count or a ฿ value.");
-          setBusy(false);
-          return;
-        }
-        const custom = (draft.quoteSource || "manual") === "manual";
-        if (hasValue && !hasUnits && custom && draft.marketPrice.trim() === "") {
-          setRowError("A custom asset needs a current price to value it.");
-          setBusy(false);
-          return;
-        }
         const avg = draft.pricePerUnit.trim() === "" ? null : Number(draft.pricePerUnit);
         payload = {
           tradeDate: draft.tradeDate,
@@ -222,18 +243,6 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
           fee: draft.fee,
           quoteSource: (draft.quoteSource || undefined) as QuoteSource | undefined,
         });
-        if (!d.ticker || d.needsDate || (d.kind !== "split" && d.needsAmount)) {
-          setRowError("Add a date, a symbol, and an amount.");
-          setBusy(false);
-          return;
-        }
-        // A custom trade given cash but no count and no price folds to 0 units —
-        // reject it here exactly as the Add modal does (shared `unitsResolvable`).
-        if (d.kind !== "split" && !d.unitsResolvable) {
-          setRowError("Add a price so we can value this trade.");
-          setBusy(false);
-          return;
-        }
         payload = {
           tradeDate: d.tradeDate,
           kind: d.kind,
