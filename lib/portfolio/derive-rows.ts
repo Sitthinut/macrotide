@@ -1,7 +1,8 @@
 import "server-only";
 import { catalogQuoteSource } from "@/lib/db/queries/funds";
 import { listFundQuotes, navOnDate } from "@/lib/db/queries/quotes";
-import { type DerivedRow, deriveRow, type ExtractedRow, inferQuoteSource } from "./ocr";
+import type { QuoteSource } from "@/lib/market/sources";
+import { type DerivedRow, deriveRow, type ExtractedRow } from "./ocr";
 
 // Shared NAV-derivation for extracted holding rows. Both the image-import route
 // (POST /api/import/image) and the advisor's `propose_holdings_import` tool turn
@@ -17,10 +18,11 @@ import { type DerivedRow, deriveRow, type ExtractedRow, inferQuoteSource } from 
 /**
  * Build the composite `${source}:${TICKER}` cache key used by `fund_quotes`
  * (lib/market/cache.ts) — the SAME key `deriveRow` consumers must look up by, so
- * the NAV lookup actually hits. Exported for tests.
+ * the NAV lookup actually hits. The source comes from the catalog (see
+ * `deriveRowsWithNav`), not a shape guess. Exported for tests.
  */
-export function quoteCacheKey(ticker: string): string {
-  return `${inferQuoteSource(ticker)}:${ticker.trim().toUpperCase()}`;
+export function quoteCacheKey(source: QuoteSource, ticker: string): string {
+  return `${source}:${ticker.trim().toUpperCase()}`;
 }
 
 /**
@@ -35,9 +37,15 @@ export function quoteCacheKey(ticker: string): string {
 export function deriveRowsWithNav(rows: ExtractedRow[], asOf?: string): DerivedRow[] {
   if (rows.length === 0) return [];
 
+  // The REAL catalog is the single source authority — and it also drives the NAV
+  // cache key, so a real fund's NAV (cached under thai_mutual_fund:TICKER) is found
+  // and a custom asset (manual:TICKER, no NAV on file) simply isn't. No shape guess.
+  const catSource = catalogQuoteSource(rows.map((r) => r.ticker));
+  const sourceOf = (t: string): QuoteSource => catSource.get(t.trim().toUpperCase()) ?? "manual";
+
   // fund_quotes / nav_history are keyed by the combined "source:ticker" cache key,
   // not the bare symbol — build the same key per row so the NAV lookups hit.
-  const keys = rows.map((r) => quoteCacheKey(r.ticker));
+  const keys = rows.map((r) => quoteCacheKey(sourceOf(r.ticker), r.ticker));
 
   // Prefer NAV on the snapshot's own date; fall back to the latest quote per key.
   const datedNav = asOf?.trim() ? navOnDate(keys, asOf) : new Map<string, number>();
@@ -46,14 +54,9 @@ export function deriveRowsWithNav(rows: ExtractedRow[], asOf?: string): DerivedR
     if (q.nav > 0) latestNav.set(q.ticker, q.nav);
   }
 
-  // Resolve the price source against the REAL catalog (not just the shape heuristic
-  // deriveRow defaults to), so a seeded row's badge is right immediately — a catalog
-  // fund reads as "Fund", a non-catalog code doesn't masquerade as one.
-  const catSource = catalogQuoteSource(rows.map((r) => r.ticker));
-
   return rows.map((r) => {
-    const key = quoteCacheKey(r.ticker);
+    const key = quoteCacheKey(sourceOf(r.ticker), r.ticker);
     const out = deriveRow(r, datedNav.get(key) ?? latestNav.get(key));
-    return { ...out, quoteSource: catSource.get(r.ticker.trim().toUpperCase()) ?? out.quoteSource };
+    return { ...out, quoteSource: sourceOf(r.ticker) };
   });
 }

@@ -627,16 +627,18 @@ describe("retail-availability gate + zero-TER sort (#117)", () => {
 
     it("does NOT let a hyphenated NON-catalog code masquerade as a fund", () => {
       withDb(() => {
-        // Nothing seeded → not in the catalog. The heuristic would guess "Fund" off
-        // the hyphen; the catalog check overrides that to custom (manual).
+        // Nothing seeded → not in the catalog → custom (manual). No shape guessing
+        // could promote a hyphenated code to "Fund".
         expect(catalogQuoteSource(["NOT-A-REAL-FUND"]).get("NOT-A-REAL-FUND")).toBe("manual");
       });
     });
 
-    it("leaves a market-shaped symbol on the market source", () => {
+    it("tags any NON-catalog symbol as custom — no shape guessing", () => {
       withDb(() => {
-        expect(catalogQuoteSource(["PTT.BK"]).get("PTT.BK")).toBe("market");
-        expect(catalogQuoteSource(["^GSPC"]).get("^GSPC")).toBe("market");
+        // PTT.BK / ^GSPC look like market symbols, but the catalog is the SINGLE
+        // authority: not in it → custom (until stocks/ETFs join the catalog too).
+        expect(catalogQuoteSource(["PTT.BK"]).get("PTT.BK")).toBe("manual");
+        expect(catalogQuoteSource(["^GSPC"]).get("^GSPC")).toBe("manual");
       });
     });
 

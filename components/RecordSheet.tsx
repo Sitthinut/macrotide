@@ -24,7 +24,6 @@ import { mergeSourceSuggestions } from "@/lib/data/sources";
 import { useBuckets, useHoldings } from "@/lib/fetchers/portfolio";
 import { invalidate } from "@/lib/fetchers/swr";
 import { normalizeImage } from "@/lib/image-normalize";
-import { inferQuoteSource } from "@/lib/market/infer-quote-source";
 import type { QuoteSource } from "@/lib/market/sources";
 import type { TxnKind } from "@/lib/portfolio/lots";
 import type { ExtractedTxnRow, ImportDocType } from "@/lib/portfolio/ocr";
@@ -191,7 +190,7 @@ function seedHoldingToRow(s: ImportSeedRow, asOf = ""): Row {
     estimated: s.estimated,
     fee: "",
     amount: "",
-    quoteSource: s.quoteSource ?? inferQuoteSource(s.ticker),
+    quoteSource: s.quoteSource ?? "manual",
     provenance: "image",
   };
 }
@@ -209,7 +208,7 @@ function seedTxnToRow(e: ExtractedTxnRow, asOf = ""): Row {
     price: e.pricePerUnit != null ? String(e.pricePerUnit) : "",
     fee: e.fee != null ? String(e.fee) : "",
     amount: e.amount != null ? String(e.amount) : "",
-    quoteSource: inferQuoteSource(e.ticker),
+    quoteSource: "manual",
     provenance: "image",
   };
 }
@@ -538,7 +537,7 @@ export function RecordSheet({
     setError(null);
     try {
       const transactions = readyRows.map((r) => {
-        const quoteSource = r.quoteSource || inferQuoteSource(r.ticker);
+        const quoteSource = r.quoteSource || "manual";
         if (isAnchor(r.kind)) {
           const hasUnits = Number(r.units) > 0;
           const avg = r.price.trim() === "" ? null : Number(r.price);
@@ -924,7 +923,7 @@ function RowEditor({
   const anchorValueDriven = anchor && Number(row.value) > 0;
   // A custom (self-priced) asset has no live feed — its current price is NEEDED to
   // value the holding, not optional like it is for a catalog fund (live NAV).
-  const isCustom = anchor && (row.quoteSource ?? inferQuoteSource(row.ticker)) === "manual";
+  const isCustom = anchor && (row.quoteSource ?? "manual") === "manual";
   const cls = `rec-edit${anchor ? " is-anchor" : amountOnly ? " is-flow" : ""}`;
   return (
     <div className="ledger-edit-card">
@@ -995,7 +994,7 @@ function RowEditor({
             }
             onToggleSource={() => {
               // Cycle Thai fund → Stock/ETF → Custom (manual price).
-              const qs = row.quoteSource ?? inferQuoteSource(row.ticker);
+              const qs = row.quoteSource ?? "manual";
               const next: QuoteSource =
                 qs === "thai_mutual_fund"
                   ? "market"

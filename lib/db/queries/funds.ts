@@ -12,7 +12,6 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { isIndexStyle } from "../../market/fund-classify";
 import { type FeeType, TER_FEE_TYPE } from "../../market/fund-fees";
-import { inferQuoteSource, seedQuoteSource } from "../../market/infer-quote-source";
 import { compareClassesForList } from "../../market/share-class-select";
 import type { QuoteSource } from "../../market/sources";
 import { searchFundIds } from "../../search/fund-index";
@@ -575,14 +574,12 @@ export function getCheaperAlternatives(projId: string, limit = 5): FundWithTer[]
 }
 
 /**
- * Resolve each ticker's `quote_source` against the REAL fund catalog — not just the
- * client-side shape/seed heuristic. A ticker that exists in `fund_share_classes` is
- * a Thai mutual fund (authoritative). Anything not in the catalog falls back to
- * {@link inferQuoteSource} (shape + the client seed), so a market-shaped code
- * (`PTT.BK`, `^GSPC`) stays `market` and an unknown one stays `manual` (custom) —
- * instead of a hyphenated non-fund defaulting to "Fund". Powers the importer's
- * on-the-fly source badge, the seeded-import stamp, and the save-time backstop.
- * Keys in the returned map are the UPPER-CASED tickers.
+ * Resolve each ticker's `quote_source` against the REAL fund catalog — the SINGLE
+ * authority for both the importer's source badge and the autocomplete suggestions.
+ * A ticker in `fund_share_classes` / `fund_catalog` is a real, priceable fund;
+ * anything else is a `manual` (custom, self-priced) asset. No shape heuristic and no
+ * static seed — when stocks / ETFs / etc. join the catalog they resolve here the
+ * same way (today the catalog holds Thai funds only). Keys are UPPER-CASED tickers.
  */
 export function catalogQuoteSource(tickers: string[]): Map<string, QuoteSource> {
   const out = new Map<string, QuoteSource>();
@@ -605,23 +602,8 @@ export function catalogQuoteSource(tickers: string[]): Map<string, QuoteSource> 
     .where(inArray(fundCatalog.abbrName, cleaned))
     .all())
     if (r.abbr) hits.add(r.abbr.toUpperCase());
-  for (const t of cleaned) {
-    if (hits.has(t)) {
-      out.set(t, "thai_mutual_fund"); // a real catalog fund — authoritative
-      continue;
-    }
-    const seed = seedQuoteSource(t);
-    if (seed) {
-      out.set(t, seed); // confirmed by the client seed (e.g. PTT.BK → market)
-      continue;
-    }
-    // Not in the catalog or the seed: a shape-derived "fund" guess (hyphenated code)
-    // is UNconfirmed, so demote it to a custom asset rather than masquerading as a
-    // fund we can't price; a market-shaped (PTT.BK, ^GSPC) or already-custom guess
-    // passes through.
-    const guess = inferQuoteSource(t);
-    out.set(t, guess === "thai_mutual_fund" ? "manual" : guess);
-  }
+  // In the catalog → a real fund; otherwise → custom. Nothing else.
+  for (const t of cleaned) out.set(t, hits.has(t) ? "thai_mutual_fund" : "manual");
   return out;
 }
 

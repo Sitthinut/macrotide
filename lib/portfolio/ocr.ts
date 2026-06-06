@@ -1,12 +1,7 @@
 import "server-only";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { generateText } from "ai";
-import { inferQuoteSource } from "@/lib/market/infer-quote-source";
 import type { QuoteSource } from "@/lib/market/sources";
-
-// Re-exported so server callers (route, deriveRow) keep importing it from here.
-// The implementation lives in a client-safe module so the UI can share it.
-export { inferQuoteSource };
 
 /**
  * Image OCR for the "Add holdings" flow. The user uploads a broker-app
@@ -701,7 +696,9 @@ export function parseExtractedRows(text: string): ExtractedRow[] {
  * them, ideally from the fund's detail screen.
  */
 export function deriveRow(row: ExtractedRow, nav: number | undefined): DerivedRow {
-  const quoteSource = inferQuoteSource(row.ticker);
+  // Default to a custom asset; deriveRowsWithNav overlays the real catalog source
+  // (the single authority) — no shape guessing here.
+  const quoteSource: QuoteSource = "manual";
   const out: DerivedRow = { ...row, quoteSource, estimated: false, needsUnits: false };
 
   // Prefer the NAV printed on the image; fall back to market-data NAV.

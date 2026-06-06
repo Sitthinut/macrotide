@@ -342,9 +342,10 @@ describe("advisor tools — propose_holdings_import", () => {
   it("derives units from market NAV and returns the holdingsImport payload (no DB write)", async () => {
     const result = await withFresh(async () => {
       createBucket(BUCKET);
-      // NAV keyed by the composite source:TICKER, same as the importer.
+      // NAV keyed by the composite source:TICKER, same as the importer (a catalog
+      // fund resolves to thai_mutual_fund).
       upsertFundQuote({
-        ticker: quoteCacheKey("K-USA-A"),
+        ticker: quoteCacheKey("thai_mutual_fund", "K-USA-A"),
         nav: 20,
         updatedAt: new Date().toISOString(),
       });

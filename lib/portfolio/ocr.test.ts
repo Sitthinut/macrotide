@@ -36,7 +36,6 @@ import {
   dateFromFilename,
   deriveRow,
   extractHoldingsFromImage,
-  inferQuoteSource,
   isAllowedMimeType,
   OcrProviderUnavailableError,
   parseClassification,
@@ -56,47 +55,6 @@ afterEach(() => {
   delete process.env.OPENROUTER_API_KEY;
   delete process.env.OCR_MODEL;
   delete process.env.OCR_FALLBACK_MODEL;
-});
-
-describe("inferQuoteSource", () => {
-  it("treats Thai fund share-class shapes as thai_mutual_fund", () => {
-    expect(inferQuoteSource("K-FIXED-A")).toBe("thai_mutual_fund");
-    expect(inferQuoteSource("HIDIV-D")).toBe("thai_mutual_fund");
-    expect(inferQuoteSource("SCBS&P500-A")).toBe("thai_mutual_fund");
-    expect(inferQuoteSource("k-fixed-a")).toBe("thai_mutual_fund"); // case-insensitive
-  });
-
-  it("keeps known stock/ETF/index seeds on market, but defaults unknown symbols to custom", () => {
-    // Tickers in the seed catalog keep their tagged source.
-    expect(inferQuoteSource("AAPL")).toBe("market");
-    expect(inferQuoteSource("PTT.BK")).toBe("market");
-    expect(inferQuoteSource("^GSPC")).toBe("market");
-    expect(inferQuoteSource("THB=X")).toBe("market");
-    expect(inferQuoteSource("QQQ")).toBe("market");
-    // Unknown bare tickers default to a CUSTOM (manual-priced) asset — we can't
-    // price an arbitrary symbol, so don't assume the ETF chain.
-    expect(inferQuoteSource("KFIXED")).toBe("manual"); // no hyphen, not a known AMC prefix
-    for (const t of ["SPY", "THD", "ACWI", "ZZUNLISTED"]) {
-      expect(inferQuoteSource(t)).toBe("manual");
-    }
-  });
-
-  it("tags Thai funds the old shape-only regex missed", () => {
-    // Parenthetical share class — parens weren't in the old character class.
-    expect(inferQuoteSource("K-GOLD-A(A)")).toBe("thai_mutual_fund");
-    // No-hyphen AMC codes — fell through to market under shape-only rules.
-    expect(inferQuoteSource("SCBCOMP")).toBe("thai_mutual_fund");
-    expect(inferQuoteSource("KFS100SSFX")).toBe("thai_mutual_fund");
-    // Hyphen / ampersand fund codes stay Thai funds.
-    for (const t of ["TLFVMR-ASIAX", "KF-LATAM", "KF-SET50-L", "KT-BOND"]) {
-      expect(inferQuoteSource(t)).toBe("thai_mutual_fund");
-    }
-  });
-
-  it("honours the seed catalog by membership (case-insensitive)", () => {
-    expect(inferQuoteSource("^set.bk")).toBe("market");
-    expect(inferQuoteSource("ptt.bk")).toBe("market");
-  });
 });
 
 describe("isAllowedMimeType", () => {
@@ -300,11 +258,11 @@ describe("deriveRow", () => {
     expect(row.needsUnits).toBe(true);
   });
 
-  it("routes the quoteSource from the ticker shape", () => {
-    expect(deriveRow({ ticker: "K-FIXED-A", units: 1 }, undefined).quoteSource).toBe(
-      "thai_mutual_fund",
-    );
-    expect(deriveRow({ ticker: "AAPL", units: 1 }, undefined).quoteSource).toBe("market");
+  it("defaults the quoteSource to custom — the catalog overlay (in derive-rows) decides", () => {
+    // deriveRow is pure + catalog-free: no shape guessing. deriveRowsWithNav overlays
+    // the real catalog source, so a real fund reads as a Thai fund there, not here.
+    expect(deriveRow({ ticker: "K-FIXED-A", units: 1 }, undefined).quoteSource).toBe("manual");
+    expect(deriveRow({ ticker: "AAPL", units: 1 }, undefined).quoteSource).toBe("manual");
   });
 
   it("rounds derived units to 4 dp and carries the invested total as a fact", () => {

@@ -19,7 +19,6 @@ import { mergeWithHoldings, type TickerSuggestion } from "@/lib/data/known-funds
 import type { Transaction } from "@/lib/db/queries/transactions";
 import { useHoldings } from "@/lib/fetchers/portfolio";
 import { invalidate, useResource } from "@/lib/fetchers/swr";
-import { inferQuoteSource } from "@/lib/market/infer-quote-source";
 import type { QuoteSource } from "@/lib/market/sources";
 import type { TxnKind } from "@/lib/portfolio/lots";
 import type { TransactionAnalytics } from "@/lib/portfolio/transaction-analytics";
@@ -188,7 +187,7 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
           pricePerUnit: draft.pricePerUnit.trim() === "" ? null : Number(draft.pricePerUnit),
           marketPrice: draft.marketPrice.trim() === "" ? null : Number(draft.marketPrice),
           amount: 0,
-          quoteSource: draft.quoteSource || inferQuoteSource(draft.ticker),
+          quoteSource: draft.quoteSource || "manual",
         };
         if (!payload.tradeDate || !payload.ticker) {
           setRowError("Add a date and a symbol.");
@@ -490,7 +489,7 @@ function TxnEditor({
           }
           onToggleSource={() => {
             // Cycle Thai fund → Stock/ETF → Custom (manual price).
-            const qs = (draft.quoteSource || inferQuoteSource(draft.ticker)) as QuoteSource;
+            const qs = (draft.quoteSource || "manual") as QuoteSource;
             const next: QuoteSource =
               qs === "thai_mutual_fund"
                 ? "market"

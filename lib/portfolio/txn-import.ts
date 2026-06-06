@@ -6,7 +6,6 @@
 // table is the human gate, so parsing is tolerant: it reads what it can and
 // flags what the user must fill in.
 
-import { inferQuoteSource } from "@/lib/market/infer-quote-source";
 import type { QuoteSource } from "@/lib/market/sources";
 import type { TxnKind } from "./lots";
 
@@ -158,7 +157,8 @@ export function normalizeTxnDraft(row: TxnDraftInput): TxnDraftRow {
   }
 
   const tradeDate = normalizeDate(row.tradeDate ?? "");
-  const quoteSource = row.quoteSource ?? inferQuoteSource(ticker);
+  // Default to custom; the catalog resolver (/api/quote-source) promotes a real fund.
+  const quoteSource = row.quoteSource ?? "manual";
 
   return {
     tradeDate,

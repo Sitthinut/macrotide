@@ -12,10 +12,6 @@ function withDb<T>(fn: () => T): T {
   return runWithDbContext(makeTestDbContext(), fn) as T;
 }
 
-function seedNav(ticker: string, nav: number): void {
-  upsertFundQuote({ ticker: quoteCacheKey(ticker), nav, updatedAt: new Date().toISOString() });
-}
-
 // Make a ticker a real catalog fund so the DB-backed source check confirms it as
 // thai_mutual_fund (a priced production fund is always in the catalog).
 function seedCatalogFund(ticker: string): void {
@@ -30,17 +26,27 @@ function seedCatalogFund(ticker: string): void {
   upsertShareClasses([{ projId: ticker, className: "main", ticker, investorType: "retail" }]);
 }
 
+// A priced fund is always a catalog fund, so its source — and thus its NAV cache key
+// — is thai_mutual_fund. Seed both together so the lookup key matches.
+function seedNav(ticker: string, nav: number): void {
+  seedCatalogFund(ticker);
+  upsertFundQuote({
+    ticker: quoteCacheKey("thai_mutual_fund", ticker),
+    nav,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 function seedNavHistory(ticker: string, rows: [string, number][]): void {
   const db = getMarketDb();
-  const key = quoteCacheKey(ticker);
+  const key = quoteCacheKey("thai_mutual_fund", ticker);
   for (const [date, nav] of rows) db.insert(navHistory).values({ ticker: key, date, nav }).run();
 }
 
 describe("quoteCacheKey", () => {
   it("builds the composite source:TICKER key fund_quotes is keyed by", () => {
-    // Hyphenated code → Thai mutual fund; bare ETF → market.
-    expect(quoteCacheKey("k-usa-a")).toBe("thai_mutual_fund:K-USA-A");
-    expect(quoteCacheKey(" voo ")).toBe("market:VOO");
+    expect(quoteCacheKey("thai_mutual_fund", "k-usa-a")).toBe("thai_mutual_fund:K-USA-A");
+    expect(quoteCacheKey("market", " voo ")).toBe("market:VOO");
   });
 });
 
@@ -52,8 +58,7 @@ describe("deriveRowsWithNav", () => {
 
   it("derives units from market NAV and carries the invested total when only value is shown", () => {
     const rows = withDb(() => {
-      seedNav("K-USA-A", 20); // value 1000 ÷ NAV 20 = 50 units
-      seedCatalogFund("K-USA-A"); // catalog-confirmed → source reads as a Thai fund
+      seedNav("K-USA-A", 20); // catalog fund + NAV 20 → 1000 ÷ 20 = 50 units
       const extracted: ExtractedRow[] = [{ ticker: "K-USA-A", value: 1000, pl: 100 }];
       return deriveRowsWithNav(extracted) as DerivedRow[];
     });
@@ -79,7 +84,8 @@ describe("deriveRowsWithNav", () => {
     expect(rows[0].units).toBe(10);
     expect(rows[0].avgCost).toBe(5);
     expect(rows[0].estimated).toBe(false);
-    expect(rows[0].quoteSource).toBe("market");
+    // VOO isn't in the catalog → custom (no shape guess to "market" anymore).
+    expect(rows[0].quoteSource).toBe("manual");
   });
 
   it("flags needsUnits when there is no NAV on file and none on the image", () => {
