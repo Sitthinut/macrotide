@@ -32,7 +32,7 @@ app.db but share the real market.db read-write (same warm cache as real users).
 |---|---|---|
 | `buckets` | Portfolio slices (Core, SSF, experiment, …) | `target_allocation` (JSON), `target_model_id`, `position` (sidebar order), `user_id` |
 | `transactions` | The canonical event ledger — the single source of truth for positions ([ADR 0004](../explanation/decisions/0004-unified-ledger-positions-derived.md)). DELTAS (`buy`/`sell`/`dividend`/`fee`/`split`/`reinvest`) move a position; ANCHORS (`opening`/`snapshot`) assert an absolute position at a date. | `bucket_id` (FK, cascade), `kind` (TEXT, Zod-validated), `trade_date` (economic event date), `units`, `price_per_unit` (avg cost on anchors), signed THB `amount` (the return primitive; 0 for a snapshot, −cost for a costed opening), `fee`, `quote_source`, `fx_to_thb`, `import_batch_id`. **No `user_id`** — scoped through its bucket. |
-| `holdings` | A DERIVED projection of the ledger (one row per held ticker), reconciled after every ledger write — not typed directly. Stores **only** user-editable instrument metadata (`thai_name`, `category`, `asset_class`, `region`, `ter`, `color`, `quote_source`) that has no home in the ledger; **no position columns**. `units`/`avg_cost` are folded from the ledger on READ (`listHoldings`/`getHolding` overlay the live position — ADR 0004), so they always reflect the latest NAV and can't go stale; `avg_cost` is `null` when cost is unknown. | `bucket_id` (FK, cascade), `ter`, `quote_source` (routing key). Read overlay + projection: `lib/db/queries/holdings.ts`, `lib/db/queries/project-holdings.ts`. |
+| `holdings` | A DERIVED projection of the ledger (one row per held ticker), reconciled after every ledger write — not typed directly. Stores no position columns: `units`/`avg_cost` are folded from the ledger on READ (`listHoldings`/`getHolding` overlay the live position — ADR 0004), so they always reflect the latest NAV and can't go stale; `avg_cost` is `null` when cost is unknown. The row also stores portfolio/source/color and custom-asset metadata. For catalog-backed funds, fund facts (`thai_name`, `english_name`, `category`, `asset_class`, `region`, `ter`) are read from `market.db` at read time and stale `app.db` values are ignored. | `bucket_id` (FK, cascade), `quote_source` (routing key). Read overlay + projection: `lib/db/queries/holdings.ts`, `lib/db/queries/holding-enrichment.ts`, `lib/db/queries/project-holdings.ts`. |
 | `plans` | The investment plan | Single-row in v1; `markdown`, `selected_model_id`, `user_id` |
 | `journal_entries` | Notes, decisions, questions, reading, and feedback (a `kind: "feedback"` entry records a 👍/👎 reaction — e.g. a Portfolio "Not for me" rejection — with its rating in a `rating:up\|down` tag) | `kind`, `tags` (JSON), `pinned`, `archived_at`, `user_id` |
 | `model_portfolios` | Built-in + custom model allocations | `built_in`, `allocation` (JSON slices), risk/return metadata, `user_id` |
@@ -98,6 +98,20 @@ the catalog, de-duped per class — **no extra API calls**. Queries live in
 [lib/market/share-class-select.ts](../../lib/market/share-class-select.ts)'s
 `pickDefaultClass` chooses the default class (retail-first, then accumulating).
 Why parent and class are split: [explanation/architecture.md § Market data](../explanation/architecture.md#market-data).
+
+#### Holding metadata ownership
+
+`market.db` is the source of truth for catalog-backed fund metadata. `app.db`
+stores user-entered metadata only for unresolved/custom holdings, plus
+portfolio-owned fields such as source and color.
+
+| Case | Metadata source | Editable fields | Display/analysis behavior |
+|---|---|---|---|
+| Known fund: ticker resolves in `fund_share_classes.ticker` or `fund_catalog.abbr_name` | `market.db` | Portfolio/source/color, plus normal ledger edits | Locked fields show catalog data; stale `app.db.holdings` metadata is ignored |
+| Unknown/custom holding: no market catalog match | `app.db.holdings` | Metadata fields editable | User-entered metadata is used; missing asset class stays unknown |
+| Known becomes unknown after catalog change | `app.db.holdings` | Metadata fields become editable | Next read treats it as custom/unresolved |
+| Unknown becomes known after catalog refresh | `market.db` | Catalog-owned fields lock | Next read switches to catalog metadata without copying it into `app.db` |
+| Deleted holding | None | N/A | The holding row is deleted, so any stale app metadata disappears with it |
 
 ### Chat & memory
 

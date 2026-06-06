@@ -6,14 +6,19 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { freshMarketDb } from "@/tests/db-helpers";
-import { type DbContext, runWithDbContext } from "../context";
+import { type DbContext, getMarketDb, runWithDbContext } from "../context";
 import * as schema from "../schema";
 import { createBucket } from "./buckets";
-import { listHoldings, renameHoldingSource } from "./holdings";
-import { createHoldingViaLedger } from "./project-holdings";
+import { getHolding, listHoldings, renameHoldingSource } from "./holdings";
+import {
+  createHoldingViaLedger,
+  deleteHoldingViaLedger,
+  editHoldingViaLedger,
+} from "./project-holdings";
 
 function freshDb() {
   const sqlite = new Database(":memory:");
@@ -58,6 +63,197 @@ function seedHolding(bucketId: string, ticker: string, source: string | null) {
     quoteSource: "market",
   });
 }
+
+function ctx(): DbContext {
+  const { sqlite, db, marketDb, marketSqlite } = freshDb();
+  return {
+    appDb: db,
+    appSqlite: sqlite,
+    marketDb,
+    marketSqlite,
+    isDemo: false,
+    sessionId: "s",
+    userId: null,
+  };
+}
+
+function seedCatalogFund(
+  ticker: string,
+  meta: {
+    thaiName?: string;
+    englishName?: string;
+    category?: string;
+    assetClass?: string;
+    region?: "domestic" | "foreign" | "mixed";
+    ter?: number;
+  } = {},
+) {
+  getMarketDb()
+    .insert(schema.fundCatalog)
+    .values({
+      projId: `proj-${ticker}`,
+      abbrName: ticker,
+      thaiName: meta.thaiName ?? `Thai ${ticker}`,
+      englishName: meta.englishName ?? `English ${ticker}`,
+      policyDescTh: meta.category ?? "Catalog category",
+      assetClass: meta.assetClass ?? "equity",
+      investRegion: meta.region ?? "foreign",
+      currentTer: meta.ter ?? 0.5,
+    })
+    .run();
+  getMarketDb()
+    .insert(schema.fundShareClasses)
+    .values({
+      projId: `proj-${ticker}`,
+      className: "main",
+      ticker,
+      currentTer: meta.ter ?? 0.5,
+    })
+    .run();
+}
+
+describe("holding catalog enrichment", () => {
+  it("overlays known fund metadata from market.db without mutating app.db", () => {
+    const c = ctx();
+    runWithDbContext(c, () => {
+      createBucket({ ...BUCKET, id: "b1" });
+      seedCatalogFund("EXAMPLE-FUND-A", {
+        thaiName: "Official Thai",
+        englishName: "Official English",
+        category: "Official category",
+        assetClass: "bond",
+        region: "domestic",
+        ter: 0.25,
+      });
+      const h = createHoldingViaLedger({
+        bucketId: "b1",
+        ticker: "EXAMPLE-FUND-A",
+        englishName: "Stale app name",
+        quoteSource: "thai_mutual_fund",
+        units: 10,
+        thaiName: "Stale Thai",
+        category: "Stale category",
+        assetClass: "equity",
+        region: "Old region",
+        ter: 1.5,
+      });
+
+      const read = listHoldings("b1")[0];
+      expect(read.thaiName).toBe("Official Thai");
+      expect(read.englishName).toBe("Official English");
+      expect(read.category).toBe("Official category");
+      expect(read.assetClass).toBe("bond");
+      expect(read.region).toBe("Thailand");
+      expect(read.ter).toBe(0.25);
+
+      const raw = c.appDb
+        .select()
+        .from(schema.holdings)
+        .where(eq(schema.holdings.id, h?.id as number))
+        .get();
+      expect(raw?.thaiName).toBe("Stale Thai");
+      expect(raw?.englishName).toBe("Stale app name");
+      expect(raw?.category).toBe("Stale category");
+      expect(raw?.assetClass).toBe("equity");
+      expect(raw?.region).toBe("Old region");
+      expect(raw?.ter).toBe(1.5);
+    });
+  });
+
+  it("reflects market.db metadata changes on the next read", () => {
+    runWithDbContext(ctx(), () => {
+      createBucket({ ...BUCKET, id: "b1" });
+      seedCatalogFund("EXAMPLE-FUND-A", { englishName: "Before", assetClass: "equity" });
+      createHoldingViaLedger({
+        bucketId: "b1",
+        ticker: "EXAMPLE-FUND-A",
+        englishName: "App name",
+        quoteSource: "thai_mutual_fund",
+        units: 10,
+      });
+      expect(listHoldings("b1")[0].englishName).toBe("Before");
+
+      getMarketDb()
+        .update(schema.fundCatalog)
+        .set({ englishName: "After", assetClass: "cash" })
+        .where(eq(schema.fundCatalog.abbrName, "EXAMPLE-FUND-A"))
+        .run();
+
+      const read = listHoldings("b1")[0];
+      expect(read.englishName).toBe("After");
+      expect(read.assetClass).toBe("cash");
+    });
+  });
+
+  it("uses app metadata for unknown holdings and switches modes when catalog membership changes", () => {
+    runWithDbContext(ctx(), () => {
+      createBucket({ ...BUCKET, id: "b1" });
+      const h = createHoldingViaLedger({
+        bucketId: "b1",
+        ticker: "CUSTOM-1",
+        englishName: "Custom holding",
+        quoteSource: "manual",
+        units: 10,
+        assetClass: "alternative",
+        ter: 2,
+      });
+      expect(listHoldings("b1")[0].assetClass).toBe("alternative");
+
+      seedCatalogFund("CUSTOM-1", { englishName: "Catalog holding", assetClass: "cash", ter: 0.1 });
+      expect(getHolding(h?.id as number)?.englishName).toBe("Catalog holding");
+      expect(getHolding(h?.id as number)?.assetClass).toBe("cash");
+
+      getMarketDb()
+        .delete(schema.fundShareClasses)
+        .where(eq(schema.fundShareClasses.ticker, "CUSTOM-1"))
+        .run();
+      getMarketDb()
+        .delete(schema.fundCatalog)
+        .where(eq(schema.fundCatalog.abbrName, "CUSTOM-1"))
+        .run();
+      expect(getHolding(h?.id as number)?.englishName).toBe("Custom holding");
+      expect(getHolding(h?.id as number)?.assetClass).toBe("alternative");
+
+      editHoldingViaLedger(h?.id as number, { assetClass: "bond", ter: 1.1 });
+      expect(getHolding(h?.id as number)?.assetClass).toBe("bond");
+      expect(getHolding(h?.id as number)?.ter).toBe(1.1);
+    });
+  });
+
+  it("deleting a holding removes its app metadata row", () => {
+    const c = ctx();
+    runWithDbContext(c, () => {
+      createBucket({ ...BUCKET, id: "b1" });
+      seedCatalogFund("EXAMPLE-FUND-A");
+      const h = createHoldingViaLedger({
+        bucketId: "b1",
+        ticker: "EXAMPLE-FUND-A",
+        englishName: "Stale app name",
+        quoteSource: "thai_mutual_fund",
+        units: 10,
+        assetClass: "equity",
+      });
+      expect(h).toBeTruthy();
+      expect(deleteHoldingViaLedger(h?.id as number)).toBe(true);
+      expect(listHoldings("b1")).toHaveLength(0);
+      expect(
+        getMarketDb()
+          .select()
+          .from(schema.fundCatalog)
+          .where(eq(schema.fundCatalog.abbrName, "EXAMPLE-FUND-A"))
+          .get(),
+      ).toBeTruthy();
+      expect(getHolding(h?.id as number)).toBeUndefined();
+      expect(
+        c.appDb
+          .select()
+          .from(schema.holdings)
+          .where(eq(schema.holdings.id, h?.id as number))
+          .get(),
+      ).toBeUndefined();
+    });
+  });
+});
 
 describe("renameHoldingSource", () => {
   it("renames the label only within the given buckets", () => {

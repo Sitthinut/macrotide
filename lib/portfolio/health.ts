@@ -105,6 +105,7 @@ const ASSET_CLASS_META: Record<AssetClass, { label: string; color: string }> = {
   bond: { label: "Bonds", color: "#F4A434" },
   alternative: { label: "Alternatives", color: "#7C7CFF" },
   cash: { label: "Cash", color: "#9E9EA8" },
+  unknown: { label: "Unknown", color: "#A38A55" },
 };
 
 const REGION_COLORS = [
@@ -127,7 +128,7 @@ export function allocationByClass(holdings: Holding[], totalValue: number): Allo
   for (const h of holdings) {
     groups.set(h.class, (groups.get(h.class) ?? 0) + h.value);
   }
-  const order: AssetClass[] = ["equity", "bond", "alternative", "cash"];
+  const order: AssetClass[] = ["equity", "bond", "alternative", "cash", "unknown"];
   return order
     .map((cls) => {
       const value = groups.get(cls) ?? 0;

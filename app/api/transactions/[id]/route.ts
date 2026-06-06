@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { withDb } from "@/lib/api/with-db";
 import { listBuckets } from "@/lib/db/queries/buckets";
+import { catalogQuoteSource } from "@/lib/db/queries/funds";
 import { deleteTransaction, updateTransaction } from "@/lib/db/queries/transactions";
 import { isAnchorKind, LEDGER_KINDS, signedAmount } from "@/lib/portfolio/txn-import";
 
@@ -68,10 +69,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const owned = listBuckets().map((b) => b.id);
     const anchor = isAnchorKind(t.kind);
     const pricePerUnit = t.pricePerUnit ?? null;
+    const ticker = t.ticker.trim();
+    const catalogSource = catalogQuoteSource([ticker]).get(ticker.toUpperCase());
+    const quoteSource = catalogSource === "thai_mutual_fund" ? catalogSource : t.quoteSource;
     const updated = updateTransaction(numId, owned, {
       tradeDate: t.tradeDate,
       kind: t.kind,
-      ticker: t.ticker,
+      ticker,
       englishName: t.englishName ?? null,
       // Facts: a read unit count, else NULL for the fold to derive.
       units: t.units ?? null,
@@ -82,7 +86,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       // Client sends a positive magnitude; sign it by the (possibly anchor) kind.
       amount: signedAmount(t.kind, t.amount),
       fee: t.fee ?? null,
-      quoteSource: t.quoteSource,
+      quoteSource,
     });
     if (!updated) return NextResponse.json({ error: "not_found" }, { status: 404 });
     return NextResponse.json(updated);

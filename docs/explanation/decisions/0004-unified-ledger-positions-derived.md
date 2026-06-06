@@ -103,7 +103,10 @@ ledger — a cache, not a second source of truth.
   the new values; history stays intact and auditable, and we never silently
   rewrite a past trade.
 - **Metadata edits** (name / colour / category / TER) update the holdings row
-  directly — they are not positions.
+  directly — they are not positions. The maintained implementation now narrows
+  this rule: for catalog-backed funds, descriptive fund facts are read from
+  `market.db` at read time and are not user-editable in `app.db`; `app.db`
+  metadata remains authoritative only for unresolved/custom holdings.
 
 ### Graceful degradation when cost is unknown
 

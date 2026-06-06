@@ -1,6 +1,6 @@
 // Shared types for the mock data layer
 
-export type AssetClass = "equity" | "bond" | "alternative" | "cash";
+export type AssetClass = "equity" | "bond" | "alternative" | "cash" | "unknown";
 
 export interface Holding {
   /** DB primary key — present on adapted holdings from /api/holdings. */

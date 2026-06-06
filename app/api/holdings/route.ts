@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
 import { getBucket, listBuckets } from "@/lib/db/queries/buckets";
-import { listHoldings } from "@/lib/db/queries/holdings";
+import { getHolding, listHoldings } from "@/lib/db/queries/holdings";
 import { createHoldingViaLedger } from "@/lib/db/queries/project-holdings";
 
 export async function GET(req: Request) {
@@ -53,6 +53,8 @@ export async function POST(req: Request) {
       ter: body.ter == null ? null : Number(body.ter),
       color: body.color ?? null,
     });
-    return NextResponse.json(created, { status: 201 });
+    return NextResponse.json(created ? (getHolding(created.id) ?? created) : created, {
+      status: 201,
+    });
   });
 }

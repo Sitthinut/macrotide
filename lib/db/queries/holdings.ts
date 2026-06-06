@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { ProjectedPosition } from "@/lib/portfolio/project-positions";
 import { getDb } from "../context";
 import { holdings, transactions } from "../schema";
+import { enrichHoldingsWithCatalog } from "./holding-enrichment";
 import { projectBucketPositions } from "./project-holdings";
 
 /** The stored holdings row: instrument metadata + identity only — NO position. */
@@ -45,7 +46,7 @@ function overlayLive(rows: HoldingRow[]): Holding[] {
 export function listHoldings(bucketId?: string): Holding[] {
   const q = getDb().select().from(holdings);
   const rows = (bucketId ? q.where(eq(holdings.bucketId, bucketId)) : q).all();
-  return overlayLive(rows);
+  return enrichHoldingsWithCatalog(overlayLive(rows));
 }
 
 export function getHolding(id: number): Holding | undefined {
@@ -54,7 +55,9 @@ export function getHolding(id: number): Holding | undefined {
   // Load by id even when the ledger folds to no position (units 0) — the metadata
   // row exists and may need editing.
   const p = projectBucketPositions(row.bucketId).find((x) => x.ticker === row.ticker);
-  return { ...row, units: p?.units ?? 0, avgCost: p?.avgCost ?? null };
+  return enrichHoldingsWithCatalog([
+    { ...row, units: p?.units ?? 0, avgCost: p?.avgCost ?? null },
+  ])[0];
 }
 
 /**

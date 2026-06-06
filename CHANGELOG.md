@@ -15,6 +15,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Known fund metadata now reads from the catalog source of truth.** Ledger
+  imports still promote known catalog symbols to the Thai mutual-fund price
+  source, but names, asset class, region, category, and TER are overlaid from
+  `market.db` at read time instead of copied into `app.db.holdings`; custom
+  holdings keep their user-entered metadata and unresolved asset classes stay
+  unknown rather than defaulting to Stocks.
 - **One Add surface records everything in your portfolio.** A single Add modal
   replaces the old separate holdings / activity / transaction sheets. Each row
   carries its own **Type**, auto-detected from what you paste or import: a

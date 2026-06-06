@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { withDb } from "@/lib/api/with-db";
 import { listBuckets } from "@/lib/db/queries/buckets";
+import { catalogQuoteSource } from "@/lib/db/queries/funds";
 import {
   insertTransactions,
   listTransactionsByBucket,
@@ -114,6 +115,7 @@ export async function POST(req: Request) {
       .filter((t) => isAnchorKind(t.kind))
       .map((t) => t.ticker);
     const kinds = promoteAnchorKinds(alreadyAnchored, transactions);
+    const catalogSources = catalogQuoteSource(transactions.map((t) => t.ticker));
 
     // FACTS-ONLY LEDGER (ADR 0004). The route does NO derivation — it stores only the
     // money facts the user gave: a read `units`, a Balance's ฿ `value`, or a trade's ฿
@@ -125,11 +127,14 @@ export async function POST(req: Request) {
     const rows: TransactionInsert[] = transactions.map((t, i) => {
       const kind = kinds[i];
       const anchor = isAnchorKind(kind);
+      const ticker = t.ticker.trim();
+      const catalogSource = catalogSources.get(ticker.toUpperCase());
+      const quoteSource = catalogSource === "thai_mutual_fund" ? catalogSource : t.quoteSource;
       return {
         bucketId,
-        ticker: t.ticker,
+        ticker,
         englishName: t.englishName ?? null,
-        quoteSource: t.quoteSource,
+        quoteSource,
         kind,
         tradeDate: t.tradeDate,
         // A read unit count is a fact; a value-only Balance / amount-only trade leaves

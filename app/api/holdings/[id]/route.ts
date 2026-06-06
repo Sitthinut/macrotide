@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
 import { getBucket } from "@/lib/db/queries/buckets";
+import { isCatalogHolding, stripCatalogOwnedFields } from "@/lib/db/queries/holding-enrichment";
 import { getHolding } from "@/lib/db/queries/holdings";
 import { deleteHoldingViaLedger, editHoldingViaLedger } from "@/lib/db/queries/project-holdings";
 
@@ -30,7 +31,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
     // Editing a holding is sugar over the ledger: position changes write events,
     // metadata updates the row (ADR 0004).
-    const row = editHoldingViaLedger(Number(id), {
+    const existing = getHolding(Number(id));
+    const rawPatch = {
       ticker: body.ticker,
       englishName: body.englishName,
       quoteSource: body.quoteSource,
@@ -44,9 +46,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       region: body.region,
       ter: body.ter === undefined ? undefined : body.ter == null ? null : Number(body.ter),
       color: body.color,
-    });
+    };
+    const nextTicker =
+      typeof body.ticker === "string" && body.ticker.trim() ? body.ticker.trim() : existing?.ticker;
+    const patch =
+      nextTicker && isCatalogHolding(nextTicker) ? stripCatalogOwnedFields(rawPatch) : rawPatch;
+    const row = editHoldingViaLedger(Number(id), patch);
     if (!row) return NextResponse.json({ error: "not_found" }, { status: 404 });
-    return NextResponse.json(row);
+    return NextResponse.json(getHolding(row.id) ?? row);
   });
 }
 

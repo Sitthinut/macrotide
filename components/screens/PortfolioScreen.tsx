@@ -626,7 +626,7 @@ export function PortfolioScreen({
 
   const byClass = useMemo(() => {
     if (!view || view.totalValue <= 0) {
-      return { equity: 0, bond: 0, alternative: 0, cash: 0 };
+      return { equity: 0, bond: 0, alternative: 0, cash: 0, unknown: 0 };
     }
     const groups: Record<string, number> = {};
     view.holdings.forEach((h) => {
@@ -638,6 +638,7 @@ export function PortfolioScreen({
       bond: ((groups.bond || 0) / total) * 100,
       alternative: ((groups.alternative || 0) / total) * 100,
       cash: ((groups.cash || 0) / total) * 100,
+      unknown: ((groups.unknown || 0) / total) * 100,
     };
   }, [view]);
 
@@ -1519,6 +1520,15 @@ export function PortfolioScreen({
         {byClass.cash > 0.5 && (
           <span className="chip" data-active={filter === "cash"} onClick={() => setFilter("cash")}>
             Cash {byClass.cash.toFixed(0)}%
+          </span>
+        )}
+        {byClass.unknown > 0.5 && (
+          <span
+            className="chip"
+            data-active={filter === "unknown"}
+            onClick={() => setFilter("unknown")}
+          >
+            Unknown {byClass.unknown.toFixed(0)}%
           </span>
         )}
       </div>

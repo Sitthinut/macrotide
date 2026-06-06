@@ -1,6 +1,6 @@
 # Balances and History
 
-*Last updated: 2026-06-05*
+*Last updated: 2026-06-06*
 
 How the two ways of recording a portfolio — stating a **Balance** and logging a
 **trade** — fit together, and exactly what the app does with each. This is the
@@ -67,10 +67,16 @@ these are how it *behaves* — kept current here.)
   History and Position analytics, the Advisor's view all re-derive units and cost
   from the live NAV, so every surface is fresh to the latest price and they can't
   disagree. You never type a holding's units or average cost directly; you record a
-  ledger entry and the position recomputes. (A holdings row still exists as the home
-  for instrument metadata that isn't in the ledger — name, asset class, price source,
-  which portfolio — and a rebuild keeps that row in step; it stores **no** units or
+  ledger entry and the position recomputes. (A holdings row still exists for
+  portfolio/source/color and custom-asset metadata; it stores **no** units or
   average cost at all, so there's nothing derived to go stale.)
+- **Catalog facts come from the catalog.** When a ticker resolves in
+  `market.db`'s fund catalog, the app reads its name, asset class, region,
+  category, and TER from that catalog on every read. Those fields are locked in
+  the holding editor and stale values in `app.db.holdings` are ignored. If the
+  symbol is not in the catalog, it is a custom/unresolved holding: its metadata is
+  editable and missing asset class stays unknown rather than being guessed as
+  stocks.
 - **Cost and market value stay orthogonal.** Average cost only moves when you buy
   or sell; current value comes from the live NAV (or a custom asset's recorded
   price). Because the market can't touch your average cost, a value-only

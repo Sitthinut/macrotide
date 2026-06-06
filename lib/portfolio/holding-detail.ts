@@ -10,6 +10,7 @@ const ASSET_CLASS_LABELS: Record<AssetClass, string> = {
   bond: "Bond",
   alternative: "Alternative",
   cash: "Cash",
+  unknown: "Unknown",
 };
 
 /** Human label for an asset class, falling back to the raw value. */

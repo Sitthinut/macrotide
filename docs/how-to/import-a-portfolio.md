@@ -49,16 +49,16 @@ inline before saving:
   correcting an import.
 
 As you type a symbol, the field autocompletes against the **real fund catalog**
-(plus the funds you already hold), filling in the name and asset class where it
-can. The same catalog is the single authority for each row's **price source**
-badge: a symbol the catalog knows reads as a Thai fund; anything it doesn't is a
-**custom** (self-priced) asset. There's no shape guessing and no hard-coded list —
-when stocks/ETFs join the catalog they resolve the same way (you can still flip the
-badge per row to force one). Duplicate symbols are de-duped into the
-existing row for review rather than creating a second row. To save a
-Balance you give it **either a unit count or a ฿ value** (the app derives units
-from the value — see below); average cost stays optional. For the exact input
-shapes a Balance or a trade accepts and how each resolves, see
+(plus the funds you already hold). The catalog is the single authority for
+known-fund names, asset class, region, category, TER, and the row's **price
+source** badge: a symbol the catalog knows reads as a Thai fund; anything it
+doesn't is a **custom** (self-priced) asset. There's no shape guessing and no
+hard-coded list — when stocks/ETFs join the catalog they resolve the same way.
+Duplicate symbols are de-duped into the existing row for review rather than
+creating a second row. To save a Balance you give it **either a unit count or a
+฿ value** (the app derives units from the value — see below); average cost stays
+optional. For the exact input shapes a Balance or a trade accepts and how each
+resolves, see
 [What each row accepts](../explanation/balances-and-history.md#what-each-row-accepts--the-input-combinations).
 
 ### Units or ฿ Total
@@ -120,9 +120,13 @@ execution price). If you later edit a custom holding's symbol to one the catalog
 tracks, it offers to adopt the official fund details and switch to the live NAV,
 keeping your units and cost.
 
-For a holding the catalog *does* recognize, its name, asset class, category, tax
-wrapper, and TER come from the catalog and are locked — only its Portfolio and
-price Source stay editable — so catalog facts can't be overwritten by hand.
+For a holding the catalog *does* recognize, its name, asset class, category,
+region, tax wrapper, and TER come from `market.db` at read time and are locked —
+only its Portfolio, free-text Source, color, and ledger facts stay editable. If a
+custom symbol later appears in the catalog after a refresh, the next read switches
+to catalog metadata without copying those facts into `app.db`. If a catalog fund
+stops resolving, the holding becomes custom/unresolved again and its stored
+metadata is editable.
 
 ## History, Position, and editing
 

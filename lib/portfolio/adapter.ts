@@ -23,8 +23,8 @@ import type {
   UserJournal,
 } from "@/lib/static/types";
 
-const DEFAULT_ASSET_CLASS: AssetClass = "equity";
 const DEFAULT_RISK: RiskBand = "balanced";
+const ASSET_CLASSES: AssetClass[] = ["equity", "bond", "alternative", "cash"];
 
 function quotesByTicker(quotes: FundQuote[]): Map<string, FundQuote> {
   // fund_quotes.ticker is the combined cache key "source:ticker" — see
@@ -57,6 +57,9 @@ function holdingFromDb(
   // `cost` at 0 then, but flag it so gain figures degrade rather than mislead.
   const costKnown = h.avgCost != null;
   const cost = (h.avgCost ?? 0) * h.units;
+  const assetClass = ASSET_CLASSES.includes(h.assetClass as AssetClass)
+    ? (h.assetClass as AssetClass)
+    : "unknown";
   return {
     id: h.id,
     bucketId: h.bucketId,
@@ -64,7 +67,7 @@ function holdingFromDb(
     thai: h.thaiName ?? undefined,
     name: h.englishName,
     category: h.category ?? "",
-    class: (h.assetClass as AssetClass | null) ?? DEFAULT_ASSET_CLASS,
+    class: assetClass,
     region: h.region ?? "",
     value,
     cost,
