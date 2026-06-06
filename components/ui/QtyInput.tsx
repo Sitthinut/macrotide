@@ -22,6 +22,9 @@ export interface QtyInputProps {
   onUnits: (units: string) => void;
   /** Lift the typed ฿ total so it persists on the row and reaches the save. */
   onValue?: (value: string) => void;
+  /** Force the initial mode (the History editor, where a stored row carries BOTH units
+   *  and an amount, so the `value`-based guess would always pick Total). Omit to infer. */
+  defaultMode?: "units" | "total";
   ariaLabel?: string;
 }
 
@@ -36,16 +39,19 @@ export function QtyInput({
   value,
   onUnits,
   onValue,
+  defaultMode,
   ariaLabel = "Units",
 }: QtyInputProps) {
   const p = Number(price);
   const hasPrice = Number.isFinite(p) && p > 0;
   // ONE number in ONE box; the Units ↔ ฿ Total toggle just RE-TYPES it — like a type
   // badge on what you entered. Flipping the toggle keeps your figure (no convert, no
-  // clear), so picking the wrong kind is a one-tap fix. The mode is inferred from the
-  // row so it survives collapse/reopen: a non-empty ฿ `value` means Total mode (Units
-  // mode always clears `value`, so value set ⟺ Total).
-  const [mode, setMode] = useState<"units" | "total">(() => (value?.trim() ? "total" : "units"));
+  // clear), so picking the wrong kind is a one-tap fix. Initial mode: a caller hint
+  // (`defaultMode`), else inferred — a non-empty ฿ `value` means Total (Units mode
+  // clears `value`, so value set ⟺ Total during entry).
+  const [mode, setMode] = useState<"units" | "total">(
+    () => defaultMode ?? (value?.trim() ? "total" : "units"),
+  );
   const inBaht = mode === "total";
   const text = inBaht ? (value ?? "") : units;
 

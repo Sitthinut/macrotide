@@ -531,11 +531,12 @@ function TxnEditor({
             <QtyInput
               units={draft.units}
               price={anchor ? draft.marketPrice || draft.pricePerUnit : draft.pricePerUnit}
-              // Open in the mode that matches the stored FACT: show Units when a unit
-              // count is present (an edited trade stores both units and amount, so we'd
-              // otherwise always default to Total); fall back to the ฿ total (a trade's
-              // amount, a Balance's value) only when there's no unit count.
-              value={anchor ? draft.value : draft.units.trim() ? "" : draft.amount}
+              // `value` is the real ฿ total (a trade's amount, a Balance's value) so the
+              // toggle has data to re-type. A stored row carries BOTH units and an amount,
+              // so open in the mode matching the FACT — Units when a count is present —
+              // via defaultMode, not by blanking `value` (which would empty the toggle).
+              value={anchor ? draft.value : draft.amount}
+              defaultMode={draft.units.trim() ? "units" : "total"}
               onUnits={(v) => set({ units: v })}
               onValue={(v) => set(anchor ? { value: v } : { amount: v })}
             />
