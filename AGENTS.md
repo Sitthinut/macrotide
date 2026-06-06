@@ -150,7 +150,11 @@ degradation: [auth-and-providers.md § Market data providers](./docs/reference/a
   implement a `Provider` with `matches(source, ticker)`, register it ahead of Yahoo
   (`lib/market/registry.ts`), add a UI label in HoldingSheet.
 - Cache keys in `fund_quotes`/`nav_history` are the combined `${source}:${ticker}`,
-  so one table holds quotes for every source.
+  so one table holds quotes for every source. **Always build the key through
+  `quoteCacheKey` (`lib/market/sources.ts`)** — it upper-cases the ticker (source
+  left as-is) so the catalog's native case and the always-upper-cased ledger ticker
+  resolve to one row. A second, divergently-cased builder is exactly the bug that
+  made lowercase-cataloged funds drop from holdings; there must be only one.
 
 ## Auth conventions
 

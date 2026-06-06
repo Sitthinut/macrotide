@@ -4,6 +4,7 @@ import { holdings } from "@/lib/db/schema";
 import { refreshSymbols } from "@/lib/market/cache";
 import { INDICATOR_CATALOG } from "@/lib/market/indicators";
 import type { SeriesRange } from "@/lib/market/providers/types";
+import { quoteCacheKey } from "@/lib/market/sources";
 
 export interface RefreshTrackedMarketResult {
   /** Distinct (source, ticker) refs refreshed after de-dup. */
@@ -48,7 +49,7 @@ export async function refreshTrackedMarket(
 
   const seen = new Set<string>();
   const allRefs = [...indexRefs, ...heldRefs].filter((r) => {
-    const k = `${r.source}:${r.ticker}`;
+    const k = quoteCacheKey(r.source, r.ticker);
     if (seen.has(k)) return false;
     seen.add(k);
     return true;

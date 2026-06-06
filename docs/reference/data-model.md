@@ -60,6 +60,7 @@ the current mappers ignore.
 | `feeder_master_map`, `feeder_look_through_holdings` | Feeder-fund → US master look-through | from SEC EDGAR N-PORT |
 
 > Cache keys in `fund_quotes`/`nav_history` are the combined `${source}:${ticker}`
+> (ticker upper-cased — built by the canonical `quoteCacheKey` in `lib/market/sources.ts`),
 > so one table holds quotes from different providers without a schema change.
 > See [AGENTS.md § Provider routing](../../AGENTS.md#provider-routing-via-holdingsquote_source).
 

@@ -7,6 +7,7 @@ import { findBenchmark } from "./benchmark-options";
 import { getCachedSeries } from "./cache";
 import type { SeriesRange } from "./providers/types";
 import { benchmarkRangeStart } from "./range";
+import { quoteCacheKey } from "./sources";
 
 // Re-export the client-safe catalog so server callers can keep importing
 // everything benchmark-related from this one module.
@@ -53,7 +54,9 @@ export async function getBenchmarkSeries(
       const carry = getMarketDb()
         .select({ nav: navHistory.nav })
         .from(navHistory)
-        .where(and(eq(navHistory.ticker, `${b.source}:${b.ticker}`), lt(navHistory.date, since)))
+        .where(
+          and(eq(navHistory.ticker, quoteCacheKey(b.source, b.ticker)), lt(navHistory.date, since)),
+        )
         .orderBy(desc(navHistory.date))
         .limit(1)
         .get();

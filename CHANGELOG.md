@@ -80,6 +80,10 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   money-weighted return however you entered it (by units or by ฿ total). And a
   value-only Balance the app can't price yet (no NAV on file for its date) no longer
   blanks an existing position — it's held aside and appears when that date's NAV lands.
+  This holds for **every fund regardless of how its fund code is capitalized**: the
+  NAV lookup normalizes the fund-code case, so a fund cataloged in lowercase derives
+  its units and value exactly like one in uppercase (previously such a fund's
+  value-only Balance found no NAV and silently dropped from your holdings).
   Your **holdings list itself now folds the ledger on every read** (not just the
   analytics), so units, cost, value, and weight always reflect the latest NAV with no
   refresh — the holdings view and the return figures can never drift apart. The

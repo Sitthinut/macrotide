@@ -24,6 +24,7 @@ import { runWithDbContext } from "@/lib/db/context";
 import { createBucket } from "@/lib/db/queries/buckets";
 import { listHoldings } from "@/lib/db/queries/holdings";
 import { navHistory } from "@/lib/db/schema";
+import { quoteCacheKey } from "@/lib/market/sources";
 
 /** Units the projection derived for a ticker (the holdings cache), or undefined if not held. */
 function heldUnits(ticker: string): number | undefined {
@@ -95,6 +96,32 @@ describe("POST /api/transactions — facts-only ledger (ADR 0004)", () => {
     expect(body.inserted[0].units).toBeNull();
     // The PROJECTION derives units from NAV on the balance's OWN date (12.5, not 99).
     expect(heldUnits("EXAMPLE-FUND-A")).toBeCloseTo(16000);
+  });
+
+  it("derives units for a LOWERCASE-cataloged fund's value-only Balance (cache-key case, #134)", async () => {
+    // The ttb SSF/RMF family is cataloged in lowercase. The NAV cache is keyed by
+    // the canonical quoteCacheKey (source:UPPER(ticker)) on write, and the fold
+    // looks it up the same way — so a lowercase ticker must resolve to the same
+    // row. Pre-#134 the write side used the catalog's native (lowercase) case
+    // while the fold uppercased, so the lookup missed and the position silently
+    // dropped from holdings. Seed via the SAME builder the writer uses, then post
+    // a Balance carrying the lowercase ticker.
+    seedNav(quoteCacheKey("thai_mutual_fund", "example-ssf"), [["2026-03-01", 12.5]]);
+    const { status, body } = await post([
+      {
+        tradeDate: "2026-03-01",
+        kind: "opening",
+        ticker: "example-ssf",
+        quoteSource: "thai_mutual_fund",
+        value: 200000,
+        amount: 0,
+      },
+    ]);
+    expect(status).toBe(201);
+    expect(body.inserted[0].value).toBe(200000);
+    expect(body.inserted[0].units).toBeNull();
+    // 200000 ÷ 12.5 = 16000 — derived despite the lowercase catalog case.
+    expect(heldUnits("example-ssf")).toBeCloseTo(16000);
   });
 
   it("stores an amount-only buy's AMOUNT fact (units NULL) and derives units in the projection", async () => {

@@ -4,6 +4,7 @@ import { getMarketDb } from "@/lib/db/context";
 import { fundQuotes, navHistory } from "@/lib/db/schema";
 import type { SeriesInterval, SeriesRange } from "./providers/types";
 import { resolveProviderChain } from "./registry";
+import { quoteCacheKey } from "./sources";
 
 // Cache freshness. One TTL governs each cached entry — both the daily series and
 // the latest quote derived from it — so a quote refreshes at most once a day.
@@ -24,15 +25,12 @@ const FAIL_BACKOFF_MS = 3 * 60_000; // after an upstream error, don't refetch th
 // provokes more 429s. Process-local; resets on restart, which is fine.
 const recentFailures = new Map<string, number>();
 
-/**
- * The cache table (fund_quotes / nav_history) is keyed by a single TEXT column
- * called `ticker` for historical reasons. To support multiple data sources
- * cleanly we namespace inserts by combining source + ticker into one key
- * string. The combined key is internal — never returned to the UI.
- */
-function cacheKey(source: string, ticker: string): string {
-  return `${source}:${ticker}`;
-}
+// The cache table (fund_quotes / nav_history) is keyed by a single TEXT column
+// called `ticker` for historical reasons. We namespace inserts by combining
+// source + ticker into one key string, built by the canonical `quoteCacheKey`
+// (lib/market/sources.ts) so write keys match the fold's read keys exactly. The
+// combined key is internal — never returned to the UI.
+const cacheKey = quoteCacheKey;
 
 function isFresh(updatedAt: string, ttlMs: number): boolean {
   return Date.now() - new Date(updatedAt).getTime() < ttlMs;

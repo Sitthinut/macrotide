@@ -13,7 +13,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { isIndexStyle } from "../../market/fund-classify";
 import { type FeeType, TER_FEE_TYPE } from "../../market/fund-fees";
 import { compareClassesForList } from "../../market/share-class-select";
-import type { QuoteSource } from "../../market/sources";
+import { type QuoteSource, quoteCacheKey } from "../../market/sources";
 import { searchFundIds } from "../../search/fund-index";
 import { getMarketDb } from "../context";
 import { fundCatalog, fundFees, fundQuotes, fundShareClasses, navHistory } from "../schema";
@@ -496,7 +496,7 @@ export function findShareClasses(
 /** Batch-attach latest NAV/quote (fund_quotes) + latest AUM (nav_history) per class. */
 function attachQuotesAndAum(items: ShareClassListItem[]): void {
   const db = getMarketDb();
-  const keyOf = (t: string) => `thai_mutual_fund:${t}`;
+  const keyOf = (t: string) => quoteCacheKey("thai_mutual_fund", t);
   const keys = items.map((x) => keyOf(x.ticker));
 
   const quotes = db

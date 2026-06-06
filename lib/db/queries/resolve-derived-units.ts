@@ -1,4 +1,5 @@
 import "server-only";
+import { quoteCacheKey } from "@/lib/market/sources";
 import type { TxnKind } from "@/lib/portfolio/lots";
 import { isAnchorKind, signedAmount, signFor } from "@/lib/portfolio/txn-import";
 import { deriveUnits } from "@/lib/portfolio/value-ledger";
@@ -18,7 +19,7 @@ import type { Transaction } from "./transactions";
 
 const DERIVABLE_TRADE = new Set(["buy", "sell", "reinvest"]);
 
-const cacheKey = (r: Transaction): string => `${r.quoteSource}:${r.ticker.trim().toUpperCase()}`;
+const cacheKey = (r: Transaction): string => quoteCacheKey(r.quoteSource, r.ticker);
 
 /** A row whose unit count is missing and must be derived from a money total. */
 const needsUnits = (r: Transaction): boolean => {

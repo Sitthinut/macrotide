@@ -7,6 +7,7 @@ import type { JournalEntry } from "@/lib/db/queries/journal";
 import type { ModelPortfolio as DbModelPortfolio } from "@/lib/db/queries/models";
 import type { FundQuote } from "@/lib/db/queries/quotes";
 import { fmtRelativeDate } from "@/lib/format";
+import { quoteCacheKey } from "@/lib/market/sources";
 import type {
   AggregatePortfolio,
   AssetClass,
@@ -49,7 +50,7 @@ function holdingFromDb(
   // Prefer the source-namespaced lookup. Falls back to the bare ticker for
   // backward compatibility with cache entries written before quoteSource
   // existed.
-  const q = quotes.get(`${h.quoteSource}:${h.ticker}`) ?? quotes.get(h.ticker);
+  const q = quotes.get(quoteCacheKey(h.quoteSource, h.ticker)) ?? quotes.get(h.ticker);
   const nav = q?.nav ?? h.avgCost ?? 0;
   const value = h.units * nav;
   // Cost basis is unknown for an uncosted opening/snapshot (ADR 0004). Keep

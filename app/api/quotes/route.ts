@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
 import { listFundQuotes } from "@/lib/db/queries/quotes";
 import { getCachedSeries } from "@/lib/market/cache";
+import { quoteCacheKey } from "@/lib/market/sources";
 
 interface QuoteResult {
   source: string;
@@ -38,7 +39,7 @@ export async function GET(req: Request) {
     : [];
 
   if (!refresh) {
-    const keys = refs.map((r) => `${r.source}:${r.ticker}`);
+    const keys = refs.map((r) => quoteCacheKey(r.source, r.ticker));
     return withDb(() => NextResponse.json(listFundQuotes(keys.length ? keys : undefined)));
   }
 
