@@ -124,7 +124,7 @@ export function SymbolCombobox({
       trailing={
         hasTicker ? (
           <>
-            <span className="symbol-fade" aria-hidden="true" />
+            <span className="field-fade" aria-hidden="true" />
             <button
               type="button"
               className="type-badge"

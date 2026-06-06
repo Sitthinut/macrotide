@@ -8,6 +8,7 @@
 // source, anything future — shares this behavior and styling.
 
 import { type CSSProperties, type ReactNode, useId, useRef, useState } from "react";
+import { useClipEnd } from "@/lib/useClipEnd";
 
 export interface ComboboxProps<T> {
   value: string;
@@ -69,6 +70,11 @@ export function Combobox<T>({
   const show = open && items.length > 0;
   const up = openUp || flipUp;
 
+  // A trailing fade (the symbol field's `.field-fade`) cues "there's more to the
+  // right", so it shows only while the value is clipped and not scrolled to its
+  // end — tracked by the shared hook and surfaced as `data-clip-end`.
+  const { clipEnd, recompute: updateClipEnd } = useClipEnd(inputRef, value);
+
   const measureFlip = () => {
     const el = inputRef.current;
     if (!el) return;
@@ -103,7 +109,7 @@ export function Combobox<T>({
   };
 
   return (
-    <div className="combobox">
+    <div className="combobox" data-clip-end={clipEnd || undefined}>
       <input
         ref={inputRef}
         className={inputClassName}
@@ -112,8 +118,10 @@ export function Combobox<T>({
           setOpen(true);
           onChange(e.target.value);
         }}
+        onScroll={updateClipEnd}
         onFocus={() => {
           measureFlip();
+          updateClipEnd();
           setOpen(true);
           onFocus?.();
         }}

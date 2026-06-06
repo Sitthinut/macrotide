@@ -15,7 +15,8 @@
 // was entered — which `units`-presence alone encodes (see `qtyDefaultMode`). Both
 // inline editors (the Add modal + History) wire it the same way, so they match.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useClipEnd } from "@/lib/useClipEnd";
 
 export interface QtyInputProps {
   units: string;
@@ -60,6 +61,11 @@ export function QtyInput({
   const inBaht = mode === "total";
   const text = inBaht ? (value ?? "") : units;
 
+  // Same "there's more →" fade as the symbol field: show it only while the typed
+  // number is clipped and not scrolled to its end (see useClipEnd / .field-fade).
+  const inputRef = useRef<HTMLInputElement>(null);
+  const { clipEnd, recompute } = useClipEnd(inputRef, text);
+
   // Write the typed number to its canonical field and CLEAR the other, so the row
   // stores only the fact you gave. In ฿ mode units stay empty — the fold derives them
   // (฿ ÷ (price ?? NAV)) on read, never a frozen count here; in Units mode the ฿ value
@@ -81,15 +87,19 @@ export function QtyInput({
   };
 
   return (
-    <div className="qty-input">
+    <div className="qty-input" data-clip-end={clipEnd || undefined}>
       <input
+        ref={inputRef}
         value={text}
         onChange={(e) => apply(e.target.value, mode)}
+        onScroll={recompute}
+        onFocus={recompute}
         placeholder={inBaht ? "฿ total" : "Units"}
         inputMode="decimal"
         aria-label={inBaht ? "Total in baht" : ariaLabel}
         style={{ paddingRight: 52 }}
       />
+      <span className="field-fade" aria-hidden="true" />
       <button
         type="button"
         className="qty-input__toggle"

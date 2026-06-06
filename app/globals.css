@@ -901,24 +901,34 @@ textarea.sheet-input {
 .source-seg button:hover {
   border-color: var(--accent);
 }
-/* Right-edge fade over the symbol input: a long ticker fades into the input's
-   own background as it nears the clip, cueing "there's more" (full value is in
-   the input's title tooltip). Sits just left of the badge; invisible over the
-   empty bg, so short tickers show nothing. Painted after the input but before
-   the badge in DOM, so the badge stays crisp. */
-.manual-row .symbol-fade,
-.combobox .symbol-fade {
+/* Right-edge "there's more →" fade, shared by the symbol and units/total fields
+   (`.field-fade`). An overflowing value fades into the input's own background as
+   it nears the clip, cueing more text without dimming what fits. Painted after
+   the input but before the trailing badge in DOM, so the badge stays crisp.
+   Hidden by default; the field wrapper sets data-clip-end (via useClipEnd) only
+   while the value is clipped AND not scrolled to its end — so at the rightmost
+   caret it clears and the last character stays sharp. Both fields sit on --paper
+   inside the .rec-edit editor, and each reserves room for its own badge, so the
+   fade sits just left of it (symbol pad 42, units/total pad 52). */
+.field-fade {
   position: absolute;
   top: 1px;
   bottom: 1px;
-  right: 42px;
   width: 16px;
   pointer-events: none;
-  background: linear-gradient(to right, transparent, var(--card-soft));
-}
-/* The .rec-edit symbol input paints on --paper, so its fade must match. */
-.rec-edit .combobox .symbol-fade {
+  opacity: 0;
+  transition: opacity 0.12s ease;
   background: linear-gradient(to right, transparent, var(--paper));
+}
+.combobox .field-fade {
+  right: 42px;
+}
+.qty-input .field-fade {
+  right: 52px;
+}
+.combobox[data-clip-end] .field-fade,
+.qty-input[data-clip-end] .field-fade {
+  opacity: 1;
 }
 /* Narrow phones: shrink the symbol column and floor the numeric columns so
    "Quantity" / "Optional" always fit without clipping. */
