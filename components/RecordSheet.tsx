@@ -847,11 +847,33 @@ function DraftRow({
       : row.units.trim() && row.price.trim()
         ? baht(Number(row.units) * Number(row.price))
         : "";
-  // A CONSISTENT amber nudge that this Balance has no cost basis yet — adding one
-  // unlocks gains/return, so it's worth encouraging. Shown the same way whether you
-  // recorded units or a ฿ total. Cost basis = a per-unit avg cost OR an invested
-  // total (an import carrying value + P/L).
-  const costUnknown = anchor && hasTicker && !row.price.trim() && !(Number(row.costTotal) > 0);
+  // What this row still NEEDS to be saveable — kind-aware, mirroring the same checks
+  // as valid(). Surfaced amber in the subline so an incomplete row tells you the
+  // actual missing required field (not just cost). Only meaningful once a symbol is in.
+  let needs: string | null = null;
+  if (hasTicker) {
+    if (anchor) {
+      if (!(Number(row.units) > 0) && !(Number(row.value) > 0)) needs = "needs units or a ฿ total";
+    } else {
+      const d = normalizeTxnDraft({
+        tradeDate: row.tradeDate,
+        kind: row.kind,
+        ticker: row.ticker,
+        units: row.units,
+        pricePerUnit: row.price,
+        amount: row.amount,
+        fee: row.fee,
+      });
+      if (d.needsDate) needs = "needs a date";
+      else if (row.kind === "split") {
+        if (d.units == null) needs = "needs a split ratio";
+      } else if (d.needsAmount) needs = "needs an amount";
+    }
+  }
+  // Cost is OPTIONAL — a softer nudge ("adding one unlocks gains"), shown only once the
+  // row is otherwise complete (so a required gap takes priority).
+  const costUnknown =
+    !needs && anchor && hasTicker && !row.price.trim() && !(Number(row.costTotal) > 0);
   return (
     <div className="holding" style={{ display: "flex", gap: 4 }}>
       <button
@@ -884,7 +906,11 @@ function DraftRow({
           <span className="sub" style={{ display: "block" }}>
             {/* No symbol yet → unfilled, regardless of a Balance's default date. */}
             {hasTicker ? sub.join(" · ") || "Tap to fill in" : "Tap to fill in"}
-            {costUnknown && <span style={{ color: "var(--amber)" }}> · no cost yet</span>}
+            {needs ? (
+              <span style={{ color: "var(--amber)" }}> · {needs}</span>
+            ) : costUnknown ? (
+              <span style={{ color: "var(--amber)" }}> · no cost yet</span>
+            ) : null}
           </span>
         </span>
         <span className="value">{amt}</span>
