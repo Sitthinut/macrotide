@@ -27,10 +27,12 @@ anything user-visible:
    [auth-and-providers.md](./docs/reference/auth-and-providers.md), and `.env.example` together. Never one without the
    others.
 4. If you change auth / security posture, update [SECURITY.md](./SECURITY.md).
-5. If you add, move, rename, or repurpose a doc, update its line in
-   [llms.txt](./llms.txt) (the agent-facing doc map) so the link and its
-   one-line description still match. It tracks the docs *map*, not every code
-   change — only touch it when the set or purpose of docs shifts.
+5. If you add, move, rename, or repurpose a doc, update **two** indexes: its
+   **folder `README.md`** (the authoritative, complete index for that section —
+   subfolders like `decisions/` and `research/` keep their own) and its line in
+   [llms.txt](./llms.txt) (the flat machine-readable map). The top-level
+   [docs/README.md](./docs/README.md) is a section *map*, not a leaf inventory —
+   touch it only when you add or remove a whole section.
 
 Stale docs are the #1 failure mode here. After implementing, do a docs pass
 before committing — treat docs as part of the change, not a follow-up. Keep docs
@@ -50,7 +52,7 @@ the prose.
 | A settled technical decision | [docs/explanation/decisions/](./docs/explanation/decisions/) — default to a one-line Picks-table row; reserve a numbered ADR file for a genuinely contentious decision that needs the full options/consequences treatment (settled-by-precedent ≠ ADR-worthy) |
 | Product intent / scope | [product-direction.md](./docs/explanation/product-direction.md) |
 | Conventions an agent must know | this file |
-| Add / move / rename a doc | Place it in the right [Diátaxis](https://diataxis.fr/) quadrant — tutorials (learn) / how-to (task) / reference (look up) / explanation (why, incl. decisions) — per [docs/README.md § How these docs are organized](./docs/README.md#how-these-docs-are-organized), then add or fix its [llms.txt](./llms.txt) line |
+| Add / move / rename a doc | Place it in the right [Diátaxis](https://diataxis.fr/) quadrant — tutorials (learn) / how-to (task) / reference (look up) / explanation (why, incl. decisions) — per [docs/README.md § How these docs are organized](./docs/README.md#how-these-docs-are-organized), then update its **folder `README.md`** index + its [llms.txt](./llms.txt) line (touch [docs/README.md](./docs/README.md) itself only when adding/removing a whole section) |
 
 ### Project board conventions
 

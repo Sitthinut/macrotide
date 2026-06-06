@@ -124,8 +124,8 @@ macrotide/
 ├── docs/                    User + developer guide (Diátaxis)
 │   ├── tutorials/           Learning by doing (getting-started)
 │   ├── how-to/              Tasks (local-development, import, deploy)
-│   ├── reference/           Lookup (configuration, auth-and-providers, api, data-model)
-│   └── explanation/         Why (architecture, design-principles, memory + research/)
+│   ├── reference/           Lookup (configuration, auth-and-providers, api, data-model, design-system)
+│   └── explanation/         Why (architecture, design-principles, memory, decisions/ + research/)
 ├── llms.txt                 Machine-readable docs map for AI agents
 ├── README.md, AGENTS.md, SECURITY.md, LICENSE
 ```

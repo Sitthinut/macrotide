@@ -31,51 +31,26 @@ Feature deep dives and the prior-art research behind them live under
 > load just the context the task requires. A machine-readable entry point lives
 > at [/llms.txt](../llms.txt).
 
-## Everything, in one table
+## The docs map
 
-### Tutorials — learning by doing
-| Doc | What it gives you |
-|---|---|
-| [getting-started.md](./tutorials/getting-started.md) | Clone → run → try the demo → add your first holding → chat with the Advisor |
+Each section's `README.md` is the **complete, authoritative index** for that
+section — start there, or jump straight into a folder below. This page stays a
+*map*, not a leaf inventory, so it doesn't drift as individual docs come and go.
 
-### How-to — task recipes
-| Doc | Use when |
-|---|---|
-| [local-development.md](./how-to/local-development.md) | Setting up a dev loop: env, scripts, seeding, tests, hooks |
-| [import-a-portfolio.md](./how-to/import-a-portfolio.md) | Getting holdings in via Paste/CSV, image OCR, and editable table entry |
-| [deploy.md](./how-to/deploy.md) | Putting it on a VM (Caddy + systemd) or a tailnet |
+| Section | What's inside | Complete index |
+|---|---|---|
+| Tutorials | Learn by doing — first run, demo, your first holding | [tutorials/](./tutorials) |
+| How-to | Task recipes — local dev, import a portfolio, deploy | [how-to/](./how-to) |
+| Reference | Look up facts — config, API, data model, auth, design system | [reference/](./reference) |
+| Explanation | Why it works — architecture, principles, feature deep dives | [explanation/](./explanation) |
+| ↳ Decisions | Settled technical calls — a Picks table + numbered ADRs | [explanation/decisions/](./explanation/decisions) |
+| ↳ Research | Prior-art surveys behind the decisions | [explanation/research/](./explanation/research) |
 
-### Reference — look it up
-| Doc | Contains |
-|---|---|
-| [configuration.md](./reference/configuration.md) | How configuration works + the canonical env-var table |
-| [api.md](./reference/api.md) | Catalog of `app/api/*` route handlers |
-| [data-model.md](./reference/data-model.md) | The SQLite tables and how they relate |
-| [design-system.md](./reference/design-system.md) | Real CSS tokens, high-reuse classes, and shared UI components (Modal, Icon, EventLine) |
-| [auth-and-providers.md](./reference/auth-and-providers.md) | Passkeys, OpenRouter, rate limits, where data lives |
-| [Security policy](../SECURITY.md) | Threat model, reporting (lives at repo root) |
-
-### Explanation — understand the why
-| Doc | Explains |
-|---|---|
-| [architecture.md](./explanation/architecture.md) | The system shape, request lifecycle, and where everything lives |
-| [design-principles.md](./explanation/design-principles.md) | Secure-by-default, the "Advisor" voice, single-owner → multi-user |
-| [portfolio-health.md](./explanation/portfolio-health.md) | Why the Portfolio screen leads with named checks (not a 0–100 grade) and how the look-through diversification check stays honest on partial data |
-| [memory.md](./explanation/memory.md) | The long-term memory + chat-session design |
-| [advisor-context.md](./explanation/advisor-context.md) | What the Advisor knows per turn — context channels, entry-point contract, empty-turn recovery |
-| [inference-strategy.md](./explanation/inference-strategy.md) | How the Advisor stays smart/fast/token-efficient — model routing, caching, reasoning, context loading, tool-result shaping |
-| [research/memory-systems.md](./explanation/research/memory-systems.md) | Prior-art survey behind the memory design |
-| [research/context-engineering.md](./explanation/research/context-engineering.md) | Prior-art survey on context engineering for tool-using agents |
-| [research/llm-platform-primitives.md](./explanation/research/llm-platform-primitives.md) | Prior-art survey: tool calling, system prompts, reasoning tokens, structured output across providers |
-| [research/context-and-caching.md](./explanation/research/context-and-caching.md) | Prior-art survey: prompt caching + context-window management / progressive loading |
-| [research/agent-evals.md](./explanation/research/agent-evals.md) | Prior-art survey: evaluating tool-using agents — graders, `pass^k`, dead-end metrics; evidence behind `scripts/eval` |
-| [research/design-systems.md](./explanation/research/design-systems.md) | Prior-art survey: keeping a design system consistent + human/AI-foolproof — tokens, typed component APIs, lint/CI gates, agent guardrails, governance |
-
-### Project status & process (repo root)
-| Doc | Role |
-|---|---|
-| [Project board](https://github.com/users/Sitthinut/projects/2) | Forward-looking work — issues grouped by Priority |
-| [AGENTS.md](../AGENTS.md) | Rules for AI agents touching the code |
+[llms.txt](../llms.txt) is the flat, complete, machine-readable map of every
+doc — the entry point for AI agents. [SECURITY.md](../SECURITY.md) (threat model)
+and the [project board](https://github.com/users/Sitthinut/projects/2)
+(forward-looking work) live at the repo root, alongside
+[AGENTS.md](../AGENTS.md) (rules for AI agents touching the code).
 
 ## Keeping these docs honest
 

@@ -5,6 +5,17 @@ wider ecosystem at a given moment, and what we took from it. Each survey's
 **Decision** links to the feature doc where the *reasoning* lives; this folder
 is the evidence ("what's out there"), not the verdict.
 
+## Surveys
+
+| Survey | Behind |
+|---|---|
+| [memory-systems.md](./memory-systems.md) | The long-term memory design |
+| [context-engineering.md](./context-engineering.md) | The Advisor context model + tool-using loop |
+| [llm-platform-primitives.md](./llm-platform-primitives.md) | Provider tool-calling / system-prompt / reasoning / structured-output choices |
+| [context-and-caching.md](./context-and-caching.md) | Prompt caching + context-window management / progressive loading |
+| [agent-evals.md](./agent-evals.md) | The eval harness (`scripts/eval`) — graders, `pass^k`, dead-end metrics |
+| [design-systems.md](./design-systems.md) | Design-system consistency + human/AI foolproofing — tokens, typed APIs, lint/CI gates, agent guardrails, governance |
+
 ## Conventions
 
 - **One topic per file**, kebab-named (`memory-systems.md`) — no numbering;
