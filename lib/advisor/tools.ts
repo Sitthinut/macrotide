@@ -18,6 +18,7 @@ import { getModelPortfolio } from "../db/queries/models";
 import { getPlan } from "../db/queries/plan";
 import { listFundQuotes } from "../db/queries/quotes";
 import { getPortfolioSeries } from "../db/queries/series";
+import { listTransactionsForBuckets } from "../db/queries/transactions";
 import { BENCHMARK_OPTIONS, getBenchmarkReturnPct } from "../market/benchmarks";
 import { QUOTE_SOURCES } from "../market/sources";
 import { adaptModelPortfolio, adaptPortfolios } from "../portfolio/adapter";
@@ -26,10 +27,12 @@ import { assessConcentration, computeHealth, summarizeHealth } from "../portfoli
 import { computeLookThrough } from "../portfolio/look-through";
 import type { ExtractedRow } from "../portfolio/ocr";
 import { parsePlan } from "../portfolio/plan-parser";
+import { computeTransactionAnalytics } from "../portfolio/transaction-analytics";
 import {
   type CheaperOutput,
   type FundsOutput,
   type PerformanceOutput,
+  type PortfolioOutput,
   shapeForModel,
 } from "./shape";
 
@@ -56,16 +59,32 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
       "Read the user's REAL portfolio: total value, allocation by asset class " +
       "and region, per-sleeve drift from their target model, blended (value-" +
       "weighted) expense ratio, concentration (largest holding, top-3, HHI), " +
-      "and cash drag. Use this before answering anything about how they're " +
-      "doing, their mix, fees, concentration, or rebalancing. Numbers are " +
-      "computed deterministically from holdings — never invent figures.",
-    inputSchema: z.object({}),
+      "and cash drag. ALSO returns lifetime ledger analytics — money invested " +
+      "(contributions), realized gains/losses, income (dividends), and the " +
+      "money-weighted (annualized) return — plus a flag for any custom, " +
+      "self-priced holdings. Pass `ticker` to additionally get one fund's own " +
+      "realized P/L and money-weighted return. Use this before answering " +
+      "anything about how they're doing, their mix, fees, concentration, " +
+      "realized/unrealized gains, or rebalancing. Numbers are computed " +
+      "deterministically from the ledger — never invent figures.",
+    inputSchema: z.object({
+      ticker: z
+        .string()
+        .trim()
+        .min(1)
+        .optional()
+        .describe(
+          "Optional: a held fund/ETF/stock symbol (exactly as it appears in the " +
+            "portfolio) to ALSO return that one fund's realized P/L, income, " +
+            "invested, and money-weighted return. Omit for the whole-portfolio view.",
+        ),
+    }),
     // Model sees a compact text view (#60); the UI still gets the full object.
     toModelOutput: ({ output }) => ({
       type: "text" as const,
-      value: shapeForModel.portfolio(output),
+      value: shapeForModel.portfolio(output as PortfolioOutput),
     }),
-    execute: async () => {
+    execute: async ({ ticker }) => {
       const buckets = listBuckets();
       const holdings = listHoldings();
       const quotes = listFundQuotes();
@@ -87,6 +106,70 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
       );
       const headline = summarizeHealth(health, target?.name ?? null);
       const concAssessment = assessConcentration(health.concentration);
+
+      // Lifetime ledger analytics — money invested (contributions), realized
+      // gains, income, and the money-weighted (annualized) return. These mirror
+      // the History/Position screens' KPI cards so a spoken answer matches what
+      // the user sees (computeTransactionAnalytics is the same orchestrator
+      // /api/transactions/analytics uses).
+      const asOf = new Date().toISOString().slice(0, 10);
+      const bucketIds = buckets.map((b) => b.id);
+      const allTxns = bucketIds.length > 0 ? listTransactionsForBuckets(bucketIds) : [];
+
+      const toLedger = (a: Awaited<ReturnType<typeof computeTransactionAnalytics>>) => ({
+        invested: round(a.contributions.totalInvested),
+        realized: round(a.realizedTotal),
+        income: round(a.incomeTotal),
+        irrPct: a.irr == null ? null : round(a.irr * 100, 1),
+        irrUnavailable: a.irrUnavailable,
+      });
+
+      const ledger =
+        allHoldings.length > 0
+          ? toLedger(await computeTransactionAnalytics(allTxns, { method: "average", asOf }))
+          : null;
+
+      // Custom ("manual") holdings are valued from the user's last-entered price,
+      // not a live feed — the model must flag them as user-supplied.
+      const customHoldings =
+        totalValue > 0
+          ? allHoldings
+              .filter((h) => h.quoteSource === "manual")
+              .map((h) => ({
+                ticker: h.ticker,
+                label: h.name,
+                pct: round((h.value / totalValue) * 100, 1),
+              }))
+          : [];
+
+      // Optional single-fund analytics (the Position screen's per-fund figures).
+      let position: {
+        ticker: string;
+        invested: number;
+        realized: number;
+        income: number;
+        irrPct: number | null;
+        irrUnavailable: string | null;
+        marketValue: number | null;
+        units: number;
+      } | null = null;
+      let tickerNote = "";
+      if (ticker) {
+        const want = ticker.trim().toUpperCase();
+        const fundTxns = allTxns.filter((t) => t.ticker.toUpperCase() === want);
+        if (fundTxns.length > 0) {
+          const a = await computeTransactionAnalytics(fundTxns, { method: "average", asOf });
+          const units = a.positions.reduce((s, p) => s + (p.units > 0 ? p.units : 0), 0);
+          position = {
+            ticker: want,
+            ...toLedger(a),
+            marketValue: a.marketValue == null ? null : round(a.marketValue),
+            units: round(units, 4),
+          };
+        } else {
+          tickerNote = ` No ledger events for "${want}" — the user may not hold it.`;
+        }
+      }
 
       return {
         ok: true as const,
@@ -136,9 +219,12 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
             : null,
         },
         cashPct: round(health.cashPct, 1),
+        ledger,
+        customHoldings,
+        position,
         headline: { tone: headline.tone, title: headline.title, body: headline.body },
         message: allHoldings.length
-          ? `Read ${allHoldings.length} holding(s) across ${buckets.length} bucket(s); total ฿${round(totalValue).toLocaleString()}.`
+          ? `Read ${allHoldings.length} holding(s) across ${buckets.length} bucket(s); total ฿${round(totalValue).toLocaleString()}.${tickerNote}`
           : "The user has no holdings yet — suggest adding some before analysis.",
       };
     },

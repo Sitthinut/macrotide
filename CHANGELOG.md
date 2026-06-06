@@ -32,6 +32,13 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   ledger row is editable inline with the same grid the Add modal uses. Tapping a
   holding opens its Position page: that fund's own analytics (its return,
   invested, realized, and income), scoped to its events alone.
+- **Advisor can speak to your realized P/L and money-weighted return.** The
+  Advisor's portfolio read now includes the same lifetime ledger figures the
+  History and Position screens show — money invested, realized gains, income, and
+  money-weighted (annualized) return — and can scope them to a single fund, so it
+  answers "what's my realized P/L?" or "my return on fund X?" from real numbers.
+  It also knows which holdings are custom (self-priced) and treats that price as
+  user-supplied rather than live market truth, nudging you to refresh it if stale.
 - **Custom assets you price yourself.** A holding with no live NAV provider
   (crypto, a private fund, anything off-catalog) can be a **custom** asset:
   you record its current price, and the app values it from the latest price in

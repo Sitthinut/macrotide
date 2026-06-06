@@ -41,6 +41,15 @@ const PORTFOLIO: PortfolioOutput = {
     holdingCount: 3,
   },
   cashPct: 10,
+  ledger: {
+    invested: 950_000,
+    realized: 12_500,
+    income: 3_200,
+    irrPct: 8.4,
+    irrUnavailable: null,
+  },
+  customHoldings: [{ ticker: "EXAMPLE-CUSTOM-A", label: "Gold savings (manual)", pct: 5 }],
+  position: null,
   headline: { tone: "warn", title: "Off target", body: "Bonds 15pp under target." },
   message: "Read 3 holdings; total ฿1,000,000.",
 };
@@ -76,6 +85,67 @@ describe("portfolioModelText", () => {
       message: "No holdings yet.",
     };
     expect(portfolioModelText(empty)).toBe("No holdings yet.");
+  });
+
+  it("surfaces lifetime ledger figures (invested, realized, income, money-weighted return)", () => {
+    const t = portfolioModelText(PORTFOLIO);
+    expect(t).toContain("invested ฿950,000 (contributions)");
+    expect(t).toContain("realized +฿12,500");
+    expect(t).toContain("income ฿3,200");
+    expect(t).toContain("money-weighted return +8.4%");
+  });
+
+  it("explains why the money-weighted return is unavailable instead of guessing", () => {
+    const t = portfolioModelText({
+      ...PORTFOLIO,
+      ledger: {
+        invested: 950_000,
+        realized: 12_500,
+        income: 3_200,
+        irrPct: null,
+        irrUnavailable: "Not enough activity yet.",
+      },
+    });
+    expect(t).toContain("money-weighted return n/a (Not enough activity yet.)");
+  });
+
+  it("flags custom (self-priced) holdings as user-supplied", () => {
+    const t = portfolioModelText(PORTFOLIO);
+    expect(t).toContain("Self-priced (custom) holdings");
+    expect(t).toContain("EXAMPLE-CUSTOM-A 5%");
+  });
+
+  it("omits ledger/custom/position lines when absent", () => {
+    const bare: PortfolioOutput = {
+      ...PORTFOLIO,
+      ledger: null,
+      customHoldings: [],
+      position: null,
+    };
+    const t = portfolioModelText(bare);
+    expect(t).not.toContain("Lifetime ledger");
+    expect(t).not.toContain("Self-priced");
+    expect(t).not.toContain("money-weighted return");
+    expect(t).not.toContain("invested");
+  });
+
+  it("includes a per-fund block when a ticker was requested", () => {
+    const t = portfolioModelText({
+      ...PORTFOLIO,
+      position: {
+        ticker: "EXAMPLE-FUND-A",
+        invested: 400_000,
+        realized: -2_000,
+        income: 1_100,
+        irrPct: 6.2,
+        irrUnavailable: null,
+        marketValue: 500_000,
+        units: 1234.5,
+      },
+    });
+    expect(t).toContain("Fund EXAMPLE-FUND-A: invested ฿400,000");
+    expect(t).toContain("realized −฿2,000");
+    expect(t).toContain("value ฿500,000 (1234.5 units)");
   });
 });
 
