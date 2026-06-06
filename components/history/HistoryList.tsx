@@ -531,9 +531,11 @@ function TxnEditor({
             <QtyInput
               units={draft.units}
               price={anchor ? draft.marketPrice || draft.pricePerUnit : draft.pricePerUnit}
-              // A Balance carries its ฿ figure in `value`; a trade in `amount` — so a
-              // value-only Balance or an amount-only trade shows/edits its ฿ total here.
-              value={anchor ? draft.value : draft.amount}
+              // Open in the mode that matches the stored FACT: show Units when a unit
+              // count is present (an edited trade stores both units and amount, so we'd
+              // otherwise always default to Total); fall back to the ฿ total (a trade's
+              // amount, a Balance's value) only when there's no unit count.
+              value={anchor ? draft.value : draft.units.trim() ? "" : draft.amount}
               onUnits={(v) => set({ units: v })}
               onValue={(v) => set(anchor ? { value: v } : { amount: v })}
             />
