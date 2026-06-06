@@ -23,10 +23,11 @@ import { mergeWithHoldings, type TickerSuggestion } from "@/lib/data/known-funds
 import { mergeSourceSuggestions } from "@/lib/data/sources";
 import { useBuckets, useHoldings } from "@/lib/fetchers/portfolio";
 import { invalidate } from "@/lib/fetchers/swr";
+import { normalizeImage } from "@/lib/image-normalize";
 import { inferQuoteSource } from "@/lib/market/infer-quote-source";
 import type { QuoteSource } from "@/lib/market/sources";
 import type { TxnKind } from "@/lib/portfolio/lots";
-import type { ExtractedTxnRow } from "@/lib/portfolio/ocr";
+import type { ExtractedTxnRow, ImportDocType } from "@/lib/portfolio/ocr";
 import { TXN_KIND_HELP, TXN_KIND_LABEL, typeSelectOptions } from "@/lib/portfolio/txn-display";
 import { normalizeDate, normalizeTxnDraft, parseTxnPaste } from "@/lib/portfolio/txn-import";
 import type { ImportSeedRow } from "@/lib/stores/import-seed";
@@ -154,11 +155,15 @@ function draftToRow(d: ReturnType<typeof parseTxnPaste>[number]): Row {
 }
 
 // Map an OCR'd holdings row (snapshot screenshot) → a Starting-balance Row.
-function seedHoldingToRow(s: ImportSeedRow): Row {
+// `asOf` is the snapshot date (from the file). Units/avg cost come from deriveRow
+// (value ÷ NAV) when a NAV is on file; a value-only row flags needs-units — the
+// value-based Balance model that fills it from value+cost is a follow-up task.
+function seedHoldingToRow(s: ImportSeedRow, asOf = ""): Row {
   return {
     id: nextId++,
     kind: "opening",
-    tradeDate: "",
+    // The Add-modal path passes `asOf`; the Advisor path stamps it on the row.
+    tradeDate: asOf || s.asOf || "",
     ticker: s.ticker,
     englishName: s.englishName,
     units: s.units != null ? String(s.units) : "",
@@ -170,8 +175,9 @@ function seedHoldingToRow(s: ImportSeedRow): Row {
   };
 }
 
-function seedTxnToRow(e: ExtractedTxnRow): Row {
-  const tradeDate = normalizeDate(e.tradeDate ?? "");
+function seedTxnToRow(e: ExtractedTxnRow, asOf = ""): Row {
+  // Trades carry their own dated rows; fall back to the file date only if absent.
+  const tradeDate = normalizeDate(e.tradeDate ?? "") || asOf;
   return {
     id: nextId++,
     kind: tradeDate ? ((e.kind as RowKind) ?? "buy") : "opening",
@@ -217,6 +223,14 @@ export function RecordSheet({
   const [editing, setEditing] = useState<number | null>(null);
   const [pasteText, setPasteText] = useState("");
   const [imgBusy, setImgBusy] = useState(false);
+  // Set when an imported screenshot's type (snapshot vs history) was a
+  // low-confidence guess — drives the "switch type?" confirm banner. Carries the
+  // model's as-of date so a re-read keeps it (the override path skips detection).
+  const [unsure, setUnsure] = useState<{
+    file: File;
+    guessed: ImportDocType;
+    asOf: string;
+  } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -235,8 +249,8 @@ export function RecordSheet({
     }
     if (seededRef.current) return;
     const seeded: Row[] = [];
-    if (holdingsSeed?.length) seeded.push(...holdingsSeed.map(seedHoldingToRow));
-    if (txnSeed?.length) seeded.push(...txnSeed.map(seedTxnToRow));
+    if (holdingsSeed?.length) seeded.push(...holdingsSeed.map((s) => seedHoldingToRow(s)));
+    if (txnSeed?.length) seeded.push(...txnSeed.map((e) => seedTxnToRow(e)));
     if (seeded.length) {
       seededRef.current = true;
       setRows(seeded);
@@ -284,6 +298,7 @@ export function RecordSheet({
     setEditing(null);
     setPasteText("");
     setError(null);
+    setUnsure(null);
   };
 
   // Re-derive the PASTE rows from the textbox, leaving manual/image rows intact.
@@ -309,23 +324,63 @@ export function RecordSheet({
 
   // Ingest dropped/chosen files — screenshots (OCR → Starting balances) and
   // CSV/text (parsed → detected rows). Multiple files at once.
-  const ingestImage = async (file: File): Promise<Row[]> => {
+  // Read one screenshot. The endpoint auto-detects holdings-snapshot (→ Starting
+  // balances) vs transaction-history (→ trade rows) and returns the matching rows
+  // plus a confidence; `as` forces a type when the user resolves a low-confidence
+  // guess via the banner.
+  const importFile = async (
+    file: File,
+    as?: ImportDocType,
+    asOfHint = "",
+  ): Promise<{ rows: Row[]; docType: ImportDocType; confidence: "high" | "low"; asOf: string }> => {
     const fd = new FormData();
-    fd.append("image", file);
+    // Normalize to the shared 2048/0.8 JPEG so the OCR pipeline gets the same
+    // image the Advisor does (same model) — bounds upload + tile cost, keeps the
+    // resolution the model needs to read dense tables.
+    const norm = await normalizeImage(file);
+    fd.append("image", norm.blob, file.name);
+    // Filename + saved-at ride as CONTEXT for the model's as-of-date call (a
+    // date shown in the image wins; we never parse the filename ourselves).
+    fd.append("filename", file.name);
+    if (file.lastModified) fd.append("capturedAt", new Date(file.lastModified).toISOString());
+    if (as) fd.append("as", as);
     const res = await fetch("/api/import/image", { method: "POST", body: fd });
     if (!res.ok) throw new Error(String(res.status));
-    const body = (await res.json()) as { rows: ImportSeedRow[] };
-    return (body.rows ?? []).filter((r) => r.ticker?.trim()).map(seedHoldingToRow);
+    const body = (await res.json()) as {
+      docType: ImportDocType;
+      confidence: "high" | "low";
+      asOf?: string | null;
+      holdings?: ImportSeedRow[];
+      transactions?: ExtractedTxnRow[];
+    };
+    // The override path skips classification (no asOf) — re-use the date the
+    // first read found.
+    const asOf = body.asOf ?? asOfHint;
+    const rows =
+      body.docType === "transactions"
+        ? (body.transactions ?? [])
+            .filter((r) => r.ticker?.trim())
+            .map((r) => seedTxnToRow(r, asOf))
+        : (body.holdings ?? [])
+            .filter((r) => r.ticker?.trim())
+            .map((r) => seedHoldingToRow(r, asOf));
+    return { rows, docType: body.docType, confidence: body.confidence, asOf };
   };
   const handleFiles = async (files: File[]) => {
     if (files.length === 0) return;
     setImgBusy(true);
     setError(null);
+    setUnsure(null);
     try {
       const collected: Row[] = [];
+      let unsureFile: { file: File; guessed: ImportDocType; asOf: string } | null = null;
       for (const file of files) {
         if (file.type.startsWith("image/")) {
-          collected.push(...(await ingestImage(file)));
+          const det = await importFile(file);
+          collected.push(...det.rows);
+          if (det.confidence === "low" && det.rows.length) {
+            unsureFile = { file, guessed: det.docType, asOf: det.asOf };
+          }
         } else {
           collected.push(
             ...parseTxnPaste(await file.text())
@@ -337,9 +392,26 @@ export function RecordSheet({
       if (collected.length) {
         setEditing(null);
         setRows((prev) => [...prev.filter((r) => !isBlankManual(r)), ...collected]);
+        setUnsure(unsureFile);
       } else setError("Couldn't read those files. Try a sharper screenshot, or paste the rows.");
     } catch {
       setError("Couldn't read those files. Try a sharper screenshot, or paste the rows.");
+    } finally {
+      setImgBusy(false);
+    }
+  };
+  // Re-read the unsure image as the OTHER type and swap in those rows.
+  const switchImportType = async () => {
+    if (!unsure) return;
+    const other: ImportDocType = unsure.guessed === "transactions" ? "holdings" : "transactions";
+    setImgBusy(true);
+    setError(null);
+    try {
+      const det = await importFile(unsure.file, other, unsure.asOf);
+      setRows((prev) => [...prev.filter((r) => r.provenance !== "image"), ...det.rows]);
+      setUnsure(null);
+    } catch {
+      setError("Couldn't re-read that image. Try pasting the rows instead.");
     } finally {
       setImgBusy(false);
     }
@@ -569,6 +641,27 @@ export function RecordSheet({
         </div>
 
         {error && <div className="rec-error">{error}</div>}
+        {unsure && (
+          <div className="rec-ask">
+            <span>
+              Read this as{" "}
+              <strong>
+                {unsure.guessed === "transactions"
+                  ? "a transaction history"
+                  : "a holdings snapshot"}
+              </strong>{" "}
+              — not certain.
+            </span>
+            <button
+              type="button"
+              className="btn ghost sm"
+              onClick={switchImportType}
+              disabled={imgBusy}
+            >
+              Switch to {unsure.guessed === "transactions" ? "holdings" : "transactions"}
+            </button>
+          </div>
+        )}
 
         {/* Review list — native holdings-style rows; tap to edit. */}
         {hasRows && (

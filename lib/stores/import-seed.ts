@@ -12,6 +12,7 @@
 
 import { useSyncExternalStore } from "react";
 import type { QuoteSource } from "@/lib/market/sources";
+import type { ExtractedTxnRow } from "@/lib/portfolio/ocr";
 
 /**
  * One extracted holding row handed to the importer. Structurally matches the
@@ -30,16 +31,22 @@ export interface ImportSeedRow {
   quoteSource?: QuoteSource;
   estimated?: boolean;
   needsUnits?: boolean;
+  /** Snapshot as-of date (ISO), when the Advisor read one — dates the Balance. */
+  asOf?: string;
 }
 
 export interface ImportSeedState {
-  /** Rows to seed into the importer, or null when none pending / consumed. */
+  /** Holdings rows to seed into the importer, or null when none pending. */
   seedRows: ImportSeedRow[] | null;
-  /** Bumped per request so the same rows can re-open the sheet. */
+  /** Bumped per holdings request so the same rows can re-open the sheet. */
   openNonce: number;
+  /** Transaction rows to seed (→ trade rows), or null when none pending. */
+  txnRows: ExtractedTxnRow[] | null;
+  /** Bumped per transaction request, separate from the holdings nonce. */
+  txnNonce: number;
 }
 
-let state: ImportSeedState = { seedRows: null, openNonce: 0 };
+let state: ImportSeedState = { seedRows: null, openNonce: 0, txnRows: null, txnNonce: 0 };
 
 const listeners = new Set<() => void>();
 
@@ -73,9 +80,25 @@ export function consumeImportSeed() {
   if (state.seedRows !== null) setState({ seedRows: null });
 }
 
+/** ChatScreen asks App to open the importer pre-filled with these TRANSACTIONS. */
+export function requestTxnImportWithRows(rows: ExtractedTxnRow[]) {
+  setState({ txnRows: rows, txnNonce: state.txnNonce + 1 });
+}
+
+/** App calls this after handling a transaction request so it fires exactly once. */
+export function consumeTxnImportSeed() {
+  if (state.txnRows !== null) setState({ txnRows: null });
+}
+
 // ── React binding ──────────────────────────────────────────────────────────
 
 export function useImportSeed() {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  return { ...snapshot, requestImportWithRows, consumeImportSeed };
+  return {
+    ...snapshot,
+    requestImportWithRows,
+    consumeImportSeed,
+    requestTxnImportWithRows,
+    consumeTxnImportSeed,
+  };
 }

@@ -218,17 +218,38 @@ export function App({ isDemo }: { isDemo: boolean }) {
   // Ticker for the per-position drill-in screen (One Truth: a holding opens its
   // own record — summary above the history that produced it).
   const [positionTicker, setPositionTicker] = useState<string | null>(null);
-  const { seedRows: seedRequest, openNonce: seedNonce, consumeImportSeed } = useImportSeed();
+  const {
+    seedRows: seedRequest,
+    openNonce: seedNonce,
+    consumeImportSeed,
+    txnRows: txnRequest,
+    txnNonce,
+    consumeTxnImportSeed,
+  } = useImportSeed();
   const handledSeedNonce = useRef(0);
   useEffect(() => {
     if (seedNonce > 0 && seedNonce !== handledSeedNonce.current && seedRequest) {
       handledSeedNonce.current = seedNonce;
+      setTxnSeed(null);
       setImportSeed(seedRequest);
       setAddMode("snapshot");
       setAddOpen(true);
       consumeImportSeed();
     }
   }, [seedNonce, seedRequest, consumeImportSeed]);
+  // Parallel handoff for the Advisor's transaction-history import card: seed the
+  // Add modal with trade rows (→ buy/sell/dividend), not Starting balances.
+  const handledTxnNonce = useRef(0);
+  useEffect(() => {
+    if (txnNonce > 0 && txnNonce !== handledTxnNonce.current && txnRequest) {
+      handledTxnNonce.current = txnNonce;
+      setImportSeed(null);
+      setTxnSeed(txnRequest);
+      setAddMode("snapshot");
+      setAddOpen(true);
+      consumeTxnImportSeed();
+    }
+  }, [txnNonce, txnRequest, consumeTxnImportSeed]);
   const [, setSavedReading] = useState<unknown[]>([]);
   const planSelectedModelId = useSelectedModelId();
   const { data: plan } = usePlan();

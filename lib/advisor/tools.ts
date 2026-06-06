@@ -551,18 +551,22 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
 
   const propose_holdings_import = tool({
     description:
-      "Propose adding MANY holdings at once by handing them to the portfolio " +
-      "importer. Use this — NOT repeated propose_holding calls — when you've read " +
-      "TWO OR MORE positions from attached image(s) (a brokerage statement, " +
-      "portfolio summary, or transaction history). It does NOT write anything: it " +
-      "shows the user a compact table in chat that opens the full import page, " +
-      "pre-filled with these rows, where they review/edit and bulk-save. Pass one " +
-      "entry per position. Read each value EXACTLY as printed — never invent a " +
-      "number; omit a field you can't read. If a row shows only a market value (no " +
-      "units), include `value` (and `pl` if shown) and the importer derives units " +
-      "from the latest NAV. For a SINGLE position, use propose_holding instead. " +
-      "After calling this, tell the user you've drafted the rows for them to review " +
-      "and import.",
+      "Propose adding MANY current holdings at once by handing them to the portfolio " +
+      "importer. Use this — NOT repeated propose_holding calls — when you've read TWO " +
+      "OR MORE positions from an attached holdings/portfolio screenshot. It does NOT " +
+      "write anything: it shows the user a compact table that opens the full import " +
+      "page, pre-filled, where they review/edit and bulk-save. One entry per position. " +
+      "Read each value EXACTLY as printed — never invent a number; omit a field you " +
+      "can't read. " +
+      "IMPORTANT — Thai broker apps usually show a position's market VALUE " +
+      "(มูลค่าปัจจุบัน) + invested amount (ยอดเงินลงทุน) + P/L (กำไร/ขาดทุน) but NO unit " +
+      "count. When you DON'T see a printed unit count, pass `value` (the current market " +
+      "value) and `pl` (the gain/loss), and leave `units` AND `avgCost` EMPTY — the " +
+      "importer derives them. NEVER invent a unit count (e.g. 1), and NEVER put the " +
+      "invested total into `avgCost` (that field is the price PER UNIT, not a total). " +
+      "Set `units`/`avgCost` ONLY when they are literally printed per unit. For a SINGLE " +
+      "position use propose_holding instead. After calling this, tell the user you've " +
+      "drafted the rows for them to review and import.",
     inputSchema: z.object({
       rows: z
         .array(
@@ -611,8 +615,15 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
         .max(300)
         .optional()
         .describe("One short line shown above the table (e.g. what was read from the image)."),
+      asOf: z
+        .string()
+        .optional()
+        .describe(
+          "The snapshot's as-of date in ISO YYYY-MM-DD. PREFER a date shown in the image; " +
+            "otherwise use the attached file's name/timestamp noted in the conversation. Omit if unknown.",
+        ),
     }),
-    execute: async ({ rows, source, note }) => {
+    execute: async ({ rows, source, note, asOf }) => {
       // Derive units/avgCost from the latest NAV (shared with POST
       // /api/import/image via lib/portfolio/derive-rows.ts), so the in-chat table
       // and the importer agree. The `holdingsImport` field carries the shape
@@ -633,7 +644,10 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
       // ticker-inferred default deriveRow chose.
       const out = derived.map((d, i) => {
         const override = rows[i]?.quoteSource;
-        return override ? { ...d, quoteSource: override } : d;
+        const row = override ? { ...d, quoteSource: override } : d;
+        // Stamp the snapshot's as-of date on every row so the importer dates the
+        // Balances (the model determines it from the image / file context).
+        return asOf ? { ...row, asOf } : row;
       });
       const needs = out.filter((r) => r.needsUnits).length;
       return {
@@ -646,6 +660,101 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
               ? ` ${needs} need${needs === 1 ? "s" : ""} a unit count you'll be asked to fill in.`
               : ""
           }`,
+      };
+    },
+  });
+
+  const propose_transactions_import = tool({
+    description:
+      "Propose recording a batch of past TRANSACTIONS (a buy/sell/dividend log) to " +
+      "the user's ledger. Use this — NOT propose_holdings_import — when an attached " +
+      "image or the user's text is a TRANSACTION HISTORY: a DATED log of activity over " +
+      "time (rows carry or inherit a date, the same fund repeats, labels like " +
+      "buy/sell/subscribe/redeem/ซื้อ/ขาย/สับเปลี่ยน). It does NOT write anything: it " +
+      "shows the user a compact table they review, edit and save — so PROPOSE directly " +
+      "and let them correct it there. Do NOT interrogate the user about details you can " +
+      "read; you already know how to read a Thai fund log: " +
+      "(a) DATES are group headers — give every row under a date that date; Buddhist-era " +
+      "years subtract 543 (มีนาคม 2569 = March 2026, 22 ธันวาคม 2568 = 2025-12-22). " +
+      "(b) The TYPE is the action word — ซื้อ = buy, ขาย = sell, เงินปันผล = dividend; " +
+      "'AMC' and other channel/agent badges are NOT the type, ignore them. " +
+      "(c) A สับเปลี่ยน (switch) is TWO rows — the ออก (out) leg a 'sell', the เข้า (in) " +
+      "leg a 'buy'. Read each value EXACTLY as printed; omit a field you genuinely can't " +
+      "read (the user fills it in) — never invent one, and never ask the user to confirm " +
+      "B.E. dates or what สับเปลี่ยน/ซื้อ/ขาย mean. For a CURRENT positions snapshot (no " +
+      "per-row dates) use propose_holdings_import instead. After calling this, tell the " +
+      "user you've drafted the transactions for them to review and import.",
+    inputSchema: z.object({
+      rows: z
+        .array(
+          z.object({
+            ticker: z.string().min(1).max(40).describe("Fund/ETF/stock code exactly as printed."),
+            englishName: z.string().max(200).optional().describe("Human-readable name if shown."),
+            kind: z
+              .enum(["buy", "sell", "dividend", "fee", "split", "reinvest"])
+              .optional()
+              .describe("Transaction type read off the row; omit only if truly unreadable."),
+            tradeDate: z
+              .string()
+              .optional()
+              .describe("ISO date YYYY-MM-DD — inherit the nearest date header above the row."),
+            units: z.number().positive().optional().describe("Units bought/sold, if shown."),
+            pricePerUnit: z
+              .number()
+              .positive()
+              .optional()
+              .describe("NAV / price per unit, if shown."),
+            amount: z
+              .number()
+              .positive()
+              .optional()
+              .describe("Baht amount of the transaction (unsigned magnitude)."),
+            fee: z
+              .number()
+              .min(0)
+              .optional()
+              .describe("Fee / front-end charge on this row, if any."),
+          }),
+        )
+        .min(1)
+        .max(200)
+        .describe("One entry per transaction row."),
+      source: z
+        .string()
+        .max(80)
+        .optional()
+        .describe("Provenance label shown in the UI (e.g. brokerage name)."),
+      note: z
+        .string()
+        .max(300)
+        .optional()
+        .describe("One short line shown above the table (e.g. what was read from the image)."),
+    }),
+    execute: async ({ rows, source, note }) => {
+      // The `transactionsImport` field carries the shape ChatScreen's
+      // TransactionsImportCard expects; the client picks it off the stream and
+      // renders the table, which opens the importer (RecordSheet txnSeed →
+      // trade rows). No DB mutation here — saving happens in the importer.
+      const out = rows.map((r) => ({
+        ticker: r.ticker.trim(),
+        englishName: r.englishName?.trim(),
+        kind: r.kind,
+        tradeDate: r.tradeDate?.trim(),
+        units: r.units,
+        pricePerUnit: r.pricePerUnit,
+        amount: r.amount,
+        fee: r.fee,
+      }));
+      return {
+        ok: true as const,
+        transactionsImport: {
+          rows: out,
+          source: source?.trim() ?? null,
+          note: note?.trim() ?? null,
+        },
+        message:
+          `Drafted ${out.length} transaction${out.length === 1 ? "" : "s"} — review and import ` +
+          "them on the table below.",
       };
     },
   });
@@ -941,6 +1050,7 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
     propose_plan_edit,
     propose_holding,
     propose_holdings_import,
+    propose_transactions_import,
     find_funds,
     find_cheaper_alternatives,
   };

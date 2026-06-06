@@ -303,6 +303,17 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Fixed
 
+- **Importing a transaction history no longer records every row as a Balance.**
+  The image importer now auto-detects whether a screenshot is a holdings
+  snapshot (current positions → Balances) or a transaction history (a dated
+  buy/sell log → trades) and routes it to the right reader; when it's not sure it
+  asks you which it is instead of guessing. Works in both the Add-to-portfolio
+  modal and Advisor chat (the Advisor gained a dedicated transaction-import path),
+  so a dated buy/sell/switch log lands as trades, not opening balances. Both the
+  importer and chat now feed the model the same higher-resolution image, and an
+  image you attach in chat is read once and remembered as text — so the Advisor
+  can keep discussing it across follow-up turns without asking you to upload it
+  again, and Shift+Enter adds a newline in the chat box.
 - **A fund with no published fee no longer reads as "0.00%".** The SEC feed
   reports a `0` expense rate two ways that don't mean "free": a new/IPO fund
   carries a fee ceiling but a `0` *actualized* rate until a period elapses, and a

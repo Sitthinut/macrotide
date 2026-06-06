@@ -38,6 +38,7 @@ import {
   inferQuoteSource,
   isAllowedMimeType,
   OcrProviderUnavailableError,
+  parseClassification,
   parseExtractedRows,
 } from "./ocr";
 
@@ -300,5 +301,51 @@ describe("deriveRow", () => {
       "thai_mutual_fund",
     );
     expect(deriveRow({ ticker: "AAPL", units: 1 }, undefined).quoteSource).toBe("market");
+  });
+});
+
+describe("parseClassification", () => {
+  it("reads a clean JSON verdict with confidence + asOf", () => {
+    expect(
+      parseClassification('{"docType":"transactions","confidence":"high","asOf":"2026-03-16"}'),
+    ).toEqual({ docType: "transactions", confidence: "high", asOf: "2026-03-16" });
+    expect(parseClassification('{"docType":"holdings","confidence":"high","asOf":null}')).toEqual({
+      docType: "holdings",
+      confidence: "high",
+      asOf: null,
+    });
+  });
+
+  it("tolerates surrounding prose / code fences", () => {
+    expect(
+      parseClassification(
+        'Here is the result:\n```json\n{"docType":"transactions","confidence":"low","asOf":"2025-12-22"}\n```',
+      ),
+    ).toEqual({ docType: "transactions", confidence: "low", asOf: "2025-12-22" });
+  });
+
+  it("defaults confidence/asOf to low/null when missing, rejects a non-ISO asOf", () => {
+    expect(parseClassification('{"docType":"transactions"}')).toEqual({
+      docType: "transactions",
+      confidence: "low",
+      asOf: null,
+    });
+    expect(
+      parseClassification('{"docType":"holdings","confidence":"high","asOf":"30 May 2026"}'),
+    ).toEqual({ docType: "holdings", confidence: "high", asOf: null });
+  });
+
+  it("falls back to a low-confidence guess when there is no usable JSON", () => {
+    // Keyword scan still routes, but never claims high confidence.
+    expect(parseClassification("this looks like a transaction history")).toEqual({
+      docType: "transactions",
+      confidence: "low",
+      asOf: null,
+    });
+    expect(parseClassification("garbage")).toEqual({
+      docType: "holdings",
+      confidence: "low",
+      asOf: null,
+    });
   });
 });

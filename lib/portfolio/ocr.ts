@@ -307,6 +307,134 @@ async function extractWith(
   }
 }
 
+// ─── Holdings-snapshot vs transaction-history classification ────────────────
+//
+// A broker screenshot is one of two shapes the importer handles very
+// differently: a HOLDINGS SNAPSHOT (current positions → Starting balances) or a
+// TRANSACTION HISTORY (a dated buy/sell log → trade rows). Feeding one to the
+// other's extractor mis-imports every row, so we classify FIRST and route the
+// image to the matching extractor. A cheap, low-token call; the route falls back
+// to asking the user when this returns "low" confidence.
+
+export type ImportDocType = "holdings" | "transactions";
+
+export interface ImportContext {
+  /** Original file name (a hint only — e.g. "Screenshot_20260530_…jpg"). */
+  filename?: string;
+  /** When the file was saved (ISO) — a hint only. */
+  capturedAt?: string;
+}
+
+export interface ImportClassification {
+  docType: ImportDocType;
+  confidence: "high" | "low";
+  /** The data's as-of date (ISO), preferring a date shown IN the image. */
+  asOf: string | null;
+}
+
+// Built per call so the filename/timestamp can ride as CONTEXT — they are only a
+// fallback. A date shown inside the image (an "as of" header, statement date)
+// always wins; the model decides, we don't regex the filename.
+function classifyPrompt(ctx?: ImportContext): string {
+  const hints: string[] = [];
+  if (ctx?.filename) hints.push(`file name: "${ctx.filename}"`);
+  if (ctx?.capturedAt) hints.push(`file saved at: ${ctx.capturedAt}`);
+  const fallback = hints.length
+    ? `\nDate context (a FALLBACK only — use it solely when the image itself shows no date): ${hints.join("; ")}.`
+    : "";
+  return `You are shown ONE screenshot from an investing / brokerage app. Do two things:
+1) Classify it — "holdings" = the user's CURRENT positions (funds/stocks with units and/or market value, NO per-row transaction dates); "transactions" = a DATED LOG of activity over time (buys/sells/dividends; rows carry or inherit a date, the same fund repeats, labels like ซื้อ/ขาย/buy/sell/subscribe/redeem/สับเปลี่ยน).
+2) Determine the AS-OF date — the day this data is current. PREFER a date shown ANYWHERE in the image (an "as of" / data / statement date). Thai Buddhist-era years subtract 543 (2569 → 2026). Only if the image shows no date at all, fall back to the date context below.${fallback}
+Reply with ONLY a JSON object, no prose, no code fences: {"docType":"holdings"|"transactions","confidence":"high"|"low","asOf":"YYYY-MM-DD"|null}. Use confidence "low" when the type is genuinely ambiguous; asOf null only when you truly cannot determine a date.`;
+}
+
+/**
+ * Classify an import screenshot as a holdings snapshot or a transaction history.
+ * Same provider + fallback policy as the extractors. On an unparseable/blocked
+ * response returns `{ docType: "holdings", confidence: "low" }` so the caller
+ * asks the user rather than silently guessing.
+ */
+export async function classifyImportImage(
+  input: OcrInput,
+  ctx?: ImportContext,
+): Promise<ImportClassification> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENROUTER_API_KEY is not set");
+  }
+
+  const primary = process.env.OCR_MODEL?.trim() || DEFAULT_OCR_MODEL;
+  const fallbackEnv = process.env.OCR_FALLBACK_MODEL?.trim();
+  const fallback = fallbackEnv ?? (process.env.OCR_MODEL ? null : DEFAULT_OCR_FALLBACK_MODEL);
+
+  try {
+    return await classifyWith(apiKey, primary, input, ctx);
+  } catch (err) {
+    if (err instanceof OcrProviderUnavailableError && fallback && fallback !== primary) {
+      return await classifyWith(apiKey, fallback, input, ctx);
+    }
+    throw err;
+  }
+}
+
+async function classifyWith(
+  apiKey: string,
+  modelId: string,
+  input: OcrInput,
+  ctx?: ImportContext,
+): Promise<ImportClassification> {
+  const model = openrouterVisionModel(apiKey, modelId);
+  try {
+    const result = await generateText({
+      model,
+      temperature: 0,
+      maxOutputTokens: 120,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: classifyPrompt(ctx) },
+            { type: "image", image: input.data, mediaType: input.mimeType },
+          ],
+        },
+      ],
+    });
+    return parseClassification(result.text ?? "");
+  } catch (err) {
+    if (isProviderError(err)) {
+      throw new OcrProviderUnavailableError(extractProviderMessage(err));
+    }
+    // Unparseable/blocked → safest is to let the user decide.
+    return { docType: "holdings", confidence: "low", asOf: null };
+  }
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+export function parseClassification(raw: string): ImportClassification {
+  const match = raw.match(/\{[^{}]*\}/);
+  if (match) {
+    try {
+      const o = JSON.parse(match[0]) as {
+        docType?: unknown;
+        confidence?: unknown;
+        asOf?: unknown;
+      };
+      const asOf = typeof o.asOf === "string" && ISO_DATE.test(o.asOf) ? o.asOf : null;
+      if (o.docType === "transactions" || o.docType === "holdings") {
+        return { docType: o.docType, confidence: o.confidence === "high" ? "high" : "low", asOf };
+      }
+    } catch {
+      // fall through to keyword scan
+    }
+  }
+  // No clean JSON — scan for a keyword but never claim high confidence.
+  const low = raw.toLowerCase();
+  if (low.includes("transaction"))
+    return { docType: "transactions", confidence: "low", asOf: null };
+  return { docType: "holdings", confidence: "low", asOf: null };
+}
+
 /**
  * A single transaction the vision model read off a tall buy/sell-log screenshot,
  * BEFORE any normalization. Like {@link ExtractedRow}, every numeric field is
