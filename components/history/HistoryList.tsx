@@ -449,7 +449,9 @@ function TxnEditor({
   busy,
 }: {
   draft: Draft;
-  onChange: (d: Draft) => void;
+  // Accepts an updater so multiple patches in one handler compose (the QtyInput sets
+  // amount AND units back-to-back; a value-spread `set` would clobber the first).
+  onChange: (d: Draft | ((prev: Draft) => Draft)) => void;
   onSave: () => void;
   onCancel: () => void;
   onDelete?: () => void;
@@ -468,7 +470,7 @@ function TxnEditor({
     [holdings],
   );
 
-  const set = (patch: Partial<Draft>) => onChange({ ...draft, ...patch });
+  const set = (patch: Partial<Draft>) => onChange((prev) => ({ ...prev, ...patch }));
   const anchor = isAnchor(draft.kind);
   // Dividend / fee are pure ฿ flows — no units or price, just an amount.
   const amountOnly = draft.kind === "dividend" || draft.kind === "fee";
