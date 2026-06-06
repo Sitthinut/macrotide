@@ -17,14 +17,16 @@ export interface HistoryScreenProps {
 export function HistoryScreen({ onBack, onAdd }: HistoryScreenProps) {
   return (
     <div className="screen">
-      {/* Topbar content is constrained to the same 760px column as the body so the
-          back chevron and the Add button line up with the content edges. */}
+      {/* Topbar content shares the same column width as the body so the back
+          chevron and the Add button line up with the content edges. Matches the
+          desktop main container (.ra-main-inner) so the inline ledger editor has
+          room for its number fields. */}
       <div className="topbar" style={{ paddingLeft: 0, paddingRight: 0 }}>
         <div
           style={{
             flex: "none",
             width: "100%",
-            maxWidth: 760,
+            maxWidth: 880,
             margin: "0 auto",
             padding: "0 16px",
             display: "flex",
@@ -59,7 +61,7 @@ export function HistoryScreen({ onBack, onAdd }: HistoryScreenProps) {
         </div>
       </div>
 
-      <div style={{ padding: "4px 16px 40px", maxWidth: 760, margin: "0 auto" }}>
+      <div style={{ padding: "4px 16px 40px", maxWidth: 880, margin: "0 auto" }}>
         <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.5, margin: "4px 8px 14px" }}>
           Everything you’ve recorded, most recent first. Tap any line to edit it in place.
         </p>

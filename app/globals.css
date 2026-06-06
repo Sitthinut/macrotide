@@ -3635,10 +3635,12 @@ textarea.sheet-input {
   align-items: start;
   /* Type + Date stay fixed (their controls have an intrinsic width); the rest
      flex so the row fills the modal's full width on any desktop size without
-     any single field stretching too far. */
+     any single field stretching too far. Symbol is held to a smaller share so
+     the number fields (units/total, price) get enough room to read a figure
+     you've typed — the symbol code is short, the numbers aren't. */
   grid-template-columns:
-    98px 124px minmax(120px, 1.6fr) minmax(70px, 1fr)
-    minmax(72px, 1fr) minmax(60px, 0.9fr);
+    98px 124px minmax(104px, 1.2fr) minmax(96px, 1.3fr)
+    minmax(82px, 1.05fr) minmax(70px, 0.9fr);
 }
 /* One field cell: a caption above its control. */
 .rec-field {
@@ -3664,11 +3666,12 @@ textarea.sheet-input {
 }
 /* Amount-only kinds (dividend / fee): Type · Date · Symbol · ฿ amount. */
 .rec-edit.is-flow {
-  grid-template-columns: 98px 124px minmax(120px, 1.8fr) minmax(96px, 1fr);
+  grid-template-columns: 98px 124px minmax(120px, 1.3fr) minmax(120px, 1.2fr);
 }
-/* Balance row: Type · Date · Symbol · Units · Avg cost · Current price. */
+/* Balance row: Type · Date · Symbol · Units · Avg cost · Current price. Symbol
+   gives up a little width so the units/total field reads its figure clearly. */
 .rec-edit.is-anchor {
-  grid-template-columns: 98px 124px minmax(120px, 1.4fr) minmax(74px, 1fr) minmax(84px, 1fr) minmax(
+  grid-template-columns: 98px 124px minmax(104px, 1.15fr) minmax(98px, 1.3fr) minmax(86px, 1fr) minmax(
       96px,
       1.05fr
     );
