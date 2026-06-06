@@ -125,23 +125,14 @@ keeping cost and market value orthogonal.
    converts every existing holding to an `opening` and rebuilds the projection —
    verified to reproduce byte-identical positions.
 
-## Consequences & the rules that follow
+## Consequences
+
+What this decision settled, as foreseen when it was made:
 
 - **One source of truth for positions.** There is no second hand-entered number
   to reconcile. The 0003 reconcile line and any "ledger vs snapshot disagree"
   diagnostic are **removed** — they are meaningless when holdings *are* the
   projection.
-- **Rebuild after every write.** Any ledger mutation (insert / edit / delete /
-  import / advisor tool) re-projects the affected bucket's holdings rows in the
-  same DB transaction. The projection is pure (`lib/portfolio/` stays DB- and
-  network-free); the rebuild orchestration lives in the query/route layer.
-- **Cost and market value stay orthogonal** (Beancount's separation) — the
-  single rule that makes value-only restatement and graceful degradation fall
-  out for free.
-- **IRR keys off whether an event is an external cash flow**, derived from
-  `kind` (no new column): `snapshot`, `split`, `reinvest`, and uncosted
-  `opening`/transfer-in are excluded; costed `opening` is included. A `snapshot`
-  entering XIRR would corrupt the return.
 - **Carried forward from 0003 (unchanged):** `transactions` omits `user_id` and
   is scoped through its parent bucket; the signed THB `amount` is the sole
   money-weighted-return primitive and trade-date FX is never re-applied to it;
@@ -151,3 +142,10 @@ keeping cost and market value orthogonal.
 - **Table name kept as `transactions`** (not renamed to `ledger`) to avoid churn
   across well-tested query/analytics/test code; anchors are simply special
   transaction kinds. The concept is called "the ledger" in docs and UI copy.
+
+The *ongoing* rules this decision implies — rebuild-after-every-write (the
+projection is a pure, rebuilt cache, never edited directly), cost/value
+orthogonality, and which event kinds count as external cash flows for the
+money-weighted return — are kept in the maintained docs, not frozen here:
+[Balances and History § The rules that hold everywhere](../balances-and-history.md#the-rules-that-hold-everywhere)
+and [AGENTS.md § DB routing](../../../AGENTS.md#db-routing--read-before-touching-a-route-handler).

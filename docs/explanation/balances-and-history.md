@@ -33,6 +33,54 @@ and there is no holdings-vs-history toggle to keep in sync. Delete an entry and 
 position recomputes from what's left. (The why, and the alternatives rejected, are
 in [ADR 0004](./decisions/0004-unified-ledger-positions-derived.md).)
 
+## The rules that hold everywhere
+
+A few rules fall out of "one ledger, positions derived" and hold for every fund,
+balance and trade alike. (Why the model is built this way, and the alternatives
+rejected, are in [ADR 0004](./decisions/0004-unified-ledger-positions-derived.md);
+these are how it *behaves* — kept current here.)
+
+- **The ledger stores only facts; the missing unit count is derived at the fold.**
+  Each entry keeps the **money fact** you actually gave — a *unit count*, a
+  Balance's *value*, or a trade's *amount* — and nothing else:
+
+  | You gave | Stored fact | Derived at the fold |
+  |---|---|---|
+  | a unit count | `units` | — |
+  | a value-only Balance | `value` | `units = value ÷ NAV(date)` |
+  | an amount-only trade | `amount` | `units = amount ÷ NAV(date)` |
+  | a Balance's invested ฿ total | `amount` (the cost) | `average cost = cost total ÷ units` |
+
+  A derived unit count is **never frozen into the record** — it's derived afresh
+  from the stored fact ÷ the NAV on that date every time your position is read (the
+  *fold*: replaying the ledger into positions). So if that date's NAV arrives late
+  or is later corrected, your units — and the value, gains, and return that flow
+  from them — recompute to match, with no re-entry. The same holds for **cost**: a
+  value-only Balance stores the invested ฿ *total* you gave (a fact); the *per-unit*
+  average cost is derived from that total ÷ the derived units at the fold — we never
+  invent a per-unit cost by dividing by a NAV-derived unit count and freezing it. The
+  source of truth never holds a number that regenerable market data could change out
+  from under it.
+- **Holdings are derived on read, never a second source you edit.** Your position
+  is folded from the ledger **every time it's read** — the holdings list, the
+  History and Position analytics, the Advisor's view all re-derive units and cost
+  from the live NAV, so every surface is fresh to the latest price and they can't
+  disagree. You never type a holding's units or average cost directly; you record a
+  ledger entry and the position recomputes. (A holdings row still exists as the home
+  for instrument metadata that isn't in the ledger — name, asset class, price source,
+  which portfolio — and a rebuild keeps that row in step; its stored units are only a
+  write-time snapshot, never what a read trusts.)
+- **Cost and market value stay orthogonal.** Average cost only moves when you buy
+  or sell; current value comes from the live NAV (or a custom asset's recorded
+  price). Because the market can't touch your average cost, a value-only
+  restatement and graceful degradation (held, but cost unknown) both fall out for
+  free — neither can corrupt the other.
+- **Money-weighted return counts only real cash flows.** Whether an entry enters
+  the return is decided by its kind: a buy, a sell, a cash dividend, and a *costed*
+  starting balance are external cash flows; a restatement, a split, a reinvested
+  dividend, and an uncosted balance / transfer-in move no outside money and are
+  excluded. Letting a restatement count would corrupt the return.
+
 ## Two ways to record — pick what your source gives you
 
 People hold portfolios in different shapes, so the app accepts both and lets you
@@ -67,6 +115,23 @@ The first Balance you record for a fund is its **starting balance**; any later
 Balance for the same fund is a **restatement**. You never choose which — it's
 decided by what came before (see [Self-healing](#editing-and-deleting-self-healing)),
 so the labels stay correct even if you delete one.
+
+### State a value, not a unit count
+
+Most broker apps show what a holding is *worth* — its **฿ value** — not how many
+units you hold. So a Balance lets you state the value and **derives the units for
+you**: `units = value ÷ NAV`. In the quantity field, tap **Total** and type the ฿
+figure your app shows; you never have to hunt down a unit count. Average cost is
+still what you paid (optional, entered separately) — the value only sets *how many
+units* the money represents.
+
+The NAV it divides by is the one on the **Balance's own date**, not today's. A
+holding's unit count is fixed to its date, so a value you record for last quarter
+divides by last quarter's NAV — pairing it with today's moving NAV would make the
+unit count drift. A Balance dated *today* divides by the latest NAV, which is the
+same rule. If a fund has no NAV on file for that date and you've given neither a
+unit count nor a current price, the app asks you for a unit count rather than
+guessing one.
 
 ## How a Balance is counted
 
@@ -112,6 +177,53 @@ Worked the long way, the two-balance case people ask about most:
 > (the money you added), **not** ฿1,800.
 > If between them the price rose but you bought nothing (still 150 units @ ฿12),
 > that Balance contributes **฿0**.
+
+## What each row accepts — the input combinations
+
+You never have to compute units (or amounts) yourself: every row takes a few
+**input shapes** and the app fills the rest. The rule of thumb is *give the money
+facts your source shows; the app derives the unit count*. Two shapes of row, each
+with its own accepted combinations.
+
+### Balance — an absolute holding on a date
+
+Give a date and **either a unit count or a ฿ value**. Everything else is optional
+or derived:
+
+| You provide | Units become | Avg cost | What you can see |
+|---|---|---|---|
+| **units** + avg cost | as entered | as entered | value, gains, and return |
+| **units** only | as entered | — | held, but **cost-unknown** — gains & return blank until you add a cost |
+| **value** only | `value ÷ NAV(date)` | — | held, cost-unknown |
+| **value** + avg cost | `value ÷ NAV(date)` | as entered | cost basis = units × avg cost; gains work |
+| **value** + invested ฿ total *(an import showing value & P/L, or a cost total)* | `value ÷ NAV(date)` | *derived at the fold* from `cost total ÷ units` | gains & return work — the invested total is the stored fact, the per-unit cost self-corrects |
+
+Two rules hold across the table:
+
+- **NAV is on the Balance's own date**, never today's — so a back-dated balance
+  doesn't drift (see [The rules that hold everywhere](#the-rules-that-hold-everywhere)).
+- **Avg cost is what you _paid_**, so it's only ever *entered* or *carried in by an
+  import that knows your cost* — it is **never invented** from current value. A
+  Balance with no cost is held at cost-unknown, not given a made-up one.
+
+### Trade — a dated buy / sell / dividend / fee / split / reinvest
+
+Give a date and the money facts the kind needs. A trade's **฿ amount is the
+authoritative figure** — units derive from it, never the other way round, so fees
+and rounding stay exact:
+
+| Kind | You provide | Units become | Amount |
+|---|---|---|---|
+| buy / sell / reinvest | units + price | as entered | `units × price` (± fee) |
+| buy / sell / reinvest | units + ฿ amount | as entered | amount as entered |
+| buy / sell / reinvest | ฿ amount + price | `amount ÷ price` | as entered |
+| buy / sell / reinvest | **฿ amount** only | `amount ÷ NAV(date)` | as entered |
+| dividend / fee | ฿ amount | — (a pure cash event) | as entered |
+| split | the ratio (2 = 2-for-1) | scaled by the ratio | — (moves no cash) |
+
+A row that can't be completed — a Balance with neither units nor value, or a trade
+with no amount and no way to derive one — isn't saved; the importer flags it so you
+can fill the missing fact rather than have one invented.
 
 ## Editing and deleting (self-healing)
 

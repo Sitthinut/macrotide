@@ -64,6 +64,39 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   reads a pure price move as zero new money, and never inflates your invested
   total. Whether a Balance is a starting balance or a restatement is decided by
   what came before it, so deleting one self-heals the rest.
+- **The ledger keeps the figure you saw; unit counts and cost self-correct.** When
+  you record a Balance by its ฿ value, or a buy/sell by its ฿ amount, that money
+  figure is stored as the fact; the unit count is derived from the NAV on that date
+  whenever your position is read, never frozen at save. So if that date's NAV
+  arrives late or is later corrected, your units — and the value, gains, and return
+  that flow from them — recompute to match, with no re-entry. The same now holds for
+  **cost**: a value-only Balance that carries an invested ฿ total (an import showing
+  value & P/L, or a cost total) stores that *total* as the fact and derives the
+  *per-unit* average cost at the fold — it no longer freezes a per-unit cost computed
+  from a NAV-derived unit count. A costed Balance's invested cash also reaches your
+  money-weighted return however you entered it (by units or by ฿ total). And a
+  value-only Balance the app can't price yet (no NAV on file for its date) no longer
+  blanks an existing position — it's held aside and appears when that date's NAV lands.
+  Your **holdings list itself now folds the ledger on every read** (not just the
+  analytics), so units, cost, value, and weight always reflect the latest NAV with no
+  refresh — the holdings view and the return figures can never drift apart.
+- **The importer checks each symbol's price source against the real catalog.** A
+  symbol's source badge (Fund · Stock/ETF · Custom) is now resolved against the
+  full fund catalog on the fly — typed, pasted, or imported — instead of guessing
+  from the symbol's shape. A real catalog fund reads as a Thai fund; a market-shaped
+  code as a stock/ETF; anything else as a custom asset — so a hyphenated code no
+  longer defaults to "Fund" just because of its shape. You can still flip the badge
+  per row, and your choice is respected.
+- **Record by ฿ amount — no unit count needed.** Thai broker apps show what a
+  holding is worth, not how many units you hold, so a **Balance** now accepts the ฿
+  value and a **buy/sell** accepts the ฿ amount; the app derives the units. It
+  prices off the price on the row's **own date** — the row's execution / current
+  price, else the fund's NAV on that date, never today's moving NAV — so a past
+  entry doesn't drift; an entry dated today uses the latest NAV. The divisor is
+  always a current price, never your average cost, so value and cost can't be
+  conflated. A ฿-total typed in the Add modal persists through collapse/expand. If
+  a fund has no price on file for the date, the app keeps your figure rather than
+  inventing units — a Balance asks for a unit count; a trade saves and flags it.
 - **Explore's browse list ranks each share class on its own fee.** The default
   (no-search) screener now sorts by each priceable class's *own* TER — cheapest
   first — instead of grouping a fund's classes together under the family's cheapest
