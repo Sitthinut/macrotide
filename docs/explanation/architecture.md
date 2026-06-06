@@ -279,5 +279,5 @@ lib/mock/                  Seed data (db:seed) + demo seed (never imported by UI
 ```
 
 For the full status of what's built vs. planned, the authoritative sources are
-the [README status board](../../README.md#status) (built) and the
+the [README features list](../../README.md#features) (built) and the
 [GitHub Project board](https://github.com/users/Sitthinut/projects/2) (planned).

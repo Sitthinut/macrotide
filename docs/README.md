@@ -59,7 +59,7 @@ Staleness is the #1 documentation failure mode. The conventions that fight it:
 - **Single source of truth.** Each fact lives in exactly one place; everything
   else links to it. The env-var table lives in [AGENTS.md](../AGENTS.md); deploy
   steps in [deploy.md](./how-to/deploy.md); feature status in the
-  [README status board](../README.md#status) (built) + the
+  [README features list](../README.md#features) (built) + the
   [project board](https://github.com/users/Sitthinut/projects/2) (planned).
   Docs here **link**, they don't copy.
 - **Docs travel with code.** Update the doc in the same commit as the change.

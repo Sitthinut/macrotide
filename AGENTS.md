@@ -11,16 +11,17 @@ Project-specific rules for AI agents working on this repo.
 
 ## Sources of truth & what to update
 
-[README.md](./README.md#status) holds the capability/status board (what works
-today); [CHANGELOG.md](./CHANGELOG.md) holds shipped detail by capability; the
+[README.md](./README.md#features) holds the Features list (notable shipped
+capabilities, no status — the board owns status); [CHANGELOG.md](./CHANGELOG.md) holds shipped detail by capability; the
 [GitHub Project board](https://github.com/users/Sitthinut/projects/2) tracks
 forward-looking work (issues grouped by Priority). When you ship or change
 anything user-visible:
 
 1. Add a one-line entry under `## [Unreleased]` in [CHANGELOG.md](./CHANGELOG.md),
    described by capability — not "yesterday", not a phase number.
-2. Flip the matching row in the [README.md](./README.md#status) status board if
-   its status changed, and close the matching
+2. If it's a notable user-facing capability, add a line to the
+   [README.md](./README.md#features) Features list (shipped-only — no status
+   column, so skip minor or in-progress work), and close the matching
    [board](https://github.com/users/Sitthinut/projects/2) issue if it was listed
    as planned.
 3. If you change env vars, update [deploy.md](./docs/how-to/deploy.md),
@@ -37,13 +38,13 @@ anything user-visible:
 Stale docs are the #1 failure mode here. After implementing, do a docs pass
 before committing — treat docs as part of the change, not a follow-up. Keep docs
 **timeless** — present-tense capability, no issue numbers or status tags; status
-lives in the board, CHANGELOG, and README status board (the table below), not in
-the prose.
+lives in the board and CHANGELOG, not in the prose; the README Features list
+names shipped capabilities only (no status column).
 
 | When you change… | Update… |
 | --- | --- |
 | Shipped a behavior change | [CHANGELOG.md](./CHANGELOG.md) `## [Unreleased]` (by capability) |
-| A capability's shipped status | [README.md](./README.md#status) status board |
+| A notable user-facing feature shipped | [README.md](./README.md#features) Features list (shipped-only) |
 | Planned, unbuilt work | the [GitHub Project board](https://github.com/users/Sitthinut/projects/2) (an issue, labelled + prioritized) |
 | Env vars | the canonical table in [configuration.md](./docs/reference/configuration.md#environment-variables) + [.env.example](.env.example) + [auth-and-providers.md](./docs/reference/auth-and-providers.md) + [deploy.md](./docs/how-to/deploy.md) |
 | Deployment topology | [deploy.md](./docs/how-to/deploy.md) |

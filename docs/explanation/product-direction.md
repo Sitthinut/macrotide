@@ -6,7 +6,7 @@ Why Macrotide exists, who it's for, and how the pieces fit into one product.
 This is the durable **why**; the forward build order lives on the
 [GitHub Project board](https://github.com/users/Sitthinut/projects/2) (issues
 grouped by Priority) and what already works is the
-[README status board](../../README.md#status). When intent and this page
+[README features list](../../README.md#features). When intent and this page
 disagree, this page is the product intent and the board is how we get there.
 
 ## North star
@@ -64,7 +64,7 @@ differentiator — a plain-language headline plus deterministic named checks
 (drift, fees, look-through diversification, cash) instead of a single chase-able
 grade, real aligned benchmark series, and an explicit "unavailable" state
 instead of fabricated numbers. This pillar is **mostly shipped** (see the
-[README status board](../../README.md#status)); the advisor reads it through
+[README features list](../../README.md#features)); the advisor reads it through
 `read_portfolio` / `read_performance` ([lib/advisor/tools.ts](../../lib/advisor/tools.ts)).
 
 ### 3. Research — *a market view for a long-term investor*
@@ -231,7 +231,7 @@ do.
 ## References
 
 - **Forward build order** → [GitHub Project board](https://github.com/users/Sitthinut/projects/2) (issues by Priority)
-- **What works today** → [README status board](../../README.md#status)
+- **What works today** → [README features list](../../README.md#features)
 - **What shipped** → [CHANGELOG.md](../../CHANGELOG.md)
 - **Why we picked what we picked** → [decisions/](./decisions/)
 - **Architecture** → [architecture.md](./architecture.md)

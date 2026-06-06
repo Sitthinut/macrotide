@@ -48,7 +48,7 @@ list is in [AGENTS.md § Personal data](../../AGENTS.md#personal-data--never-com
 Duplicated prose is the main cause of doc drift, so each fact has exactly one
 home and everything else links to it:
 
-- **Feature status** → [README status board](../../README.md#status) (built) + [project board](https://github.com/users/Sitthinut/projects/2) (planned)
+- **Feature status** → [README features list](../../README.md#features) (built) + [project board](https://github.com/users/Sitthinut/projects/2) (planned)
 - **Environment variables** → [configuration.md](../reference/configuration.md#environment-variables)
 - **Deploy steps** → [deploy.md](../how-to/deploy.md)
 - **Schema** → [lib/db/schema/](../../lib/db/schema)

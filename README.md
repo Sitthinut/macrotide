@@ -5,50 +5,56 @@
 [![CI](https://github.com/Sitthinut/macrotide/actions/workflows/ci.yml/badge.svg)](https://github.com/Sitthinut/macrotide/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
-_An open-source AI investment companion for Thai index investors. Personal-use experiment._
+_An open-source AI investment companion for Thai index investors._
 
 Macrotide closes the gap between index investing's proven theory and how DIY
 investors actually execute it. It pairs education, portfolio analysis, market
 research, and low-fee Thai fund selection with an AI advisor grounded in your
 real holdings.
 
-## Status
+> ⚠️ **Experimental** — a personal-use project, not investment advice.
 
-**Experimental — don't rely on it for real investment decisions.** The
-8-screen UI (Portfolio, Markets, Explore, Advisor, Journal, Models, Connect, Settings) is
-responsive across mobile / tablet / desktop with light/dark/system themes.
+## Features
 
-| Capability | Status |
-| --- | --- |
-| Persistence — SQLite + Drizzle, daily backups | ✅ Shipped |
-| AI advisor — streaming chat, tool-calls, proposal cards, plain-language health checks (incl. look-through diversification), performance-vs-index + plan-anchored rebalancing guidance | ✅ Shipped |
-| In-chat vision — attach images for the Advisor to read; multi-image holdings reconciliation → in-chat table + importer, chart/factsheet Q&A | ✅ Shipped |
-| Passkey auth + isolated per-session demo mode | ✅ Shipped |
-| Market data — real index levels (EODHD/FMP, with ETF-proxy + Yahoo fallback) + FX, Thai fund NAVs + history (Thai SEC), RSS news | ✅ Shipped |
-| Fund finder & screener — fuzzy + feeder-aware search over priceable **share classes**, with per-class fee / tax wrapper / 1-year return | ✅ Shipped |
-| Fund detail — per-share-class price & fund-size (AUM) history chart with class selector | ✅ Shipped |
-| Portfolio import — one Add modal with per-row Balance/trade types; paste, screenshot OCR, CSV, or typed rows in one editable review list; symbol autocomplete; units ↔ ฿-total entry | ✅ Shipped |
-| Unified ledger — holdings are a projection of one buy/sell + balance ledger; full-screen History + per-fund Position pages; realized gains, money-weighted return (XIRR), cost-basis timeline; custom (self-priced) assets; graceful degradation when cost is unknown | ✅ Shipped |
-| Long-term memory + chat archival — recall, FTS, session lifecycle | ✅ Shipped |
-| Multi-user — per-user isolation, tiers/quotas (token + optional cost caps, configurable cheap-paid free tier), owner admin | 🟡 Code shipped; launch prep open |
-| Benchmark comparison — "match or beat your index" (SET / S&P / Nasdaq / Nikkei) | ✅ Shipped; custom/goal-based benchmarks planned |
-| Reliable index/FX source (Yahoo 429 fix) | ✅ Shipped |
-| Scheduled market-data jobs — daily NAV freshness (held + indicators) + all-funds NAV/AUM history pre-warm, on systemd timers | ✅ Shipped |
-| What's next — richer AI, custom benchmarks, fund-data depth | ⬜ Planned — see the [project board](https://github.com/users/Sitthinut/projects/2) |
+A responsive app built around **five main tabs** — Portfolio, Markets, Explore,
+Advisor, and Journal — across mobile / tablet / desktop with light/dark/system
+themes. At its core: hold your Thai mutual-fund holdings,
+visualize allocation, fees, and NAV trends, pull a live market view from free
+public sources, and chat with an AI advisor grounded in your real portfolio,
+plan, and journal — including plan edits it proposes as accept/reject cards.
+
+**Portfolio, ledger & analytics**
+
+- **Unified ledger** — your holdings are a projection of one buy/sell + balance ledger; full-screen History and per-fund Position pages, in-place edits, custom self-priced assets, and graceful handling of unknown cost basis
+- **Performance** — realized gains, money-weighted return (XIRR) per-fund and whole-portfolio, cost-basis timeline, contributions and income
+- **Plain-language health checks** — allocation drift, blended fees, cash drag, and look-through diversification (underlying single-name concentration, feeder-aware); fee-creep alerts you can dismiss or snooze
+- **Flexible import** — paste, a screenshot, CSV, or typed rows, all reviewed in one editable list before saving; symbol autocomplete; enter by units or baht value
+- **Plan & journal** — a markdown investment plan the Advisor proposes edits to, plus notes, decisions, questions, and a reading list
+
+**AI Advisor**
+
+- **Grounded streaming chat** — knows your real portfolio, plan, and journal; tool-calls, accept/reject proposal cards, performance-vs-index and plan-anchored rebalancing guidance
+- **In-chat vision** — attach images for multi-image holdings reconciliation (snapshot vs transaction-history auto-detected) into an editable importer, plus chart / factsheet Q&A
+- **Long-term memory + chat archival** — recall, full-text search, and session lifecycle with preference extraction
+- **Built to be reliable** — empty-turn recovery, provider fallback, a configurable cheap-paid free tier with token / cost caps, and a committed eval harness in CI
+
+**Funds & markets**
+
+- **Fund finder & screener** — fuzzy, feeder-aware search over priceable **share classes** with per-class fee, tax wrapper, and 1-year return; retail-availability gating and TER ranking
+- **Fund detail** — per-share-class price and fund-size (AUM) history, holdings by asset type, and feeder look-through to underlying holdings
+- **Market data** — live index levels (FMP / EODHD with ETF-proxy + Yahoo fallback) + FX, Thai fund NAVs and history (Thai SEC), and RSS news, over a resilient stale-on-error cache
+- **Benchmarks & models** — match-or-beat your index (SET / S&P 500 / Nasdaq / Nikkei), and model portfolios you can browse, fork, and set as a target that drives drift + health checks
+
+**Platform**
+
+- **Sign-in** — passkeys + Google, with an isolated, ephemeral per-session demo mode
+- **Multi-user** — per-user data isolation, tiers and quotas, owner admin
+- **Storage** — a two-database SQLite split (precious `app.db` + regenerable `market.db`) on Drizzle, with daily backups
+- **Scheduled jobs** — daily NAV freshness + all-funds NAV/AUM history pre-warm on systemd timers, plus a nightly SEC fund-data ELT pipeline with risk-spectrum asset classification
 
 For what's next see the **[project board](https://github.com/users/Sitthinut/projects/2)**;
 for shipped detail see [CHANGELOG.md](./CHANGELOG.md) and the **[docs/](./docs)**
 user + developer guide.
-
-## What it does
-
-- Hold your **mutual fund holdings** (Thai fund-supermarket account).
-- **Visualize** allocation, fees, and NAV trends.
-- Fetch a **market view** from free public sources (SET index, public fund
-  pages).
-- Let you **jot thoughts and chat with an AI** that has structured access to
-  your portfolio, plan, and journal — including AI-proposed plan edits you
-  accept or reject as cards.
 
 ## Tech stack
 
