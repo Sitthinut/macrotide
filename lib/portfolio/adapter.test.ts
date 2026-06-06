@@ -74,6 +74,13 @@ describe("adaptPortfolios", () => {
     expect(portfolios[0].holdings[0].id).toBe(1);
     expect(portfolios[0].holdings[0].bucketId).toBe("core");
   });
+
+  it("keeps a blank holding source blank instead of falling back to brokerage", () => {
+    const holding = { ...sampleHolding, source: null };
+    const bucket = { ...sampleBucket, brokerage: "—" };
+    const portfolios = adaptPortfolios([bucket], [holding], [sampleQuote]);
+    expect(portfolios[0].holdings[0].source).toBe("");
+  });
 });
 
 describe("adaptAggregate", () => {

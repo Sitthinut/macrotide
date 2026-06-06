@@ -42,11 +42,7 @@ function quotesByTicker(quotes: FundQuote[]): Map<string, FundQuote> {
   return m;
 }
 
-function holdingFromDb(
-  h: DbHolding,
-  quotes: Map<string, FundQuote>,
-  fallbackSource: string,
-): Holding {
+function holdingFromDb(h: DbHolding, quotes: Map<string, FundQuote>): Holding {
   // Prefer the source-namespaced lookup. Falls back to the bare ticker for
   // backward compatibility with cache entries written before quoteSource
   // existed.
@@ -79,7 +75,7 @@ function holdingFromDb(
     y1: q?.y1Pct ?? 0,
     ter: h.ter ?? null,
     color: h.color ?? "var(--accent)",
-    source: h.source ?? fallbackSource,
+    source: h.source ?? "",
     quoteSource: h.quoteSource,
   };
 }
@@ -137,7 +133,7 @@ export function adaptBucket(
   quotes: Map<string, FundQuote>,
   rawSeries?: { date: string; value: number }[],
 ): Portfolio {
-  const holdings = bucketHoldings.map((h) => holdingFromDb(h, quotes, bucket.brokerage));
+  const holdings = bucketHoldings.map((h) => holdingFromDb(h, quotes));
   const totalValue = holdings.reduce((s, h) => s + h.value, 0);
   const initialInvestment = holdings.reduce((s, h) => s + h.cost, 0);
 
