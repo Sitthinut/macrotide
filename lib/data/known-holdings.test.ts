@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterKnownTickers, mergeWithHoldings, type TickerSuggestion } from "./known-funds";
+import { filterKnownTickers, mergeWithHoldings, type TickerSuggestion } from "./known-holdings";
 
 const sample: TickerSuggestion[] = [
   { ticker: "K-FIXED-A", name: "K Fixed Income Fund — A", quote_source: "thai_mutual_fund" },

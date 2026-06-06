@@ -15,7 +15,7 @@ import { Icon } from "@/components/Icon";
 import { SymbolCombobox } from "@/components/portfolio/SymbolCombobox";
 import { QtyInput } from "@/components/ui/QtyInput";
 import { Stat } from "@/components/ui/Stat";
-import { mergeWithHoldings, type TickerSuggestion } from "@/lib/data/known-funds";
+import { mergeWithHoldings, type TickerSuggestion } from "@/lib/data/known-holdings";
 import type { Transaction } from "@/lib/db/queries/transactions";
 import { useHoldings } from "@/lib/fetchers/portfolio";
 import { invalidate, useResource } from "@/lib/fetchers/swr";

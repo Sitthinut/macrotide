@@ -9,7 +9,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Combobox } from "@/components/ui/Combobox";
-import { filterKnownTickers, type TickerSuggestion } from "@/lib/data/known-funds";
+import { filterKnownTickers, type TickerSuggestion } from "@/lib/data/known-holdings";
 import type { ShareClassListItem } from "@/lib/db/queries/funds";
 import { useResource } from "@/lib/fetchers/swr";
 import type { QuoteSource } from "@/lib/market/sources";
@@ -22,7 +22,7 @@ const TYPE_BADGE_CODES: Record<QuoteSource, string> = {
   manual: "Custom",
 };
 
-// One dropdown row — a local (holdings/seed) suggestion or a live catalog class.
+// One dropdown row — a holdings suggestion or a live catalog class.
 // `distributionPolicy` is present only for catalog rows (drives the Acc/Div tag).
 interface SymbolSuggestion {
   ticker: string;

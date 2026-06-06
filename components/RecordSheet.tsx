@@ -19,7 +19,7 @@ import { Modal } from "@/components/Modal";
 import { SymbolCombobox } from "@/components/portfolio/SymbolCombobox";
 import { Combobox } from "@/components/ui/Combobox";
 import { QtyInput } from "@/components/ui/QtyInput";
-import { mergeWithHoldings, type TickerSuggestion } from "@/lib/data/known-funds";
+import { mergeWithHoldings, type TickerSuggestion } from "@/lib/data/known-holdings";
 import { mergeSourceSuggestions } from "@/lib/data/sources";
 import { useBuckets, useHoldings } from "@/lib/fetchers/portfolio";
 import { invalidate } from "@/lib/fetchers/swr";

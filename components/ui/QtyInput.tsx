@@ -83,9 +83,7 @@ export function QtyInput({
         type="button"
         className="qty-input__toggle"
         title={
-          inBaht
-            ? "This figure is the ฿ total — tap to read it as units"
-            : "This figure is units — tap to read it as the ฿ total"
+          inBaht ? "Entering the ฿ total — tap for units" : "Entering units — tap for the ฿ total"
         }
         aria-label="Switch between units and total"
         onMouseDown={(e) => e.preventDefault()}
