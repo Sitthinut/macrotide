@@ -867,7 +867,12 @@ function DraftRow({
       if (d.needsDate) needs = "needs a date";
       else if (row.kind === "split") {
         if (d.units == null) needs = "needs a split ratio";
-      } else if (d.needsAmount) needs = "needs an amount";
+      } else if (d.needsAmount) {
+        // Units alone can't value a trade (the ฿ amount comes from units × price, and
+        // a fund's NAV only derives units FROM an amount, never the reverse). So with
+        // units you still need a price; with neither, you need an amount.
+        needs = Number(row.units) > 0 ? "needs a price" : "needs an amount";
+      }
     }
   }
   // Cost is OPTIONAL — a softer nudge ("adding one unlocks gains"), shown only once the
@@ -953,6 +958,10 @@ function RowEditor({
   // not-yet-typed symbol shows NO cue (just "Price"), like the other required fields:
   // we only ever flag "optional", never "needed".
   const pricedByFeed = row.ticker.trim().length > 0 && (row.quoteSource ?? "manual") !== "manual";
+  // A TRADE's Price is optional only once the ฿ amount is in (then the amount is the
+  // money fact and units derive from it) — NOT merely because the fund is on a feed.
+  // Entering UNITS instead still needs the price to know the cost.
+  const tradePriceOptional = !anchor && Number(row.amount) > 0;
   const cls = `rec-edit${anchor ? " is-anchor" : amountOnly ? " is-flow" : ""}`;
   return (
     <div className="ledger-edit-card">
@@ -1063,24 +1072,21 @@ function RowEditor({
             <label className="rec-field">
               <span className="rec-label">
                 {anchor ? "Avg cost" : "Price"}
-                {/* A trade on a feed-priced symbol can derive units from NAV / the ฿
-                    amount, so its Price is optional. (Avg cost on a Balance is never
-                    "optional" — it's encouraged via the amber nudge instead.) */}
-                {!anchor && pricedByFeed && <span className="rec-opt"> · optional</span>}
+                {/* Trade Price is optional once the ฿ amount is in (units derive from it).
+                    Avg cost on a Balance is never "optional" — encouraged via the nudge. */}
+                {tradePriceOptional && <span className="rec-opt"> · optional</span>}
               </span>
               <input
                 value={row.price}
                 onChange={(e) => onChange({ price: e.target.value, estimated: false })}
-                placeholder={
-                  !anchor && pricedByFeed ? "Optional" : anchor ? "What you paid" : "Price"
-                }
+                placeholder={tradePriceOptional ? "Optional" : anchor ? "What you paid" : "Price"}
                 inputMode="decimal"
                 aria-label={anchor ? "Average cost" : "Price"}
                 // Avg cost is NOT marked "optional": skippable, but adding it unlocks
                 // gains/return — so it reads as a normal field, and the row nudges
                 // (amber "no cost yet") when it's blank. A pre-filled figure DERIVED from
                 // the ฿ value is an estimate to verify (amber dashed, data-estimated).
-                data-optional={!anchor && pricedByFeed ? "" : undefined}
+                data-optional={tradePriceOptional ? "" : undefined}
                 data-estimated={anchor && anchorValueDriven && row.estimated ? "" : undefined}
                 title={
                   anchor
