@@ -8,7 +8,7 @@
 // record). Holdings are a projection of this ledger, so every write re-invalidates
 // holdings + portfolio views.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EventLine } from "@/components/history/EventLine";
 import { Icon } from "@/components/Icon";
@@ -18,6 +18,7 @@ import { Stat } from "@/components/ui/Stat";
 import { mergeWithHoldings, type TickerSuggestion } from "@/lib/data/known-holdings";
 import type { Transaction } from "@/lib/db/queries/transactions";
 import { useHoldings } from "@/lib/fetchers/portfolio";
+import { cachedQuoteSource, resolveQuoteSources } from "@/lib/fetchers/quote-source";
 import { invalidate, useResource } from "@/lib/fetchers/swr";
 import type { QuoteSource } from "@/lib/market/sources";
 import type { TxnKind } from "@/lib/portfolio/lots";
@@ -223,6 +224,13 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
         });
         if (!d.ticker || d.needsDate || (d.kind !== "split" && d.needsAmount)) {
           setRowError("Add a date, a symbol, and an amount.");
+          setBusy(false);
+          return;
+        }
+        // A custom trade given cash but no count and no price folds to 0 units —
+        // reject it here exactly as the Add modal does (shared `unitsResolvable`).
+        if (d.kind !== "split" && !d.unitsResolvable) {
+          setRowError("Add a price so we can value this trade.");
           setBusy(false);
           return;
         }
@@ -471,6 +479,34 @@ function TxnEditor({
   );
 
   const set = (patch: Partial<Draft>) => onChange((prev) => ({ ...prev, ...patch }));
+
+  // Resolve a hand-TYPED symbol's source against the catalog (the same shared
+  // resolver the Add modal uses) so the badge matches across both editors — picking
+  // a suggestion already sets the source; this covers typing a catalog code without
+  // picking it. Skips a pinned (user-toggled) source. Reads/writes via the functional
+  // updater so a stale ticker in the debounced callback can't clobber a newer edit.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: ticker + lock are the inputs; onChange is stable (setDraft)
+  useEffect(() => {
+    const ticker = draft.ticker;
+    if (draft.quoteSourceLocked || !ticker.trim()) return;
+    const apply = () => {
+      const resolved = cachedQuoteSource(ticker);
+      if (!resolved) return;
+      onChange((prev) =>
+        prev.quoteSourceLocked || prev.ticker !== ticker || prev.quoteSource === resolved
+          ? prev
+          : { ...prev, quoteSource: resolved },
+      );
+    };
+    apply(); // apply an already-cached source immediately
+    const timer = setTimeout(() => {
+      void resolveQuoteSources([ticker]).then((gained) => {
+        if (gained) apply();
+      });
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [draft.ticker, draft.quoteSourceLocked]);
+
   const anchor = isAnchor(draft.kind);
   // Dividend / fee are pure ฿ flows — no units or price, just an amount.
   const amountOnly = draft.kind === "dividend" || draft.kind === "fee";

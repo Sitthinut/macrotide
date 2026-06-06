@@ -22,6 +22,7 @@ import { QtyInput, qtyDefaultMode } from "@/components/ui/QtyInput";
 import { mergeWithHoldings, type TickerSuggestion } from "@/lib/data/known-holdings";
 import { mergeSourceSuggestions } from "@/lib/data/sources";
 import { useBuckets, useHoldings } from "@/lib/fetchers/portfolio";
+import { cachedQuoteSource, resolveQuoteSources } from "@/lib/fetchers/quote-source";
 import { invalidate } from "@/lib/fetchers/swr";
 import { normalizeImage } from "@/lib/image-normalize";
 import type { QuoteSource } from "@/lib/market/sources";
@@ -449,19 +450,18 @@ export function RecordSheet({
     setEditing(r.id);
   };
 
-  // Resolve each row's price source against the REAL fund catalog (a catalog fund →
-  // "Fund", a market-shaped code → "Stock/ETF", else custom) so the badge is right
-  // on the fly for ANY typed/imported symbol — not just the client seed list the
-  // shape heuristic falls back to. Skips rows the user pinned; debounced + cached so
-  // it fires once per new symbol and converges (only patches when the source differs).
-  const sourceCache = useRef(new Map<string, QuoteSource>());
+  // Resolve each row's price source against the REAL fund catalog (in the catalog →
+  // its fund source, else custom) so the badge is right on the fly for ANY typed or
+  // imported symbol. Skips rows the user pinned; debounced + cached (the shared
+  // resolver the History editor uses too) so it fires once per new symbol and
+  // converges, only patching when the source actually differs.
   useEffect(() => {
     const applyCached = () =>
       setRows((prev) => {
         let changed = false;
         const next = prev.map((r) => {
           if (r.quoteSourceLocked || !r.ticker.trim()) return r;
-          const resolved = sourceCache.current.get(r.ticker.trim().toUpperCase());
+          const resolved = cachedQuoteSource(r.ticker);
           if (resolved && resolved !== r.quoteSource) {
             changed = true;
             return { ...r, quoteSource: resolved };
@@ -471,30 +471,14 @@ export function RecordSheet({
         return changed ? next : prev;
       });
 
-    const pending = [
-      ...new Set(
-        rows
-          .filter((r) => r.ticker.trim() && !r.quoteSourceLocked)
-          .map((r) => r.ticker.trim().toUpperCase())
-          .filter((t) => !sourceCache.current.has(t)),
-      ),
-    ];
-    if (pending.length === 0) {
-      applyCached();
-      return;
-    }
-    const timer = setTimeout(async () => {
-      try {
-        const res = await fetch(
-          `/api/quote-source?tickers=${encodeURIComponent(pending.join(","))}`,
-        );
-        if (!res.ok) return;
-        const map = (await res.json()) as Record<string, QuoteSource>;
-        for (const [t, s] of Object.entries(map)) sourceCache.current.set(t.toUpperCase(), s);
-        applyCached();
-      } catch {
-        // Best-effort — on failure the shape-heuristic default badge stands.
-      }
+    applyCached(); // paint anything already cached immediately
+    const tickers = rows
+      .filter((r) => r.ticker.trim() && !r.quoteSourceLocked)
+      .map((r) => r.ticker);
+    const timer = setTimeout(() => {
+      void resolveQuoteSources(tickers).then((gained) => {
+        if (gained) applyCached();
+      });
     }, 350);
     return () => clearTimeout(timer);
   }, [rows]);
@@ -533,10 +517,9 @@ export function RecordSheet({
     if (d.kind === "split") return d.units != null;
     // A trade needs its cash AND units it can actually resolve: units entered, a price
     // (units = amount ÷ price), or a feed-priced fund (NAV bridges them). A custom
-    // amount-only trade with no price would fold to 0 units — not ready.
-    const feed = (r.quoteSource ?? "manual") !== "manual";
-    const unitsResolvable = Number(r.units) > 0 || r.price.trim() !== "" || feed;
-    return !d.needsAmount && unitsResolvable;
+    // amount-only trade with no price would fold to 0 units — not ready. The same
+    // `unitsResolvable` gate runs in the History editor's save, so the two agree.
+    return !d.needsAmount && d.unitsResolvable;
   };
   const readyRows = rows.filter(valid);
 
@@ -886,7 +869,6 @@ function DraftRow({
         fee: row.fee,
         quoteSource: row.quoteSource,
       });
-      const feed = (row.quoteSource ?? "manual") !== "manual";
       if (d.needsDate) needs = "needs a date";
       else if (row.kind === "split") {
         if (d.units == null) needs = "needs a split ratio";
@@ -895,9 +877,9 @@ function DraftRow({
         // needsAmount stays true only when it can't — a custom asset with units still
         // needs a price, and a row with neither units nor amount needs an amount.
         needs = Number(row.units) > 0 ? "needs a price" : "needs an amount";
-      } else if (!(Number(row.units) > 0) && !row.price.trim() && !feed) {
+      } else if (!d.unitsResolvable) {
         // Cash is in, but a CUSTOM asset has no NAV and no price to turn it into units
-        // — without one it'd fold to 0 units. Prompt for the price.
+        // — without one it'd fold to 0 units. Prompt for the price (same gate as save).
         needs = "needs a price";
       }
     }

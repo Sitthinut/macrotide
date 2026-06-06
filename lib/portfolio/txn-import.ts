@@ -110,6 +110,11 @@ export interface TxnDraftRow {
   quoteSource: QuoteSource;
   /** True when no usable amount could be derived — the user must enter one. */
   needsAmount: boolean;
+  /** True when the trade's units can be resolved at the fold — a read count, an
+   *  execution price (units = amount ÷ price), or a feed-priced fund (NAV bridges).
+   *  False only for a CUSTOM asset given cash but no count and no price: it would
+   *  fold to 0 units, so both inline editors reject it (split rows are exempt). */
+  unitsResolvable: boolean;
   /** True when no trade date is present — the user must enter one. */
   needsDate: boolean;
 }
@@ -159,6 +164,8 @@ export function normalizeTxnDraft(row: TxnDraftInput): TxnDraftRow {
   const tradeDate = normalizeDate(row.tradeDate ?? "");
   // Default to custom; the catalog resolver (/api/quote-source) promotes a real fund.
   const quoteSource = row.quoteSource ?? "manual";
+  const hasUnits = units !== null && units > 0;
+  const feed = quoteSource !== "manual";
 
   return {
     tradeDate,
@@ -173,10 +180,10 @@ export function normalizeTxnDraft(row: TxnDraftInput): TxnDraftRow {
     // A units-only trade on a feed-priced fund (catalog / market) is NOT missing its
     // amount — it derives from units × NAV(date) at the fold. A custom asset has no
     // NAV, so units alone still needs a price (or the ฿ amount).
-    needsAmount:
-      kind !== "split" &&
-      (amount === null || amount <= 0) &&
-      !(units !== null && units > 0 && quoteSource !== "manual"),
+    needsAmount: kind !== "split" && (amount === null || amount <= 0) && !(hasUnits && feed),
+    // The fold turns the ฿ amount into units via the execution price or NAV; a custom
+    // asset has neither, so a count/price is the only bridge (else it folds to 0 units).
+    unitsResolvable: kind === "split" || hasUnits || price !== null || feed,
     needsDate: tradeDate === "",
   };
 }
