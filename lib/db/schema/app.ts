@@ -57,8 +57,10 @@ export const holdings = sqliteTable(
     category: text("category"),
     assetClass: text("asset_class"),
     region: text("region"),
-    units: real("units").notNull(),
-    avgCost: real("avg_cost"),
+    // NOTE: a holding's POSITION (units, avg cost) is NOT stored — it is folded
+    // from the `transactions` ledger on read (ADR 0004; listHoldings/getHolding).
+    // The row holds only instrument metadata + ledger-carried identity. Never
+    // re-add units/avg_cost columns: they'd be a stale copy of regenerable math.
     ter: real("ter"),
     color: text("color"),
     /** Brokerage / import provenance — free-text, displayed in UI. */

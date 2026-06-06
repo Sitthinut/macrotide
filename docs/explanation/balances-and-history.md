@@ -68,8 +68,8 @@ these are how it *behaves* — kept current here.)
   disagree. You never type a holding's units or average cost directly; you record a
   ledger entry and the position recomputes. (A holdings row still exists as the home
   for instrument metadata that isn't in the ledger — name, asset class, price source,
-  which portfolio — and a rebuild keeps that row in step; its stored units are only a
-  write-time snapshot, never what a read trusts.)
+  which portfolio — and a rebuild keeps that row in step; it stores **no** units or
+  average cost at all, so there's nothing derived to go stale.)
 - **Cost and market value stay orthogonal.** Average cost only moves when you buy
   or sell; current value comes from the live NAV (or a custom asset's recorded
   price). Because the market can't touch your average cost, a value-only

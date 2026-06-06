@@ -1,37 +1,45 @@
 import { and, eq, inArray } from "drizzle-orm";
+import type { ProjectedPosition } from "@/lib/portfolio/project-positions";
 import { getDb } from "../context";
 import { holdings, transactions } from "../schema";
 import { projectBucketPositions } from "./project-holdings";
 
-export type Holding = typeof holdings.$inferSelect;
+/** The stored holdings row: instrument metadata + identity only — NO position. */
+export type HoldingRow = typeof holdings.$inferSelect;
 export type HoldingInsert = typeof holdings.$inferInsert;
 export type HoldingUpdate = Partial<Omit<HoldingInsert, "id" | "createdAt">>;
 
-// Read-through fold (ADR 0004). `holdings` rows carry the instrument metadata that
-// has no home in the ledger (name, asset class, quote source, portfolio, custom
-// flag); their `units`/`avgCost` are a write-time snapshot. On READ we re-fold the
-// ledger and overlay the live position, so a holding's units/cost — and therefore
-// its value, gains, and weight — always reflect the latest NAV, never a figure
-// frozen at the last write. This matches the analytics path (which already folds on
-// read), so the two can no longer disagree.
-function overlayLive(rows: Holding[]): Holding[] {
-  if (rows.length === 0) return rows;
+/**
+ * A holding as the app reads it: the stored metadata row PLUS the live position
+ * (`units`/`avgCost`) folded from the ledger on read (ADR 0004). The position is
+ * never stored — the `holdings` table holds only the instrument metadata that has
+ * no home in the ledger (name, asset class, quote source, portfolio). So units,
+ * cost, value, gains, and weight always reflect the latest NAV and can't disagree
+ * with the analytics, which folds the same ledger.
+ */
+export type Holding = HoldingRow & { units: number; avgCost: number | null };
+
+/** Overlay the live fold onto stored rows. A row the ledger no longer folds to a
+ * held position is OMITTED — the fold, not the row, decides what you hold (a
+ * sold-out holding's row is already gone, deleted by the rebuild). */
+function overlayLive(rows: HoldingRow[]): Holding[] {
+  if (rows.length === 0) return [];
   const buckets = new Set(rows.map((h) => h.bucketId));
-  const live = new Map<
-    string,
-    { units: number; avgCost: number | null; acquiredOn: string | null }
-  >();
+  const live = new Map<string, ProjectedPosition>();
   for (const b of buckets)
     for (const p of projectBucketPositions(b)) live.set(`${b} ${p.ticker}`, p);
-  return rows.map((h) => {
+  const out: Holding[] = [];
+  for (const h of rows) {
     const p = live.get(`${h.bucketId} ${h.ticker}`);
-    // No live position → keep the stored snapshot. This is resilient, not stale: a
-    // genuinely sold-out holding has its row DELETED by the rebuild (so it's already
-    // absent here), and a value-only holding the ledger can't price right now keeps
-    // its last-known units rather than vanishing on a transient market-data gap.
-    if (!p) return h;
-    return { ...h, units: p.units, avgCost: p.avgCost, acquiredOn: h.acquiredOn ?? p.acquiredOn };
-  });
+    if (!p) continue;
+    out.push({
+      ...h,
+      units: p.units,
+      avgCost: p.avgCost,
+      acquiredOn: h.acquiredOn ?? p.acquiredOn,
+    });
+  }
+  return out;
 }
 
 export function listHoldings(bucketId?: string): Holding[] {
@@ -43,25 +51,10 @@ export function listHoldings(bucketId?: string): Holding[] {
 export function getHolding(id: number): Holding | undefined {
   const row = getDb().select().from(holdings).where(eq(holdings.id, id)).get();
   if (!row) return undefined;
+  // Load by id even when the ledger folds to no position (units 0) — the metadata
+  // row exists and may need editing.
   const p = projectBucketPositions(row.bucketId).find((x) => x.ticker === row.ticker);
-  return p ? { ...row, units: p.units, avgCost: p.avgCost } : row;
-}
-
-export function createHolding(input: HoldingInsert): Holding {
-  return getDb().insert(holdings).values(input).returning().get();
-}
-
-export function updateHolding(id: number, patch: HoldingUpdate): Holding | undefined {
-  return getDb()
-    .update(holdings)
-    .set({ ...patch, updatedAt: new Date().toISOString() })
-    .where(eq(holdings.id, id))
-    .returning()
-    .get();
-}
-
-export function deleteHolding(id: number): void {
-  getDb().delete(holdings).where(eq(holdings.id, id)).run();
+  return { ...row, units: p?.units ?? 0, avgCost: p?.avgCost ?? null };
 }
 
 /**

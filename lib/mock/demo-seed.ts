@@ -101,8 +101,7 @@ export function seedDemoData(db: Db): void {
           category: h.category,
           assetClass: h.class,
           region: h.region,
-          units: h.units,
-          avgCost,
+          // Position (units/avgCost) is folded from the opening anchor below, not stored.
           ter: h.ter,
           color: h.color,
           source: h.source,

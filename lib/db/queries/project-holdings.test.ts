@@ -10,7 +10,8 @@ import { freshMarketDb } from "@/tests/db-helpers";
 import { type DbContext, runWithDbContext } from "../context";
 import * as schema from "../schema";
 import { createBucket } from "./buckets";
-import { createHolding, listHoldings } from "./holdings";
+import type { Holding } from "./holdings";
+import { listHoldings } from "./holdings";
 import {
   createHoldingViaLedger,
   deleteHoldingViaLedger,
@@ -286,8 +287,20 @@ describe("holdings projection — backfill equivalence", () => {
   it("holding → opening anchor → rebuild reproduces the same position", () => {
     runWithDbContext(freshCtx(), () => {
       createBucket({ ...BUCKET, id: "b1" });
-      // A hand-typed snapshot holding, as today.
-      const before = createHolding({
+      // A legacy snapshot holding (the pre-ledger shape openingFromHolding backfills),
+      // as a literal — holdings rows no longer store units/avgCost.
+      const before: Pick<
+        Holding,
+        | "bucketId"
+        | "ticker"
+        | "englishName"
+        | "quoteSource"
+        | "units"
+        | "avgCost"
+        | "source"
+        | "acquiredOn"
+        | "createdAt"
+      > = {
         bucketId: "b1",
         ticker: A,
         englishName: "Fund A",
@@ -295,7 +308,9 @@ describe("holdings projection — backfill equivalence", () => {
         avgCost: 12.5,
         quoteSource: "thai_mutual_fund",
         source: "Broker X",
-      });
+        acquiredOn: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      };
 
       // Backfill it into an opening anchor, then rebuild the projection.
       insertTransactions([openingFromHolding(before)]);

@@ -13,7 +13,7 @@ import {
   upsertFund,
   upsertFundFees,
 } from "../db/queries/funds";
-import { createHolding } from "../db/queries/holdings";
+import { createHoldingViaLedger } from "../db/queries/project-holdings";
 import * as schema from "../db/schema";
 import { computeFeeCreep } from "./fee-creep";
 
@@ -93,7 +93,7 @@ function ter(projId: string, actual: number, over: Partial<FundFeeInsert> = {}):
 }
 
 function holding(ticker: string) {
-  return createHolding({
+  return createHoldingViaLedger({
     bucketId: "b1",
     ticker,
     englishName: `${ticker} holding`,

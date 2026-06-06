@@ -7,7 +7,7 @@ import {
 } from "@/lib/portfolio/project-positions";
 import { getDb } from "../context";
 import { holdings, transactions } from "../schema";
-import type { Holding } from "./holdings";
+import type { Holding, HoldingRow } from "./holdings";
 import { foldableEvents } from "./resolve-derived-units";
 import type { Transaction, TransactionInsert } from "./transactions";
 
@@ -55,16 +55,21 @@ export function projectBucketPositions(bucketId: string): ProjectedPosition[] {
   return projectPositions(foldableEvents(events).map(toProjectionEvent), DEFAULT_METHOD);
 }
 
+/** Build the read-model Holding (stored row + folded position) — the same overlay
+ * listHoldings/getHolding do, inlined here to avoid a holdings.ts import cycle. */
+function withFoldedPosition(row: HoldingRow): Holding {
+  const p = projectBucketPositions(row.bucketId).find((x) => x.ticker === row.ticker);
+  return { ...row, units: p?.units ?? 0, avgCost: p?.avgCost ?? null };
+}
+
 /**
- * Rebuild the derived `holdings` rows for one bucket from its ledger. Positions
- * (units, avgCost) come from the ledger; instrument metadata (thaiName,
- * category, assetClass, region, ter, color) is preserved from the existing row.
- * A position that nets to zero units is removed. Idempotent and deterministic:
- * running it twice on the same ledger yields the same rows.
- *
- * The persisted units/avgCost are a write-time snapshot for row existence and a
- * fallback; the live read path (`listHoldings`/`getHolding`) re-folds and overlays
- * fresh figures, so reads never serve a position frozen at the last write.
+ * Reconcile the `holdings` rows for one bucket with its ledger. A `holdings` row
+ * is the home for instrument metadata that has no place in the ledger (thaiName,
+ * category, assetClass, region, ter, color) plus ledger-carried identity
+ * (quoteSource, englishName, source). Positions (units/avgCost) are NOT stored —
+ * they're folded on read (listHoldings/getHolding). This keeps one row per held
+ * ticker: create a row when a ticker is first held, drop it when it's no longer
+ * held, preserve metadata across rebuilds. Idempotent and deterministic.
  */
 export function rebuildHoldingsForBucket(bucketId: string): void {
   const db = getDb();
@@ -80,11 +85,10 @@ export function rebuildHoldingsForBucket(bucketId: string): void {
       seen.add(p.ticker);
       const prev = byTicker.get(p.ticker);
       if (prev) {
-        // Overwrite the DERIVED position columns; leave metadata untouched.
+        // Refresh only the ledger-carried identity; leave metadata untouched. No
+        // position columns to write — units/avgCost are folded on read.
         tx.update(holdings)
           .set({
-            units: p.units,
-            avgCost: p.avgCost,
             quoteSource: p.quoteSource,
             englishName: p.englishName || prev.englishName,
             source: p.source ?? prev.source,
@@ -94,15 +98,13 @@ export function rebuildHoldingsForBucket(bucketId: string): void {
           .where(eq(holdings.id, prev.id))
           .run();
       } else {
-        // First time we've seen this ticker — create the row with whatever
-        // identity the ledger carries; metadata fills in via later edits.
+        // First time we've seen this ticker — create the metadata row with whatever
+        // identity the ledger carries; richer metadata fills in via later edits.
         tx.insert(holdings)
           .values({
             bucketId,
             ticker: p.ticker,
             englishName: p.englishName || p.ticker,
-            units: p.units,
-            avgCost: p.avgCost,
             quoteSource: p.quoteSource,
             source: p.source,
             acquiredOn: p.acquiredOn,
@@ -224,11 +226,10 @@ export function createHoldingViaLedger(input: CreateHoldingInput): Holding | und
       .where(eq(holdings.id, row.id))
       .run();
   }
-  return db
-    .select()
-    .from(holdings)
-    .where(eq(holdings.id, row?.id ?? -1))
-    .get();
+  if (!row) return undefined;
+  // Re-read AFTER the metadata update; the position is folded on read (no stored units).
+  const fresh = db.select().from(holdings).where(eq(holdings.id, row.id)).get();
+  return fresh ? withFoldedPosition(fresh) : undefined;
 }
 
 /**
@@ -249,6 +250,10 @@ export function editHoldingViaLedger(id: number, patch: EditHoldingPatch): Holdi
   const oldTicker = h.ticker;
   const newTicker = (patch.ticker ?? oldTicker).trim() || oldTicker;
   const now = new Date().toISOString();
+  // Current position folded from the ledger — units/avgCost aren't stored on the row.
+  const cur = projectBucketPositions(bucketId).find((p) => p.ticker === oldTicker);
+  const curUnits = cur?.units ?? 0;
+  const curAvg = cur?.avgCost ?? null;
 
   // 1. Identity onto the ledger (ticker / quoteSource / englishName / source).
   const idSet: Record<string, unknown> = {};
@@ -264,9 +269,9 @@ export function editHoldingViaLedger(id: number, patch: EditHoldingPatch): Holdi
   }
 
   // 2. Position change → edit the single backing event, else append a snapshot.
-  if (numChanged(patch.units, h.units) || numChanged(patch.avgCost, h.avgCost)) {
-    const newUnits = patch.units ?? h.units;
-    const newAvg = patch.avgCost !== undefined ? patch.avgCost : h.avgCost;
+  if (numChanged(patch.units, curUnits) || numChanged(patch.avgCost, curAvg)) {
+    const newUnits = patch.units ?? curUnits;
+    const newAvg = patch.avgCost !== undefined ? patch.avgCost : curAvg;
     const events = db
       .select()
       .from(transactions)
@@ -321,9 +326,10 @@ export function editHoldingViaLedger(id: number, patch: EditHoldingPatch): Holdi
       .run();
   }
 
-  // 5. One rebuild lands the derived position columns.
+  // 5. One rebuild reconciles the row set; the position is folded on read.
   rebuildHoldingsForBucket(bucketId);
-  return db.select().from(holdings).where(eq(holdings.id, id)).get();
+  const updated = db.select().from(holdings).where(eq(holdings.id, id)).get();
+  return updated ? withFoldedPosition(updated) : undefined;
 }
 
 /**

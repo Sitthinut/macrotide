@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { freshAppDb, freshMarketDb } from "@/tests/db-helpers";
 import { getMarketDb, runWithDbContext } from "../context";
-import { buckets, fundCatalog, fundQuotes, holdings, navHistory } from "../schema";
+import { buckets, fundCatalog, fundQuotes, holdings, navHistory, transactions } from "../schema";
 import { getPortfolioSeries } from "./series";
 
 // The FX layer (lib/market/fx) calls getCachedSeries, which would otherwise
@@ -73,13 +73,26 @@ function seedHolding(
   db: AppDb,
   h: { bucketId?: string; ticker: string; quoteSource: string; units: number },
 ): void {
+  const bucketId = h.bucketId ?? "core";
   db.insert(holdings)
+    .values({ bucketId, ticker: h.ticker, englishName: h.ticker, quoteSource: h.quoteSource })
+    .run();
+  // Position is folded from the ledger on read — seed a matching opening anchor.
+  db.insert(transactions)
     .values({
-      bucketId: h.bucketId ?? "core",
+      bucketId,
       ticker: h.ticker,
       englishName: h.ticker,
-      units: h.units,
       quoteSource: h.quoteSource,
+      kind: "opening",
+      tradeDate: "2020-01-01",
+      units: h.units,
+      pricePerUnit: null,
+      amount: 0,
+      fee: null,
+      tradeCurrency: "THB",
+      fxToThb: 1,
+      importBatchId: "test-seed",
     })
     .run();
 }

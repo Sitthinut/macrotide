@@ -79,7 +79,10 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   blanks an existing position — it's held aside and appears when that date's NAV lands.
   Your **holdings list itself now folds the ledger on every read** (not just the
   analytics), so units, cost, value, and weight always reflect the latest NAV with no
-  refresh — the holdings view and the return figures can never drift apart.
+  refresh — the holdings view and the return figures can never drift apart. The
+  `holdings` table no longer stores units or average cost at all (those columns are
+  dropped); a holding row now carries only the instrument metadata that isn't in the
+  ledger, so there is no derived figure left to go stale.
 - **The importer checks each symbol's price source against the real catalog.** A
   symbol's source badge (Fund · Stock/ETF · Custom) is now resolved against the
   full fund catalog on the fly — typed, pasted, or imported — instead of guessing

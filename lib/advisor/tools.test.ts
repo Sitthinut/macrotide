@@ -7,9 +7,10 @@ import { freshMarketDb } from "@/tests/db-helpers";
 import { runWithDbContext } from "../db/context";
 import { createBucket } from "../db/queries/buckets";
 import { upsertFund } from "../db/queries/funds";
-import { createHolding, listHoldings } from "../db/queries/holdings";
+import { listHoldings } from "../db/queries/holdings";
 import { listJournalEntries } from "../db/queries/journal";
 import { getPlan, upsertPlan } from "../db/queries/plan";
+import { createHoldingViaLedger } from "../db/queries/project-holdings";
 import { upsertFundQuote } from "../db/queries/quotes";
 import { upsertShareClasses } from "../db/queries/share-classes";
 import { insertTransactions } from "../db/queries/transactions";
@@ -70,20 +71,22 @@ describe("advisor tools — read_portfolio", () => {
     const out = (await withFresh(async () => {
       createBucket(BUCKET);
       // value = units * avgCost (no quote seeded → falls back to avgCost).
-      createHolding({
+      createHoldingViaLedger({
         bucketId: "core",
         ticker: "VOO",
         englishName: "S&P 500",
+        quoteSource: "market",
         units: 100,
         avgCost: 6, // value 600
         assetClass: "equity",
         region: "US",
         ter: 0.03,
       });
-      createHolding({
+      createHoldingViaLedger({
         bucketId: "core",
         ticker: "BND",
         englishName: "Total Bond",
+        quoteSource: "market",
         units: 100,
         avgCost: 4, // value 400
         assetClass: "bond",

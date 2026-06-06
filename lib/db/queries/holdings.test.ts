@@ -12,7 +12,8 @@ import { freshMarketDb } from "@/tests/db-helpers";
 import { type DbContext, runWithDbContext } from "../context";
 import * as schema from "../schema";
 import { createBucket } from "./buckets";
-import { createHolding, listHoldings, renameHoldingSource } from "./holdings";
+import { listHoldings, renameHoldingSource } from "./holdings";
+import { createHoldingViaLedger } from "./project-holdings";
 
 function freshDb() {
   const sqlite = new Database(":memory:");
@@ -48,7 +49,14 @@ const BUCKET = {
 };
 
 function seedHolding(bucketId: string, ticker: string, source: string | null) {
-  createHolding({ bucketId, ticker, englishName: ticker, units: 1, source, quoteSource: "market" });
+  createHoldingViaLedger({
+    bucketId,
+    ticker,
+    englishName: ticker,
+    units: 1,
+    source,
+    quoteSource: "market",
+  });
 }
 
 describe("renameHoldingSource", () => {
