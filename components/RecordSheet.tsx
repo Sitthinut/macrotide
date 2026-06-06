@@ -882,7 +882,8 @@ function DraftRow({
             {name || "New row"}
           </span>
           <span className="sub" style={{ display: "block" }}>
-            {sub.join(" · ") || "Tap to fill in"}
+            {/* No symbol yet → unfilled, regardless of a Balance's default date. */}
+            {hasTicker ? sub.join(" · ") || "Tap to fill in" : "Tap to fill in"}
             {costUnknown && <span style={{ color: "var(--amber)" }}> · no cost yet</span>}
           </span>
         </span>
@@ -921,16 +922,11 @@ function RowEditor({
   // A Balance recorded by its ฿ value (not a unit count): avg cost is optional here
   // — units (and any cost) are derived from the value, so the cost field steps back.
   const anchorValueDriven = anchor && Number(row.value) > 0;
-  // A custom (self-priced) asset has no live feed — its current price is NEEDED to
-  // value the holding, not optional like it is for a catalog fund (live NAV).
-  const isCustom = anchor && (row.quoteSource ?? "manual") === "manual";
-  // The current-price cue only resolves once there's a symbol to judge: until then
-  // no cue (just "Price"); a custom symbol reads "needed", a catalog fund "optional".
-  const priceCue: "optional" | "needed" | null = !row.ticker.trim()
-    ? null
-    : isCustom
-      ? "needed"
-      : "optional";
+  // A symbol priced by a live feed (a catalog fund, or a market ETF) makes its
+  // price / current-price OPTIONAL — we can value it without one. A custom asset or a
+  // not-yet-typed symbol shows NO cue (just "Price"), like the other required fields:
+  // we only ever flag "optional", never "needed".
+  const pricedByFeed = row.ticker.trim().length > 0 && (row.quoteSource ?? "manual") !== "manual";
   const cls = `rec-edit${anchor ? " is-anchor" : amountOnly ? " is-flow" : ""}`;
   return (
     <div className="ledger-edit-card">
@@ -1039,17 +1035,26 @@ function RowEditor({
               />
             </div>
             <label className="rec-field">
-              <span className="rec-label">{anchor ? "Avg cost" : "Price"}</span>
+              <span className="rec-label">
+                {anchor ? "Avg cost" : "Price"}
+                {/* A trade on a feed-priced symbol can derive units from NAV / the ฿
+                    amount, so its Price is optional. (Avg cost on a Balance is never
+                    "optional" — it's encouraged via the amber nudge instead.) */}
+                {!anchor && pricedByFeed && <span className="rec-opt"> · optional</span>}
+              </span>
               <input
                 value={row.price}
                 onChange={(e) => onChange({ price: e.target.value, estimated: false })}
-                placeholder={anchor ? "What you paid" : "Price"}
+                placeholder={
+                  !anchor && pricedByFeed ? "Optional" : anchor ? "What you paid" : "Price"
+                }
                 inputMode="decimal"
                 aria-label={anchor ? "Average cost" : "Price"}
                 // Avg cost is NOT marked "optional": skippable, but adding it unlocks
                 // gains/return — so it reads as a normal field, and the row nudges
                 // (amber "no cost yet") when it's blank. A pre-filled figure DERIVED from
                 // the ฿ value is an estimate to verify (amber dashed, data-estimated).
+                data-optional={!anchor && pricedByFeed ? "" : undefined}
                 data-estimated={anchor && anchorValueDriven && row.estimated ? "" : undefined}
                 title={
                   anchor
@@ -1062,27 +1067,22 @@ function RowEditor({
               <label className="rec-field">
                 <span className="rec-label">
                   Current price
-                  {priceCue && <span className="rec-opt"> · {priceCue}</span>}
+                  {pricedByFeed && <span className="rec-opt"> · optional</span>}
                 </span>
                 <input
                   value={row.currentPrice ?? ""}
                   onChange={(e) => onChange({ currentPrice: e.target.value })}
-                  // Placeholder mirrors the label cue: "Price" until a symbol resolves,
-                  // then "Optional" (catalog fund, live NAV) or "Needed" (custom asset).
-                  placeholder={
-                    priceCue === "needed"
-                      ? "Needed"
-                      : priceCue === "optional"
-                        ? "Optional"
-                        : "Price"
-                  }
+                  // Optional ONLY for a feed-priced symbol (live NAV); for a custom asset
+                  // it's required, but we don't mark required — just "Price", like the
+                  // other required fields. Placeholder mirrors the label.
+                  placeholder={pricedByFeed ? "Optional" : "Price"}
                   inputMode="decimal"
                   aria-label="Current price"
-                  data-optional={priceCue === "optional" ? "" : undefined}
+                  data-optional={pricedByFeed ? "" : undefined}
                   title={
-                    isCustom
-                      ? "This custom asset has no live price — set its current price to value the holding."
-                      : "Today's price per unit. Only needed for a custom asset we can't price live — for a known fund we use the live NAV."
+                    pricedByFeed
+                      ? "Today's price per unit — optional for a known fund (we use the live NAV)."
+                      : "Today's price per unit. For a custom asset with no live feed, set this to value the holding."
                   }
                 />
               </label>
