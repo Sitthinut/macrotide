@@ -848,8 +848,11 @@ function DraftRow({
       : row.units.trim() && row.price.trim()
         ? baht(Number(row.units) * Number(row.price))
         : "";
-  // Only flag a missing cost once there's actually a fund on the row.
-  const costUnknown = anchor && hasTicker && !row.price.trim();
+  // Only flag a missing cost once there's actually a fund on the row — and NOT on a
+  // value-driven Balance, where avg cost is optional/derived (flagging it there
+  // contradicts the field's own "optional" framing). A units Balance with no cost
+  // still gets the nudge: its gains stay blank until a cost is added.
+  const costUnknown = anchor && hasTicker && !row.price.trim() && !(Number(row.value) > 0);
   return (
     <div className="holding" style={{ display: "flex", gap: 4 }}>
       <button
@@ -923,129 +926,161 @@ function RowEditor({
   return (
     <div className="ledger-edit-card">
       <div className={cls}>
-        <select
-          value={row.kind}
-          onChange={(e) => {
-            const k = e.target.value as RowKind;
-            // The ฿ total lives in `value` on a Balance, `amount` on a trade —
-            // carry it across when the type flips so a figure typed in ฿ mode
-            // survives the switch (and clear the field it left).
-            const toAnchor = isAnchor(k);
-            const ledgerMove =
-              toAnchor === anchor
-                ? {}
-                : toAnchor
-                  ? { value: row.amount, amount: "" }
-                  : { amount: row.value ?? "", value: "" };
-            onChange({
-              kind: k,
-              ...ledgerMove,
-              // Switching to a Balance with no date yet defaults it to today.
-              ...(toAnchor && !row.tradeDate ? { tradeDate: today() } : {}),
-            });
-          }}
-          aria-label="Type"
-        >
-          {typeSelectOptions(row.kind).map((o) => (
-            <option key={o.label} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <input
-          type="date"
-          value={row.tradeDate}
-          onChange={(e) => onChange({ tradeDate: e.target.value })}
-          aria-label={anchor ? "As-of date" : "Trade date"}
-        />
-        <SymbolCombobox
-          value={row.ticker}
-          quoteSource={row.quoteSource}
-          sourceLocked={row.quoteSourceLocked}
-          pool={tickers}
-          onChange={(text) =>
-            onChange({
-              ticker: text,
-              englishName: undefined,
-              // Editing the symbol re-infers the source unless the user pinned it.
-              ...(row.quoteSourceLocked ? {} : { quoteSource: undefined }),
-            })
-          }
-          onPick={(s) =>
-            onChange({
-              ticker: s.ticker,
-              englishName: s.name,
-              quoteSource: s.quoteSource,
-              quoteSourceLocked: false,
-            })
-          }
-          onToggleSource={() => {
-            // Cycle Thai fund → Stock/ETF → Custom (manual price).
-            const qs = row.quoteSource ?? inferQuoteSource(row.ticker);
-            const next: QuoteSource =
-              qs === "thai_mutual_fund"
-                ? "market"
-                : qs === "market"
-                  ? "manual"
-                  : "thai_mutual_fund";
-            onChange({ quoteSource: next, quoteSourceLocked: true });
-          }}
-        />
-        {amountOnly ? (
+        <label className="rec-field">
+          <span className="rec-label">Type</span>
+          <select
+            value={row.kind}
+            onChange={(e) => {
+              const k = e.target.value as RowKind;
+              // The ฿ total lives in `value` on a Balance, `amount` on a trade —
+              // carry it across when the type flips so a figure typed in ฿ mode
+              // survives the switch (and clear the field it left).
+              const toAnchor = isAnchor(k);
+              const ledgerMove =
+                toAnchor === anchor
+                  ? {}
+                  : toAnchor
+                    ? { value: row.amount, amount: "" }
+                    : { amount: row.value ?? "", value: "" };
+              onChange({
+                kind: k,
+                ...ledgerMove,
+                // Switching to a Balance with no date yet defaults it to today.
+                ...(toAnchor && !row.tradeDate ? { tradeDate: today() } : {}),
+              });
+            }}
+            aria-label="Type"
+          >
+            {typeSelectOptions(row.kind).map((o) => (
+              <option key={o.label} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="rec-field">
+          <span className="rec-label">{anchor ? "As-of date" : "Date"}</span>
           <input
-            value={row.amount}
-            onChange={(e) => onChange({ amount: e.target.value })}
-            placeholder="฿ amount"
-            inputMode="decimal"
-            aria-label="Amount in baht"
+            type="date"
+            value={row.tradeDate}
+            onChange={(e) => onChange({ tradeDate: e.target.value })}
+            aria-label={anchor ? "As-of date" : "Trade date"}
           />
+        </label>
+        <div className="rec-field">
+          <span className="rec-label">Symbol</span>
+          <SymbolCombobox
+            value={row.ticker}
+            quoteSource={row.quoteSource}
+            sourceLocked={row.quoteSourceLocked}
+            pool={tickers}
+            onChange={(text) =>
+              onChange({
+                ticker: text,
+                englishName: undefined,
+                // Editing the symbol re-infers the source unless the user pinned it.
+                ...(row.quoteSourceLocked ? {} : { quoteSource: undefined }),
+              })
+            }
+            onPick={(s) =>
+              onChange({
+                ticker: s.ticker,
+                englishName: s.name,
+                quoteSource: s.quoteSource,
+                quoteSourceLocked: false,
+              })
+            }
+            onToggleSource={() => {
+              // Cycle Thai fund → Stock/ETF → Custom (manual price).
+              const qs = row.quoteSource ?? inferQuoteSource(row.ticker);
+              const next: QuoteSource =
+                qs === "thai_mutual_fund"
+                  ? "market"
+                  : qs === "market"
+                    ? "manual"
+                    : "thai_mutual_fund";
+              onChange({ quoteSource: next, quoteSourceLocked: true });
+            }}
+          />
+        </div>
+        {amountOnly ? (
+          <label className="rec-field">
+            <span className="rec-label">฿ Amount</span>
+            <input
+              value={row.amount}
+              onChange={(e) => onChange({ amount: e.target.value })}
+              placeholder="Amount"
+              inputMode="decimal"
+              aria-label="Amount in baht"
+            />
+          </label>
         ) : (
           <>
-            <QtyInput
-              units={row.units}
-              price={anchor ? row.currentPrice || row.price : row.price}
-              // A Balance persists its ฿ figure in `value`; a trade in its `amount`
-              // (its authoritative money field) — so a total typed in ฿ mode survives
-              // collapse/expand and the server can derive units from it (#130).
-              value={anchor ? row.value : row.amount}
-              onUnits={(v) => onChange({ units: v })}
-              onValue={(v) => onChange(anchor ? { value: v } : { amount: v })}
-            />
-            <input
-              value={row.price}
-              onChange={(e) => onChange({ price: e.target.value, estimated: false })}
-              placeholder={
-                anchor ? (anchorValueDriven ? "Avg cost · optional" : "Avg cost") : "Price"
-              }
-              inputMode="decimal"
-              aria-label={anchor ? "Average cost" : "Price"}
-              // A value-driven Balance derives its cost from the value — the field is
-              // optional here, and a pre-filled figure is an estimate (shown dashed).
-              data-optional={anchor && anchorValueDriven ? "" : undefined}
-              data-estimated={anchor && anchorValueDriven && row.estimated ? "" : undefined}
-              title={
-                anchor
-                  ? "Average cost you PAID per unit — optional; left blank, your gains stay blank until you add it. Not today's price (current value comes from the live NAV)."
-                  : undefined
-              }
-            />
+            <div className="rec-field">
+              <span className="rec-label">{anchor ? "Units or ฿ total" : "Units or ฿ amount"}</span>
+              <QtyInput
+                units={row.units}
+                price={anchor ? row.currentPrice || row.price : row.price}
+                // A Balance persists its ฿ figure in `value`; a trade in its `amount`
+                // (its authoritative money field) — so a total typed in ฿ mode survives
+                // collapse/expand and the server can derive units from it (#130).
+                value={anchor ? row.value : row.amount}
+                onUnits={(v) => onChange({ units: v })}
+                onValue={(v) => onChange(anchor ? { value: v } : { amount: v })}
+              />
+            </div>
+            <label className="rec-field">
+              <span className="rec-label">
+                {anchor ? "Avg cost" : "Price"}
+                {anchor && <span className="rec-opt"> · optional</span>}
+              </span>
+              <input
+                value={row.price}
+                onChange={(e) => onChange({ price: e.target.value, estimated: false })}
+                placeholder={anchor ? "Optional" : "Price"}
+                inputMode="decimal"
+                aria-label={anchor ? "Average cost" : "Price"}
+                // Avg cost is optional on every Balance (blank → gains blank until added);
+                // the field steps back (muted, dashed). A pre-filled figure DERIVED from
+                // the ฿ value is an estimate to verify (amber, data-estimated).
+                data-optional={anchor ? "" : undefined}
+                data-estimated={anchor && anchorValueDriven && row.estimated ? "" : undefined}
+                title={
+                  anchor
+                    ? "Average cost you PAID per unit — optional; left blank, your gains stay blank until you add it. Not today's price (current value comes from the live NAV)."
+                    : undefined
+                }
+              />
+            </label>
             {anchor ? (
-              <input
-                value={row.currentPrice ?? ""}
-                onChange={(e) => onChange({ currentPrice: e.target.value })}
-                placeholder="Current price"
-                inputMode="decimal"
-                aria-label="Current price"
-                title="Today's price per unit. Only needed for a custom asset we can't price live — for a known fund we use the live NAV."
-              />
+              <label className="rec-field">
+                <span className="rec-label">
+                  Current price<span className="rec-opt"> · optional</span>
+                </span>
+                <input
+                  value={row.currentPrice ?? ""}
+                  onChange={(e) => onChange({ currentPrice: e.target.value })}
+                  placeholder="Optional"
+                  inputMode="decimal"
+                  aria-label="Current price"
+                  data-optional=""
+                  title="Today's price per unit. Only needed for a custom asset we can't price live — for a known fund we use the live NAV."
+                />
+              </label>
             ) : (
-              <input
-                value={row.fee}
-                onChange={(e) => onChange({ fee: e.target.value })}
-                placeholder="Fee"
-                inputMode="decimal"
-                aria-label="Fee"
-              />
+              <label className="rec-field">
+                <span className="rec-label">
+                  Fee<span className="rec-opt"> · optional</span>
+                </span>
+                <input
+                  value={row.fee}
+                  onChange={(e) => onChange({ fee: e.target.value })}
+                  placeholder="Optional"
+                  inputMode="decimal"
+                  aria-label="Fee"
+                  data-optional=""
+                />
+              </label>
             )}
           </>
         )}
