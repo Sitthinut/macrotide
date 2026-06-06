@@ -274,7 +274,10 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   token/cost caps, and demo image upload is off unless an operator sets
   `DEMO_VISION`. Attached images are sent to the vision provider to answer the
   turn and cached only in your browser for the session — never stored on the
-  server (the saved message keeps a "[N image(s) attached]" marker).
+  server (the saved message keeps a "[N image(s) attached]" marker). A message
+  carries up to 10 images; picking more keeps the first 10 and says how many were
+  skipped (rather than dropping them silently), and the chat route enforces the
+  same cap. For a larger batch, Add holdings → Image has no per-message limit.
 - **The fund detail tables now cue when they scroll sideways.** The
   horizontally-scrollable tables (Performance & Risk, Portfolio, Look-Through)
   fade their content out at whichever edge still hides columns — a subtle

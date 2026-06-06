@@ -17,8 +17,10 @@ import {
   parseEntryContext,
 } from "@/lib/advisor/entry-context";
 import {
+  attachmentLimitMessage,
   countTurnImages,
   isDemoVisionEnabled,
+  MAX_CHAT_ATTACHMENTS,
   visionDecisionFor,
   withImageMarker,
 } from "@/lib/advisor/image-turn";
@@ -360,6 +362,14 @@ export async function POST(req: Request) {
     // model-message conversion) so the UIMessage `file` parts are still visible.
     const imageCount = countTurnImages(body.messages);
     const hasImages = imageCount > 0;
+
+    // Backstop the composer's per-message image cap. The UI truncates to the
+    // limit, so this fires only for a caller that bypasses it — refuse with the
+    // same guidance rather than feeding an unbounded image batch to the model.
+    // Checked before persisting so an over-limit turn leaves no misleading marker.
+    if (imageCount > MAX_CHAT_ATTACHMENTS) {
+      return stubResponse(attachmentLimitMessage(imageCount), threadId);
+    }
 
     // Persist the latest user message before streaming. Tool-call follow-ups
     // (assistant role at the end) are server-driven and shouldn't double-write.

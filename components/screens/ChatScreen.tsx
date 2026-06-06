@@ -6,6 +6,7 @@ import { FeedbackRow } from "@/components/FeedbackRow";
 import { Icon } from "@/components/Icon";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import type { EntryContext } from "@/lib/advisor/entry-context";
+import { MAX_CHAT_ATTACHMENTS } from "@/lib/advisor/image-turn";
 import {
   useModelPortfoliosView,
   usePortfolioView,
@@ -27,10 +28,12 @@ import {
 } from "@/lib/stores/import-seed";
 import { useOverlayScrollbar } from "@/lib/useOverlayScrollbar";
 
-// Up to 4 attachments per turn. Images are normalized client-side (the shared
-// 2048px / JPEG-0.8 — see lib/image-normalize) before send, so chat and the
-// importer feed the SAME vision model the SAME image.
-const MAX_ATTACHMENTS = 4;
+// Per-message attachment cap — the single source of truth lives in
+// lib/advisor/image-turn (the chat route enforces the same number as a backstop).
+// Images are normalized client-side (the shared 2048px / JPEG-0.8 — see
+// lib/image-normalize) before send, so chat and the importer feed the SAME vision
+// model the SAME image.
+const MAX_ATTACHMENTS = MAX_CHAT_ATTACHMENTS;
 
 // Normalize an image File for chat: the shared 2048/0.8 JPEG (sent to the model,
 // shown as a thumbnail, persisted), keeping the original for the full-res lightbox.
@@ -483,6 +486,10 @@ export function ChatScreen({
   // server-computed capability below (vision on + demo allows it).
   const [attachments, setAttachments] = useState<ChatImage[]>([]);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  // Transient note when a multi-file pick is truncated to the cap, so the
+  // dropped images aren't silently discarded. Cleared on the next clean add /
+  // removal / send.
+  const [attachNotice, setAttachNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { data: caps } = useResource<{ imageUpload: boolean }>("/api/chat/capabilities");
   const imageUploadEnabled = caps?.imageUpload === true;
@@ -650,6 +657,7 @@ export function ChatScreen({
     setMsgFeedback({});
     setContextNotice(false);
     setAttachments([]);
+    setAttachNotice(null);
   }, [initial, closeOutgoing]);
 
   // ── Image attachments ────────────────────────────────────────────────────
@@ -661,7 +669,16 @@ export function ChatScreen({
       const images = files.filter((f) => f.type.startsWith("image/"));
       if (images.length === 0) return;
       const room = MAX_ATTACHMENTS - attachments.length;
-      if (room <= 0) return;
+      if (room <= 0) {
+        setAttachNotice(`Advisor reads up to ${MAX_ATTACHMENTS} images per message.`);
+        return;
+      }
+      const skipped = images.length - room;
+      setAttachNotice(
+        skipped > 0
+          ? `Added ${room} — Advisor reads up to ${MAX_ATTACHMENTS} images per message, so ${skipped} ${skipped === 1 ? "was" : "were"} skipped. For a larger batch, use Add holdings → Image.`
+          : null,
+      );
       const processed = await Promise.all(images.slice(0, room).map(downscaleImage));
       setAttachments((prev) => [...prev, ...processed].slice(0, MAX_ATTACHMENTS));
       // Transcribe each new image once, in the background, so a later follow-up
@@ -687,8 +704,10 @@ export function ChatScreen({
     [imageUploadEnabled, loading, attachments.length],
   );
 
-  const removeAttachment = (idx: number) =>
+  const removeAttachment = (idx: number) => {
+    setAttachNotice(null);
     setAttachments((prev) => prev.filter((_, i) => i !== idx));
+  };
 
   // Keyboard shortcut: ⌘/Ctrl+K opens a new chat. We swallow the event so the
   // browser's "search bar" default (Firefox) doesn't also fire. Disabled
@@ -1092,6 +1111,7 @@ export function ChatScreen({
     if (!input.trim() && imgs.length === 0) return;
     ask(input, input, undefined, imgs);
     setAttachments([]);
+    setAttachNotice(null);
   };
 
   // Re-send the user message that produced a failed/empty assistant turn.
@@ -1558,6 +1578,11 @@ export function ChatScreen({
             Images stay in your browser and are sent to Advisor to answer — they are not stored on
             our servers.
           </span>
+          {attachNotice && (
+            <span className="note" style={{ color: "var(--amber)" }}>
+              {attachNotice}
+            </span>
+          )}
         </div>
       )}
 

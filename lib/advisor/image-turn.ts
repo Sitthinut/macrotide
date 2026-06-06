@@ -4,6 +4,24 @@
 // records a marker in the persisted user message (images are never stored
 // server-side — only this text marker; see SECURITY.md).
 
+// Max image attachments Advisor reads in one message. Enforced in BOTH places:
+// the composer truncates to this and tells the user (so a multi-file pick isn't
+// silently dropped), and the chat route rejects an over-limit turn as a backstop
+// (a client that bypasses the cap, or a future non-browser caller). One source of
+// truth so the two can't drift. The ceiling bounds per-turn vision tile/token cost
+// — for a larger batch of holdings screenshots, the Add holdings → Image importer
+// has no per-turn cap. Lives here (no "use client") so client + server share it.
+export const MAX_CHAT_ATTACHMENTS = 10;
+
+/** The over-limit refusal copy, shared by the composer and the route backstop. */
+export function attachmentLimitMessage(attempted: number): string {
+  return (
+    `Advisor reads up to ${MAX_CHAT_ATTACHMENTS} images per message — you attached ${attempted}. ` +
+    `Please remove ${attempted - MAX_CHAT_ATTACHMENTS} and send again, or use Add holdings → Image ` +
+    `to import a larger batch at once.`
+  );
+}
+
 function isObj(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object";
 }
