@@ -86,13 +86,15 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   `holdings` table no longer stores units or average cost at all (those columns are
   dropped); a holding row now carries only the instrument metadata that isn't in the
   ledger, so there is no derived figure left to go stale.
-- **The importer checks each symbol's price source against the real catalog.** A
-  symbol's source badge (Fund · Stock/ETF · Custom) is now resolved against the
-  full fund catalog on the fly — typed, pasted, or imported — instead of guessing
-  from the symbol's shape. A real catalog fund reads as a Thai fund; a market-shaped
-  code as a stock/ETF; anything else as a custom asset — so a hyphenated code no
-  longer defaults to "Fund" just because of its shape. You can still flip the badge
-  per row, and your choice is respected.
+- **One catalog drives both the symbol suggestions and the price-source badge.** The
+  autocomplete and the source badge now resolve from a single authority — the real
+  fund catalog (plus the funds you already hold) — so they can never disagree. A
+  symbol the catalog knows reads as a Thai fund; anything it doesn't is a **custom**
+  (self-priced) asset. There's no shape guessing (a hyphenated code is no longer
+  assumed to be a fund) and no hard-coded ticker list; when stocks/ETFs join the
+  catalog they'll resolve the same way. You can still flip the badge per row. (Fixed
+  along the way: catalog tickers stored lowercase — e.g. some SSF funds — were wrongly
+  read as custom; the lookup is now case-insensitive.)
 - **Record by ฿ amount — no unit count needed.** Thai broker apps show what a
   holding is worth, not how many units you hold, so a **Balance** now accepts the ฿
   value and a **buy/sell** accepts the ฿ amount; the app derives the units. It

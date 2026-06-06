@@ -48,12 +48,13 @@ inline before saving:
 - **Add a row** — type a row directly. Best for a handful of positions, or
   correcting an import.
 
-As you type a symbol, the field autocompletes against the known-fund catalog,
-filling in the name and asset class where it can. Each row's **price source**
-badge is checked against the real fund catalog on the fly — a catalog fund reads
-as a Thai fund, a market-shaped symbol as a stock/ETF, and anything else as a
-custom asset — so a code doesn't default to "Fund" just because it has a hyphen
-(you can still flip the badge per row). Duplicate symbols are de-duped into the
+As you type a symbol, the field autocompletes against the **real fund catalog**
+(plus the funds you already hold), filling in the name and asset class where it
+can. The same catalog is the single authority for each row's **price source**
+badge: a symbol the catalog knows reads as a Thai fund; anything it doesn't is a
+**custom** (self-priced) asset. There's no shape guessing and no hard-coded list —
+when stocks/ETFs join the catalog they resolve the same way (you can still flip the
+badge per row to force one). Duplicate symbols are de-duped into the
 existing row for review rather than creating a second row. To save a
 Balance you give it **either a unit count or a ฿ value** (the app derives units
 from the value — see below); average cost stays optional. For the exact input
