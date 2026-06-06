@@ -18,7 +18,7 @@ import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import { SymbolCombobox } from "@/components/portfolio/SymbolCombobox";
 import { Combobox } from "@/components/ui/Combobox";
-import { QtyInput } from "@/components/ui/QtyInput";
+import { QtyInput, qtyDefaultMode } from "@/components/ui/QtyInput";
 import { mergeWithHoldings, type TickerSuggestion } from "@/lib/data/known-holdings";
 import { mergeSourceSuggestions } from "@/lib/data/sources";
 import { useBuckets, useHoldings } from "@/lib/fetchers/portfolio";
@@ -852,16 +852,14 @@ function DraftRow({
   if (row.tradeDate) sub.push(fmtDate(row.tradeDate));
   if (row.units.trim()) sub.push(`${numFmt(row.units)}${anchor ? " units" : ""}`);
   if (row.price.trim()) sub.push(anchor ? `avg ฿${numFmt(row.price)}` : `@ ฿${numFmt(row.price)}`);
-  // Amount shown on the right: dividend/fee carry it directly; a trade derives it
-  // from units × price (there's no separate amount field anymore).
+  // Amount shown on the right: a typed ฿ total (`amount` — what a total-entered trade
+  // or a dividend/fee carries) wins; otherwise derive it from a units × price entry.
   const amountOnly = row.kind === "dividend" || row.kind === "fee";
   const amt = anchor
     ? ""
-    : amountOnly
-      ? row.amount.trim()
-        ? baht(Math.abs(Number(row.amount)))
-        : ""
-      : row.units.trim() && row.price.trim()
+    : row.amount.trim()
+      ? baht(Math.abs(Number(row.amount)))
+      : !amountOnly && row.units.trim() && row.price.trim()
         ? baht(Number(row.units) * Number(row.price))
         : "";
   // What this row still NEEDS to be saveable — kind-aware, mirroring the same checks
@@ -1091,11 +1089,12 @@ function RowEditor({
               <span className="rec-label">{anchor ? "Units or ฿ total" : "Units or ฿ amount"}</span>
               <QtyInput
                 units={row.units}
-                price={anchor ? row.currentPrice || row.price : row.price}
                 // A Balance persists its ฿ figure in `value`; a trade in its `amount`
                 // (its authoritative money field) — so a total typed in ฿ mode survives
-                // collapse/expand and the server can derive units from it (#130).
+                // collapse/expand and the server can derive units from it (#130). Reopen
+                // in the mode the stored fact implies, via the SAME helper History uses.
                 value={anchor ? row.value : row.amount}
+                defaultMode={qtyDefaultMode(row.units)}
                 onUnits={(v) => onChange({ units: v })}
                 onValue={(v) => onChange(anchor ? { value: v } : { amount: v })}
               />

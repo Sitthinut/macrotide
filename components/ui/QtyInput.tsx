@@ -1,49 +1,54 @@
 "use client";
 
-// QtyInput — quantity entry with a units ↔ ฿ switcher. ONE number in ONE box; the
+// QtyInput — quantity entry with a Units ↔ ฿ switcher. ONE number in ONE box; the
 // toggle is a TYPE BADGE on what you typed (Units or ฿ Total), not a converter:
 // flipping it keeps your figure and just re-reads it as the other kind, so picking
 // the wrong type is a one-tap fix. Useful because many Thai broker apps show a
-// holding's value, not its unit count. The canonical field follows the badge — Units
-// → `units`; Total → `value` (a trade's `amount`) with units DERIVED (฿ ÷ price). When
-// there's no price, ฿ entry can't derive units locally, so the raw ฿ total lifts up
-// via `onValue` and the server derives units from value ÷ NAV(date) at save (the
-// value-only Balance case, #130). A row that arrives value-only opens in ฿ mode.
+// holding's value, not its unit count.
+//
+// FACTS-ONLY (ADR 0004): the box persists exactly ONE fact — the side you typed.
+// Units mode writes `units` (and clears the ฿ value); ฿ mode writes `value` (the
+// canonical ฿ total — a trade's `amount`, a Balance's value) and leaves `units`
+// EMPTY. It never derives-and-stores the other side: the projection fold computes
+// the missing side on READ (units = ฿ ÷ (price ?? NAV); amount = units × NAV). That
+// keeps `units` empty ⟺ "typed a total", so a saved row reopens in the SAME mode it
+// was entered — which `units`-presence alone encodes (see `qtyDefaultMode`). Both
+// inline editors (the Add modal + History) wire it the same way, so they match.
 
 import { useState } from "react";
 
 export interface QtyInputProps {
   units: string;
-  /** Per-unit price used to convert a ฿ value into units. */
-  price: string;
-  /** Canonical ฿ total, persisted on the row even when no price can turn it into
-   *  units here yet — the server derives units from value ÷ NAV(date) (#130). */
+  /** Canonical ฿ total — a trade's `amount`, a Balance's value. The fold derives
+   *  units from it on read; this box never freezes a derived unit count. */
   value?: string;
   onUnits: (units: string) => void;
   /** Lift the typed ฿ total so it persists on the row and reaches the save. */
   onValue?: (value: string) => void;
-  /** Force the initial mode (the History editor, where a stored row carries BOTH units
-   *  and an amount, so the `value`-based guess would always pick Total). Omit to infer. */
+  /** Force the initial mode. A saved row carries only the typed fact, so
+   *  `qtyDefaultMode(units)` recovers the entry mode: units present → Units, else ฿. */
   defaultMode?: "units" | "total";
   ariaLabel?: string;
 }
 
-const round = (n: number, dp: number) => {
-  const f = 10 ** dp;
-  return String(Math.round(n * f) / f);
-};
+/**
+ * The mode a stored row reopens in: a read unit count → Units; otherwise ฿ Total (a
+ * value-only Balance / amount-only trade). Because a row persists only the side the
+ * user typed (see the file header), `units`-presence faithfully encodes the entry
+ * mode. Shared by BOTH inline editors so the Add modal and History behave identically.
+ */
+export function qtyDefaultMode(units: string): "units" | "total" {
+  return units.trim() ? "units" : "total";
+}
 
 export function QtyInput({
   units,
-  price,
   value,
   onUnits,
   onValue,
   defaultMode,
   ariaLabel = "Units",
 }: QtyInputProps) {
-  const p = Number(price);
-  const hasPrice = Number.isFinite(p) && p > 0;
   // ONE number in ONE box; the Units ↔ ฿ Total toggle just RE-TYPES it — like a type
   // badge on what you entered. Flipping the toggle keeps your figure (no convert, no
   // clear), so picking the wrong kind is a one-tap fix. Initial mode: a caller hint
@@ -55,14 +60,14 @@ export function QtyInput({
   const inBaht = mode === "total";
   const text = inBaht ? (value ?? "") : units;
 
-  // Write the typed number to its canonical field and keep the OTHER as the DERIVED
-  // one: in Total mode, units = ฿ ÷ price (or cleared when there's no price — the
-  // server then derives units from value ÷ NAV(date) at save), never a stale count;
-  // in Units mode, the ฿ value is cleared so it can't override on save.
+  // Write the typed number to its canonical field and CLEAR the other, so the row
+  // stores only the fact you gave. In ฿ mode units stay empty — the fold derives them
+  // (฿ ÷ (price ?? NAV)) on read, never a frozen count here; in Units mode the ฿ value
+  // is cleared so it can't override on save. (ADR 0004 / value-only Balance, #130.)
   const apply = (v: string, m: "units" | "total") => {
     if (m === "total") {
       onValue?.(v);
-      onUnits(v.trim() === "" ? "" : hasPrice ? round(Number(v) / p, 6) : "");
+      onUnits("");
     } else {
       onUnits(v);
       if (value?.trim()) onValue?.("");

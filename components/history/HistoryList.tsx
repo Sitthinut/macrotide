@@ -13,7 +13,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EventLine } from "@/components/history/EventLine";
 import { Icon } from "@/components/Icon";
 import { SymbolCombobox } from "@/components/portfolio/SymbolCombobox";
-import { QtyInput } from "@/components/ui/QtyInput";
+import { QtyInput, qtyDefaultMode } from "@/components/ui/QtyInput";
 import { Stat } from "@/components/ui/Stat";
 import { mergeWithHoldings, type TickerSuggestion } from "@/lib/data/known-holdings";
 import type { Transaction } from "@/lib/db/queries/transactions";
@@ -530,13 +530,12 @@ function TxnEditor({
           <>
             <QtyInput
               units={draft.units}
-              price={anchor ? draft.marketPrice || draft.pricePerUnit : draft.pricePerUnit}
               // `value` is the real ฿ total (a trade's amount, a Balance's value) so the
-              // toggle has data to re-type. A stored row carries BOTH units and an amount,
-              // so open in the mode matching the FACT — Units when a count is present —
-              // via defaultMode, not by blanking `value` (which would empty the toggle).
+              // toggle has data to re-type. A saved row stores only the typed fact, so
+              // open in the mode that fact implies — Units when a count is present, else
+              // ฿ — via the shared `qtyDefaultMode` (the SAME rule the Add modal uses).
               value={anchor ? draft.value : draft.amount}
-              defaultMode={draft.units.trim() ? "units" : "total"}
+              defaultMode={qtyDefaultMode(draft.units)}
               onUnits={(v) => set({ units: v })}
               onValue={(v) => set(anchor ? { value: v } : { amount: v })}
             />
