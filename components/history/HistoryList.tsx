@@ -52,6 +52,8 @@ interface Draft {
   kind: TxnKind;
   ticker: string;
   units: string;
+  /** A Balance's stated current ฿ VALUE (units derive from value ÷ NAV at the fold). */
+  value: string;
   pricePerUnit: string;
   /** A Balance's current market price per unit (for custom-asset valuation). */
   marketPrice: string;
@@ -68,6 +70,7 @@ function blankDraft(): Draft {
     kind: "buy",
     ticker: "",
     units: "",
+    value: "",
     pricePerUnit: "",
     marketPrice: "",
     fee: "",
@@ -81,6 +84,7 @@ function draftFromTxn(t: Transaction): Draft {
     kind: t.kind as TxnKind,
     ticker: t.ticker,
     units: t.units != null ? String(t.units) : "",
+    value: t.value != null ? String(t.value) : "",
     pricePerUnit: t.pricePerUnit != null ? String(t.pricePerUnit) : "",
     marketPrice: t.marketPrice != null ? String(t.marketPrice) : "",
     fee: t.fee != null ? String(t.fee) : "",
@@ -173,27 +177,39 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
     try {
       let payload: Record<string, unknown>;
       if (anchor) {
-        const u = draft.units.trim() === "" ? null : Number(draft.units);
-        if (u == null || !Number.isFinite(u) || u <= 0) {
-          setRowError("A starting balance needs a positive number of units.");
-          setBusy(false);
-          return;
-        }
-        payload = {
-          tradeDate: draft.tradeDate,
-          kind: draft.kind,
-          ticker: draft.ticker.trim(),
-          units: u,
-          pricePerUnit: draft.pricePerUnit.trim() === "" ? null : Number(draft.pricePerUnit),
-          marketPrice: draft.marketPrice.trim() === "" ? null : Number(draft.marketPrice),
-          amount: 0,
-          quoteSource: draft.quoteSource || "manual",
-        };
-        if (!payload.tradeDate || !payload.ticker) {
+        // Facts-only Balance: a unit count OR a ฿ value (units derive at the fold). A
+        // custom asset with no NAV also needs a current price to find its units.
+        const hasUnits = draft.units.trim() !== "" && Number(draft.units) > 0;
+        const hasValue = draft.value.trim() !== "" && Number(draft.value) > 0;
+        if (!draft.tradeDate || !draft.ticker.trim()) {
           setRowError("Add a date and a symbol.");
           setBusy(false);
           return;
         }
+        if (!hasUnits && !hasValue) {
+          setRowError("A balance needs a unit count or a ฿ value.");
+          setBusy(false);
+          return;
+        }
+        const custom = (draft.quoteSource || "manual") === "manual";
+        if (hasValue && !hasUnits && custom && draft.marketPrice.trim() === "") {
+          setRowError("A custom asset needs a current price to value it.");
+          setBusy(false);
+          return;
+        }
+        const avg = draft.pricePerUnit.trim() === "" ? null : Number(draft.pricePerUnit);
+        payload = {
+          tradeDate: draft.tradeDate,
+          kind: draft.kind,
+          ticker: draft.ticker.trim(),
+          units: hasUnits ? Number(draft.units) : undefined,
+          value: !hasUnits && hasValue ? Number(draft.value) : undefined,
+          pricePerUnit: avg,
+          marketPrice: draft.marketPrice.trim() === "" ? null : Number(draft.marketPrice),
+          // Cost magnitude (units × avg cost) — the PATCH route signs it (cash out).
+          amount: hasUnits && avg != null ? Number(draft.units) * avg : 0,
+          quoteSource: draft.quoteSource || "manual",
+        };
       } else {
         const d = normalizeTxnDraft({
           tradeDate: draft.tradeDate,
@@ -203,6 +219,7 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
           pricePerUnit: draft.pricePerUnit,
           amount: draft.amount,
           fee: draft.fee,
+          quoteSource: (draft.quoteSource || undefined) as QuoteSource | undefined,
         });
         if (!d.ticker || d.needsDate || (d.kind !== "split" && d.needsAmount)) {
           setRowError("Add a date, a symbol, and an amount.");
@@ -215,7 +232,7 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
           ticker: d.ticker,
           units: d.units,
           pricePerUnit: d.pricePerUnit,
-          amount: d.kind === "split" ? 0 : d.amount,
+          amount: d.kind === "split" ? 0 : (d.amount ?? 0),
           fee: d.fee,
           quoteSource: draft.quoteSource || d.quoteSource,
         };
@@ -512,7 +529,11 @@ function TxnEditor({
             <QtyInput
               units={draft.units}
               price={anchor ? draft.marketPrice || draft.pricePerUnit : draft.pricePerUnit}
+              // A Balance carries its ฿ figure in `value`; a trade in `amount` — so a
+              // value-only Balance or an amount-only trade shows/edits its ฿ total here.
+              value={anchor ? draft.value : draft.amount}
               onUnits={(v) => set({ units: v })}
+              onValue={(v) => set(anchor ? { value: v } : { amount: v })}
             />
             <input
               value={draft.pricePerUnit}
