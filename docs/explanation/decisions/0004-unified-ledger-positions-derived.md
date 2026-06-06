@@ -83,6 +83,17 @@ from current holdings (matching the lot engine, which already drops zero-unit
 positions). The projection is a deterministic, rebuildable function of the
 ledger — a cache, not a second source of truth.
 
+> **Implementation note (shipped state).** The decision above keeps the
+> `units`/`avgCost` columns and overwrites them on every write. The
+> implementation went one step further: those columns were **dropped** entirely
+> (migration `0011`) and positions are folded from the ledger **on read** — and
+> only the money fact the user gave is stored, with the missing side derived at
+> the fold (facts-only). The "same row shape / overwritten on write" wording here
+> is the plan as decided; the maintained docs
+> ([data-model](../../reference/data-model.md),
+> [balances-and-history](../balances-and-history.md),
+> [AGENTS.md](../../../AGENTS.md)) carry the current rules.
+
 ### "Edit a holding" is sugar over the ledger
 
 - **Position edits** (units / avg cost) write a ledger event: if the position has
