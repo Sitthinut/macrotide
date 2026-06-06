@@ -140,22 +140,23 @@ A Balance contributes only the **change** in cost basis since your last Balance 
 that fund — `new basis − prior basis` — to your invested total. A starting balance
 has no prior, so it contributes its full basis. This one rule covers every case:
 
-```
-Recording a later Balance each quarter (the fields a broker app shows you):
+Recording a later Balance each quarter — the fields a broker app shows you:
 
-| period            | units | avg cost | value  | cost basis (units×avg) | what happened
-|-------------------|-------|----------|--------|------------------------|------------------------------------
-| Q1                | 100   | ฿10      | ฿1,000 | ฿1,000                 | start → invested ฿1,000
-| Q2 (market only)  | 100   | ฿10      | ฿1,150 | ฿1,000                 | Δbasis 0 → ฿0 added; gain = 1,150 − 1,000 = ฿150
-| Q2 (added money)  | 130   | ฿10.5    | ฿1,400 | ฿1,365                 | Δbasis +365 → put in ฿365; gain = 1,400 − 1,365 = ฿35
+| Period | Units | Avg cost | Value | Cost basis (units × avg) | What happened |
+|---|---|---|---|---|---|
+| Q1 | 100 | ฿10 | ฿1,000 | ฿1,000 | start → invested ฿1,000 |
+| Q2 (market only) | 100 | ฿10 | ฿1,150 | ฿1,000 | Δbasis 0 → ฿0 added; gain = 1,150 − 1,000 = ฿150 |
+| Q2 (added money) | 130 | ฿10.5 | ฿1,400 | ฿1,365 | Δbasis +365 → put in ฿365; gain = 1,400 − 1,365 = ฿35 |
 
-The avg cost ticking 10 → 10.5 is the tell: the market can't do that — only a
+The avg cost ticking ฿10 → ฿10.5 is the tell: the market can't do that — only a
 purchase can. So the app reads the ฿365 as money you added, not a price move.
 
 The math, every entry:
-  cost basis  = units × avg cost
-  invested   += (new basis − prior basis)    ← the period's net contribution
-  gain        = current value − cost basis    ← value comes from the live NAV
+
+```
+cost basis  = units × avg cost
+invested   += (new basis − prior basis)    ← the period's net contribution
+gain        = current value − cost basis    ← value comes from the live NAV
 ```
 
 ### Every case at a glance

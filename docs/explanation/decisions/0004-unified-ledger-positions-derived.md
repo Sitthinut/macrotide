@@ -158,5 +158,7 @@ The *ongoing* rules this decision implies — rebuild-after-every-write (the
 projection is a pure, rebuilt cache, never edited directly), cost/value
 orthogonality, and which event kinds count as external cash flows for the
 money-weighted return — are kept in the maintained docs, not frozen here:
-[Balances and History § The rules that hold everywhere](../balances-and-history.md#the-rules-that-hold-everywhere)
-and [AGENTS.md § DB routing](../../../AGENTS.md#db-routing--read-before-touching-a-route-handler).
+[Balances and History § The rules that hold everywhere](../balances-and-history.md#the-rules-that-hold-everywhere).
+The agent-facing half of that — never write `holdings` directly; store only facts
+and let the projection rebuild — is in
+[AGENTS.md § DB routing](../../../AGENTS.md#db-routing--read-before-touching-a-route-handler).
