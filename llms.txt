@@ -37,6 +37,7 @@ root so they resolve when browsing the source.
 - [Configuration](./docs/reference/configuration.md): How config works; links to the canonical env-var table in AGENTS.md.
 - [API routes](./docs/reference/api.md): Catalog of app/api/* route handlers.
 - [Data model](./docs/reference/data-model.md): SQLite tables and relationships.
+- [Design system](./docs/reference/design-system.md): Real CSS tokens (color/radius/spacing), high-reuse classes, and shared UI components (Modal, Icon, EventLine) copied from production for building UI that matches.
 - [Auth & AI providers](./docs/reference/auth-and-providers.md): Passkeys, OpenRouter, rate limiting.
 - [Deploy](./docs/how-to/deploy.md): Single-VM (Caddy/systemd) and tailnet deployment.
 - [Security policy](./SECURITY.md): Threat model and vulnerability reporting.

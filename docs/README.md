@@ -51,6 +51,7 @@ Feature deep dives and the prior-art research behind them live under
 | [configuration.md](./reference/configuration.md) | How configuration works + the canonical env-var table |
 | [api.md](./reference/api.md) | Catalog of `app/api/*` route handlers |
 | [data-model.md](./reference/data-model.md) | The SQLite tables and how they relate |
+| [design-system.md](./reference/design-system.md) | Real CSS tokens, high-reuse classes, and shared UI components (Modal, Icon, EventLine) |
 | [auth-and-providers.md](./reference/auth-and-providers.md) | Passkeys, OpenRouter, rate limits, where data lives |
 | [Security policy](../SECURITY.md) | Threat model, reporting (lives at repo root) |
 
