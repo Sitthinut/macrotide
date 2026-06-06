@@ -2112,6 +2112,43 @@ textarea.sheet-input {
 .chat-import-table .flag.est {
   color: var(--muted);
 }
+/* Narrow bubble → stack each row as a labelled card (label from each cell's
+   data-label). Threshold sized for the widest table (5-col transactions). */
+@container (max-width: 420px) {
+  .chat-import-table thead {
+    display: none;
+  }
+  .chat-import-table,
+  .chat-import-table tbody,
+  .chat-import-table tr,
+  .chat-import-table td {
+    display: block;
+    width: 100%;
+  }
+  .chat-import-table tr {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 3px 8px;
+    margin: 6px 0;
+  }
+  .chat-import-table td {
+    border: 0;
+    padding: 2px 0;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    text-align: right;
+  }
+  .chat-import-table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    text-align: left;
+    flex: 0 0 auto;
+  }
+}
 
 /* Full-image lightbox overlay. */
 .chat-lightbox {
@@ -2472,6 +2509,10 @@ textarea.sheet-input {
   border-radius: 14px;
   padding: 12px 14px;
   margin: 6px 0;
+  /* So the in-chat import table can respond to the BUBBLE width (not the
+     viewport) — table when wide, stacked cards when narrow. Future-proof for a
+     resizable sidebar that changes the bubble width without a viewport change. */
+  container-type: inline-size;
 }
 .plan-proposal .label {
   font-size: 10px;
@@ -3397,6 +3438,16 @@ textarea.sheet-input {
   font-size: 12px;
   color: var(--loss);
   padding: 2px 0;
+}
+.rec-ask {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--amber) 12%, transparent);
 }
 .rec-intake {
   border-radius: 10px;

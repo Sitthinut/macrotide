@@ -12,53 +12,63 @@ import {
   useSelectedModelId,
 } from "@/lib/fetchers/legacy";
 import { invalidate, useResource } from "@/lib/fetchers/swr";
+import { normalizeImage } from "@/lib/image-normalize";
 import { type AdvisorScreenContext, buildChatSuggestions } from "@/lib/portfolio/chat-suggestions";
 import { computeHealth } from "@/lib/portfolio/health";
+import type { ExtractedTxnRow } from "@/lib/portfolio/ocr";
 import { AI_PERSONALITIES } from "@/lib/static/personalities";
+import { loadChatThreadCards, saveChatCard } from "@/lib/stores/chat-cards";
 import { type ChatImage, loadChatThreadImages, saveChatImages } from "@/lib/stores/chat-images";
 import { consumeLoadTarget, setActiveThreadId, useChatUi } from "@/lib/stores/chat-ui";
-import { type ImportSeedRow, requestImportWithRows } from "@/lib/stores/import-seed";
+import {
+  type ImportSeedRow,
+  requestImportWithRows,
+  requestTxnImportWithRows,
+} from "@/lib/stores/import-seed";
 import { useOverlayScrollbar } from "@/lib/useOverlayScrollbar";
 
-// Image attachment caps — bound payload + vision token cost. Images are
-// downscaled client-side before send (see downscaleImage).
+// Up to 4 attachments per turn. Images are normalized client-side (the shared
+// 2048px / JPEG-0.8 — see lib/image-normalize) before send, so chat and the
+// importer feed the SAME vision model the SAME image.
 const MAX_ATTACHMENTS = 4;
-const MAX_IMAGE_DIM = 1024;
-const IMAGE_JPEG_QUALITY = 0.7;
 
-// Downscale + re-encode an image File to a bounded JPEG data URL. Keeps the
-// longest side ≤ MAX_IMAGE_DIM so attachments stay small in the request, in
-// localStorage, and in the model's vision token budget. Falls back to the raw
-// data URL if canvas processing isn't available.
+// Normalize an image File for chat: the shared 2048/0.8 JPEG (sent to the model,
+// shown as a thumbnail, persisted), keeping the original for the full-res lightbox.
 async function downscaleImage(file: File): Promise<ChatImage> {
-  const rawDataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve((reader.result as string) ?? "");
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
+  const n = await normalizeImage(file);
+  return {
+    id: makeId(),
+    dataUrl: n.dataUrl,
+    fullDataUrl: n.fullDataUrl,
+    mime: n.mime,
+    name: file.name,
+    capturedAt: file.lastModified ? new Date(file.lastModified).toISOString() : undefined,
+  };
+}
+
+// Transcribe an attached image to plain text ONCE (on attach), so a follow-up
+// turn can reference it as cheap text instead of re-sending the bytes. Best
+// effort — returns "" on any failure and the caller proceeds without one.
+async function transcribeAttachment(dataUrl: string): Promise<string> {
   try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const el = new window.Image();
-      el.onload = () => resolve(el);
-      el.onerror = () => reject(new Error("decode failed"));
-      el.src = rawDataUrl;
-    });
-    const scale = Math.min(1, MAX_IMAGE_DIM / Math.max(img.width, img.height));
-    const w = Math.max(1, Math.round(img.width * scale));
-    const h = Math.max(1, Math.round(img.height * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("no 2d context");
-    ctx.drawImage(img, 0, 0, w, h);
-    const dataUrl = canvas.toDataURL("image/jpeg", IMAGE_JPEG_QUALITY);
-    return { id: makeId(), dataUrl, mime: "image/jpeg", name: file.name };
+    const blob = await (await fetch(dataUrl)).blob();
+    const fd = new FormData();
+    fd.append("image", blob, "image.jpg");
+    const res = await fetch("/api/chat/transcribe", { method: "POST", body: fd });
+    if (!res.ok) return "";
+    const body = (await res.json()) as { text?: string };
+    return body.text?.trim() ?? "";
   } catch {
-    // Couldn't downscale (SVG, decode failure) — send the original bytes.
-    return { id: makeId(), dataUrl: rawDataUrl, mime: file.type || "image/png", name: file.name };
+    return "";
   }
+}
+
+// Fold an image turn's transcription into its text for the model, so later turns
+// read the image as text without the bytes. Plain text when no transcript yet.
+function imageText(m: Message): string {
+  const ts = (m.images ?? []).map((i) => i.transcript?.trim()).filter(Boolean);
+  if (ts.length === 0) return m.text;
+  return `${m.text}\n\n[Attached image, transcribed so you can read it without the photo:]\n${ts.join("\n--- next image ---\n")}`;
 }
 
 const ACTIVE_THREAD_KEY = "macrotide_chat_active_thread";
@@ -102,6 +112,14 @@ interface HoldingsImport {
   note: string | null;
 }
 
+// The advisor's propose_transactions_import tool output: a batch of dated trade
+// rows (a buy/sell/dividend history) → a compact table that opens the importer.
+interface TransactionsImport {
+  rows: ExtractedTxnRow[];
+  source: string | null;
+  note: string | null;
+}
+
 interface Message {
   role: "user" | "ai";
   text: string;
@@ -117,6 +135,8 @@ interface Message {
   rejected?: boolean;
   // A batch holdings-import table (one per turn) from propose_holdings_import.
   holdingsImport?: HoldingsImport;
+  // A batch transaction-import table from propose_transactions_import.
+  transactionsImport?: TransactionsImport;
   // A turn can yield MANY holding proposals (one per extracted statement row),
   // so unlike `proposal` these are a keyed list with per-card accept/reject
   // state tracked by index.
@@ -340,7 +360,7 @@ function HoldingsImportCard({ data, onOpen }: { data: HoldingsImport; onOpen: ()
       <table className="chat-import-table">
         <thead>
           <tr>
-            <th>Fund</th>
+            <th>Symbol</th>
             <th style={{ textAlign: "right" }}>Units</th>
             <th style={{ textAlign: "right" }}>Avg cost</th>
           </tr>
@@ -348,13 +368,78 @@ function HoldingsImportCard({ data, onOpen }: { data: HoldingsImport; onOpen: ()
         <tbody>
           {data.rows.map((r, i) => (
             <tr key={`${r.ticker}-${i}`}>
-              <td>
+              <td data-label="Symbol">
                 <span className="t">{r.ticker.toUpperCase()}</span>
                 {r.needsUnits && <span className="flag">needs units</span>}
                 {!r.needsUnits && r.estimated && <span className="flag est">estimated</span>}
               </td>
-              <td style={{ textAlign: "right" }}>{fmt(r.units)}</td>
-              <td style={{ textAlign: "right" }}>{fmt(r.avgCost)}</td>
+              <td data-label="Units" style={{ textAlign: "right" }}>
+                {fmt(r.units)}
+              </td>
+              <td data-label="Avg cost" style={{ textAlign: "right" }}>
+                {fmt(r.avgCost)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="actions">
+        <button className="btn primary sm" onClick={onOpen} style={{ flex: 1 }}>
+          <Icon name="arrowRight" size={12} /> Review &amp; import
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Compact in-chat table for a batch of dated TRANSACTIONS (propose_transactions_import),
+// with a button that opens the importer pre-seeded with these trades.
+function TransactionsImportCard({
+  data,
+  onOpen,
+}: {
+  data: TransactionsImport;
+  onOpen: () => void;
+}) {
+  const fmt = (n: number | undefined) =>
+    n === undefined || !Number.isFinite(n) ? "—" : String(Math.round(n * 1e4) / 1e4);
+  return (
+    <div className="plan-proposal">
+      <div className="label">
+        <Icon name="sparkle" size={12} />
+        <span>
+          REVIEW TRANSACTIONS · {data.rows.length} ROW{data.rows.length === 1 ? "" : "S"}
+        </span>
+      </div>
+      {data.note && (
+        <div style={{ fontSize: 11.5, color: "var(--ink-soft)", lineHeight: 1.45 }}>
+          {data.note}
+        </div>
+      )}
+      <table className="chat-import-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Symbol</th>
+            <th>Type</th>
+            <th style={{ textAlign: "right" }}>Units</th>
+            <th style={{ textAlign: "right" }}>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.rows.map((r, i) => (
+            <tr key={`${r.ticker}-${r.tradeDate ?? ""}-${i}`}>
+              <td data-label="Date">{r.tradeDate ?? "—"}</td>
+              <td data-label="Symbol">
+                <span className="t">{r.ticker.toUpperCase()}</span>
+              </td>
+              <td data-label="Type">{r.kind ?? "—"}</td>
+              <td data-label="Units" style={{ textAlign: "right" }}>
+                {fmt(r.units)}
+              </td>
+              <td data-label="Total" style={{ textAlign: "right" }}>
+                {fmt(r.amount)}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -495,6 +580,9 @@ export function ChatScreen({
         // append-only), so the send path and this reload path agree without a
         // server-side image id. See lib/stores/chat-images.ts.
         const storedImages = loadChatThreadImages(id);
+        // Re-attach any browser-cached import cards to their assistant reply,
+        // keyed by the same user-turn index the send path used.
+        const storedCards = loadChatThreadCards(id);
         let userSeq = -1;
         setMessages(
           rows.length === 0
@@ -503,6 +591,7 @@ export function ChatScreen({
                 const isUser = r.role !== "assistant";
                 if (isUser) userSeq += 1;
                 const imgs = isUser ? storedImages.get(userSeq) : undefined;
+                const card = isUser ? undefined : storedCards.get(userSeq);
                 // The server stores a "[N image(s) attached]" marker since images
                 // aren't persisted server-side. When we DO have the thumbnails
                 // (from localStorage), drop the redundant marker — it's only a
@@ -515,6 +604,8 @@ export function ChatScreen({
                   id: `db-${r.id}`,
                   model: r.model ?? null,
                   images: imgs,
+                  holdingsImport: card?.holdingsImport,
+                  transactionsImport: card?.transactionsImport,
                 } as Message;
               }),
         );
@@ -573,6 +664,25 @@ export function ChatScreen({
       if (room <= 0) return;
       const processed = await Promise.all(images.slice(0, room).map(downscaleImage));
       setAttachments((prev) => [...prev, ...processed].slice(0, MAX_ATTACHMENTS));
+      // Transcribe each new image once, in the background, so a later follow-up
+      // can reference it as text. Patches the staged attachment and — once the
+      // turn is sent — the message carrying it.
+      for (const img of processed) {
+        void transcribeAttachment(img.dataUrl).then((transcript) => {
+          if (!transcript) return;
+          setAttachments((prev) => prev.map((a) => (a.id === img.id ? { ...a, transcript } : a)));
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.images?.some((i) => i.id === img.id)
+                ? {
+                    ...m,
+                    images: m.images.map((i) => (i.id === img.id ? { ...i, transcript } : i)),
+                  }
+                : m,
+            ),
+          );
+        });
+      }
     },
     [imageUploadEnabled, loading, attachments.length],
   );
@@ -679,27 +789,39 @@ export function ChatScreen({
     // Index of this user turn within the thread (for the image localStorage key).
     const userSeq = history.filter((m) => m.role === "user").length;
 
-    // Text-only turns send the compact `{role, content:string}` shape — kept
-    // byte-identical to before so the model prefix cache stays warm. Image turns
-    // send the whole conversation as UIMessage `parts` (prior turns as one text
-    // part each; this turn's text + file parts) so the server's
-    // convertToModelMessages forwards the images to the vision model.
+    // Prior image turns carry their TRANSCRIPTION as text (imageText), not the
+    // bytes — so a follow-up reads the image without re-running the vision path
+    // or busting the prompt cache. Only THIS turn's freshly-attached images go as
+    // `file` parts. Text-only turns keep the compact `{role, content}` shape so
+    // the prefix cache stays warm.
+    // Surface each attachment's file name + saved date to the model (NOT the
+    // displayed bubble) so it can date a holdings snapshot from the file when the
+    // image itself shows no date. The model decides — we don't parse it.
+    const fileNote = attached.length
+      ? `\n\n(Attached file${attached.length === 1 ? "" : "s"}: ${attached
+          .map((a) => `"${a.name}"${a.capturedAt ? ` saved ${a.capturedAt.slice(0, 10)}` : ""}`)
+          .join("; ")})`
+      : "";
+    const turnText = prompt + fileNote;
     const stringPayload = [
       // The `proposal` field is UI-only metadata and is never forwarded (we only
       // pass role + text), but the assistant prose that accompanied a proposal IS
       // part of the conversation, so keep these turns.
-      ...history.map((m) => ({ role: m.role === "ai" ? "assistant" : "user", content: m.text })),
-      { role: "user" as const, content: prompt },
+      ...history.map((m) => ({
+        role: m.role === "ai" ? "assistant" : "user",
+        content: imageText(m),
+      })),
+      { role: "user" as const, content: turnText },
     ];
     const uiPayload = [
       ...history.map((m) => ({
         role: m.role === "ai" ? "assistant" : "user",
-        parts: [{ type: "text", text: m.text }],
+        parts: [{ type: "text", text: imageText(m) }],
       })),
       {
         role: "user" as const,
         parts: [
-          ...(prompt ? [{ type: "text", text: prompt }] : []),
+          ...(turnText ? [{ type: "text", text: turnText }] : []),
           ...attached.map((a) => ({ type: "file", mediaType: a.mime, url: a.dataUrl })),
         ],
       },
@@ -851,6 +973,26 @@ export function ChatScreen({
                 setMessages((prev) =>
                   prev.map((m) => (m.id === placeholderId ? { ...m, holdingsImport } : m)),
                 );
+                // Persist the card (browser-only, like images) so it survives a
+                // reload — the server stores only the assistant's text.
+                if (tidForImages) saveChatCard(tidForImages, userSeq, { holdingsImport });
+              }
+            }
+            // propose_transactions_import emits a `transactionsImport` batch —
+            // attach it so TransactionsImportCard renders the dated-trade table.
+            if (toolOut && typeof toolOut === "object" && "transactionsImport" in toolOut) {
+              const ti = (toolOut as { transactionsImport?: unknown }).transactionsImport;
+              if (ti && typeof ti === "object" && Array.isArray((ti as { rows?: unknown }).rows)) {
+                const raw = ti as { rows: ExtractedTxnRow[]; source?: unknown; note?: unknown };
+                const transactionsImport: TransactionsImport = {
+                  rows: raw.rows,
+                  source: typeof raw.source === "string" ? raw.source : null,
+                  note: typeof raw.note === "string" ? raw.note : null,
+                };
+                setMessages((prev) =>
+                  prev.map((m) => (m.id === placeholderId ? { ...m, transactionsImport } : m)),
+                );
+                if (tidForImages) saveChatCard(tidForImages, userSeq, { transactionsImport });
               }
             }
           } catch {
@@ -1211,7 +1353,7 @@ export function ChatScreen({
                       type="button"
                       key={img.id}
                       className="thumb"
-                      onClick={() => setLightbox(img.dataUrl)}
+                      onClick={() => setLightbox(img.fullDataUrl ?? img.dataUrl)}
                       title={img.name}
                       aria-label={`View ${img.name}`}
                     >
@@ -1261,11 +1403,18 @@ export function ChatScreen({
                   onOpen={() => requestImportWithRows(m.holdingsImport!.rows)}
                 />
               )}
+              {m.transactionsImport && (
+                <TransactionsImportCard
+                  data={m.transactionsImport}
+                  onOpen={() => requestTxnImportWithRows(m.transactionsImport!.rows)}
+                />
+              )}
               {m.role === "ai" &&
                 i > 0 &&
                 !m.proposal &&
                 !m.holdings?.length &&
-                !m.holdingsImport && (
+                !m.holdingsImport &&
+                !m.transactionsImport && (
                   <FeedbackRow
                     label="HELPFUL?"
                     value={msgFeedback[i]?.rating ?? null}
@@ -1462,7 +1611,7 @@ export function ChatScreen({
               void addFiles(files);
             }
           }}
-          placeholder="Ask about your portfolio, target, or rebalancing…"
+          placeholder="Ask about your portfolio…"
           disabled={loading}
         />
         <button type="submit" disabled={(!input.trim() && attachments.length === 0) || loading}>

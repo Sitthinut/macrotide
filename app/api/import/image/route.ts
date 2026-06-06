@@ -3,7 +3,10 @@ import { clientIp, type RateLimitConfig, rateLimit } from "@/lib/api/rate-limit"
 import { withDb } from "@/lib/api/with-db";
 import { deriveRowsWithNav } from "@/lib/portfolio/derive-rows";
 import {
+  classifyImportImage,
   extractStructuredHoldings,
+  extractTransactionRows,
+  type ImportDocType,
   isAllowedMimeType,
   OcrProviderUnavailableError,
 } from "@/lib/portfolio/ocr";
@@ -84,19 +87,52 @@ export async function POST(req: Request) {
 
   const buffer = Buffer.from(await file.arrayBuffer());
 
-  // Structured-extraction endpoint: returns { rows } the UI renders as an
-  // editable confirmation table. The vision model reads whatever the broker
-  // screen shows (often market value + % but no units); we derive units /
-  // avgCost from the latest NAV (fund_quotes) where we can, and flag the rest
-  // for the user to fill in. The image is never persisted.
+  // Optional caller override: when the auto-classifier was unsure and the user
+  // explicitly picked a type, the client re-posts with `as` to skip detection.
+  const asRaw = formData.get("as");
+  const override: ImportDocType | null =
+    asRaw === "holdings" || asRaw === "transactions" ? asRaw : null;
+
+  // Filename + saved-at timestamp ride as CONTEXT for the model's as-of-date
+  // call — a fallback only; a date shown in the image wins. We never parse the
+  // filename ourselves.
+  const fnameRaw = formData.get("filename");
+  const capturedRaw = formData.get("capturedAt");
+  const ctx = {
+    filename: typeof fnameRaw === "string" ? fnameRaw : undefined,
+    capturedAt: typeof capturedRaw === "string" ? capturedRaw : undefined,
+  };
+
+  // Detect-then-route: a screenshot is either a HOLDINGS SNAPSHOT (→ Starting
+  // balances) or a TRANSACTION HISTORY (→ trade rows); the two need different
+  // extractors. Classify first (unless overridden), then run the matching one.
+  // Response carries `docType` + `confidence` so the client can confirm a
+  // low-confidence guess with the user. The image is never persisted.
   return withDb(async () => {
     try {
+      let docType: ImportDocType;
+      let confidence: "high" | "low";
+      let asOf: string | null = null;
+      if (override) {
+        docType = override;
+        confidence = "high";
+      } else {
+        const c = await classifyImportImage({ data: buffer, mimeType }, ctx);
+        docType = c.docType;
+        confidence = c.confidence;
+        asOf = c.asOf;
+      }
+
+      if (docType === "transactions") {
+        const transactions = await extractTransactionRows({ data: buffer, mimeType });
+        return NextResponse.json({ docType, confidence, asOf, transactions }, { status: 200 });
+      }
+
       const extracted = await extractStructuredHoldings({ data: buffer, mimeType });
       // Derive units/avgCost from the latest NAV (shared with the advisor's
       // propose_holdings_import tool — see lib/portfolio/derive-rows.ts).
-      const rows = deriveRowsWithNav(extracted);
-
-      return NextResponse.json({ rows }, { status: 200 });
+      const holdings = deriveRowsWithNav(extracted);
+      return NextResponse.json({ docType, confidence, asOf, holdings }, { status: 200 });
     } catch (err) {
       if (err instanceof OcrProviderUnavailableError) {
         return NextResponse.json(

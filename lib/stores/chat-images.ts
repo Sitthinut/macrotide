@@ -15,8 +15,23 @@
 export interface ChatImage {
   /** Stable id for React keys (lists support removal/reorder). */
   id: string;
-  /** Downscaled data URL (image/jpeg) shown as a thumbnail / lightbox. */
+  /** Downscaled data URL (image/jpeg) — sent to the model and shown as a thumbnail. */
   dataUrl: string;
+  /**
+   * The ORIGINAL full-resolution data URL, for the lightbox so the user can
+   * actually read the screenshot. Kept in memory only — NOT persisted (too big
+   * for the localStorage budget), so it's absent after a reload (lightbox then
+   * falls back to the downscaled `dataUrl`).
+   */
+  fullDataUrl?: string;
+  /**
+   * Plain-text transcription of the image (from /api/chat/transcribe), computed
+   * once on attach. Carried in the conversation so follow-up turns reference the
+   * image as cheap text instead of re-sending the bytes. Small → persisted.
+   */
+  transcript?: string;
+  /** The file's last-modified time (ISO) — a hint for the snapshot's as-of date. */
+  capturedAt?: string;
   mime: string;
   name: string;
 }
@@ -68,7 +83,10 @@ const composeKey = (threadId: string, seq: number) => `${threadId}:${seq}`;
 export function saveChatImages(threadId: string, seq: number, images: ChatImage[]): void {
   if (!threadId || images.length === 0) return;
   const store = readStore();
-  store[composeKey(threadId, seq)] = { ts: Date.now(), images };
+  // Persist the downscaled copies only — strip the full-res original (kept in
+  // memory for the lightbox) so it never blows the localStorage budget.
+  const slim = images.map(({ fullDataUrl: _full, ...rest }) => rest);
+  store[composeKey(threadId, seq)] = { ts: Date.now(), images: slim };
   writeStore(store);
 }
 

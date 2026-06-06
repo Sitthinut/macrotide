@@ -83,6 +83,23 @@ size-bounded with oldest-first eviction. A muted disclaimer states images stay i
 the browser and are sent to the Advisor to answer, not stored on the server. See
 [SECURITY.md](../../SECURITY.md).
 
+## Cross-turn context: carry the transcript, not the bytes
+
+An image is only sent to the model on the turn it is attached. Re-sending the
+bytes on every follow-up would re-run the unreliable vision path each time and
+bust the prompt cache — so instead, on attach the image is transcribed ONCE to
+plain text (`POST /api/chat/transcribe` → `extractHoldingsFromImage`, the same
+model). That transcript rides on the `ChatImage` (persisted, unlike the bytes),
+and on later turns `imageText()` folds it into that turn's text as a
+`[Attached image, transcribed …]` block. Follow-ups therefore read the image as
+cheap, cache-stable text on the recoverable text path; the vision call happens
+exactly once. The system prompt tells the model to read that block and not ask
+the user to re-upload — only re-sharing for genuine visual detail a transcript
+can't capture (a chart's shape). Grounded in
+[context-engineering](./research/context-engineering.md) /
+[inference-strategy](./inference-strategy.md) (high-signal tokens, run the flaky
+path once, keep the prefix warm).
+
 ## Related
 
 - [Advisor context model](./advisor-context.md) — what the Advisor knows per turn.
