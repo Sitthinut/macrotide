@@ -15,6 +15,9 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Portfolio chart cards align by row.** On desktop the charts grid sizes every
+  card in a row to the tallest card in that row, while different rows size
+  independently; on mobile (one column) each card sizes to its own content.
 - **Known fund metadata now reads from the catalog source of truth.** Ledger
   imports still promote known catalog symbols to the Thai mutual-fund price
   source, but names, asset class, region, category, and TER are overlaid from

@@ -2483,10 +2483,11 @@ textarea.sheet-input {
   flex-direction: column;
   /* Allow content (charts with explicit widths) to shrink with the column. */
   min-width: 0;
-  /* Uniform card height across the whole grid (not just within a row). The
-     SVG-fill rule below lets chart-based cards grow their viz into the
-     extra space; list-based cards get a touch of bottom whitespace. */
-  min-height: 240px;
+  /* No fixed height: the grid's default align-items:stretch already equalizes
+     cards WITHIN a row (each row sizes to its tallest card) while letting
+     DIFFERENT rows differ. On mobile the grid is one column, so every card is
+     alone in its row and sizes to its own content. The SVG-fill rule below lets
+     a stretched chart-card grow its viz into the extra height. */
 }
 /* Push the last visual element to the bottom and let it stretch into any
    extra height the grid gave the card. Charts (MiniLine / MiniBars) use
