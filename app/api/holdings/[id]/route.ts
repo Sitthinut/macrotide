@@ -45,7 +45,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       assetClass: body.assetClass,
       region: body.region,
       ter: body.ter === undefined ? undefined : body.ter == null ? null : Number(body.ter),
-      color: body.color,
     };
     const nextTicker =
       typeof body.ticker === "string" && body.ticker.trim() ? body.ticker.trim() : existing?.ticker;

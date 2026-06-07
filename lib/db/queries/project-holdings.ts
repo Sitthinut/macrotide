@@ -65,7 +65,7 @@ function withFoldedPosition(row: HoldingRow): Holding {
 /**
  * Reconcile the `holdings` rows for one bucket with its ledger. A `holdings` row
  * is the home for instrument metadata that has no place in the ledger (thaiName,
- * category, assetClass, region, ter, color) plus ledger-carried identity
+ * category, assetClass, region, ter) plus ledger-carried identity
  * (quoteSource, englishName, source). Positions (units/avgCost) are NOT stored —
  * they're folded on read (listHoldings/getHolding). This keeps one row per held
  * ticker: create a row when a ticker is first held, drop it when it's no longer
@@ -149,7 +149,6 @@ export interface CreateHoldingInput {
   assetClass?: string | null;
   region?: string | null;
   ter?: number | null;
-  color?: string | null;
 }
 
 /** Patch for {@link editHoldingViaLedger} — any subset of position/identity/metadata. */
@@ -165,10 +164,9 @@ export interface EditHoldingPatch {
   assetClass?: string | null;
   region?: string | null;
   ter?: number | null;
-  color?: string | null;
 }
 
-const METADATA_KEYS = ["thaiName", "category", "assetClass", "region", "ter", "color"] as const;
+const METADATA_KEYS = ["thaiName", "category", "assetClass", "region", "ter"] as const;
 
 function pickMetadata(patch: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -234,7 +232,7 @@ export function createHoldingViaLedger(input: CreateHoldingInput): Holding | und
 
 /**
  * Edit a holding "directly" — sugar over the ledger (ADR 0004):
- *   • metadata (name/colour/category/TER/…) updates the row;
+ *   • metadata (name/category/TER/…) updates the row;
  *   • a position change (units/avgCost) edits the single backing event when there
  *     is exactly one, else appends a `snapshot` anchor (history preserved);
  *   • a ticker/quoteSource change is propagated to the ledger so identity stays

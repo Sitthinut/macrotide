@@ -15,6 +15,16 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Holdings get distinct, on-brand swatch colors automatically.** Each holding's
+  dot is now derived from its **risk** along one ordered palette — cool/calm blue
+  for the lowest-risk funds through to warm/hot red for the highest — so a glance
+  across your holdings reads as a risk heat map. The color follows the SEC risk
+  spectrum (RS1…RS8, with RS81 "8+" hottest of all) when known, and falls back to
+  the holding's asset class otherwise; a ticker hash nudges lightness so same-risk
+  holdings stay distinguishable. Colors are computed at render time and never
+  stored, so they stay consistent and need no picker. (The SEC risk-spectrum code
+  is now kept in the fund catalog to drive this, instead of being discarded after
+  it's used to classify a fund's asset class.)
 - **Portfolio chart cards align by row.** On desktop the charts grid sizes every
   card in a row to the tallest card in that row, while different rows size
   independently; on mobile (one column) each card sizes to its own content.

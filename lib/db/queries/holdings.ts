@@ -18,7 +18,13 @@ export type HoldingUpdate = Partial<Omit<HoldingInsert, "id" | "createdAt">>;
  * cost, value, gains, and weight always reflect the latest NAV and can't disagree
  * with the analytics, which folds the same ledger.
  */
-export type Holding = HoldingRow & { units: number; avgCost: number | null };
+export type Holding = HoldingRow & {
+  units: number;
+  avgCost: number | null;
+  /** SEC risk-spectrum code, overlaid from the catalog (market.db) by
+   * enrichHoldingsWithCatalog — absent for non-catalog holdings. */
+  riskSpectrum?: string | null;
+};
 
 /** Overlay the live fold onto stored rows. A row the ledger no longer folds to a
  * held position is OMITTED — the fold, not the row, decides what you hold (a

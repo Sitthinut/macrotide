@@ -63,7 +63,6 @@ export const PORTFOLIOS: Portfolio[] = [
         ytd: 11.2,
         y1: 14.8,
         ter: 0.4,
-        color: "oklch(0.55 0.09 150)",
         source: "Demo Broker",
       },
       {
@@ -81,7 +80,6 @@ export const PORTFOLIOS: Portfolio[] = [
         ytd: 7.8,
         y1: 10.5,
         ter: 0.45,
-        color: "oklch(0.55 0.10 230)",
         source: "Demo Broker",
       },
       {
@@ -99,7 +97,6 @@ export const PORTFOLIOS: Portfolio[] = [
         ytd: 2.1,
         y1: 3.4,
         ter: 0.32,
-        color: "oklch(0.55 0.07 200)",
         source: "Demo Broker",
       },
       {
@@ -117,7 +114,6 @@ export const PORTFOLIOS: Portfolio[] = [
         ytd: 9.4,
         y1: 12.1,
         ter: 1.4,
-        color: "oklch(0.55 0.11 70)",
         source: "Demo Broker",
       },
       {
@@ -135,7 +131,6 @@ export const PORTFOLIOS: Portfolio[] = [
         ytd: 6.4,
         y1: 8.9,
         ter: 1.85,
-        color: "oklch(0.55 0.10 300)",
         source: "Demo Broker",
       },
       {
@@ -153,7 +148,6 @@ export const PORTFOLIOS: Portfolio[] = [
         ytd: 0.8,
         y1: 1.5,
         ter: 0.18,
-        color: "oklch(0.65 0.04 80)",
         source: "Demo Broker",
       },
     ],
@@ -198,7 +192,6 @@ export const PORTFOLIOS: Portfolio[] = [
         ytd: 8.2,
         y1: 9.5,
         ter: 1.05,
-        color: "oklch(0.55 0.09 150)",
         source: "Demo Broker",
       },
       {
@@ -216,7 +209,6 @@ export const PORTFOLIOS: Portfolio[] = [
         ytd: 5.1,
         y1: 7.3,
         ter: 1.2,
-        color: "oklch(0.55 0.10 230)",
         source: "Demo Broker",
       },
       {
@@ -234,7 +226,6 @@ export const PORTFOLIOS: Portfolio[] = [
         ytd: 2.4,
         y1: 3.6,
         ter: 0.45,
-        color: "oklch(0.55 0.07 200)",
         source: "Demo Broker",
       },
     ],
@@ -279,7 +270,6 @@ export const PORTFOLIOS: Portfolio[] = [
         ytd: -4.2,
         y1: -1.8,
         ter: 1.95,
-        color: "oklch(0.55 0.13 28)",
         source: "Demo Broker",
       },
       {
@@ -297,7 +287,6 @@ export const PORTFOLIOS: Portfolio[] = [
         ytd: 1.4,
         y1: 2.7,
         ter: 1.65,
-        color: "oklch(0.55 0.10 110)",
         source: "Demo Broker",
       },
       {
@@ -315,7 +304,6 @@ export const PORTFOLIOS: Portfolio[] = [
         ytd: 3.2,
         y1: 5.4,
         ter: 1.55,
-        color: "oklch(0.55 0.11 70)",
         source: "Demo Broker",
       },
     ],

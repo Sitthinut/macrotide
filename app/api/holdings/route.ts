@@ -51,7 +51,6 @@ export async function POST(req: Request) {
       assetClass: body.assetClass ?? null,
       region: body.region ?? null,
       ter: body.ter == null ? null : Number(body.ter),
-      color: body.color ?? null,
     });
     return NextResponse.json(created ? (getHolding(created.id) ?? created) : created, {
       status: 201,

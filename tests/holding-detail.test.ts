@@ -22,7 +22,6 @@ function makeHolding(overrides: Partial<Holding> = {}): Holding {
     ytd: 0,
     y1: 0,
     ter: 0.45,
-    color: "var(--accent)",
     source: "Brokerage",
     quoteSource: "market",
     ...overrides,

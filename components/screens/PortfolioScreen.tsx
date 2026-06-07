@@ -44,6 +44,7 @@ import {
 } from "@/lib/portfolio/fee-creep-presentation";
 import { computeHealth, rebalanceHint, summarizeHealth } from "@/lib/portfolio/health";
 import { performanceDisclaimer } from "@/lib/portfolio/performance-disclaimer";
+import { holdingColor } from "@/lib/portfolio/risk-palette";
 import type { AssetClass, Holding, Portfolio } from "@/lib/static/types";
 import { usePortfolioUi } from "@/lib/stores/portfolio-ui";
 
@@ -62,7 +63,6 @@ function holdingToFormValues(h: Holding, fallbackBucketId: string): HoldingFormV
     ter: h.ter ?? 0,
     source: h.source,
     quoteSource: isQuoteSource(h.quoteSource) ? h.quoteSource : DEFAULT_QUOTE_SOURCE,
-    color: h.color,
   };
 }
 
@@ -529,7 +529,6 @@ export function PortfolioScreen({
       units: values.units,
       avgCost: values.avgCost,
       ter: values.ter,
-      color: values.color,
       source: values.source || null,
       quoteSource: values.quoteSource,
     };
@@ -1603,7 +1602,7 @@ export function PortfolioScreen({
                   cursor: "pointer",
                 }}
               >
-                <div className="swatch" style={{ background: h.color }}>
+                <div className="swatch" style={{ background: holdingColor(h) }}>
                   {swatchAbbr(h.ticker)}
                 </div>
                 <div style={{ minWidth: 0 }}>
@@ -1744,7 +1743,6 @@ export function PortfolioScreen({
                 ter: 0,
                 source: "",
                 quoteSource: DEFAULT_QUOTE_SOURCE,
-                color: "var(--accent)",
               }
         }
         bucketOptions={portfolios.map((p) => ({ id: p.id, name: p.name }))}

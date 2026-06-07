@@ -93,7 +93,6 @@ describe("PATCH /api/holdings/[id]", () => {
       assetClass: "cash",
       region: "User region",
       ter: 9,
-      color: "#123456",
       source: "Broker A",
     });
 
@@ -101,7 +100,6 @@ describe("PATCH /api/holdings/[id]", () => {
     expect(body.englishName).toBe("Catalog English");
     expect(body.assetClass).toBe("bond");
     expect(body.ter).toBe(0.25);
-    expect(body.color).toBe("#123456");
     expect(body.source).toBe("Broker A");
 
     const raw = ctx()
