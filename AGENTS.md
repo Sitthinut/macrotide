@@ -37,9 +37,12 @@ anything user-visible:
 
 Stale docs are the #1 failure mode here. After implementing, do a docs pass
 before committing — treat docs as part of the change, not a follow-up. Keep docs
-**timeless** — present-tense capability, no issue numbers or status tags; status
-lives in the board and CHANGELOG, not in the prose; the README Features list
-names shipped capabilities only (no status column).
+**timeless**: describe shipped behavior by capability, never by the issue that
+delivered it (a closed-issue number is dead weight — strip a ref when its work
+ships). Link an issue only for **not-yet-built behavior a doc must mention** — its
+open tracking issue, so the live link is the reminder to revisit when the work
+lands. Status lives in the board and CHANGELOG, not in prose; the README Features
+list names shipped capabilities only (no status column).
 
 | When you change… | Update… |
 | --- | --- |

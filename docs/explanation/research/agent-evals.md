@@ -29,8 +29,9 @@ literature, and the agent-benchmark work (τ-bench, BFCL):
 
 This survey is oriented to Macrotide's problem: a small, cheap model behind
 OpenRouter acting as **Advisor** over a tool surface, whose signature failure is
-the *empty turn* — it calls a tool then stops without answering ([issue #21](
-../advisor-context.md)). Small models fail more, and fail stochastically, so the
+the *empty turn* — it calls a tool then stops without answering (the
+[empty-turn dead-end](../advisor-context.md)). Small models fail more, and fail
+stochastically, so the
 discipline here matters more, not less.
 
 ## Decision
@@ -158,8 +159,8 @@ A tool-call-then-silence turn is a **reliability** failure of a different kind
 from a wrong answer — and a quality-only average hides it (a model that
 dead-ends 30% of the time but is otherwise correct can score like a reliable
 one). It must be its own metric with its own threshold. This is Macrotide's
-[#21](../advisor-context.md), and the harness reports dead-end rate as a separate
-gated column, not a zero folded into quality.
+[empty-turn dead-end](../advisor-context.md), and the harness reports dead-end
+rate as a separate gated column, not a zero folded into quality.
 
 ## Reading transcripts and the maintenance loop
 
@@ -192,7 +193,7 @@ production traces fed back into the set.
 | Did it use the right tools? | Trajectory set-membership | `expectTools` → **tools** sub-signal |
 | Did it over-call / propose spuriously? | Negative-case grading | `mustNotCallTools` + an N-control question |
 | Did it invent data? | Hallucination guard | `mustNotInclude` → **safety** sub-signal (threshold 0) |
-| Did it stall (empty turn)? | Dead-end rate as its own metric | separate gated % column (#21) |
+| Did it stall (empty turn)? | Dead-end rate as its own metric | separate gated % column |
 | Is it reliable, not just right-on-average? | `pass^k` / `avg@N` over N runs | `EVAL_N` repeats, `pass^k` per tier |
 | Is a change actually better? | Pre-declared thresholds + paired test | `THRESHOLDS` + PASS/FAIL verdict (CIs: planned) |
 | Can grading be trusted? | Read transcripts; hermetic data | per-run transcript spot-read; `EXAMPLE-FUND-*` only |

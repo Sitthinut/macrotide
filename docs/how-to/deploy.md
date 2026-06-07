@@ -456,7 +456,7 @@ container**, not `docker exec` into the live app: each `ExecStart` is
 
 Why not `docker exec`: an `exec`'d job runs *inside* the app container, so a
 deploy (`docker compose up --build`) recreates that container and **SIGKILLs the
-in-flight job** (issue #115 — a mid-crawl deploy killed three nightly catalog
+in-flight job** (a mid-crawl deploy once killed three nightly catalog
 refreshes). A `run --rm` one-off shares the app's image, `.env.local`, and
 `./data` volume but is its own ephemeral container, so an app redeploy leaves it
 untouched. The bare-Node units below use the `npx -y tsx` form.

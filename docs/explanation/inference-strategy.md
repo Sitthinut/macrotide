@@ -297,7 +297,7 @@ DB) in two tiers — *retrieve-then-explain* (the common path) and *complex
 multi-step* (rebalance, SSF-vs-RMF, a plan-anchored tilt) — using the exact
 production system prompt and OpenRouter wiring. Four metric families:
 deterministic **quality** (three separately-reported sub-signals: grounded-facts
-/ tool-trace / no-hallucination), **dead-end rate** (the #21 empty-turn, its own
+/ tool-trace / no-hallucination), **dead-end rate** (the empty-turn dead-end, its own
 gated metric — never a zero folded into quality), **latency / token / cost**, and
 **reliability across runs** (`pass^k` — the fraction of questions where *all* N
 runs pass, the number a single-run mean hides).
