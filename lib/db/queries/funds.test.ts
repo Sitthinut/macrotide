@@ -86,6 +86,18 @@ function ter(projId: string, actual: number, over: Partial<FundFeeInsert> = {}):
   };
 }
 
+describe("upsertFund conflict update", () => {
+  it("updates risk_spectrum when an existing fund is re-upserted", () => {
+    // Regression: the on-conflict set must include riskSpectrum, else a catalog
+    // re-run (the normal case — funds already exist) silently leaves it null.
+    withDb(() => {
+      upsertFund(fund("RSU", { riskSpectrum: null }));
+      const updated = upsertFund(fund("RSU", { riskSpectrum: "RS6" }));
+      expect(updated.riskSpectrum).toBe("RS6");
+    });
+  });
+});
+
 describe("getCurrentFees / getCurrentTer", () => {
   it("prefers the open period over a newer closed one", () => {
     withDb(() => {

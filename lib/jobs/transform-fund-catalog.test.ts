@@ -149,6 +149,18 @@ describe("profileToFundInsert", () => {
     expect(equity.assetClass).toBe("equity");
   });
 
+  it("persists the raw risk-spectrum code (kept after classification)", () => {
+    // The code survives even when it doesn't drive the asset class (RS5 → policy
+    // wins) and even when it's an off-ladder variant (RS81) the classifier drops.
+    expect(profileToFundInsert(makeProfile(), null, "RS6").riskSpectrum).toBe("RS6");
+    expect(
+      profileToFundInsert(makeProfile({ policy_desc: "ตราสารหนี้" }), null, "RS5").riskSpectrum,
+    ).toBe("RS5");
+    expect(profileToFundInsert(makeProfile(), null, "RS81").riskSpectrum).toBe("RS81");
+    // No code published → null, not undefined (an explicit "not published").
+    expect(profileToFundInsert(makeProfile(), null, undefined).riskSpectrum).toBeNull();
+  });
+
   it("falls back to policy when the RS code is ambiguous (RS5) or absent", () => {
     // RS5 mixes balanced + high-yield-bond funds, so policy disambiguates.
     expect(

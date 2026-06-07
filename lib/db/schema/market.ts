@@ -139,6 +139,11 @@ export const fundCatalog = sqliteTable(
     // `policyDescTh` + the money-market name match — see deriveAssetClass in
     // lib/market/fund-classify.ts.
     assetClass: text("asset_class"),
+    // The SEC factsheet risk-spectrum code, verbatim (e.g. "RS1"…"RS8", "RS81",
+    // "RS8+"). The 1–8 ladder it sits on is the source axis `assetClass` is
+    // derived from (RS1/2→cash … RS8→alt), kept here for the fund-detail UI and
+    // so the raw signal isn't lost after classification. NULL = not published.
+    riskSpectrum: text("risk_spectrum"),
     // Short Thai asset-type label from the SEC (ตราสารหนี้ / ตราสารทุน / ผสม /
     // ทรัพย์สินทางเลือก) — the source for `assetClass` inference.
     policyDescTh: text("policy_desc_th"),

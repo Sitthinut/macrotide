@@ -57,6 +57,13 @@
       "when": 1780729754385,
       "tag": "0007_uppercase_cache_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1780805543221,
+      "tag": "0008_fair_whistler",
+      "breakpoints": true
     }
   ]
 }
