@@ -3,6 +3,7 @@
 // hover + tooltips see components/InteractiveCharts.tsx (recharts).
 
 import { useId } from "react";
+import { formatSeriesDate } from "@/lib/portfolio/adapter";
 import { rebaseBenchmark } from "@/lib/portfolio/rebase";
 import type { MixSlice, SeriesPoint } from "@/lib/static/types";
 
@@ -203,7 +204,7 @@ export function PerfChart({
           const p = pts[i];
           return (
             <text key={i} x={p[0]} y={height - 6} textAnchor="middle" className="chart-axis">
-              {p[2].d}
+              {formatSeriesDate(p[2].d)}
             </text>
           );
         });

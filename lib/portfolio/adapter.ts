@@ -95,17 +95,70 @@ function inferPortfolioType(typeLabel: string | null): PortfolioType {
   return "free";
 }
 
-// Convert "YYYY-MM-DD" → "MMM DD" (e.g. "2026-05-22" → "May 22"). The chart's
-// x-axis uses the short label. Exported so the benchmark overlay can map onto
-// the same label space and align with the portfolio line.
+// Convert "YYYY-MM-DD" → "MMM DD" (e.g. "2026-05-22" → "May 22"). Used by the
+// hand-rolled PerfChart's axis labels.
 export function formatSeriesDate(iso: string): string {
   const d = new Date(`${iso}T00:00:00Z`);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
+// "YYYY-MM-DD" → "MMM 'yy" (e.g. "2026-05-22" → "May '26"). The prominent
+// month-boundary label on the interactive chart's grouped x-axis.
+export function formatMonthYear(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  const mon = d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
+  return `${mon} '${String(d.getUTCFullYear()).slice(-2)}`;
+}
+
+// "YYYY-MM-DD" → bare day-of-month (e.g. "2026-05-22" → "22"). The muted
+// in-between ticks under a month label on the grouped x-axis.
+export function formatDay(iso: string): string {
+  return String(new Date(`${iso}T00:00:00Z`).getUTCDate());
+}
+
+// "YYYY-MM-DD" → "MMM D, YYYY" (e.g. "May 22, 2026"). The full, unambiguous
+// date shown in the chart's hover tooltip.
+export function formatTooltipDate(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+// Pick up to `count` evenly-spaced points for x-axis ticks, INSET from both
+// edges — each tick sits at the centre of its 1/count slot, so there are
+// half-slot margins on each side. No label lands on the chart boundary (so
+// edge labels never clip) and the gaps read uniformly. Index-spacing — not
+// calendar — so gaps mirror the data's own (trading) days. Returns the points'
+// ISO `d` values; the chart hands these to recharts as an explicit `ticks` list
+// so each tick can compare against its neighbour for month grouping.
+export function pickAxisTicks(data: SeriesPoint[], count = 6): string[] {
+  const n = data.length;
+  if (n === 0) return [];
+  const c = Math.min(count, n);
+  return Array.from(
+    { length: c },
+    (_, k) => data[Math.min(n - 1, Math.floor(((k + 0.5) / c) * n))].d,
+  );
+}
+
+// Cumulative % return across a series: first finite value → last finite value.
+// Null when there aren't two finite points or the start is zero (can't divide).
+export function seriesReturnPct(series: SeriesPoint[]): number | null {
+  const finite = series.filter((p) => Number.isFinite(p.v));
+  if (finite.length < 2) return null;
+  const start = finite[0].v;
+  if (!start) return null;
+  return (finite[finite.length - 1].v / start - 1) * 100;
+}
+
 function toSeriesPoints(raw: { date: string; value: number }[] | undefined): SeriesPoint[] {
   if (!raw || raw.length === 0) return [];
-  return raw.map((p) => ({ d: formatSeriesDate(p.date), v: p.value }));
+  // `d` carries the raw ISO date; the chart formats axis/tooltip labels from it.
+  return raw.map((p) => ({ d: p.date, v: p.value }));
 }
 
 // Look back `days` calendar days from the latest point and return the % delta
