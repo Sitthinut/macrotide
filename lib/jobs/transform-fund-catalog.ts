@@ -65,6 +65,7 @@ export function profileToFundInsert(
     policyDesc: p.policy_desc ?? null,
     policyDescTh: p.policy_desc ?? null,
     assetClass: deriveAssetClass(rsCode, p.policy_desc, p.proj_name_th, p.proj_name_en),
+    riskSpectrum: rsCode ?? null,
     managementStyle: p.management_style ?? null,
     taxIncentiveType: classifyTaxIncentive(p.fund_class_tax_incentive_type),
     distributionPolicy: classifyDistribution(p.fund_class_detail),

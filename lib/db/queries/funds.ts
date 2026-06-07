@@ -41,6 +41,7 @@ export function upsertFund(input: FundInsert): Fund {
         fundType: input.fundType,
         policyDesc: input.policyDesc,
         assetClass: input.assetClass,
+        riskSpectrum: input.riskSpectrum,
         policyDescTh: input.policyDescTh,
         managementStyle: input.managementStyle,
         taxIncentiveType: input.taxIncentiveType,
