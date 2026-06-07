@@ -33,7 +33,7 @@ import { BENCHMARK_OPTIONS } from "@/lib/market/benchmark-options";
 import { DEFAULT_QUOTE_SOURCE, isQuoteSource } from "@/lib/market/sources";
 import { feeCreepKey } from "@/lib/portfolio/action-item-key";
 import { REASON_CHIPS, type ReasonChip } from "@/lib/portfolio/action-item-resurface";
-import { formatSeriesDate } from "@/lib/portfolio/adapter";
+import { seriesReturnPct } from "@/lib/portfolio/adapter";
 import { buildNamedChecks, type NamedCheck } from "@/lib/portfolio/checks";
 import {
   feeCheckInlineIntro,
@@ -579,7 +579,7 @@ export function PortfolioScreen({
   const benchmarkSeries = useMemo(
     () =>
       benchmarkResp && benchmarkResp.series.length > 0
-        ? benchmarkResp.series.map((p) => ({ d: formatSeriesDate(p.date), v: p.value }))
+        ? benchmarkResp.series.map((p) => ({ d: p.date, v: p.value }))
         : null,
     [benchmarkResp],
   );
@@ -821,9 +821,8 @@ export function PortfolioScreen({
   const pnl = view.totalValue - view.initialInvestment;
   const pnlPct = view.initialInvestment > 0 ? (pnl / view.initialInvestment) * 100 : 0;
 
-  const minV = view.series.length ? Math.min(...view.series.map((s) => s.v)) : 0;
-  const maxV = view.series.length ? Math.max(...view.series.map((s) => s.v)) : 0;
-  const fmtK = (n: number) => `฿${Math.round(n / 1000).toLocaleString("en-US")}k`;
+  // % return across the selected chart range (first → last value of the window).
+  const periodReturn = seriesReturnPct(view.series);
 
   const showAnalysis = activePfId === "all" || activePf?.targetModelId;
 
@@ -950,9 +949,14 @@ export function PortfolioScreen({
               </button>
             ))}
           </div>
-          <span className="num" style={{ fontSize: 11, color: "var(--muted)" }}>
-            {fmtK(minV)} → {fmtK(maxV)}
-          </span>
+          {periodReturn != null && (
+            <span
+              className={`delta-pill${periodReturn < 0 ? " down" : ""}`}
+              style={{ fontSize: 13 }}
+            >
+              {fmtPct(periodReturn, 2)}
+            </span>
+          )}
         </div>
         <NavChart
           data={view.series}

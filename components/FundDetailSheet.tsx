@@ -27,6 +27,7 @@ import type { FundWithTer } from "@/lib/db/queries/funds";
 import type { ShareClass } from "@/lib/db/queries/share-classes";
 import { type SeriesRange, useFundSeries } from "@/lib/fetchers/portfolio";
 import { useResource } from "@/lib/fetchers/swr";
+import { seriesReturnPct } from "@/lib/portfolio/adapter";
 import { buildHoldingDetailRows } from "@/lib/portfolio/holding-detail";
 import {
   buildPortfolioGroups,
@@ -1384,9 +1385,10 @@ function FundNavChartSection({ ticker }: { ticker: string | null }) {
       ? "Fund-size history isn't available for this fund yet."
       : "Price history isn't available for this fund yet.";
 
+  const periodReturn = seriesReturnPct(chartData);
+
   return (
-    <section>
-      <SectionHeader title="Fund history" />
+    <section style={{ marginTop: 16 }}>
       <div className="row between" style={{ marginBottom: 8 }}>
         <div className="range-pills">
           {NAV_RANGES.map((r) => (
@@ -1413,6 +1415,14 @@ function FundNavChartSection({ ticker }: { ticker: string | null }) {
           ))}
         </div>
       </div>
+      {periodReturn != null && (
+        <span
+          className={`delta-pill${periodReturn < 0 ? " down" : ""}`}
+          style={{ fontSize: 13, marginTop: 4 }}
+        >
+          {fmtPct(periodReturn)}
+        </span>
+      )}
       <NavChart
         data={chartData}
         height={140}

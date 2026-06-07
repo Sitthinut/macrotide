@@ -21,6 +21,12 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import {
+  formatDay,
+  formatMonthYear,
+  formatTooltipDate,
+  pickAxisTicks,
+} from "@/lib/portfolio/adapter";
 import type { AllocationSlice, SleeveDrift } from "@/lib/portfolio/health";
 import { rebaseBenchmark } from "@/lib/portfolio/rebase";
 import type { SeriesPoint } from "@/lib/static/types";
@@ -43,6 +49,45 @@ const TOOLTIP_LABEL: React.CSSProperties = {
 
 const fmtBaht = (n: number) => `฿${Math.round(n).toLocaleString("en-US")}`;
 const fmtK = (n: number) => `฿${Math.round(n / 1000).toLocaleString("en-US")}k`;
+
+// Grouped x-axis tick: the first tick of each month renders a brighter
+// "MMM 'yy"; in-between ticks render just a muted day number — so multi-month /
+// multi-year ranges stay readable without repeating the year on every label.
+// Ticks are inset from the edges (see pickAxisTicks), so all anchor "middle"
+// with even gaps and nothing clips. `ticks` is the full ordered list (so we can
+// compare against the previous tick for month grouping); recharts supplies
+// `index` as the position within it.
+function AxisTick({
+  x,
+  y,
+  payload,
+  index = 0,
+  ticks,
+}: {
+  x?: number | string;
+  y?: number | string;
+  payload?: { value?: string | number };
+  index?: number;
+  ticks: string[];
+}) {
+  if (x == null || y == null || payload?.value == null) return null;
+  const iso = String(payload.value);
+  const isMonthStart = index === 0 || iso.slice(0, 7) !== ticks[index - 1]?.slice(0, 7);
+  return (
+    <text
+      x={Number(x)}
+      y={Number(y)}
+      dy={12}
+      textAnchor="middle"
+      fontSize={10}
+      fontFamily="var(--font-mono)"
+      fill="var(--muted)"
+      opacity={isMonthStart ? 1 : 0.55}
+    >
+      {isMonthStart ? formatMonthYear(iso) : formatDay(iso)}
+    </text>
+  );
+}
 
 function EmptyState({ height, emptyHint }: { height: number; emptyHint?: string | null }) {
   return (
@@ -117,6 +162,7 @@ export function NavChart({
     v: d.v,
     bench: benchByLabel?.get(d.d) ?? null,
   }));
+  const axisTicks = pickAxisTicks(merged);
 
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -129,17 +175,18 @@ export function NavChart({
         </defs>
         <XAxis
           dataKey="d"
-          tick={{ fontSize: 10, fill: "var(--muted)", fontFamily: "var(--font-mono)" }}
+          ticks={axisTicks}
+          interval={0}
           tickLine={false}
           axisLine={false}
-          interval="preserveStartEnd"
-          minTickGap={48}
+          tick={(props) => <AxisTick {...props} ticks={axisTicks} />}
         />
         <YAxis hide domain={["dataMin", "dataMax"]} />
         <Tooltip
           cursor={{ stroke: "var(--line)", strokeWidth: 1 }}
           contentStyle={TOOLTIP_STYLE}
           labelStyle={TOOLTIP_LABEL}
+          labelFormatter={(label) => formatTooltipDate(String(label))}
           formatter={(value, name) => {
             if (name === "bench") return [fmtBaht(Number(value)), benchmarkLabel ?? "Benchmark"];
             const v = Number(value);

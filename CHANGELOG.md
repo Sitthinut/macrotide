@@ -15,6 +15,17 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Performance charts show the return for the selected period.** The portfolio
+  performance chart and the fund-detail price/size chart now display a colored
+  %-return for whatever range is selected (green up / red down) — derived from the
+  first and last value in the visible window, so it updates as you switch
+  1M/3M/6M/1Y/All. On the portfolio chart it replaces the old value-span readout;
+  on the fund chart it reads as "{range} return" under the pills.
+- **Performance-chart x-axis is readable across years.** The interactive chart's
+  date labels no longer clip at the left/right edges, and the axis now groups by
+  month: the first tick of each month shows a brighter `MMM 'yy` (e.g. `May '26`)
+  while in-between ticks show a muted day number — so multi-year ranges (1Y / All)
+  are unambiguous. The hover tooltip shows the full date with year.
 - **Holdings get distinct, on-brand swatch colors automatically.** Each holding's
   dot is now derived from its **risk** along one ordered palette — cool/calm blue
   for the lowest-risk funds through to warm/hot red for the highest — so a glance
