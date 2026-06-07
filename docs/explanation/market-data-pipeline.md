@@ -125,17 +125,20 @@ touching the portfolio "All" chart:
   universe to **SEC's depth cap of ~5.4 years** (~1,310 daily points; this is
   the SEC daily-NAV floor, not fund inception). For funds, ~5.4y is effectively
   the ceiling without another source.
-- **Indices / FX / gold / foreign holdings → shallow.** These resolve through
-  the `market` providers, are filled lazily or by the freshness job, and sit
-  only as **deep as they've been requested** (historically the 6mo default). The
-  prewarm job is Thai-fund-only and does **not** cover them.
-- **Consequence for a real account's "All" chart.** The blended value/return
-  series is bounded by its *shallowest* component. A portfolio of Thai funds is
-  now deep; one that also holds an index benchmark, a foreign ETF, gold, or
-  needs THB↔USD FX history is still capped near ~6 months by those non-fund
-  series. Backfilling them — bounded by free-tier provider history and quotas —
-  is not built yet; it's tracked in the [non-fund-series NAV backfill
-  issue](https://github.com/Sitthinut/macrotide/issues/81).
+- **Held non-fund positions → shallow until opened.** A `market`-sourced
+  holding (a foreign ETF, gold, an index held as a position) resolves through
+  the `market` providers and isn't proactively warmed — the prewarm job is
+  Thai-fund-only. The depth-aware fetch deepens such a symbol to `max` on the
+  first "All" open (bounded by that provider's free-tier history), so it largely
+  **self-heals on demand**; proactively warming held positions is tracked in
+  [#141](https://github.com/Sitthinut/macrotide/issues/141).
+- **FX is not a limiter.** THB↔USD conversion history rides on Frankfurter
+  (keyless, ECB-backed, deep to 1999), so the currency leg of a blended "All"
+  chart never bottlenecks it.
+- **Benchmark comparison is separate data.** Comparing the portfolio against an
+  index needs a purpose-built **total-return** series (SET TRI / tracking-ETF
+  adjusted close), not the display-only price indices above — tracked in
+  [#81](https://github.com/Sitthinut/macrotide/issues/81).
 
 The demo is exempt from this gap: it ships a self-contained committed history
 fixture and never depends on the crawl. A real account must never be shown
@@ -149,5 +152,6 @@ synthetic data as its own returns.
 | A new SEC field not yet landed | the crawl's `sec_raw` landing (`refresh-fund-catalog.ts`) |
 | Price-series freshness, depth, or fallback | [lib/market/cache.ts](../../lib/market/cache.ts) |
 | Provider chain / a new market provider | [lib/market/providers/](../../lib/market/providers), then [auth-and-providers.md](../reference/auth-and-providers.md#market-data-providers-indices--fx--stocks) |
-| Coverage backfill (NAV history depth) | `jobs:prewarm-nav` (`prewarm-nav.ts`); non-fund-series backfill not built — [#81](https://github.com/Sitthinut/macrotide/issues/81) |
+| Coverage backfill (NAV history depth) | `jobs:prewarm-nav` (`prewarm-nav.ts`); held non-fund positions self-heal on demand — [#141](https://github.com/Sitthinut/macrotide/issues/141) |
+| Benchmark comparison series (total-return) | not built — [#81](https://github.com/Sitthinut/macrotide/issues/81) |
 | Job schedules / one-shot containers | [deploy.md § Scheduled jobs](../how-to/deploy.md#scheduled-jobs-systemd-timers) |
