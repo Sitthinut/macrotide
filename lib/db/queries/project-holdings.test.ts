@@ -184,7 +184,6 @@ describe("holdings write paths route through the ledger", () => {
         units: 100,
         avgCost: 12,
         category: "Equity",
-        color: "#abc",
       });
       expect(h?.units).toBeCloseTo(100, 6);
       expect(h?.avgCost).toBeCloseTo(12, 6);
@@ -206,7 +205,7 @@ describe("holdings write paths route through the ledger", () => {
         units: 100,
         avgCost: 12,
       });
-      editHoldingViaLedger(h?.id as number, { color: "#fff", category: "Bond" });
+      editHoldingViaLedger(h?.id as number, { category: "Bond" });
       expect(listTransactionsByBucket("b1")).toHaveLength(1); // unchanged
       expect(listHoldings("b1")[0].category).toBe("Bond");
     });

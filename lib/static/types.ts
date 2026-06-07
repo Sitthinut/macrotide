@@ -30,10 +30,15 @@ export interface Holding {
   y1: number;
   /** Total expense ratio in %. `null` when the fund's fee is not published. */
   ter: number | null;
-  color: string;
   source: string;
   /** Data-routing key. Present on adapted holdings from /api/holdings. */
   quoteSource?: string;
+  /**
+   * SEC risk-spectrum code (RS1…RS8, RS81), overlaid from the catalog. Drives
+   * the holding swatch color via the risk palette; absent for non-catalog
+   * holdings (color then falls back to asset class).
+   */
+  riskSpectrum?: string | null;
 }
 
 export interface PerfPct {

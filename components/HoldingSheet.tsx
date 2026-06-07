@@ -25,7 +25,6 @@ export interface HoldingFormValues {
   source: string;
   /** Which provider serves this holding's NAV/price. */
   quoteSource: QuoteSource;
-  color: string;
 }
 
 export interface HoldingSheetProps {

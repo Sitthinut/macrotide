@@ -31,7 +31,6 @@ function holding(partial: Partial<Holding> & { ticker: string; value: number }):
     ytd: partial.ytd ?? 0,
     y1: partial.y1 ?? 0,
     ter: partial.ter === undefined ? 0 : partial.ter,
-    color: partial.color ?? "var(--accent)",
     source: partial.source ?? "",
   };
 }

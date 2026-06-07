@@ -103,7 +103,6 @@ export function seedDemoData(db: Db): void {
           region: h.region,
           // Position (units/avgCost) is folded from the opening anchor below, not stored.
           ter: h.ter,
-          color: h.color,
           source: h.source,
           // All demo seed holdings are real Thai mutual funds — route NAV
           // lookups through the SEC Open API against the shared market.db.

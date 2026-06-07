@@ -30,7 +30,6 @@ const sampleHolding = {
   units: 10,
   avgCost: 100,
   ter: 0.22,
-  color: "#3b82f6",
   source: "live",
   quoteSource: "market",
   acquiredOn: null,

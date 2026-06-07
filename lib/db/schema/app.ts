@@ -62,7 +62,6 @@ export const holdings = sqliteTable(
     // The row holds only instrument metadata + ledger-carried identity. Never
     // re-add units/avg_cost columns: they'd be a stale copy of regenerable math.
     ter: real("ter"),
-    color: text("color"),
     /** Brokerage / import provenance — free-text, displayed in UI. */
     source: text("source"),
     /**

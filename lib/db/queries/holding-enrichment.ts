@@ -11,6 +11,8 @@ export interface CatalogHoldingMetadata {
   assetClass: string | null;
   region: string | null;
   ter: number | null;
+  /** SEC risk-spectrum code (RS1…RS8, RS81) — drives the holding swatch color. */
+  riskSpectrum: string | null;
 }
 
 const CATALOG_FIELDS = [
@@ -20,6 +22,7 @@ const CATALOG_FIELDS = [
   "assetClass",
   "region",
   "ter",
+  "riskSpectrum",
 ] as const;
 export type CatalogOwnedField = (typeof CATALOG_FIELDS)[number];
 
@@ -60,6 +63,7 @@ export function catalogMetadataForHoldings(tickers: string[]): Map<string, Catal
       policyDescTh: fundCatalog.policyDescTh,
       assetClass: fundCatalog.assetClass,
       investRegion: fundCatalog.investRegion,
+      riskSpectrum: fundCatalog.riskSpectrum,
       shareTer: fundShareClasses.currentTer,
       fundTer: fundCatalog.currentTer,
     })
@@ -74,6 +78,7 @@ export function catalogMetadataForHoldings(tickers: string[]): Map<string, Catal
       assetClass: r.assetClass,
       region: displayRegion(r.investRegion),
       ter: r.shareTer ?? r.fundTer,
+      riskSpectrum: r.riskSpectrum,
     });
   }
 
@@ -87,6 +92,7 @@ export function catalogMetadataForHoldings(tickers: string[]): Map<string, Catal
       policyDescTh: fundCatalog.policyDescTh,
       assetClass: fundCatalog.assetClass,
       investRegion: fundCatalog.investRegion,
+      riskSpectrum: fundCatalog.riskSpectrum,
       ter: fundCatalog.currentTer,
     })
     .from(fundCatalog)
@@ -101,6 +107,7 @@ export function catalogMetadataForHoldings(tickers: string[]): Map<string, Catal
       assetClass: r.assetClass,
       region: displayRegion(r.investRegion),
       ter: r.ter,
+      riskSpectrum: r.riskSpectrum,
     });
   }
 

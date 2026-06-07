@@ -123,7 +123,6 @@ async function main() {
           region: h.region,
           // Position (units/avgCost) is folded from the opening anchor below, not stored.
           ter: h.ter,
-          color: h.color,
           source: h.source,
           // All mock holdings are Thai mutual funds — route through the SEC
           // Open API by default. Real-world adds via HoldingSheet will pick

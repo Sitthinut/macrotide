@@ -20,7 +20,6 @@ function holding(partial: Partial<Holding> & { ticker: string; value: number }):
     ytd: 0,
     y1: 0,
     ter: partial.ter === undefined ? 0 : partial.ter,
-    color: "var(--accent)",
     source: "",
   };
 }
