@@ -695,7 +695,6 @@ export function RecordSheet({
                 <strong>Import from {brokerCfg?.displayName} automatically</strong>
                 <span>Skip manual entry — connect once and it syncs.</span>
               </span>
-              <Icon name="arrowRight" size={14} />
             </button>
             <button
               type="button"

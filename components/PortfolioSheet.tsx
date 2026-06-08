@@ -72,6 +72,7 @@ export function PortfolioSheet({ open, initial, onClose, onSave, onDelete }: Por
       setValues(initial ?? { ...DEFAULT_VALUES, id: newId() });
       setError(null);
       setIconQuery("");
+      setSubmitting(false);
     }
   }, [open, initial]);
 
@@ -109,6 +110,7 @@ export function PortfolioSheet({ open, initial, onClose, onSave, onDelete }: Por
     try {
       await onDelete();
       setConfirmDelete(false);
+      setSubmitting(false);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete");
