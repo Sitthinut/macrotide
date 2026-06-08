@@ -1,0 +1,100 @@
+import "server-only";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import type { Connector } from "@macrotide/connector-sdk";
+
+// The server-only LOADER for a connector manifest — DATA only (no executable
+// code; the generic collector/parser live in @macrotide/connector-sdk and stay
+// brand-free). Brand specifics never live in committed code: they come from a
+// connector manifest supplied at deploy time, so this repo carries no broker
+// identity and a different broker is a config change.
+//
+// Provide the manifest one of three ways (checked in order):
+//   1. BROKER_CONNECTOR_PATH — path to a local JSON manifest (recommended for
+//      self-host; gitignored under .connectors/).
+//   2. BROKER_CONNECTOR_URL  — a URL the app fetches the JSON from (for shared /
+//      published connectors). Cached briefly. Data-only, so low-risk.
+//   3. Legacy BROKER_IMPORT_* env vars (back-compat).
+// Unset → no broker configured; the importer UI hides itself.
+
+export type { Connector };
+
+function str(v: unknown): string {
+  return typeof v === "string" ? v.trim() : "";
+}
+
+/** Validate a parsed manifest into a Connector (or null if it lacks essentials). */
+function toConnector(raw: unknown): Connector | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const host = str(o.host);
+  const planPath = str(o.planPath);
+  const historyPath = str(o.historyPath);
+  const pendingPath = str(o.pendingPath);
+  if (!host || !planPath || !historyPath || !pendingPath) return null;
+  const sourceTag = str(o.sourceTag) || "broker";
+  return {
+    id: str(o.id) || sourceTag,
+    displayName: str(o.displayName) || "your broker",
+    host,
+    planPath,
+    historyPath,
+    pendingPath,
+    sourceTag,
+    openUrl: str(o.openUrl) || undefined,
+    loginUrl: str(o.loginUrl) || undefined,
+    // Response-shape map (data-only); the SDK fills any gaps with its built-in
+    // defaults. Passed through verbatim — validated structurally by the SDK.
+    shape: o.shape && typeof o.shape === "object" ? (o.shape as Connector["shape"]) : undefined,
+  };
+}
+
+function fromFile(path: string): Connector | null {
+  try {
+    return toConnector(JSON.parse(readFileSync(resolve(path), "utf8")));
+  } catch {
+    return null;
+  }
+}
+
+// Brief in-memory cache for the URL path so we don't refetch on every request.
+let urlCache: { at: number; data: Connector | null } | null = null;
+const URL_TTL_MS = 5 * 60_000;
+
+async function fromUrl(url: string): Promise<Connector | null> {
+  const now = Date.now();
+  if (urlCache && now - urlCache.at < URL_TTL_MS) return urlCache.data;
+  try {
+    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const data = toConnector(await res.json());
+    urlCache = { at: now, data };
+    return data;
+  } catch {
+    // On failure keep serving the last good value (if any), else null.
+    return urlCache?.data ?? null;
+  }
+}
+
+function fromLegacyEnv(): Connector | null {
+  return toConnector({
+    id: process.env.BROKER_IMPORT_SOURCE_TAG,
+    displayName: process.env.BROKER_IMPORT_DISPLAY_NAME,
+    host: process.env.BROKER_IMPORT_HOST,
+    planPath: process.env.BROKER_IMPORT_PLAN_PATH,
+    historyPath: process.env.BROKER_IMPORT_HISTORY_PATH,
+    pendingPath: process.env.BROKER_IMPORT_PENDING_PATH,
+    sourceTag: process.env.BROKER_IMPORT_SOURCE_TAG,
+    openUrl: process.env.BROKER_IMPORT_OPEN_URL,
+    loginUrl: process.env.BROKER_IMPORT_LOGIN_URL,
+  });
+}
+
+/** Resolve the configured connector, or null when none is set up. */
+export async function getConnector(): Promise<Connector | null> {
+  const path = process.env.BROKER_CONNECTOR_PATH?.trim();
+  if (path) return fromFile(path);
+  const url = process.env.BROKER_CONNECTOR_URL?.trim();
+  if (url) return fromUrl(url);
+  return fromLegacyEnv();
+}

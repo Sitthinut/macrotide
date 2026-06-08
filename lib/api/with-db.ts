@@ -47,8 +47,14 @@ export async function withDb<T>(fn: (ctx: DbContext) => T | Promise<T>): Promise
   } else {
     // No authenticated user. Fall back to a demo session if the cookie is set,
     // otherwise the single-owner / AUTH_DISABLED owner context (userId: null).
+    // Under AUTH_DISABLED there is no demo concept — a stale `macrotide_demo`
+    // cookie must NOT hijack the local owner into an empty demo DB, so ignore it.
     const store = await cookies();
-    const demoId = store.get(DEMO_COOKIE)?.value;
+    // AUTH_DISABLED ⇒ no demo concept; ignore any stale cookie (matches
+    // isAuthRequired() in lib/auth/session, inlined to avoid pulling the heavy
+    // auth/db graph into this hot path).
+    const authRequired = process.env.AUTH_DISABLED !== "1";
+    const demoId = authRequired ? store.get(DEMO_COOKIE)?.value : undefined;
     if (demoId) {
       const session = getOrCreateDemoSession(demoId);
       ctx = {

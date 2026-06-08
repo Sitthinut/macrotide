@@ -51,6 +51,60 @@ export function insertTransactions(rows: TransactionInsert[]): Transaction[] {
 }
 
 /**
+ * Insert a batch, skipping any row whose `external_id` already exists (a broker
+ * re-sync) — so re-running an import inserts only genuinely new orders. Rows
+ * without an `external_id` (manual / OCR / paste) are never deduped. Dedup is
+ * GLOBAL (the partial unique index is table-wide), which is what we want: a row
+ * moved to another bucket keeps its id and still won't re-import. Returns the
+ * inserted rows plus how many were skipped as duplicates.
+ */
+export function insertTransactionsDeduped(rows: TransactionInsert[]): {
+  inserted: Transaction[];
+  skipped: number;
+} {
+  if (rows.length === 0) return { inserted: [], skipped: 0 };
+  const db = getDb();
+
+  // Which external_ids are already in the ledger? Chunk the IN() to stay well
+  // under SQLite's bound-variable limit.
+  const ids = rows.map((r) => r.externalId).filter((v): v is string => v != null);
+  const seen = new Set<string>();
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500);
+    if (chunk.length === 0) continue;
+    const found = db
+      .select({ externalId: transactions.externalId })
+      .from(transactions)
+      .where(inArray(transactions.externalId, chunk))
+      .all();
+    for (const f of found) if (f.externalId) seen.add(f.externalId);
+  }
+
+  // Keep rows with no external_id (always insert) and the first occurrence of
+  // each unseen id; `seen` grows as we accept ids so an in-batch duplicate is
+  // also dropped (two legs of the same order already get distinct ids).
+  const toInsert: TransactionInsert[] = [];
+  for (const r of rows) {
+    if (r.externalId == null) {
+      toInsert.push(r);
+      continue;
+    }
+    if (seen.has(r.externalId)) continue;
+    seen.add(r.externalId);
+    toInsert.push(r);
+  }
+
+  const skipped = rows.length - toInsert.length;
+  if (toInsert.length === 0) return { inserted: [], skipped };
+
+  const inserted = db.transaction((tx) =>
+    toInsert.map((r) => tx.insert(transactions).values(r).returning().get()),
+  );
+  rebuildHoldingsForBuckets(toInsert.map((r) => r.bucketId));
+  return { inserted, skipped };
+}
+
+/**
  * Update one transaction (gated by the caller-owned bucket set), then rebuild
  * the affected bucket's holdings. Returns the updated row, or undefined if the
  * id isn't in an owned bucket. The caller (route) is responsible for deriving a
@@ -98,6 +152,74 @@ export function deleteTransaction(id: number, ownedBucketIds: string[]): number 
     .where(and(eq(transactions.id, id), inArray(transactions.bucketId, ownedBucketIds)))
     .run();
   if (row) rebuildHoldingsForBucket(row.bucketId);
+  return res.changes;
+}
+
+/**
+ * Move every transaction from one broker account (external_account) into a
+ * target bucket — the account→portfolio remap / merge / consolidation primitive.
+ * Gated by the caller-owned bucket set. Rebuilds holdings for the source AND
+ * target buckets. `external_id` is untouched, so a re-sync stays idempotent.
+ */
+export function remapExternalAccountToBucket(
+  externalAccount: string,
+  newBucketId: string,
+  ownedBucketIds: string[],
+): { moved: number; affectedBuckets: string[] } {
+  if (ownedBucketIds.length === 0) return { moved: 0, affectedBuckets: [] };
+  const db = getDb();
+  const olds = db
+    .selectDistinct({ bucketId: transactions.bucketId })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.externalAccount, externalAccount),
+        inArray(transactions.bucketId, ownedBucketIds),
+      ),
+    )
+    .all();
+  const res = db
+    .update(transactions)
+    .set({ bucketId: newBucketId, updatedAt: new Date().toISOString() })
+    .where(
+      and(
+        eq(transactions.externalAccount, externalAccount),
+        inArray(transactions.bucketId, ownedBucketIds),
+      ),
+    )
+    .run();
+  const affected = Array.from(new Set([newBucketId, ...olds.map((o) => o.bucketId)]));
+  rebuildHoldingsForBuckets(affected);
+  return { moved: res.changes, affectedBuckets: affected };
+}
+
+/** Delete every transaction from one broker account (unlink → remove all history). */
+export function deleteTransactionsByExternalAccount(
+  externalAccount: string,
+  ownedBucketIds: string[],
+): number {
+  if (ownedBucketIds.length === 0) return 0;
+  const db = getDb();
+  const olds = db
+    .selectDistinct({ bucketId: transactions.bucketId })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.externalAccount, externalAccount),
+        inArray(transactions.bucketId, ownedBucketIds),
+      ),
+    )
+    .all();
+  const res = db
+    .delete(transactions)
+    .where(
+      and(
+        eq(transactions.externalAccount, externalAccount),
+        inArray(transactions.bucketId, ownedBucketIds),
+      ),
+    )
+    .run();
+  rebuildHoldingsForBuckets(olds.map((o) => o.bucketId));
   return res.changes;
 }
 
