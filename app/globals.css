@@ -1173,6 +1173,24 @@ textarea.sheet-input {
   gap: 8px;
   margin-left: auto;
 }
+/* `modal-footer--stack`: on narrow screens, lay the footer out as full-width
+   rows (start-slot actions first, then the end action last) instead of a row. */
+@media (max-width: 480px) {
+  .modal-footer--stack {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .modal-footer--stack .modal-footer-start,
+  .modal-footer--stack .modal-footer-end {
+    flex-direction: column;
+    align-items: stretch;
+    margin-left: 0;
+  }
+  .modal-footer--stack .modal-footer-start > *,
+  .modal-footer--stack .modal-footer-end > * {
+    width: 100%;
+  }
+}
 /* Appear-on-scroll separator: a soft upward shadow + a hairline top highlight
    (echoing the floating-pill treatment, e.g. .bottom-nav) once the body's
    bottom sentinel scrolls out of view. No hairline divider, no backdrop-filter. */

@@ -341,12 +341,16 @@ export interface ModalFooterProps {
   /** Left-aligned slot for a destructive / tertiary action. */
   start?: React.ReactNode;
   children: React.ReactNode;
+  /** Extra class on the footer (e.g. `modal-footer--stack` to stack on mobile). */
+  className?: string;
 }
 
-function ModalFooter({ start, children }: ModalFooterProps) {
+function ModalFooter({ start, children, className }: ModalFooterProps) {
   const { footerShadow } = useModalContext();
   return (
-    <div className={`modal-footer${footerShadow ? " modal-footer--scrolled" : ""}`}>
+    <div
+      className={`modal-footer${footerShadow ? " modal-footer--scrolled" : ""}${className ? ` ${className}` : ""}`}
+    >
       {start && <div className="modal-footer-start">{start}</div>}
       <div className="modal-footer-end">{children}</div>
     </div>

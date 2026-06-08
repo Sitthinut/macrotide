@@ -216,11 +216,6 @@ function PortfolioRow({
           >
             {conn.displayName || `Account ${conn.accountCode}`}
           </span>
-          {conn.lastInserted > 0 && (
-            <span className="tag green" style={{ flexShrink: 0 }}>
-              +{conn.lastInserted} new
-            </span>
-          )}
         </div>
         <div
           style={{
@@ -322,27 +317,41 @@ function DisconnectModal({
       <Modal.Header title={`Disconnect ${broker}?`} />
       <Modal.Body gap={8}>
         <p style={{ fontSize: 13, color: "var(--ink-soft)", lineHeight: 1.5, margin: 0 }}>
-          Syncing stops and the installed userscript is deactivated (its token is reset). You can
-          reconnect any time. Choose what to do with the history already imported:
+          Syncing stops and the installed userscript is deactivated. You can reconnect any time.
+          Choose what to do with the history already imported:
         </p>
       </Modal.Body>
       <Modal.Footer
+        className="modal-footer--stack"
         start={
-          <button type="button" className="btn ghost sm" disabled={busy} onClick={onClose}>
-            Cancel
-          </button>
+          <>
+            <button
+              type="button"
+              className="btn ghost sm"
+              disabled={busy}
+              onClick={() => run("leave")}
+            >
+              Keep history
+            </button>
+            <button
+              type="button"
+              className="btn sm"
+              style={{
+                background: "transparent",
+                border: 0,
+                color: "var(--loss)",
+                fontWeight: 600,
+              }}
+              disabled={busy}
+              onClick={() => run("purge")}
+            >
+              Remove all history
+            </button>
+          </>
         }
       >
-        <button type="button" className="btn sm" disabled={busy} onClick={() => run("leave")}>
-          Keep history
-        </button>
-        <button
-          type="button"
-          className="btn danger sm"
-          disabled={busy}
-          onClick={() => run("purge")}
-        >
-          Remove all history
+        <button type="button" className="btn primary sm" disabled={busy} onClick={onClose}>
+          Cancel
         </button>
       </Modal.Footer>
     </Modal>
