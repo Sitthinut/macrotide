@@ -1,7 +1,6 @@
-// Broker order-history import — moved to the brand-free @macrotide/connector-sdk
-// package. This module is a thin re-export so existing imports
-// (`@/lib/portfolio/broker-import`) keep working; new code should import from
-// `@macrotide/connector-sdk` directly.
+// Re-exports the broker import-format types + parser/collector from
+// `@macrotide/connector-sdk`, so `@/lib/portfolio/broker-import` is a stable
+// in-app import path for them. New code can import from the SDK directly.
 
 export type {
   BrokerAccount,

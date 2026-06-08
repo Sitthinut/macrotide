@@ -29,6 +29,7 @@ plan, and journal — including plan edits it proposes as accept/reject cards.
 - **Performance** — realized gains, money-weighted return (XIRR) per-fund and whole-portfolio, cost-basis timeline, contributions and income
 - **Plain-language health checks** — allocation drift, blended fees, cash drag, and look-through diversification (underlying single-name concentration, feeder-aware); fee-creep alerts you can dismiss or snooze
 - **Flexible import** — paste, a screenshot, CSV, or typed rows, all reviewed in one editable list before saving; symbol autocomplete; enter by units or baht value
+- **Broker auto-sync** — connect a broker once and it imports your full order history and keeps it in sync, each account as its own portfolio
 - **Plan & journal** — a markdown investment plan the Advisor proposes edits to, plus notes, decisions, questions, and a reading list
 
 **AI Advisor**
@@ -125,6 +126,9 @@ macrotide/
 │   ├── static/              Editorial content (markets/learn/personalities)
 │   │                        and placeholder analytics
 │   ├── format.ts, useViewport.ts, useScrollHide.ts
+├── packages/
+│   └── connector-sdk/       @macrotide/connector-sdk — brand-free broker
+│                            connector contract + parser/collector builder
 ├── data/                    SQLite + daily backups (gitignored)
 ├── tests/                   Vitest
 ├── docs/                    User + developer guide (Diátaxis)
