@@ -3,6 +3,7 @@
 ![Macrotide — an honest mirror for your index portfolio. Mobile and desktop screenshots of the portfolio dashboard.](./app/opengraph-image.png)
 
 [![CI](https://github.com/Sitthinut/macrotide/actions/workflows/ci.yml/badge.svg)](https://github.com/Sitthinut/macrotide/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/Sitthinut/macrotide/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/Sitthinut/macrotide/security/code-scanning)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 _An open-source AI investment companion for Thai index investors._
