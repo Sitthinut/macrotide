@@ -131,9 +131,19 @@ export function ChatPanel({
             </button>
             <span className="ra-dot"></span> Advisor
           </div>
-          <button className="icon-btn" onClick={onClose} aria-label="Close">
-            <Icon name="close" size={14} />
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <button
+              type="button"
+              className="chip-btn"
+              onClick={startNewChat}
+              title="Start a new conversation (⌘K)"
+            >
+              <Icon name="sparkle" size={12} /> New chat
+            </button>
+            <button className="icon-btn" onClick={onClose} aria-label="Close">
+              <Icon name="close" size={14} />
+            </button>
+          </div>
         </div>
       ) : (
         <div className="ra-panel-head">
@@ -151,10 +161,9 @@ export function ChatPanel({
           </div>
           <button
             type="button"
-            className="btn ghost sm"
+            className="chip-btn"
             onClick={startNewChat}
             title="Start a new conversation (⌘K)"
-            style={{ gap: 4 }}
           >
             <Icon name="sparkle" size={12} /> New
           </button>

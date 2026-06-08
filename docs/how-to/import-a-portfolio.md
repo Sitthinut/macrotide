@@ -140,6 +140,10 @@ whole ledger) is explicit.
 
 From the ledger, History and Position show:
 
+- **Invested** — the **cost basis of the units you still hold** (what you paid for
+  them), so it reflects capital actually still at work, not gross buys. Selling
+  removes the sold units' cost, never their proceeds, so realized profit isn't
+  double-counted here — it shows separately in **Realized**.
 - **Realized gains** on your sells, using **average cost** (FIFO is available);
   the cost basis of sold units is removed proportionally, never by the sale
   proceeds.

@@ -19,6 +19,11 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // Keep the dev-tools indicator in the bottom-right corner (out of the way of
+  // the app's top-left nav and bottom-left content).
+  devIndicators: {
+    position: "bottom-right",
+  },
   turbopack: {
     root: __dirname,
   },

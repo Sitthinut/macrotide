@@ -714,24 +714,17 @@ export function ChatThreadList({
           </div>
           <button
             type="button"
-            className="btn ghost sm"
+            className="chip-btn"
             onClick={() => {
               onNewChat();
               onClose();
             }}
             title="Start a new conversation (⌘K)"
-            style={{ gap: 4 }}
           >
             <Icon name="sparkle" size={12} /> New
           </button>
-          <button
-            type="button"
-            className="btn ghost sm"
-            onClick={onClose}
-            aria-label="Close"
-            style={{ padding: "4px 8px" }}
-          >
-            ✕
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
+            <Icon name="close" size={14} />
           </button>
         </header>
         <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>{listBody}</div>

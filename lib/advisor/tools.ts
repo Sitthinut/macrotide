@@ -107,17 +107,17 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
       const headline = summarizeHealth(health, target?.name ?? null);
       const concAssessment = assessConcentration(health.concentration);
 
-      // Lifetime ledger analytics — money invested (contributions), realized
-      // gains, income, and the money-weighted (annualized) return. These mirror
-      // the History/Position screens' KPI cards so a spoken answer matches what
-      // the user sees (computeTransactionAnalytics is the same orchestrator
-      // /api/transactions/analytics uses).
+      // Lifetime ledger analytics — capital still invested (cost basis of held
+      // units), realized gains, income, and the money-weighted (annualized)
+      // return. These mirror the History/Position screens' KPI cards so a spoken
+      // answer matches what the user sees (computeTransactionAnalytics is the
+      // same orchestrator /api/transactions/analytics uses).
       const asOf = new Date().toISOString().slice(0, 10);
       const bucketIds = buckets.map((b) => b.id);
       const allTxns = bucketIds.length > 0 ? listTransactionsForBuckets(bucketIds) : [];
 
       const toLedger = (a: Awaited<ReturnType<typeof computeTransactionAnalytics>>) => ({
-        invested: round(a.contributions.totalInvested),
+        invested: round(a.costBasisTotal),
         realized: round(a.realizedTotal),
         income: round(a.incomeTotal),
         irrPct: a.irr == null ? null : round(a.irr * 100, 1),

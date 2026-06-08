@@ -334,8 +334,8 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
               />
               <Stat
                 label="INVESTED"
-                value={baht(analytics?.contributions.totalInvested ?? 0)}
-                caption="contributions"
+                value={baht(analytics?.costBasisTotal ?? 0)}
+                caption="cost basis"
               />
               <Stat
                 label="REALIZED"

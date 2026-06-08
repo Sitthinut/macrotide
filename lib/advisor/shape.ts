@@ -120,7 +120,7 @@ const mwReturn = (irrPct: number | null, why: string | null) =>
 /** Lifetime ledger figures (invested / realized / income / money-weighted return). */
 function ledgerLine(l: PortfolioOutput["ledger"]): string | null {
   if (!l) return null;
-  return `Lifetime ledger: invested ${baht(l.invested)} (contributions), realized ${bahtSigned(l.realized)}, income ${baht(l.income)}, ${mwReturn(l.irrPct, l.irrUnavailable)}.`;
+  return `Lifetime ledger: invested ${baht(l.invested)} (cost basis), realized ${bahtSigned(l.realized)}, income ${baht(l.income)}, ${mwReturn(l.irrPct, l.irrUnavailable)}.`;
 }
 
 /**

@@ -124,11 +124,7 @@ export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps
                 : (a?.irrUnavailable ?? "Return appears after about a month of activity.")
             }
           />
-          <Stat
-            label="INVESTED"
-            value={baht(a?.contributions.totalInvested ?? 0)}
-            caption="contributions"
-          />
+          <Stat label="INVESTED" value={baht(a?.costBasisTotal ?? 0)} caption="cost basis" />
           <Stat
             label="REALIZED"
             value={signed(a?.realizedTotal ?? 0)}

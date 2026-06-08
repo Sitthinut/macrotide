@@ -36,6 +36,13 @@ export interface TransactionAnalytics {
   positions: PositionState[];
   basisTimeline: BasisPoint[];
   contributions: ContributionSummary;
+  /**
+   * Σ remaining cost basis of still-held units in THB — the capital actually
+   * still invested. Deducts the COST of sold units (via the lots fold), not
+   * their proceeds, so it never double-counts realized gain (that's `realizedTotal`)
+   * and can't go negative. Uncosted held units (cost_unknown) contribute 0.
+   */
+  costBasisTotal: number;
   /** Current market value of still-held units in THB, or null if unpriced. */
   marketValue: number | null;
   /** Money-weighted (annualized) return as a decimal, or null when undefined. */
@@ -88,6 +95,7 @@ export async function computeTransactionAnalytics(
 
   // Price still-held positions → THB, to form the terminal cash flow.
   const held = lots.positions.filter((p) => p.units > 0);
+  const costBasisTotal = held.reduce((s, p) => s + (p.costBasis ?? 0), 0);
   const sourceByTicker = new Map<string, string>();
   for (const r of rows) sourceByTicker.set(r.ticker, r.quoteSource);
 
@@ -159,6 +167,7 @@ export async function computeTransactionAnalytics(
     positions: lots.positions,
     basisTimeline: lots.basisTimeline,
     contributions,
+    costBasisTotal,
     marketValue,
     irr,
     irrUnavailable,

@@ -1268,25 +1268,23 @@ export function ChatScreen({
       <div className="topbar">
         <button
           type="button"
-          className="btn ghost sm"
+          className="icon-btn"
           onClick={() => setShowThreads(true)}
           disabled={loading}
           aria-label="Open chat list"
           title="All chats"
-          style={{ padding: "4px 8px" }}
         >
-          <Icon name="menu" size={14} />
+          <Icon name="menu" size={15} />
         </button>
         <div className="brand" style={{ flex: 1 }}>
           <span>{AI_PERSONALITIES.advisor.label}</span>
         </div>
         <button
           type="button"
-          className="btn ghost sm"
+          className="chip-btn"
           onClick={newChat}
           disabled={loading}
           title="Start a new conversation"
-          style={{ gap: 4 }}
         >
           <Icon name="sparkle" size={12} /> New chat
         </button>

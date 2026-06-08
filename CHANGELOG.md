@@ -15,6 +15,16 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **History/Position "Invested" now shows the cost basis of money still invested**
+  — the remaining cost of held units (deducting the cost of what you've sold, not
+  its proceeds) — so the KPI card and the Advisor's spoken figure reflect capital
+  actually still at work, without double-counting realized gains already in the
+  "Realized" card.
+- **Consistent Advisor header controls.** The hamburger, New-chat, and overflow
+  (kebab) buttons now share one compact style across the mobile chat header, the
+  Chats list, and the desktop panel; the desktop chat header gains a top-right
+  New-chat button beside the close button, so a fresh conversation is one click
+  from the chat view.
 - **One-click import of your broker's full order history — now an ongoing sync.**
   The Add sheet can pull every buy / sell / switch / dividend across all of your
   broker portfolios with no file export or screenshots. Install a small userscript

@@ -318,6 +318,44 @@ body[data-topbar-hidden="true"] .portfolio-switch {
   background: transparent;
   color: var(--ink);
 }
+/* Labeled sibling of .icon-btn: same height / corner / fill / border / hover,
+   but inline-sized to fit a short label (+ optional leading icon). Lets a
+   "New chat" control sit in a header next to icon-only .icon-btn buttons (the
+   hamburger, the kebab) and read as one consistent set. */
+.chip-btn {
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink-soft);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    color 0.12s;
+}
+.chip-btn:hover {
+  background: var(--card-soft);
+  color: var(--ink);
+}
+.chip-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.chip-btn:disabled,
+.chip-btn[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 /* Footer icon actions (e.g. the destructive trash) size up to match the 40px
    footer button row so the row reads as one consistent height. */
 .modal-footer .icon-btn {

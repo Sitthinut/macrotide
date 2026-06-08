@@ -89,7 +89,7 @@ describe("portfolioModelText", () => {
 
   it("surfaces lifetime ledger figures (invested, realized, income, money-weighted return)", () => {
     const t = portfolioModelText(PORTFOLIO);
-    expect(t).toContain("invested ฿950,000 (contributions)");
+    expect(t).toContain("invested ฿950,000 (cost basis)");
     expect(t).toContain("realized +฿12,500");
     expect(t).toContain("income ฿3,200");
     expect(t).toContain("money-weighted return +8.4%");

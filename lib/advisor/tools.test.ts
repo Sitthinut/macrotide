@@ -178,9 +178,11 @@ describe("advisor tools — read_portfolio", () => {
       position: { ticker: string; invested: number; income: number } | null;
     };
 
-    // Aggregate ledger: the buy is the only contribution; the dividend is income.
+    // Aggregate ledger: invested = cost basis of held units — the VOO buy (600)
+    // plus the GOLDSAVE opening balance (1000), which is also invested capital.
+    // The dividend is income, not cost basis.
     expect(out.ledger).not.toBeNull();
-    expect(out.ledger?.invested).toBe(600);
+    expect(out.ledger?.invested).toBe(1600);
     expect(out.ledger?.income).toBe(50);
     // The manual holding is flagged as self-priced.
     expect(out.customHoldings.map((c) => c.ticker)).toContain("GOLDSAVE");
