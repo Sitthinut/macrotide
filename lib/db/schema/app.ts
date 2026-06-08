@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { isNotNull, sql } from "drizzle-orm";
 import {
   index,
   integer,
@@ -163,6 +163,19 @@ export const transactions = sqliteTable(
     source: text("source"),
     // Groups the rows of one import for provenance / undo.
     importBatchId: text("import_batch_id"),
+    /**
+     * Stable per-order identity from a broker import (`sourceTag:account:ref`) —
+     * the dedup anchor so a re-sync inserts only genuinely new orders. NULL on
+     * manual / OCR / paste rows; the partial unique index below only constrains
+     * non-null values, so those rows never collide. Immutable after insert.
+     */
+    externalId: text("external_id"),
+    /**
+     * The broker account this row came from (account_code) — remembers the
+     * "real structure" so a later sync can keep the user's chosen portfolio.
+     * Immutable after insert; survives a re-bucketing. NULL on non-broker rows.
+     */
+    externalAccount: text("external_account"),
     createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
     updatedAt: text("updated_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
     /**
@@ -175,7 +188,48 @@ export const transactions = sqliteTable(
      */
     value: real("value"),
   },
-  (table) => [index("idx_transactions_bucket").on(table.bucketId, table.tradeDate)],
+  (table) => [
+    index("idx_transactions_bucket").on(table.bucketId, table.tradeDate),
+    // Idempotent broker re-sync: one row per external_id. Partial (only non-null)
+    // so existing/manual rows (external_id NULL) are unconstrained — SQLite would
+    // otherwise treat multiple NULLs as distinct anyway, but the partial index is
+    // explicit and skips indexing every non-broker row.
+    uniqueIndex("idx_transactions_external_id")
+      .on(table.externalId)
+      .where(isNotNull(table.externalId)),
+  ],
+);
+
+// Broker-import connections — maps one broker account (account_code) to the
+// Macrotide portfolio (bucket) its orders route into, plus last-sync status.
+// The account→bucket mapping is what the user manages (rename / remap / merge)
+// in Settings → Connections; the importer routes each account's rows by it. Two
+// connections pointing at the same bucketId is a MERGE. Scoped per user like
+// buckets (the uniqueness invariant is enforced in the query layer, not the
+// index, since NULL user_id rows are distinct in a SQLite unique index).
+export const brokerConnections = sqliteTable(
+  "broker_connections",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: text("user_id").references(() => user.id),
+    // Connector tag (the broker source label) — disambiguates multi-broker.
+    source: text("source").notNull().default("broker"),
+    // The broker's own account identifier (== transactions.external_account).
+    accountCode: text("account_code").notNull(),
+    // Human label from the broker (the plan name), for display.
+    displayName: text("display_name"),
+    // The portfolio this account's orders route to. onDelete:set null so deleting
+    // a bucket doesn't drop the connection (next sync re-creates a portfolio).
+    bucketId: text("bucket_id").references(() => buckets.id, { onDelete: "set null" }),
+    lastSyncedAt: text("last_synced_at"),
+    lastInserted: integer("last_inserted").notNull().default(0),
+    lastSkipped: integer("last_skipped").notNull().default(0),
+    createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
+    updatedAt: text("updated_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
+  },
+  (table) => [
+    uniqueIndex("idx_broker_connections_acct").on(table.userId, table.source, table.accountCode),
+  ],
 );
 
 // Investment plan — one row per user. `id` autoincrements; a UNIQUE index on

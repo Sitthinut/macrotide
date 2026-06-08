@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   type ProjectedPosition,
   type ProjectionEvent,
@@ -53,6 +53,30 @@ export function projectBucketPositions(bucketId: string): ProjectedPosition[] {
     .where(eq(transactions.bucketId, bucketId))
     .all();
   return projectPositions(foldableEvents(events).map(toProjectionEvent), DEFAULT_METHOD);
+}
+
+/**
+ * How many tickers ONE broker account currently holds — fold only that account's
+ * ledger rows (by `external_account`), across the caller-owned buckets, and count
+ * the surviving positions. Per-account (not per-bucket) so the count is stable
+ * when the account is remapped/merged into a different portfolio.
+ */
+export function countHeldByExternalAccount(
+  externalAccount: string,
+  ownedBucketIds: string[],
+): number {
+  if (ownedBucketIds.length === 0) return 0;
+  const events = getDb()
+    .select()
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.externalAccount, externalAccount),
+        inArray(transactions.bucketId, ownedBucketIds),
+      ),
+    )
+    .all();
+  return projectPositions(foldableEvents(events).map(toProjectionEvent), DEFAULT_METHOD).length;
 }
 
 /** Build the read-model Holding (stored row + folded position) — the same overlay
