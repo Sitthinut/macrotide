@@ -16,6 +16,22 @@ export function useBuckets() {
   return useResource<Bucket[]>("/api/buckets");
 }
 
+/** Broker import config for the UI (display name + install/open/login URLs).
+ *  `error` present (or no displayName) ⇒ no broker configured → hide the UI. */
+export interface BrokerConfig {
+  token?: string;
+  displayName?: string;
+  accountLabel?: string | null;
+  installUrl?: string;
+  openUrl?: string | null;
+  loginUrl?: string | null;
+  error?: string;
+}
+
+export function useBrokerConfig() {
+  return useResource<BrokerConfig>("/api/import/broker/token");
+}
+
 export function useHoldings(bucketId?: string) {
   const key = bucketId ? `/api/holdings?bucket=${encodeURIComponent(bucketId)}` : "/api/holdings";
   return useResource<DbHolding[]>(key);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { BrokerConnections } from "@/components/screens/BrokerConnections";
 import { invalidate, useResource } from "@/lib/fetchers/swr";
 
 export type Theme = "light" | "dark" | "system";
@@ -9,6 +10,8 @@ export interface SettingsScreenProps {
   theme: Theme;
   onThemeChange: (t: Theme) => void;
   onBack: () => void;
+  /** Open the standalone broker-connect wizard. */
+  onConnectBroker: () => void;
 }
 
 // Mirrors `lib/db/queries/preferences.ts#Preference` for the slice of fields
@@ -66,7 +69,12 @@ function fmtForgottenAt(iso: string): string {
   return `${parts} (${tz})`;
 }
 
-export function SettingsScreen({ theme, onThemeChange, onBack }: SettingsScreenProps) {
+export function SettingsScreen({
+  theme,
+  onThemeChange,
+  onBack,
+  onConnectBroker,
+}: SettingsScreenProps) {
   const { data, isLoading, error } = useResource<MemoryResponse>(MEMORY_KEY);
   const active = data?.active ?? [];
   const recentlyForgotten = data?.recentlyForgotten ?? [];
@@ -257,36 +265,7 @@ export function SettingsScreen({ theme, onThemeChange, onBack }: SettingsScreenP
         <div className="section-header">
           <h3>Connections</h3>
         </div>
-        <div className="card">
-          <div className="row between">
-            <div className="row">
-              <div className="broker-logo" style={{ width: 36, height: 36 }}>
-                +
-              </div>
-              <div>
-                <div
-                  style={{
-                    fontSize: 13.5,
-                    fontWeight: 500,
-                    letterSpacing: "-0.01em",
-                  }}
-                >
-                  No brokerage connected
-                </div>
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: "var(--muted)",
-                    fontFamily: "var(--font-mono)",
-                  }}
-                >
-                  Add holdings manually · sync coming soon
-                </div>
-              </div>
-            </div>
-            <span className="tag">soon</span>
-          </div>
-        </div>
+        <BrokerConnections onConnect={onConnectBroker} />
         <div
           style={{
             fontSize: 11.5,
@@ -315,25 +294,34 @@ export function SettingsScreen({ theme, onThemeChange, onBack }: SettingsScreenP
                 {renamingFrom === src ? (
                   <>
                     <input
-                      className="sheet-input"
+                      className="mt-select"
                       value={renameTo}
                       onChange={(e) => setRenameTo(e.target.value)}
                       style={{ flex: 1 }}
                     />
                     <div className="row" style={{ gap: 6 }}>
                       <button
-                        className="btn ghost sm"
-                        onClick={() => setRenamingFrom(null)}
-                        disabled={renameBusy}
-                      >
-                        Cancel
-                      </button>
-                      <button
+                        type="button"
                         className="btn ghost sm"
                         onClick={() => submitRename(src)}
                         disabled={renameBusy}
                       >
                         Save
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRenamingFrom(null)}
+                        disabled={renameBusy}
+                        style={{
+                          background: "transparent",
+                          border: 0,
+                          color: "var(--muted)",
+                          cursor: "pointer",
+                          fontSize: 12.5,
+                          padding: "4px 6px",
+                        }}
+                      >
+                        Cancel
                       </button>
                     </div>
                   </>
