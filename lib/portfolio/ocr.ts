@@ -1,5 +1,6 @@
 import "server-only";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import type { ExtractedTxnRow } from "@macrotide/connector-sdk";
 import { generateText } from "ai";
 import type { QuoteSource } from "@/lib/market/sources";
 
@@ -468,26 +469,9 @@ export function parseClassification(raw: string): ImportClassification {
   return { docType: "holdings", confidence: "low", asOf: null };
 }
 
-/**
- * A single transaction the vision model read off a tall buy/sell-log screenshot,
- * BEFORE any normalization. Like {@link ExtractedRow}, every numeric field is
- * optional — the extractor reports only what it actually saw and the editable
- * confirmation table is the human gate. `kind`/`tradeDate` are free-text as
- * printed; the client normalizes them (see lib/portfolio/txn-import.ts).
- */
-export interface ExtractedTxnRow {
-  ticker: string;
-  englishName?: string;
-  /** "buy" / "sell" / "dividend" / … as printed; normalized client-side. */
-  kind?: string;
-  /** Trade date as printed; normalized to ISO client-side. */
-  tradeDate?: string;
-  units?: number;
-  pricePerUnit?: number;
-  /** The baht amount of the transaction (unsigned magnitude). */
-  amount?: number;
-  fee?: number;
-}
+// The OCR/paste import row IS Macrotide's import format — owned by the SDK so the
+// broker parser and the host share one type. Re-exported for existing importers.
+export type { ExtractedTxnRow };
 
 const EXTRACT_TXN_PROMPT = `You are reading a screenshot of a Thai mutual-fund / brokerage TRANSACTION HISTORY — a log of buys, sells and dividends over time (many rows, often the SAME fund repeated, each row belonging to a date). Extract EVERY transaction row as a JSON array — output ONLY the array, no prose, no markdown code fences.
 

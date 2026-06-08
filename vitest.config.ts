@@ -3,7 +3,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ["lib/**/*.test.ts", "tests/**/*.test.ts"],
+    include: ["lib/**/*.test.ts", "tests/**/*.test.ts", "packages/**/*.test.ts"],
     exclude: ["**/node_modules/**", "**/*.local.test.ts"],
     environment: "node",
     globals: false,
@@ -14,6 +14,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": resolve(__dirname, "."),
+      "@macrotide/connector-sdk": resolve(__dirname, "packages/connector-sdk/src/index.ts"),
       "server-only": resolve(__dirname, "tests/shims/server-only.ts"),
     },
   },
