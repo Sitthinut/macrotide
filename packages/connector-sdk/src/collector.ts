@@ -73,7 +73,11 @@ const COLLECTOR_GETPATH = `var GP=function(o,p){if(p==null)return undefined;var 
 // A floating, Macrotide-branded toast (white card + brand mark + wordmark) shown
 // ON the broker page. Self-contained inline SVG + CSS. Message via textContent
 // (no HTML injection). Mark mirrors components/BrandMark.tsx (ink square + wave).
-const COLLECTOR_TOAST = `function toast(m,bad){var d=document.createElement("div");d.style.cssText="position:fixed;z-index:2147483647;left:50%;top:20px;transform:translateX(-50%);max-width:92vw;display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:12px;background:#fff;color:#0a0a0b;font:500 13.5px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;box-shadow:0 10px 40px rgba(0,0,0,.18);border:1px solid #e6e7ea";d.innerHTML='<svg width="22" height="22" viewBox="0 0 22 22" style="display:block;flex-shrink:0"><rect width="22" height="22" rx="6" fill="#0a0a0b"></rect><path d="M 0 11 Q 5.5 5 11 11 T 22 11 L 22 16 A 6 6 0 0 1 16 22 L 6 22 A 6 6 0 0 1 0 16 Z" fill="#0aa694"></path></svg><span style="font-weight:700;letter-spacing:-.01em">Macrotide</span>';var s=document.createElement("span");s.textContent=m;s.style.color=bad?"#b00020":"#3a3d43";d.appendChild(s);document.body.appendChild(d);setTimeout(function(){d.remove()},6000);return d}`;
+// Toasts append to a single fixed, centered, vertically-stacked container so
+// concurrent toasts (e.g. "Synced" + a reinstall nudge) never overlap. A
+// `sticky` toast does not auto-dismiss — it carries a × button and stays until
+// the user closes it (used for the reinstall nudge).
+const COLLECTOR_TOAST = `function toast(m,bad,sticky){var W=document.getElementById("__mt_toasts__");if(!W){W=document.createElement("div");W.id="__mt_toasts__";W.style.cssText="position:fixed;z-index:2147483647;left:50%;top:20px;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;align-items:center;max-width:92vw;pointer-events:none";document.body.appendChild(W)}var d=document.createElement("div");d.style.cssText="display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:12px;background:#fff;color:#0a0a0b;font:500 13.5px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;box-shadow:0 10px 40px rgba(0,0,0,.18);border:1px solid #e6e7ea";d.innerHTML='<svg width="22" height="22" viewBox="0 0 22 22" style="display:block;flex-shrink:0"><rect width="22" height="22" rx="6" fill="#0a0a0b"></rect><path d="M 0 11 Q 5.5 5 11 11 T 22 11 L 22 16 A 6 6 0 0 1 16 22 L 6 22 A 6 6 0 0 1 0 16 Z" fill="#0aa694"></path></svg><span style="font-weight:700;letter-spacing:-.01em">Macrotide</span>';var s=document.createElement("span");s.textContent=m;s.style.color=bad?"#b00020":"#3a3d43";d.appendChild(s);function close(){d.remove();if(!W.children.length)W.remove()}if(sticky){d.style.pointerEvents="auto";var x=document.createElement("button");x.type="button";x.textContent="×";x.setAttribute("aria-label","Dismiss");x.style.cssText="margin:-4px -6px -4px 2px;border:0;background:transparent;color:#9aa0a6;font:400 18px/1 system-ui;cursor:pointer;padding:4px 6px";x.onclick=close;d.appendChild(x)}else{setTimeout(close,6000)}W.appendChild(d);return d}`;
 
 // JSON fetch that rides the page's own cookies.
 const COLLECTOR_FETCH = `var J=function(u){return fetch(u,{credentials:"include",headers:{"Content-Type":"application/json"}}).then(function(r){return r.json()})};`;
@@ -114,7 +118,7 @@ const COLLECTOR_GATHER = `if(location.hostname!==H){toast("Open "+H+" (your orde
 //   • A short attempt-dedupe collapses rapid in-site navigations (and the toast).
 const USERSCRIPT_TEMPLATE = `(function(){
   ${COLLECTOR_GETPATH}
-  var T=__TOKEN__,O=__ORIGIN__,LV=__LOADER_VERSION__,SKEY="__macrotide_last_sync__",AKEY="__macrotide_last_try__",CFGKEY="__macrotide_cfg__",MIN=300000,DEDUPE=4000;
+  var T=__TOKEN__,O=__ORIGIN__,LV=__LOADER_VERSION__,SKEY="__macrotide_last_sync__",AKEY="__macrotide_last_try__",NKEY="__macrotide_nag__",CFGKEY="__macrotide_cfg__",MIN=300000,DEDUPE=4000,NAGMIN=86400000;
   ${COLLECTOR_TOAST}
   ${COLLECTOR_FETCH}
   function cfg(){return new Promise(function(res,rej){try{GM_xmlhttpRequest({method:"GET",url:O+"/api/import/broker/runtime",headers:{"X-Import-Token":T},onload:function(r){if(r.status>=200&&r.status<300){try{res(JSON.parse(r.responseText))}catch(e){rej(e)}}else rej(new Error("status "+r.status))},onerror:function(){rej(new Error("network"))},ontimeout:function(){rej(new Error("timeout"))}})}catch(e){rej(e)}})}
@@ -139,7 +143,7 @@ const USERSCRIPT_TEMPLATE = `(function(){
     try{C=await cfg();try{localStorage.setItem(CFGKEY,JSON.stringify(C))}catch(e){}}
     catch(e){try{C=JSON.parse(localStorage.getItem(CFGKEY)||"null")}catch(e2){C=null}}
     if(!C){toast("Open Macrotide once to finish connecting your broker.",true);return}
-    if(C.collectorVersion>LV)toast("A newer Macrotide importer is available — reinstall it from Settings → Connections.");
+    if(C.collectorVersion>LV){try{var ng=(localStorage.getItem(NKEY)||"").split("|");if(ng[0]!==(""+C.collectorVersion)||Date.now()-(+ng[1]||0)>NAGMIN){localStorage.setItem(NKEY,C.collectorVersion+"|"+Date.now());toast("A newer Macrotide importer is available — reinstall it from Settings → Connections.",false,true)}}catch(e){toast("A newer Macrotide importer is available — reinstall it from Settings → Connections.",false,true)}}
     var BACKOFF=[3000,8000,20000];
     var drive=async function(i){
       var r=await attempt(C);
