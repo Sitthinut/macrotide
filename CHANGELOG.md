@@ -15,6 +15,30 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **One-click import of your broker's full order history — now an ongoing sync.**
+  The Add sheet can pull every buy / sell / switch / dividend across all of your
+  broker portfolios with no file export or screenshots. Install a small userscript
+  (one click from a `.user.js` link) and it runs on your broker's own (logged-in)
+  page, collects the order history through the broker's API, and posts it straight
+  back to Macrotide — so opening your broker keeps Macrotide in sync without even
+  having Macrotide open. The installed script is a thin loader that fetches its
+  broker settings from Macrotide on each run, so it **stays current without
+  reinstalling** when the broker's API details change — only a change to the
+  collection logic itself prompts a one-tap reinstall. Re-syncs are
+  **idempotent**: each order carries a stable id, so importing again adds only
+  genuinely new orders and never duplicates. A
+  switch is recorded as a sell of the outgoing fund plus a buy of the incoming
+  one; dividends become cash income; cancelled and pending orders are skipped.
+  Which broker this targets is deployment config (env-only): a self-hoster points
+  it at any broker by writing a **connector manifest** — a data-only JSON naming
+  the broker's endpoints and (optionally) mapping its response field shape — with
+  no code changes, so the feature is hidden unless configured and the repo carries
+  no broker identity. A guided,
+  platform-aware install stepper (with a QR for installing on your phone) walks
+  you through it. Each of your broker accounts becomes its own portfolio, named
+  after the plan — and in **Settings → Connections** you can remap an account to a
+  different portfolio, merge several accounts into one, see each account's last
+  sync, unlink (keeping or removing its history), and reset the import token.
 - **Performance charts show the return for the selected period.** The portfolio
   performance chart and the fund-detail price/size chart now display a colored
   %-return for whatever range is selected (green up / red down) — derived from the

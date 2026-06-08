@@ -125,6 +125,24 @@ and run a priced model, only the token cap bites. Cost is an *estimate*
 | `EODHD_API_KEY` | — (chain falls through to ETF proxy → Yahoo) | [lib/market/providers/eodhd.ts](../../lib/market/providers/eodhd.ts) | EOD Historical Data. REAL global index levels via `{CODE}.INDX` (e.g. `GSPC.INDX`, `NDX.INDX`, `N225.INDX`, **`SET.INDX`** for Thailand). Free tier ≈ 20 req/day — second in the chain; covers Nikkei + SET that FMP's free tier lacks. Matches only mapped index symbols + only when set. |
 | `TWELVE_DATA_API_KEY` | — (falls back to keyless Yahoo, which 429s from datacenter IPs) | [lib/market/providers/twelvedata.ts](../../lib/market/providers/twelvedata.ts) | ETF-proxy layer for `market`-sourced series (Markets indicators, FX, stocks). When set, used after FMP/EODHD; maps index symbols to tracking ETFs (SPY/QQQ/DIA/THD/…) since raw index symbols aren't on the free plan. Free tier ≈ 800 req/day, 8 req/min. ACWI stays an ETF; Gold stays XAU/USD. |
 
+### One-click broker import
+
+Points the "Connect your broker" feature at a broker. The broker's identity and
+API shape live in a **connector manifest** (DATA only — the collector/parser code
+stays brand-free in `@macrotide/connector-sdk`), supplied one of three ways below
+(checked in order). All unset → the feature hides itself (paste / screenshot
+import still work). Authoring guide: [add-a-broker-connector.md](../how-to/add-a-broker-connector.md).
+
+| Var | Default | Read by | Notes |
+| --- | --- | --- | --- |
+| `BROKER_CONNECTOR_PATH` | unset | [lib/portfolio/connector.ts](../../lib/portfolio/connector.ts) | Path to a local manifest JSON (recommended for self-host). Real manifests live gitignored under `.connectors/`; see [.connectors/example.json](../../.connectors/example.json) for the full shape. |
+| `BROKER_CONNECTOR_URL` | unset (used only if `…PATH` unset) | [lib/portfolio/connector.ts](../../lib/portfolio/connector.ts) | URL the app fetches the manifest from (shared / published connectors). Cached ~5 min in-memory; data-only, so low-risk. |
+| `BROKER_IMPORT_*` | unset (used only if neither above set) | [lib/portfolio/connector.ts](../../lib/portfolio/connector.ts) | Legacy individual vars (`_HOST`, `_PLAN_PATH`, `_HISTORY_PATH`, `_PENDING_PATH`, `_SOURCE_TAG`, `_DISPLAY_NAME`, `_OPEN_URL`, `_LOGIN_URL`) — back-compat for the manifest's endpoint fields; superseded by `BROKER_CONNECTOR_PATH`/`URL`. No `shape` support (defaults only). |
+
+The per-user import token the userscript carries is a stored secret (months of
+broker read access), not an env var — it lives in `settings` and rotates on
+Disconnect ([lib/db/queries/broker-token.ts](../../lib/db/queries/broker-token.ts)).
+
 ### Dev-only
 
 | Var | Default | Read by | Notes |
