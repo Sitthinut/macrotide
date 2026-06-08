@@ -61,7 +61,7 @@ export function BrokerConnections({ onConnect }: { onConnect: () => void }) {
         </div>
         <button
           type="button"
-          className="btn primary sm"
+          className="btn ghost sm"
           style={{ alignSelf: "flex-start" }}
           onClick={onConnect}
         >

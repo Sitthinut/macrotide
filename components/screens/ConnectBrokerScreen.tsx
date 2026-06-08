@@ -53,6 +53,10 @@ export function ConnectBrokerScreen({ onBack, onOrganize }: ConnectBrokerScreenP
   const [scriptText, setScriptText] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [synced, setSynced] = useState<{ inserted: number; portfolios: number } | null>(null);
+  // Polling gives up after a window; `pollDone` flips the status to a manual
+  // "Check again", and `recheck` restarts a fresh polling window on click.
+  const [pollDone, setPollDone] = useState(false);
+  const [recheck, setRecheck] = useState(0);
 
   useEffect(() => {
     if (typeof navigator !== "undefined") setOs(detectOS(navigator.userAgent));
@@ -98,12 +102,15 @@ export function ConnectBrokerScreen({ onBack, onOrganize }: ConnectBrokerScreenP
       .catch(() => {});
   }, [step, cfg, qr]);
 
-  // Poll for a fresh sync once the user is on step 3+.
+  // Poll for a fresh sync while the user waits on step 3. Polls every 3s for a
+  // 5-min window, then stops and surfaces a manual "Check again" (no page
+  // refresh). Bumping `recheck` restarts a fresh window.
   useEffect(() => {
-    if (step < 3) return;
+    if (step !== 3) return;
     let alive = true;
     let timer: number;
     const start = Date.now();
+    setPollDone(false);
     const tick = async () => {
       try {
         const res = await fetch("/api/import/broker/connections");
@@ -116,19 +123,22 @@ export function ConnectBrokerScreen({ onBack, onOrganize }: ConnectBrokerScreenP
               portfolios: done.length,
             });
             setStep(4);
+            return;
           }
         }
       } catch {
         // transient — keep polling
       }
-      if (alive && Date.now() - start < 5 * 60_000) timer = window.setTimeout(tick, 3000);
+      if (!alive) return;
+      if (Date.now() - start < 5 * 60_000) timer = window.setTimeout(tick, 3000);
+      else setPollDone(true);
     };
     tick();
     return () => {
       alive = false;
       window.clearTimeout(timer);
     };
-  }, [step]);
+  }, [step, recheck]);
 
   // One-click: fetch the script (if not already) and copy it in a single action.
   const copyScript = async () => {
@@ -297,35 +307,45 @@ export function ConnectBrokerScreen({ onBack, onOrganize }: ConnectBrokerScreenP
                       <div className="import-step__body">
                         <p className="import-hint">
                           Open {cfg.displayName}, log in if needed, and the script syncs
-                          automatically — keep this tab open.
+                          automatically.
                         </p>
                         {cfg.openUrl && (
                           <a
-                            className="btn accent sm"
+                            className="btn primary sm"
                             href={cfg.openUrl}
                             target="_blank"
                             rel="noreferrer"
                           >
-                            <Icon name="arrowRight" size={12} /> Open {cfg.displayName}
+                            Open {cfg.displayName} →
                           </a>
                         )}
                         <p className="import-note">
                           You may briefly see an error page on {cfg.displayName} — that's fine, the
                           sync still runs underneath.
                         </p>
-                        {cfg.loginUrl && cfg.loginUrl !== cfg.openUrl && (
-                          <a
-                            className="btn link xs"
-                            href={cfg.loginUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            Need to log in first? Open your dashboard
-                          </a>
+                        {pollDone ? (
+                          <>
+                            <p className="broker-import__status" aria-live="polite">
+                              <Icon name="info" size={12} /> No sync yet — open {cfg.displayName}{" "}
+                              and make sure you're logged in.
+                            </p>
+                            <button
+                              type="button"
+                              className="btn ghost sm"
+                              onClick={() => {
+                                setPollDone(false);
+                                setRecheck((n) => n + 1);
+                              }}
+                            >
+                              Check again
+                            </button>
+                          </>
+                        ) : (
+                          <p className="broker-import__status" aria-live="polite">
+                            <Icon name="loader" size={12} className="mt-spin" /> Waiting for your
+                            first sync…
+                          </p>
                         )}
-                        <p className="broker-import__status" aria-live="polite">
-                          <Icon name="loader" size={12} /> Waiting for your first sync…
-                        </p>
                       </div>
                     )}
 
