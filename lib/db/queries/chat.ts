@@ -8,6 +8,23 @@ export type ChatMessage = typeof chatMessages.$inferSelect;
 export type ChatRole = "user" | "assistant" | "tool" | "summary";
 
 /**
+ * Per-message attachment metadata for an image turn, stored JSON-encoded in
+ * `chat_messages.attachments`. Holds NO image bytes (images aren't stored
+ * server-side — see SECURITY.md), only the facts needed to recompose the
+ * model-facing "(Attached files: …)" note at model-build time so `content`
+ * stays raw user text. `capturedAtSource` records where the timestamp came
+ * from: parsed EXIF (`exif`), EXIF wall-time assumed Asia/Bangkok when the
+ * image carried no offset (`exif-assumed-tz`), or the file's mtime (`file`).
+ */
+export interface ChatAttachmentMeta {
+  name: string;
+  mime: string;
+  /** ISO-8601 instant with offset; absent when no capture time is known. */
+  capturedAt?: string;
+  capturedAtSource: "exif" | "exif-assumed-tz" | "file";
+}
+
+/**
  * Role marker for the context-compression summary row. Stored in
  * the free-TEXT `chat_messages.role` column (no migration). These rows are an
  * internal model-input artifact: excluded from display ({@link listMessages}'s
@@ -333,6 +350,11 @@ export function appendMessage(input: {
   toolCallId?: string | null;
   /** The OpenRouter / provider model id that served this response. */
   model?: string | null;
+  /**
+   * Structured attachment metadata for an image turn. JSON-encoded on write;
+   * omitted (NULL) for text turns and non-user rows. Never holds image bytes.
+   */
+  attachments?: ChatAttachmentMeta[] | null;
 }): ChatMessage {
   const now = new Date().toISOString();
   const row = getDb()
@@ -343,6 +365,7 @@ export function appendMessage(input: {
       content: input.content,
       toolCallId: input.toolCallId ?? null,
       model: input.model ?? null,
+      attachments: input.attachments?.length ? JSON.stringify(input.attachments) : null,
       createdAt: now,
     })
     .returning()

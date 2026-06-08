@@ -24,6 +24,7 @@ import { mergeSourceSuggestions } from "@/lib/data/sources";
 import { useBrokerConfig, useBuckets, useHoldings } from "@/lib/fetchers/portfolio";
 import { cachedQuoteSource, resolveQuoteSources } from "@/lib/fetchers/quote-source";
 import { invalidate, useResource } from "@/lib/fetchers/swr";
+import { readExifCapture } from "@/lib/image-exif";
 import { normalizeImage } from "@/lib/image-normalize";
 import type { QuoteSource } from "@/lib/market/sources";
 import { looksLikeBrokerExport, parseBrokerExport } from "@/lib/portfolio/broker-import";
@@ -431,10 +432,15 @@ export function RecordSheet({
     // resolution the model needs to read dense tables.
     const norm = await normalizeImage(file);
     fd.append("image", norm.blob, file.name);
-    // Filename + saved-at ride as CONTEXT for the model's as-of-date call (a
-    // date shown in the image wins; we never parse the filename ourselves).
+    // Filename + capture time ride as CONTEXT for the model's as-of-date call (a
+    // date shown in the image wins; we never parse the filename ourselves). Prefer
+    // the original file's EXIF capture time (read before normalize, which strips
+    // EXIF); fall back to the file's mtime.
     fd.append("filename", file.name);
-    if (file.lastModified) fd.append("capturedAt", new Date(file.lastModified).toISOString());
+    const exif = await readExifCapture(file);
+    const capturedAt =
+      exif?.capturedAt ?? (file.lastModified ? new Date(file.lastModified).toISOString() : null);
+    if (capturedAt) fd.append("capturedAt", capturedAt);
     if (as) fd.append("as", as);
     const res = await fetch("/api/import/image", { method: "POST", body: fd });
     if (!res.ok) throw new Error(String(res.status));

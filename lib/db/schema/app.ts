@@ -337,6 +337,12 @@ export const chatMessages = sqliteTable(
     // The OpenRouter / provider model id that served this response.
     // NULL for user/tool/summary rows and for messages predating this column.
     model: text("model"),
+    // JSON-encoded per-message attachment metadata for image turns:
+    // [{name, mime, capturedAt, capturedAtSource}]. NULL for non-image / legacy
+    // rows. Holds NO bytes (images aren't stored server-side; see SECURITY.md).
+    // The model-facing "(Attached files: …)" note is composed from this at
+    // model-build time and never persisted — `content` holds only raw user text.
+    attachments: text("attachments"),
     createdAt: text("created_at").notNull(),
   },
   (table) => [index("idx_chat_messages_thread").on(table.threadId, table.createdAt)],

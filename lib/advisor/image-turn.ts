@@ -65,6 +65,67 @@ export function withImageMarker(text: string, imageCount: number): string {
   return text ? `${text}\n\n${marker}` : marker;
 }
 
+/** One attachment's facts for the model-facing note. Mirrors ChatAttachmentMeta. */
+export interface AttachmentNoteItem {
+  name: string;
+  /** ISO-8601 instant with offset; absent when no capture time is known. */
+  capturedAt?: string;
+  capturedAtSource?: "exif" | "exif-assumed-tz" | "file";
+}
+
+// Convert an ISO instant to an Asia/Bangkok ISO-8601 string,
+// "YYYY-MM-DDTHH:MM:SS+07:00". This CONVERTS the instant (a photo's native
+// offset is shifted to Bangkok, rolling the date when needed) — it is not a
+// naive offset relabel. The zone is fixed (+07:00, no DST) so the literal
+// suffix is always correct. The note is model-only, so a machine-parseable ISO
+// is preferred over a humanized form. Precedent: lib/portfolio/adapter.ts tz fmt.
+function bangkokIso(iso: string): string | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  const date = `${get("year")}-${get("month")}-${get("day")}`;
+  // en-CA renders 24h "24:05" at midnight in some engines; normalize 24 → 00.
+  const hour = get("hour") === "24" ? "00" : get("hour");
+  return `${date}T${hour}:${get("minute")}:${get("second")}+07:00`;
+}
+
+/**
+ * Compose the model-facing attachment note for an image turn — the line the
+ * Advisor sees (NOT the displayed user bubble) so it can date a holdings
+ * snapshot from the photo when the image itself shows no date. Built fresh at
+ * model-build time from structured metadata and never persisted, so
+ * `chat_messages.content` stays raw user text.
+ *
+ * Per item: the file name, plus a capture clause — `taken …` for an EXIF time,
+ * `saved …` for a file mtime, nothing when no time is known. Times are emitted
+ * as Asia/Bangkok ISO-8601 (`…+07:00`) — machine-parseable, since this string
+ * is model-only and never user-visible. The shared `[N images attached]` marker
+ * is appended (reusing {@link withImageMarker}'s wording).
+ */
+export function composeAttachmentNote(items: AttachmentNoteItem[], imageCount: number): string {
+  const listed = items
+    .map((it) => {
+      const when = it.capturedAt ? bangkokIso(it.capturedAt) : null;
+      if (!when) return `"${it.name}"`;
+      const verb = it.capturedAtSource === "file" ? "saved" : "taken";
+      return `"${it.name}" ${verb} ${when}`;
+    })
+    .join("; ");
+  const note = listed ? `(Attached file${items.length === 1 ? "" : "s"}: ${listed})` : "";
+  // Reuse withImageMarker so the "[N images attached]" wording has one home.
+  return withImageMarker(note, imageCount);
+}
+
 export type VisionPath = "demo" | "tiered" | "owner";
 export type VisionDecision = "text" | "vision" | "stub";
 

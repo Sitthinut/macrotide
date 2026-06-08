@@ -15,6 +15,17 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Advisor chat stores your raw message, not an internal note.** Image turns
+  used to bake a model-facing `(Attached files: …)` note into the saved message,
+  so it leaked into your own bubble on reload. The message now keeps only the
+  text you typed; per-image filename and capture-time metadata are stored
+  separately and the note is recomposed for the model at send time, never
+  persisted. The capture time is read from the image's EXIF (`DateTimeOriginal`,
+  with its UTC offset when present), converted to the Thai trading day and given
+  to the Advisor as Asia/Bangkok ISO-8601 (`…+07:00`) — falling back to the
+  file's saved time for screenshots with no EXIF. The Add → Image importer shares the same EXIF-derived capture
+  time. A one-time script (`scripts/strip-legacy-attachment-notes.ts`) cleans the
+  note out of messages written before this change.
 - **History/Position "Invested" now shows the cost basis of money still invested**
   — the remaining cost of held units (deducting the cost of what you've sold, not
   its proceeds) — so the KPI card and the Advisor's spoken figure reflect capital

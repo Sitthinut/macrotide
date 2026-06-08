@@ -18,11 +18,11 @@ import {
 } from "@/lib/advisor/entry-context";
 import {
   attachmentLimitMessage,
+  composeAttachmentNote,
   countTurnImages,
   isDemoVisionEnabled,
   MAX_CHAT_ATTACHMENTS,
   visionDecisionFor,
-  withImageMarker,
 } from "@/lib/advisor/image-turn";
 import { classifyReasoningIntent } from "@/lib/advisor/intent";
 import { ADVISOR_SYSTEM_PROMPT } from "@/lib/advisor/system-prompt";
@@ -40,6 +40,7 @@ import { type DbContext, getUserId, runWithDbContext } from "@/lib/db/context";
 import { DEMO_CHAT_TURN_CAP, getDemoSession, incrementChatTurn } from "@/lib/db/demo";
 import {
   appendMessage,
+  type ChatAttachmentMeta,
   createThread,
   getThread,
   reactivateThread,
@@ -64,6 +65,65 @@ interface IncomingPayload {
   threadId?: string;
   /** Structured context from an Ask-Advisor entry point (untrusted; parsed). */
   entryContext?: EntryContext;
+  /**
+   * Per-image attachment metadata for an image turn (untrusted; validated by
+   * {@link parseAttachments}). Feeds the model-facing note and is persisted —
+   * never image bytes.
+   */
+  attachments?: unknown;
+}
+
+// Validate & clamp the client-supplied `attachments` array before it reaches
+// model input or the DB. Client-controlled, so we drop anything malformed:
+// require string name/mime, accept an ISO `capturedAt` only if it parses, and
+// coerce an unknown `capturedAtSource` to "file". Clamped to MAX_CHAT_ATTACHMENTS.
+function parseAttachments(raw: unknown): ChatAttachmentMeta[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ChatAttachmentMeta[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    if (typeof o.name !== "string" || typeof o.mime !== "string") continue;
+    const src = o.capturedAtSource;
+    const source = src === "exif" || src === "exif-assumed-tz" || src === "file" ? src : "file";
+    const capturedAt =
+      typeof o.capturedAt === "string" && !Number.isNaN(Date.parse(o.capturedAt))
+        ? o.capturedAt
+        : undefined;
+    out.push({
+      name: o.name.slice(0, 200),
+      mime: o.mime.slice(0, 100),
+      capturedAt,
+      capturedAtSource: source,
+    });
+    if (out.length >= MAX_CHAT_ATTACHMENTS) break;
+  }
+  return out;
+}
+
+// Append the model-facing attachment note to the latest user message's text,
+// on a shallow clone so the persisted `content` (raw text) is untouched. Image
+// turns send the UIMessage `parts` shape; we fold the note into the first text
+// part (or prepend one for an image-only turn) before conversion to model
+// messages — keeping the note in the model input but never in the DB.
+function injectAttachmentNote(
+  messages: UIMessage[] | ModelMessage[],
+  note: string,
+): UIMessage[] | ModelMessage[] {
+  const idx = messages.length - 1;
+  const last = messages[idx] as { parts?: unknown };
+  if (!Array.isArray(last.parts)) return messages;
+  const parts = [...(last.parts as { type?: string; text?: string }[])];
+  const textIdx = parts.findIndex((p) => p?.type === "text");
+  if (textIdx >= 0) {
+    const t = parts[textIdx];
+    parts[textIdx] = { ...t, text: t.text ? `${t.text}\n\n${note}` : note };
+  } else {
+    parts.unshift({ type: "text", text: note });
+  }
+  const cloned = [...messages] as (UIMessage | ModelMessage)[];
+  cloned[idx] = { ...(messages[idx] as object), parts } as UIMessage | ModelMessage;
+  return cloned as UIMessage[] | ModelMessage[];
 }
 
 async function toModelMessagesAsync(
@@ -371,15 +431,26 @@ export async function POST(req: Request) {
       return stubResponse(attachmentLimitMessage(imageCount), threadId);
     }
 
+    // Validate the client-supplied attachment metadata (untrusted) once, up
+    // front — it both persists and feeds the model-facing note below.
+    const attachments = hasImages ? parseAttachments(body.attachments) : [];
+
     // Persist the latest user message before streaming. Tool-call follow-ups
     // (assistant role at the end) are server-driven and shouldn't double-write.
-    // Images are never stored server-side — we keep the user's text plus a
-    // `[N image(s) attached]` marker so a reloaded thread reads coherently
-    // (see SECURITY.md). An image-only turn (no text) still persists the marker.
+    // `content` holds ONLY the raw user text — images are never stored
+    // server-side; their filename/timestamp metadata rides in the structured
+    // `attachments` column (see SECURITY.md), from which the model-facing
+    // "(Attached files: …)" note is recomposed below and never persisted. An
+    // image-only turn persists `content=""` (the attachments column carries it).
     const lastMsg = body.messages[body.messages.length - 1];
     const lastRole = (lastMsg as { role?: string } | undefined)?.role;
     if (lastRole === "user" && (lastUserText || hasImages)) {
-      appendMessage({ threadId, role: "user", content: withImageMarker(lastUserText, imageCount) });
+      appendMessage({
+        threadId,
+        role: "user",
+        content: lastUserText,
+        attachments: hasImages ? attachments : null,
+      });
       // Resume: a new user turn on an idle/archived thread flips it back to
       // active so it's eligible to close + extract again (no-op if active).
       reactivateThread(threadId);
@@ -393,7 +464,15 @@ export async function POST(req: Request) {
     // the per-user token budget.
     const userId = demoId ? null : getUserId();
     const system = composeSystemPrompt(userId);
-    const modelMessages = await toModelMessagesAsync(body.messages);
+    // For an image turn, fold the model-facing attachment note (filename +
+    // EXIF/saved capture time as Bangkok ISO-8601) into the latest user message before
+    // converting to model messages — so the Advisor can date a snapshot from
+    // the photo. Composed fresh here from the validated metadata; never the
+    // persisted `content`. Text turns convert byte-identically to before.
+    const bodyMessages = hasImages
+      ? injectAttachmentNote(body.messages, composeAttachmentNote(attachments, imageCount))
+      : body.messages;
+    const modelMessages = await toModelMessagesAsync(bodyMessages);
 
     // Context-budget compression. When the assembled input crosses
     // ~80% of the model's context budget, fold older turns into a summary and

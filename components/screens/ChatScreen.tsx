@@ -6,13 +6,14 @@ import { FeedbackRow } from "@/components/FeedbackRow";
 import { Icon } from "@/components/Icon";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import type { EntryContext } from "@/lib/advisor/entry-context";
-import { MAX_CHAT_ATTACHMENTS } from "@/lib/advisor/image-turn";
+import { MAX_CHAT_ATTACHMENTS, withImageMarker } from "@/lib/advisor/image-turn";
 import {
   useModelPortfoliosView,
   usePortfolioView,
   useSelectedModelId,
 } from "@/lib/fetchers/legacy";
 import { invalidate, useResource } from "@/lib/fetchers/swr";
+import { readExifCapture } from "@/lib/image-exif";
 import { normalizeImage } from "@/lib/image-normalize";
 import { type AdvisorScreenContext, buildChatSuggestions } from "@/lib/portfolio/chat-suggestions";
 import { computeHealth } from "@/lib/portfolio/health";
@@ -37,15 +38,23 @@ const MAX_ATTACHMENTS = MAX_CHAT_ATTACHMENTS;
 
 // Normalize an image File for chat: the shared 2048/0.8 JPEG (sent to the model,
 // shown as a thumbnail, persisted), keeping the original for the full-res lightbox.
+// The capture time is read from the ORIGINAL file's EXIF first (DateTimeOriginal
+// + offset, in GMT+7) — read before normalization, which re-encodes through a
+// canvas and strips EXIF — falling back to the file's mtime labeled "saved".
 async function downscaleImage(file: File): Promise<ChatImage> {
-  const n = await normalizeImage(file);
+  const [n, exif] = await Promise.all([normalizeImage(file), readExifCapture(file)]);
+  const captured = exif
+    ? { capturedAt: exif.capturedAt, capturedAtSource: exif.source }
+    : file.lastModified
+      ? { capturedAt: new Date(file.lastModified).toISOString(), capturedAtSource: "file" as const }
+      : { capturedAt: undefined, capturedAtSource: undefined };
   return {
     id: makeId(),
     dataUrl: n.dataUrl,
     fullDataUrl: n.fullDataUrl,
     mime: n.mime,
     name: file.name,
-    capturedAt: file.lastModified ? new Date(file.lastModified).toISOString() : undefined,
+    ...captured,
   };
 }
 
@@ -81,6 +90,19 @@ const ACTIVE_THREAD_KEY = "macrotide_chat_active_thread";
 // have the thumbnails to show, so the marker doesn't duplicate the preview.
 function stripImageMarker(text: string): string {
   return text.replace(/\s*\[\d+ image(?:s)? attached\]\s*$/, "").trimEnd();
+}
+
+// Count attachments from a persisted message's JSON `attachments` column, so a
+// device without the browser-cached thumbnails can still show a "[N images
+// attached]" marker. Returns 0 for text turns / legacy rows / malformed JSON.
+function attachmentCount(json: string | null | undefined): number {
+  if (!json) return 0;
+  try {
+    const parsed = JSON.parse(json);
+    return Array.isArray(parsed) ? parsed.length : 0;
+  } catch {
+    return 0;
+  }
 }
 
 interface PlanProposal {
@@ -576,6 +598,8 @@ export function ChatScreen({
             content: string;
             createdAt: string;
             model?: string | null;
+            // JSON-encoded ChatAttachmentMeta[] for an image turn; NULL otherwise.
+            attachments?: string | null;
           }>;
         };
         setThreadId(id);
@@ -599,11 +623,19 @@ export function ChatScreen({
                 if (isUser) userSeq += 1;
                 const imgs = isUser ? storedImages.get(userSeq) : undefined;
                 const card = isUser ? undefined : storedCards.get(userSeq);
-                // The server stores a "[N image(s) attached]" marker since images
-                // aren't persisted server-side. When we DO have the thumbnails
-                // (from localStorage), drop the redundant marker — it's only a
-                // fallback for when the images can't be shown.
-                const text = imgs?.length ? stripImageMarker(r.content) : r.content;
+                // Images aren't persisted server-side, so a device without the
+                // browser-cached thumbnails needs a "[N images attached]" marker
+                // to show something was attached. New rows store raw text plus a
+                // structured attachment count, so we synthesize the marker from
+                // that count here. When we DO have the thumbnails, show them and
+                // drop the marker (legacy rows baked it into `content`). Legacy
+                // rows with no metadata keep whatever marker is in `content`.
+                const count = isUser ? attachmentCount(r.attachments) : 0;
+                const text = imgs?.length
+                  ? stripImageMarker(r.content)
+                  : count > 0
+                    ? withImageMarker(stripImageMarker(r.content), count)
+                    : r.content;
                 return {
                   role: r.role === "assistant" ? "ai" : "user",
                   text,
@@ -813,15 +845,11 @@ export function ChatScreen({
     // or busting the prompt cache. Only THIS turn's freshly-attached images go as
     // `file` parts. Text-only turns keep the compact `{role, content}` shape so
     // the prefix cache stays warm.
-    // Surface each attachment's file name + saved date to the model (NOT the
-    // displayed bubble) so it can date a holdings snapshot from the file when the
-    // image itself shows no date. The model decides — we don't parse it.
-    const fileNote = attached.length
-      ? `\n\n(Attached file${attached.length === 1 ? "" : "s"}: ${attached
-          .map((a) => `"${a.name}"${a.capturedAt ? ` saved ${a.capturedAt.slice(0, 10)}` : ""}`)
-          .join("; ")})`
-      : "";
-    const turnText = prompt + fileNote;
+    // The model-facing attachment note (file name + EXIF/saved capture time) is
+    // composed SERVER-SIDE from the structured `attachments` metadata below, so
+    // it never leaks into the displayed bubble or the persisted message. Here
+    // `turnText` is just the user's raw prompt.
+    const turnText = prompt;
     const stringPayload = [
       // The `proposal` field is UI-only metadata and is never forwarded (we only
       // pass role + text), but the assistant prose that accompanied a proposal IS
@@ -862,6 +890,17 @@ export function ChatScreen({
           // button, when present — lets the server skip a tool round-trip. Omitted
           // for ordinary typed turns, so the body is byte-identical to before.
           entryContext: context,
+          // Per-image metadata (filename + capture time/source) for an image
+          // turn — the server validates it, composes the model-facing note, and
+          // persists it. Omitted for text turns so their body is unchanged.
+          attachments: hasImages
+            ? attached.map((a) => ({
+                name: a.name,
+                mime: a.mime,
+                capturedAt: a.capturedAt,
+                capturedAtSource: a.capturedAtSource,
+              }))
+            : undefined,
         }),
       });
       if (!res.ok || !res.body) {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  composeAttachmentNote,
   countTurnImages,
   isDemoVisionEnabled,
   turnHasImages,
@@ -82,6 +83,71 @@ describe("withImageMarker", () => {
 
   it("leaves text-only turns unchanged", () => {
     expect(withImageMarker("just text", 0)).toBe("just text");
+  });
+});
+
+describe("composeAttachmentNote", () => {
+  // 2026-06-08T07:32Z = 14:32:00 in Asia/Bangkok (+07:00).
+  const ISO = "2026-06-08T07:32:00Z";
+
+  it("emits the EXIF capture time as Bangkok ISO-8601 (machine-parseable)", () => {
+    const note = composeAttachmentNote(
+      [{ name: "stmt.jpg", capturedAt: ISO, capturedAtSource: "exif" }],
+      1,
+    );
+    expect(note).toBe(
+      '(Attached file: "stmt.jpg" taken 2026-06-08T14:32:00+07:00)\n\n[1 image attached]',
+    );
+  });
+
+  it("labels a file-mtime time 'saved …' rather than 'taken'", () => {
+    const note = composeAttachmentNote(
+      [{ name: "shot.png", capturedAt: ISO, capturedAtSource: "file" }],
+      1,
+    );
+    expect(note).toContain('"shot.png" saved 2026-06-08T14:32:00+07:00');
+  });
+
+  it("treats exif-assumed-tz as 'taken' (assumption is conveyed elsewhere)", () => {
+    const note = composeAttachmentNote(
+      [{ name: "a.jpg", capturedAt: ISO, capturedAtSource: "exif-assumed-tz" }],
+      1,
+    );
+    expect(note).toContain('"a.jpg" taken 2026-06-08T14:32:00+07:00');
+  });
+
+  it("CONVERTS a non-Bangkok instant to +07:00, not just relabels it", () => {
+    // Taken 14:32 in Tokyo (+09:00) = 12:32 in Bangkok. A naive append would
+    // wrongly print 14:32+07:00; a real conversion prints 12:32+07:00.
+    const note = composeAttachmentNote(
+      [{ name: "tokyo.jpg", capturedAt: "2026-06-08T14:32:00+09:00", capturedAtSource: "exif" }],
+      1,
+    );
+    expect(note).toContain('"tokyo.jpg" taken 2026-06-08T12:32:00+07:00');
+  });
+
+  it("rolls the date when the conversion crosses midnight", () => {
+    // 23:00 UTC on Jun 8 → 06:00 on Jun 9 in Bangkok.
+    const note = composeAttachmentNote(
+      [{ name: "late.jpg", capturedAt: "2026-06-08T23:00:00Z", capturedAtSource: "exif" }],
+      1,
+    );
+    expect(note).toContain('"late.jpg" taken 2026-06-09T06:00:00+07:00');
+  });
+
+  it("omits the clause for an item with no capture time", () => {
+    const note = composeAttachmentNote([{ name: "x.png" }], 1);
+    expect(note).toBe('(Attached file: "x.png")\n\n[1 image attached]');
+  });
+
+  it("joins multiple files and pluralizes the marker", () => {
+    const note = composeAttachmentNote(
+      [{ name: "a.jpg", capturedAt: ISO, capturedAtSource: "exif" }, { name: "b.png" }],
+      2,
+    );
+    expect(note).toBe(
+      '(Attached files: "a.jpg" taken 2026-06-08T14:32:00+07:00; "b.png")\n\n[2 images attached]',
+    );
   });
 });
 

@@ -30,8 +30,18 @@ export interface ChatImage {
    * image as cheap text instead of re-sending the bytes. Small → persisted.
    */
   transcript?: string;
-  /** The file's last-modified time (ISO) — a hint for the snapshot's as-of date. */
+  /**
+   * The image's capture time (ISO with offset) — a hint for the snapshot's
+   * as-of date, sent to the model. Parsed from EXIF when present, else the
+   * file's last-modified time.
+   */
   capturedAt?: string;
+  /**
+   * Where {@link capturedAt} came from: parsed EXIF, EXIF wall-time assumed
+   * Asia/Bangkok (no offset tag), or the file's mtime. Lets the model-facing
+   * note say "taken" vs "saved" honestly. Persisted in the slim copy.
+   */
+  capturedAtSource?: "exif" | "exif-assumed-tz" | "file";
   mime: string;
   name: string;
 }
