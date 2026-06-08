@@ -1421,6 +1421,7 @@ textarea.sheet-input {
   border-radius: var(--r-md);
   padding: 11px 18px;
   cursor: pointer;
+  text-decoration: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3467,6 +3468,250 @@ textarea.sheet-input {
 .rec-intake[data-drag] {
   box-shadow: 0 0 0 2px var(--accent);
 }
+
+/* One-click broker import panel */
+.broker-import__toggle {
+  margin-top: 8px;
+}
+.broker-import {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  font-size: 12.5px;
+}
+.broker-import__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.broker-import__steps {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--muted);
+}
+.broker-import__bm {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: grab;
+}
+.broker-import__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--muted);
+}
+.broker-import__status--ok {
+  color: var(--gain, #0a7d2c);
+}
+.broker-import__status--bad {
+  color: var(--loss);
+}
+.btn.xs {
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* Broker-import "connect" call-to-action banner (top of the Add sheet) */
+.import-cta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 4px 6px 4px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.import-cta__main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  padding: 6px 0;
+  background: none;
+  border: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.import-cta__x {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+}
+.import-cta__x:hover {
+  opacity: 1;
+}
+.import-cta__text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 1px;
+}
+.import-cta__text strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.import-cta__text span {
+  font-size: 11.5px;
+  opacity: 0.85;
+}
+
+/* Broker-import stepper (ConnectBrokerScreen.tsx) */
+.import-steps {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.import-step {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 10px;
+  padding: 6px 0;
+}
+.import-step__marker {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-full);
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--card-soft);
+  color: var(--muted);
+  border: 1px solid var(--line-soft);
+}
+.import-step--active .import-step__marker {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  border-color: transparent;
+}
+.import-step--done .import-step__marker {
+  background: var(--gain, #0a7d2c);
+  color: #fff;
+  border-color: transparent;
+}
+.import-step__title {
+  font-size: 13px;
+  font-weight: 500;
+  padding-top: 3px;
+}
+.import-step--todo .import-step__title {
+  color: var(--muted);
+}
+.import-step__body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+}
+.import-step__body > .import-hint,
+.import-step__body > .import-note,
+.import-step__body > .import-app {
+  align-self: stretch;
+}
+.import-hint {
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin: 0;
+}
+.import-note {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.5;
+}
+.import-app {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line-soft);
+  background: var(--paper);
+  text-decoration: none;
+  color: inherit;
+}
+.import-app strong {
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.import-app span {
+  font-size: 11px;
+  color: var(--muted);
+}
+.import-app--rec {
+  border-color: var(--accent);
+}
+.import-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.import-qr-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line-soft);
+  background: var(--card-soft);
+}
+.import-qr {
+  border-radius: var(--r-sm);
+  background: #fff;
+}
+
+/* Compact white-background select matching the Add sheet's Type field
+   (.rec-edit select) — keeps the native dropdown arrow, sized like a `.btn.sm`. */
+.mt-select {
+  background: var(--paper);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  color: var(--ink);
+  outline: none;
+  max-width: 200px;
+}
+.mt-select:focus {
+  border-color: var(--accent);
+}
+.mt-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .rec-hint {
   display: flex;
   align-items: center;

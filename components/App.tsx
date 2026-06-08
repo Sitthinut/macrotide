@@ -18,6 +18,7 @@ import { RecordSheet } from "@/components/RecordSheet";
 import { AccountScreen } from "@/components/screens/AccountScreen";
 import { AdminScreen } from "@/components/screens/AdminScreen";
 import { ChatScreen, type SeedPrompt } from "@/components/screens/ChatScreen";
+import { ConnectBrokerScreen } from "@/components/screens/ConnectBrokerScreen";
 import { HistoryScreen } from "@/components/screens/HistoryScreen";
 import { JournalScreen } from "@/components/screens/JournalScreen";
 import { MarketsScreen } from "@/components/screens/MarketsScreen";
@@ -64,7 +65,8 @@ type Screen =
   | "models"
   | "settings"
   | "account"
-  | "admin";
+  | "admin"
+  | "connect";
 
 // Map the app shell's `screen` onto the small vocabulary the Advisor suggestion
 // layer understands, so dock chat chips reflect the screen behind them. Screens
@@ -200,6 +202,14 @@ export function App({ isDemo }: { isDemo: boolean }) {
     return "system";
   });
   const [screen, setScreen] = useState<Screen>("portfolio");
+  // Where the broker-connect wizard returns on Back — contextual: the screen it
+  // was opened from (portfolio when launched from the Add sheet, settings when
+  // launched from Settings → Connections).
+  const [connectReturn, setConnectReturn] = useState<Screen>("portfolio");
+  const openConnect = (from: Screen) => {
+    setConnectReturn(from);
+    setScreen("connect");
+  };
   const [pendingPrompt, setPendingPrompt] = useState<SeedPrompt | null>(null);
   // One "Add to portfolio" sheet with a Holdings (snapshot) / Activity (ledger)
   // toggle — both write to the same ledger (ADR 0004). `addMode` picks the entry
@@ -623,6 +633,7 @@ export function App({ isDemo }: { isDemo: boolean }) {
           theme={theme}
           onThemeChange={(t) => setTheme(t)}
           onBack={() => setScreen("portfolio")}
+          onConnectBroker={() => openConnect("settings")}
         />
       );
     }
@@ -633,6 +644,14 @@ export function App({ isDemo }: { isDemo: boolean }) {
       // Defense in depth: even if a non-owner reaches this branch, the API
       // returns 403 and AdminScreen renders an access-denied message.
       return <AdminScreen onBack={() => setScreen("portfolio")} />;
+    }
+    if (screen === "connect") {
+      return (
+        <ConnectBrokerScreen
+          onBack={() => setScreen(connectReturn)}
+          onOrganize={() => setScreen("settings")}
+        />
+      );
     }
     return null;
   };
@@ -662,6 +681,12 @@ export function App({ isDemo }: { isDemo: boolean }) {
           setAddOpen(false);
           setImportSeed(null);
           setTxnSeed(null);
+        }}
+        onConnectBroker={() => {
+          setAddOpen(false);
+          setImportSeed(null);
+          setTxnSeed(null);
+          openConnect(screen);
         }}
         onSaved={() => setScreen("activity")}
       />

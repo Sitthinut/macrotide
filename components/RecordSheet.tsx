@@ -21,11 +21,12 @@ import { Combobox } from "@/components/ui/Combobox";
 import { QtyInput, qtyDefaultMode } from "@/components/ui/QtyInput";
 import { mergeWithHoldings, type TickerSuggestion } from "@/lib/data/known-holdings";
 import { mergeSourceSuggestions } from "@/lib/data/sources";
-import { useBuckets, useHoldings } from "@/lib/fetchers/portfolio";
+import { useBrokerConfig, useBuckets, useHoldings } from "@/lib/fetchers/portfolio";
 import { cachedQuoteSource, resolveQuoteSources } from "@/lib/fetchers/quote-source";
-import { invalidate } from "@/lib/fetchers/swr";
+import { invalidate, useResource } from "@/lib/fetchers/swr";
 import { normalizeImage } from "@/lib/image-normalize";
 import type { QuoteSource } from "@/lib/market/sources";
+import { looksLikeBrokerExport, parseBrokerExport } from "@/lib/portfolio/broker-import";
 import type { TxnKind } from "@/lib/portfolio/lots";
 import type { ExtractedTxnRow, ImportDocType } from "@/lib/portfolio/ocr";
 import { TXN_KIND_HELP, TXN_KIND_LABEL, typeSelectOptions } from "@/lib/portfolio/txn-display";
@@ -37,6 +38,9 @@ import {
   rowValidity,
 } from "@/lib/portfolio/txn-import";
 import type { ImportSeedRow } from "@/lib/stores/import-seed";
+
+// localStorage flag: user dismissed the "connect your broker" CTA in the Add sheet.
+const BROKER_CTA_DISMISS_KEY = "macrotide_hide_broker_cta";
 
 // "opening" is the Starting balance (snapshot anchor); the rest are trade deltas.
 type RowKind = TxnKind;
@@ -243,6 +247,8 @@ export interface RecordSheetProps {
   holdingsSeed?: ImportSeedRow[] | null;
   /** Rows seeded from a handoff (→ activity). */
   txnSeed?: ExtractedTxnRow[] | null;
+  /** Open the standalone broker-connect wizard (closes this sheet first). */
+  onConnectBroker?: () => void;
 }
 
 export function RecordSheet({
@@ -253,9 +259,31 @@ export function RecordSheet({
   defaultKind = "opening",
   holdingsSeed,
   txnSeed,
+  onConnectBroker,
 }: RecordSheetProps) {
   const { data: buckets } = useBuckets();
   const { data: holdings } = useHoldings();
+  const { data: brokerCfg } = useBrokerConfig();
+  // CTA shows only when a broker is configured, you haven't connected yet, and
+  // you haven't dismissed it (persisted).
+  const { data: brokerConns } = useResource<unknown[]>("/api/import/broker/connections");
+  const [ctaDismissed, setCtaDismissed] = useState(false);
+  useEffect(() => {
+    try {
+      setCtaDismissed(localStorage.getItem(BROKER_CTA_DISMISS_KEY) === "1");
+    } catch {}
+  }, []);
+  const showBrokerCta =
+    !!onConnectBroker &&
+    !!brokerCfg?.displayName &&
+    !ctaDismissed &&
+    !(Array.isArray(brokerConns) && brokerConns.length > 0);
+  const dismissBrokerCta = () => {
+    try {
+      localStorage.setItem(BROKER_CTA_DISMISS_KEY, "1");
+    } catch {}
+    setCtaDismissed(true);
+  };
   const [bucketId, setBucketId] = useState("");
   const [source, setSource] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
@@ -340,10 +368,35 @@ export function RecordSheet({
     setUnsure(null);
   };
 
+  // Ingest a broker export (JSON from the one-click importer, or pasted) → seed
+  // its trade rows as independent imported rows in the review list.
+  const ingestBrokerPayload = (raw: string) => {
+    const { rows: txnRows, stats, warnings } = parseBrokerExport(raw);
+    if (txnRows.length === 0) {
+      setError(warnings[0] ?? "No transactions found in that broker export.");
+      return;
+    }
+    const seeded = txnRows.filter((r) => r.ticker?.trim()).map((r) => seedTxnToRow(r));
+    setEditing(null);
+    setRows((prev) => [...prev.filter((r) => !isBlankManual(r)), ...seeded]);
+    const acctNote = stats.accounts > 1 ? ` from ${stats.accounts} portfolios` : "";
+    setError(
+      warnings.length
+        ? `Imported ${stats.imported} row(s)${acctNote}. ${warnings.join(" ")}`
+        : null,
+    );
+  };
+
   // Re-derive the PASTE rows from the textbox, leaving manual/image rows intact.
   // The textbox owns its rows: editing it + "Update table" updates/replaces/
   // deletes only those (manual rows are independent).
   const syncPasteRows = (text: string) => {
+    // A pasted broker export (JSON) goes through the broker parser, not the
+    // line-based paste format.
+    if (looksLikeBrokerExport(text)) {
+      ingestBrokerPayload(text);
+      return;
+    }
     const drafts = parseTxnPaste(text).filter((d) => d.ticker.trim());
     if (drafts.length === 0) {
       if (text.trim())
@@ -634,6 +687,26 @@ export function RecordSheet({
         id="rec-title"
       />
       <Modal.Body gap={12}>
+        {showBrokerCta && onConnectBroker && (
+          <div className="import-cta">
+            <button type="button" className="import-cta__main" onClick={onConnectBroker}>
+              <Icon name="download" size={14} />
+              <span className="import-cta__text">
+                <strong>Import from {brokerCfg?.displayName} automatically</strong>
+                <span>Skip manual entry — connect once and it syncs.</span>
+              </span>
+              <Icon name="arrowRight" size={14} />
+            </button>
+            <button
+              type="button"
+              className="import-cta__x"
+              onClick={dismissBrokerCta}
+              aria-label="Dismiss"
+            >
+              <Icon name="close" size={12} />
+            </button>
+          </div>
+        )}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           <label className="rec-field">
             <span className="rec-field__label">PORTFOLIO</span>
