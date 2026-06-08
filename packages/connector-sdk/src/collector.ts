@@ -19,7 +19,10 @@ import type { BrokerEndpoints, ConnectorShape } from "./types";
 // itself lives in the installed loader. Bump this ONLY when that algorithm changes
 // in a way that needs a reinstall; the runtime endpoint reports the current value
 // and the loader nudges the user to reinstall when its baked version is older.
-export const COLLECTOR_PROTOCOL_VERSION = 1;
+// v2: outcome-driven retries — throttle only after a successful sync, and retry
+// transient failures in-page with backoff (so a not-logged-in attempt no longer
+// blocks the post-login sync for 5 minutes).
+export const COLLECTOR_PROTOCOL_VERSION = 2;
 
 // The collector-side default response shape (the reference broker the defaults
 // were modeled on). The parser owns its own order/value defaults; these are only
@@ -78,13 +81,13 @@ const COLLECTOR_FETCH = `var J=function(u){return fetch(u,{credentials:"include"
 // The gather: list portfolios, paginate every history + pending list, build the
 // export object. Every broker-specific field path is read from SH (the injected
 // shape) via GP. Assumes H/PLAN/HIST/PEND/SRC/SH, GP(), toast() and J() in scope.
-const COLLECTOR_GATHER = `if(location.hostname!==H){toast("Open "+H+" (your orders page), then run this again.",true);return}
+const COLLECTOR_GATHER = `if(location.hostname!==H){toast("Open "+H+" (your orders page), then run this again.",true);return "host"}
   var busy=toast("Collecting your history…");
   var PL=SH.plan,HS=SH.history,PD=SH.pending;
   var plan=await J(PLAN);
   var LABEL="";for(var li=0;li<PL.labelPaths.length;li++){var lv=GP(plan,PL.labelPaths[li]);if(lv){LABEL=""+lv;break}}
   var accts=(GP(plan,PL.accountsPath)||[]).map(function(a){return{account_code:GP(a,PL.accountCode),name:GP(a,PL.accountName),type:GP(a,PL.accountType)}});
-  if(!accts.length){busy.remove();toast("No portfolios found — log in to your broker, then try again.",true);return}
+  if(!accts.length){busy.remove();toast("Log in to your broker — it'll sync automatically.",true);return "noauth"}
   for(var i=0;i<accts.length;i++){
     var a=accts[i],cur=null,hist=[],g=0;
     do{var u=HIST+"?"+HS.accountParam+"="+a.account_code+(cur?("&"+HS.cursorParam+"="+cur):"");var j=await J(u);hist=hist.concat(GP(j,HS.itemsPath)||[]);cur=GP(j,HS.hasNextPath)?GP(j,HS.nextCursorPath):null;g++}while(cur&&g<HS.maxPages);
@@ -94,39 +97,64 @@ const COLLECTOR_GATHER = `if(location.hostname!==H){toast("Open "+H+" (your orde
   var n=accts.reduce(function(s,a){return s+a.history.length},0);
   var payload={source:SRC,exportedAt:new Date().toISOString(),accountLabel:LABEL,accounts:accts};`;
 
-// Userscript wrapper — a THIN, SELF-UPDATING LOADER. Only the app origin, the
-// per-user token, and this loader's protocol version are baked in at install. On
-// each run it fetches the live broker config (endpoints + resolved shape + the
-// current protocol version) from the app over GM_xmlhttpRequest (token in a
-// header, never a URL), caching the last-good config so a brief app outage still
-// syncs. Endpoint/shape changes therefore apply with no reinstall; only a bump of
-// the gather ALGORITHM (COLLECTOR_PROTOCOL_VERSION) asks the user to reinstall.
-// Then it runs the shared gather and POSTs to the authenticated ingest endpoint.
-// A short localStorage throttle stops it re-firing on every in-site navigation.
+// Userscript wrapper — a THIN, SELF-UPDATING LOADER. Bakes only the app origin,
+// the per-user token, and this loader's protocol version. On each broker page load
+// it fetches the live broker config (endpoints + resolved shape + the current
+// protocol version) from the app over GM_xmlhttpRequest (token in a header, never
+// a URL), caching the last-good config so a brief app outage still syncs.
+// Endpoint/shape changes apply with no reinstall; a bump of the gather ALGORITHM
+// (COLLECTOR_PROTOCOL_VERSION) nudges a reinstall.
+//
+// Retries are OUTCOME-DRIVEN, so a failure never causes a long dead zone:
+//   • The 5-min throttle is stamped ONLY after a successful sync — so a
+//     not-logged-in attempt leaves no throttle, and the next page load (right
+//     after you log in and get redirected) syncs immediately.
+//   • Transient errors (broker API / app unreachable) retry in-page with jittered
+//     exponential backoff, then stop and let the next page load try.
+//   • A short attempt-dedupe collapses rapid in-site navigations (and the toast).
 const USERSCRIPT_TEMPLATE = `(function(){
   ${COLLECTOR_GETPATH}
-  var T=__TOKEN__,O=__ORIGIN__,LV=__LOADER_VERSION__,KEY="__macrotide_last_sync__",CFGKEY="__macrotide_cfg__",MIN=300000;
+  var T=__TOKEN__,O=__ORIGIN__,LV=__LOADER_VERSION__,SKEY="__macrotide_last_sync__",AKEY="__macrotide_last_try__",CFGKEY="__macrotide_cfg__",MIN=300000,DEDUPE=4000;
   ${COLLECTOR_TOAST}
   ${COLLECTOR_FETCH}
   function cfg(){return new Promise(function(res,rej){try{GM_xmlhttpRequest({method:"GET",url:O+"/api/import/broker/runtime",headers:{"X-Import-Token":T},onload:function(r){if(r.status>=200&&r.status<300){try{res(JSON.parse(r.responseText))}catch(e){rej(e)}}else rej(new Error("status "+r.status))},onerror:function(){rej(new Error("network"))},ontimeout:function(){rej(new Error("timeout"))}})}catch(e){rej(e)}})}
   function send(s){return new Promise(function(res){try{GM_xmlhttpRequest({method:"POST",url:O+"/api/import/broker/ingest",headers:{"Content-Type":"application/json","X-Import-Token":T},data:s,onload:function(r){res(r.status>=200&&r.status<300)},onerror:function(){res(false)},ontimeout:function(){res(false)}})}catch(e){res(false)}})}
-  async function run(){
+  // One collection attempt against resolved config C. Returns an outcome:
+  //   "ok" | "noauth" (not logged in) | "host" (wrong page) | "transient" (retry).
+  async function attempt(C){
     try{
-      var C;
-      try{C=await cfg();try{localStorage.setItem(CFGKEY,JSON.stringify(C))}catch(e){}}
-      catch(e){try{C=JSON.parse(localStorage.getItem(CFGKEY)||"null")}catch(e2){C=null}
-        if(!C){toast("Open Macrotide once to finish connecting your broker.",true);return}}
-      if(C.collectorVersion>LV)toast("A newer Macrotide importer is available — reinstall it from Settings → Connections.");
       var H=C.host,PLAN=C.planPath,HIST=C.historyPath,PEND=C.pendingPath,SRC=C.source,SH=C.shape;
       ${COLLECTOR_GATHER}
       var ok=await send(JSON.stringify(payload));
       busy.remove();
-      if(ok)toast("Synced "+n+" orders ✓");
-      else toast("Couldn't reach Macrotide to sync — open it once and try again.",true)
-    }catch(e){toast("Couldn't collect history: "+(e&&e.message||e),true)}
+      if(ok){toast("Synced "+n+" orders ✓");return "ok"}
+      return "transient"
+    }catch(e){
+      try{busy&&busy.remove()}catch(_){}
+      return "transient"
+    }
   }
-  try{var last=+(localStorage.getItem(KEY)||0);if(Date.now()-last<MIN)return;localStorage.setItem(KEY,""+Date.now())}catch(e){}
-  run();
+  async function start(){
+    var C;
+    try{C=await cfg();try{localStorage.setItem(CFGKEY,JSON.stringify(C))}catch(e){}}
+    catch(e){try{C=JSON.parse(localStorage.getItem(CFGKEY)||"null")}catch(e2){C=null}}
+    if(!C){toast("Open Macrotide once to finish connecting your broker.",true);return}
+    if(C.collectorVersion>LV)toast("A newer Macrotide importer is available — reinstall it from Settings → Connections.");
+    var BACKOFF=[3000,8000,20000];
+    var drive=async function(i){
+      var r=await attempt(C);
+      if(r==="ok"){try{localStorage.setItem(SKEY,""+Date.now())}catch(e){}return}
+      if(r==="transient"&&i<BACKOFF.length){var d=Math.round(BACKOFF[i]*(0.8+0.4*Math.random()));setTimeout(function(){drive(i+1)},d);return}
+      if(r==="transient")toast("Couldn't reach Macrotide — reopen this page to retry.",true)
+    };
+    drive(0);
+  }
+  try{
+    var ls=+(localStorage.getItem(SKEY)||0);if(Date.now()-ls<MIN)return;
+    var la=+(localStorage.getItem(AKEY)||0);if(Date.now()-la<DEDUPE)return;
+    localStorage.setItem(AKEY,""+Date.now());
+  }catch(e){}
+  start();
 })();`;
 
 /**
