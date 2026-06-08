@@ -6,6 +6,7 @@ import {
   rotateBrokerImportToken,
 } from "@/lib/db/queries/broker-token";
 import { getSetting } from "@/lib/db/queries/settings";
+import { brokerInstallUrl } from "@/lib/portfolio/broker-install";
 import { getConnector } from "@/lib/portfolio/connector";
 
 // The per-user broker import token + everything the import UI needs to render:
@@ -17,15 +18,11 @@ import { getConnector } from "@/lib/portfolio/connector";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const USERSCRIPT_FILE = "macrotide-import.user.js";
-
 export async function GET(req: Request) {
   const connector = await getConnector();
   if (!connector) return NextResponse.json({ error: "not_configured" }, { status: 404 });
 
-  const url = new URL(req.url);
-  const origin = process.env.PUBLIC_APP_URL?.trim() || url.origin;
-  const installUrl = `${origin}/api/import/broker/userscript/${USERSCRIPT_FILE}`;
+  const installUrl = brokerInstallUrl(req);
 
   return withDb(() => {
     if (isDemoRequest()) return NextResponse.json({ error: "not_available" }, { status: 404 });

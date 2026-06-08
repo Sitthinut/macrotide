@@ -1,6 +1,7 @@
 import { COLLECTOR_PROTOCOL_VERSION, resolveCollectorShape } from "@macrotide/connector-sdk";
 import { NextResponse } from "next/server";
 import { withImportToken } from "@/lib/api/broker-token-auth";
+import { brokerInstallUrl } from "@/lib/portfolio/broker-install";
 import { getConnector } from "@/lib/portfolio/connector";
 
 // Runtime config for the installed userscript loader. The loader fetches this on
@@ -31,6 +32,8 @@ export async function GET(req: Request) {
         historyPath: connector.historyPath,
         pendingPath: connector.pendingPath,
         openUrl: connector.openUrl ?? null,
+        // Where the loader's "Update" button points (the .user.js → manager reinstall).
+        installUrl: brokerInstallUrl(req),
         // Fully-resolved collector shape (defaults merged) so the loader has no gaps.
         shape: resolveCollectorShape(connector.shape),
         collectorVersion: COLLECTOR_PROTOCOL_VERSION,
