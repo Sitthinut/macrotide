@@ -2236,8 +2236,9 @@ button.private-amt:focus-visible {
   color: var(--muted);
 }
 /* Narrow bubble → stack each row as a labelled card (label from each cell's
-   data-label). Threshold sized for the widest table (5-col transactions). */
-@container (max-width: 420px) {
+   data-label). Threshold sized for the widest table (6-col transactions:
+   Date · Symbol · Type · Units · Price · Total). */
+@container (max-width: 460px) {
   .chat-import-table thead {
     display: none;
   }
@@ -2286,8 +2287,16 @@ button.private-amt:focus-visible {
   cursor: zoom-out;
 }
 .chat-lightbox img {
-  max-width: 100%;
-  max-height: 100%;
+  /* Size against the viewport (minus the 24px overlay padding on each side), not
+     100% of the grid cell — a grid item's automatic min-size lets `max-height:
+     100%` be ignored, so the image overflows at its intrinsic size. Viewport
+     units are always definite, so the image fits within the overlay. */
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
   border-radius: 10px;
   object-fit: contain;
 }
