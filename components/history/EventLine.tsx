@@ -6,6 +6,7 @@
 // swatch, "Bought EXAMPLE-FUND-A" as the name, a muted detail sub-line, the
 // amount right-aligned, and (on a sell) the realized gain as the colored delta.
 
+import { PrivateAmount } from "@/components/PrivateAmount";
 import type { Transaction } from "@/lib/db/queries/transactions";
 import type { TxnKind } from "@/lib/portfolio/lots";
 
@@ -142,11 +143,15 @@ export function EventLine({
         </div>
       </div>
       <div className="stack-xs" style={{ alignItems: "flex-end" }}>
-        {amount && <div className="value">{amount}</div>}
+        {amount && (
+          <div className="value">
+            <PrivateAmount>{amount}</PrivateAmount>
+          </div>
+        )}
         {kind === "sell" && realized != null && (
           <div className={`pct delta ${realized >= 0 ? "up" : "down"}`}>
             {realized >= 0 ? "+" : "−"}
-            {baht(Math.abs(realized))}
+            <PrivateAmount>{baht(Math.abs(realized))}</PrivateAmount>
           </div>
         )}
       </div>

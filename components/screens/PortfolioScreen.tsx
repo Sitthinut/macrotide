@@ -10,6 +10,7 @@ import { RecentActivityPeek } from "@/components/history/RecentActivityPeek";
 import { Icon } from "@/components/Icon";
 import { AllocationDonut, DriftBars, NavChart } from "@/components/InteractiveCharts";
 import { Modal } from "@/components/Modal";
+import { PrivateAmount } from "@/components/PrivateAmount";
 import { KebabMenu } from "@/components/ui/KebabMenu";
 import {
   useModelPortfoliosView,
@@ -47,6 +48,7 @@ import { performanceDisclaimer } from "@/lib/portfolio/performance-disclaimer";
 import { holdingColor } from "@/lib/portfolio/risk-palette";
 import type { AssetClass, Holding, Portfolio } from "@/lib/static/types";
 import { usePortfolioUi } from "@/lib/stores/portfolio-ui";
+import { usePrivacy } from "@/lib/stores/privacy";
 
 function holdingToFormValues(h: Holding, fallbackBucketId: string): HoldingFormValues {
   return {
@@ -500,6 +502,7 @@ export function PortfolioScreen({
   const [filter, setFilter] = useState<AssetClass | "all">("all");
   const [benchmark, setBenchmark] = useState<string>("none");
   const [feedback, setFeedback] = useState<Record<string, "up" | "down" | null>>({});
+  const { hidden: valuesHidden, toggle: togglePrivacy } = usePrivacy();
   // Tapping a holding row opens a read-only detail view (detailHolding); the
   // per-row Edit affordance opens the edit form (holdingSheet). Reading a
   // holding no longer drops the user straight into an edit form.
@@ -900,10 +903,22 @@ export function PortfolioScreen({
               <Icon name="pencil" size={11} />
             </button>
           )}
+          <button
+            type="button"
+            className="hero-edit-btn"
+            onClick={togglePrivacy}
+            aria-label={valuesHidden ? "Show portfolio values" : "Hide portfolio values"}
+            title={valuesHidden ? "Show values" : "Hide values"}
+            aria-pressed={valuesHidden}
+          >
+            <Icon name={valuesHidden ? "eye-off" : "eye"} size={12} />
+          </button>
         </div>
         <div className="hero-value">
-          ฿{Math.floor(view.totalValue).toLocaleString("en-US")}
-          <span className="cents">.{view.totalValue.toFixed(2).split(".")[1] || "00"}</span>
+          <PrivateAmount tappable wide>
+            ฿{Math.floor(view.totalValue).toLocaleString("en-US")}
+            <span className="cents">.{view.totalValue.toFixed(2).split(".")[1] || "00"}</span>
+          </PrivateAmount>
         </div>
         <div className="hero-sub">
           <span className={`delta-pill${pnl < 0 ? " down" : ""}`}>
@@ -913,7 +928,8 @@ export function PortfolioScreen({
                 fill="currentColor"
               ></path>
             </svg>
-            ฿{Math.abs(Math.round(pnl)).toLocaleString("en-US")} · {fmtPct(pnlPct)}
+            <PrivateAmount>฿{Math.abs(Math.round(pnl)).toLocaleString("en-US")}</PrivateAmount> ·{" "}
+            {fmtPct(pnlPct)}
           </span>
           <span className="muted">all-time</span>
         </div>
@@ -1616,7 +1632,9 @@ export function PortfolioScreen({
                   </div>
                 </div>
                 <div className="stack-xs" style={{ alignItems: "flex-end" }}>
-                  <div className="value">฿{Math.round(h.value).toLocaleString("en-US")}</div>
+                  <div className="value">
+                    <PrivateAmount>฿{Math.round(h.value).toLocaleString("en-US")}</PrivateAmount>
+                  </div>
                   <div className={`pct ${h.d1 >= 0 ? "delta up" : "delta down"}`}>
                     {fmtPct(h.d1, 2)}
                   </div>

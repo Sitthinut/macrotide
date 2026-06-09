@@ -15,6 +15,14 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Privacy toggle for portfolio amounts.** An eye control in the balance
+  header (Portfolios tab) masks every ฿ figure — total, all-time P&L amount,
+  per-holding values, and the "Recently recorded" / History amounts — while all
+  percentages stay visible, so allocation and return signal survive a shoulder-
+  surf or screen share. Each amount is replaced by a constant-width frosted bar
+  (same width for every value, so the digit count can't leak its magnitude); tap
+  the masked total to reveal. The choice persists per browser (localStorage,
+  default visible).
 - **Advisor chat stores your raw message, not an internal note.** Image turns
   used to bake a model-facing `(Attached files: …)` note into the saved message,
   so it leaked into your own bubble on reload. The message now keeps only the
