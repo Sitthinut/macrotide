@@ -450,101 +450,192 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
 
   const propose_holding = tool({
     description:
-      "Propose adding ONE holding (fund/ETF/stock position) to the user's " +
-      "portfolio. This does NOT write anything — it shows the user a " +
-      "HoldingProposalCard they can Accept or dismiss; the row is saved only on " +
-      "Accept (POST /api/holdings/propose, per-user scoped). Call this ONCE PER " +
-      "POSITION when extracting holdings from a brokerage statement / OCR " +
-      "transcription, or when the user describes a position to add. Use the " +
-      "ticker exactly as shown; put the human-readable fund/stock name in " +
-      "englishName. If you can read a unit count use it; if the statement only " +
-      "shows a market value and a NAV/price, set units = value / price and put " +
-      "that price in avgCost. Don't invent numbers you can't read — omit a field " +
+      "Propose adding ONE holding (a single fund/ETF/stock position) to the user's " +
+      "portfolio. This does NOT write anything — when you can read a unit count it shows " +
+      "a HoldingProposalCard the user Accepts (saved on Accept via POST /api/holdings/" +
+      "propose, per-user scoped); when only a ฿ value is shown it shows a one-row review " +
+      "table that opens the importer, where units are derived and the user verifies. Call " +
+      "this ONCE for a SINGLE position the user describes or that you read from a " +
+      "screenshot. For TWO OR MORE positions use propose_holdings_import instead. " +
+      "Use the ticker exactly as shown; put the human-readable fund/stock name in " +
+      "englishName. " +
+      "If the position shows the DATE it was purchased (วันที่ทำรายการ — a LOT / detail " +
+      "view, even when it also shows the current value and P/L), it is a BUY, not a " +
+      "current snapshot — use propose_transactions_import instead so the cost is dated to " +
+      "the real purchase, not today. Apply this SILENTLY — pick the right tool, don't " +
+      "explain the reasoning to the user. " +
+      "If you can read a UNIT COUNT, pass `units` (and `avgCost` if a per-unit cost is " +
+      "shown). If the statement shows only a market VALUE and no unit count — the common " +
+      "Thai-app case (มูลค่าปัจจุบัน + ยอดเงินลงทุน + กำไร/ขาดทุน) — pass `value` (the " +
+      "current market value) and `pl` (the gain/loss), and LEAVE `units` AND `avgCost` " +
+      "EMPTY. NEVER compute units = value / price yourself and NEVER put an invested total " +
+      "into `avgCost` (that field is the price PER UNIT) — the importer derives units from " +
+      "the NAV on the snapshot date. Don't invent numbers you can't read — omit a field " +
       "rather than guess. Choose bucketId from the user's existing buckets — call " +
-      "read_portfolio to see them and pick the one that fits by context (e.g. an " +
-      "SSF bucket for an SSF fund). If the user has more than one bucket and the " +
-      "right one isn't clear, ASK which bucket before proposing rather than " +
-      "guessing. After proposing, tell the user you've drafted the row(s) for " +
-      "them to confirm.",
-    inputSchema: z.object({
-      ticker: z
-        .string()
-        .min(1)
-        .max(40)
-        .describe("Fund/ETF/stock symbol exactly as shown (e.g. 'K-USA-A(A)', 'VOO')."),
-      englishName: z
-        .string()
-        .min(1)
-        .max(200)
-        .describe("Human-readable fund/stock name (e.g. 'S&P 500 ETF'). Falls back to the ticker."),
-      thaiName: z.string().max(200).optional().describe("Thai name if the statement shows one."),
-      units: z
-        .number()
-        .positive()
-        .describe("Number of units/shares held. Required — derive from value/price if needed."),
-      avgCost: z
-        .number()
-        .positive()
-        .optional()
-        .describe("Average cost or NAV/price per unit, if the statement shows it."),
-      ter: z.number().min(0).optional().describe("Total expense ratio as a fraction (e.g. 0.003)."),
-      assetClass: z
-        .enum(["equity", "bond", "alternative", "cash"])
-        .optional()
-        .describe("Asset class if you can infer it from the fund name; otherwise omit."),
-      region: z.string().max(60).optional().describe("Region/geography if inferable (e.g. 'US')."),
-      quoteSource: z
-        .enum(QUOTE_SOURCES)
-        .optional()
-        .describe(
-          "Price source: 'thai_mutual_fund' for SEC-registered Thai mutual funds, " +
-            "'market' for stocks/ETFs/indices. Defaults to 'market'.",
-        ),
-      bucketId: z
-        .string()
-        .optional()
-        .describe(
-          "Target portfolio bucket id, chosen from the user's existing buckets " +
-            "(see read_portfolio) by context. If you're unsure which of several " +
-            "buckets fits, ask the user first rather than guessing. If omitted, " +
-            "the accept path falls back to the user's first bucket.",
-        ),
-      source: z
-        .string()
-        .max(80)
-        .optional()
-        .describe("Provenance label shown in the UI (e.g. brokerage name)."),
-      rationale: z
-        .string()
-        .min(1)
-        .max(300)
-        .describe("One short line shown on the card (e.g. what statement line this came from)."),
-    }),
+      "read_portfolio to see them and pick the one that fits by context (e.g. an SSF " +
+      "bucket for an SSF fund). If the user has more than one bucket and the right one " +
+      "isn't clear, ASK which bucket before proposing rather than guessing. After " +
+      "proposing, confirm in ONE brief sentence — do NOT restate the row or explain your " +
+      "reasoning.",
+    inputSchema: z
+      .object({
+        ticker: z
+          .string()
+          .min(1)
+          .max(40)
+          .describe("Fund/ETF/stock symbol exactly as shown (e.g. 'K-USA-A(A)', 'VOO')."),
+        englishName: z
+          .string()
+          .min(1)
+          .max(200)
+          .describe(
+            "Human-readable fund/stock name (e.g. 'S&P 500 ETF'). Falls back to the ticker.",
+          ),
+        thaiName: z.string().max(200).optional().describe("Thai name if the statement shows one."),
+        units: z
+          .number()
+          .positive()
+          .optional()
+          .describe(
+            "Number of units/shares held, when a unit count is shown. OMIT when only a ฿ " +
+              "value is shown — never derive it from value/price.",
+          ),
+        value: z
+          .number()
+          .positive()
+          .optional()
+          .describe(
+            "Current market value of the position in baht (the large ฿ figure), when no " +
+              "unit count is shown. The importer derives units from NAV on the snapshot date.",
+          ),
+        pl: z
+          .number()
+          .optional()
+          .describe(
+            "Unrealised profit/loss in baht (negative for a loss), if shown — reconstructs " +
+              "the invested cost basis when only a value is given.",
+          ),
+        nav: z
+          .number()
+          .positive()
+          .optional()
+          .describe("NAV / price per unit, if printed on the statement."),
+        avgCost: z
+          .number()
+          .positive()
+          .optional()
+          .describe("Average cost per unit, ONLY if the statement shows that per-unit figure."),
+        ter: z
+          .number()
+          .min(0)
+          .optional()
+          .describe("Total expense ratio as a fraction (e.g. 0.003)."),
+        assetClass: z
+          .enum(["equity", "bond", "alternative", "cash"])
+          .optional()
+          .describe("Asset class if you can infer it from the fund name; otherwise omit."),
+        region: z
+          .string()
+          .max(60)
+          .optional()
+          .describe("Region/geography if inferable (e.g. 'US')."),
+        quoteSource: z
+          .enum(QUOTE_SOURCES)
+          .optional()
+          .describe(
+            "Price source: 'thai_mutual_fund' for SEC-registered Thai mutual funds, " +
+              "'market' for stocks/ETFs/indices. Defaults to 'market'.",
+          ),
+        bucketId: z
+          .string()
+          .optional()
+          .describe(
+            "Target portfolio bucket id, chosen from the user's existing buckets " +
+              "(see read_portfolio) by context. If you're unsure which of several " +
+              "buckets fits, ask the user first rather than guessing. If omitted, " +
+              "the accept path falls back to the user's first bucket.",
+          ),
+        source: z
+          .string()
+          .max(80)
+          .optional()
+          .describe("Provenance label shown in the UI (e.g. brokerage name)."),
+        asOf: z
+          .string()
+          .optional()
+          .describe(
+            "The snapshot's as-of date in ISO YYYY-MM-DD. PREFER a date shown in the image; " +
+              "otherwise the attached file's name/timestamp noted in the conversation. Omit if unknown.",
+          ),
+        rationale: z
+          .string()
+          .min(1)
+          .max(300)
+          .describe("One short line shown on the card (e.g. what statement line this came from)."),
+      })
+      .refine((v) => v.units != null || v.value != null, {
+        message: "Provide either a unit count (units) or a ฿ value.",
+        path: ["units"],
+      }),
     execute: async (input) => {
-      // The `holding` field carries the shape the HoldingProposalCard expects
-      // and that POST /api/holdings/propose accepts. The client picks it off the
-      // tool output in the stream and renders the card; accept flows through the
-      // route (applyHoldingProposal). No DB mutation here.
-      const holding = {
-        ticker: input.ticker.trim().toUpperCase(),
-        englishName: input.englishName.trim(),
-        thaiName: input.thaiName?.trim() ?? null,
-        units: input.units,
-        avgCost: input.avgCost ?? null,
-        ter: input.ter ?? null,
-        assetClass: input.assetClass ?? null,
-        region: input.region?.trim() ?? null,
-        quoteSource: input.quoteSource ?? "market",
-        bucketId: input.bucketId?.trim() ?? null,
-        source: input.source?.trim() ?? null,
-        rationale: input.rationale,
-      };
+      // Units known → the one-tap HoldingProposalCard, direct write on Accept. The
+      // `holding` field carries the shape the card expects and POST /api/holdings/
+      // propose accepts; the client picks it off the stream. No DB mutation here.
+      if (input.units != null) {
+        const holding = {
+          ticker: input.ticker.trim().toUpperCase(),
+          englishName: input.englishName.trim(),
+          thaiName: input.thaiName?.trim() ?? null,
+          units: input.units,
+          avgCost: input.avgCost ?? null,
+          ter: input.ter ?? null,
+          assetClass: input.assetClass ?? null,
+          region: input.region?.trim() ?? null,
+          quoteSource: input.quoteSource ?? "market",
+          bucketId: input.bucketId?.trim() ?? null,
+          source: input.source?.trim() ?? null,
+          rationale: input.rationale,
+        };
+        return {
+          ok: true as const,
+          holding,
+          message: `Drafted ${holding.ticker}${
+            Number.isFinite(holding.units) ? ` (${holding.units} units)` : ""
+          } — confirm on the card to add it to your portfolio.`,
+        };
+      }
+
+      // Value-only → route into the SAME reviewable importer the batch path uses
+      // (#130 / ADR 0004): units derive from NAV(asOf) at the fold and the ฿ value
+      // stays the stored fact — never a frozen value÷price conversion. We emit a
+      // one-row holdingsImport payload (shared deriveRowsWithNav, mirroring
+      // propose_holdings_import) so the user reviews the estimated unit count.
+      const extracted: ExtractedRow[] = [
+        {
+          ticker: input.ticker.trim(),
+          englishName: input.englishName.trim(),
+          avgCost: input.avgCost,
+          nav: input.nav,
+          value: input.value,
+          pl: input.pl,
+        },
+      ];
+      const derived = deriveRowsWithNav(extracted, input.asOf);
+      const out = derived.map((d) => {
+        const row = input.quoteSource ? { ...d, quoteSource: input.quoteSource } : d;
+        return input.asOf ? { ...row, asOf: input.asOf } : row;
+      });
+      const needs = out.filter((r) => r.needsUnits).length;
       return {
         ok: true as const,
-        holding,
-        message: `Drafted ${holding.ticker}${
-          Number.isFinite(holding.units) ? ` (${holding.units} units)` : ""
-        } — confirm on the card to add it to your portfolio.`,
+        holdingsImport: {
+          rows: out,
+          source: input.source?.trim() ?? null,
+          note: input.rationale.trim(),
+        },
+        message:
+          `Drafted ${input.ticker.trim().toUpperCase()} — review and import it on the table ` +
+          `below.${needs > 0 ? " You'll be asked to fill in a unit count." : ""}`,
       };
     },
   });
@@ -556,17 +647,30 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
       "OR MORE positions from an attached holdings/portfolio screenshot. It does NOT " +
       "write anything: it shows the user a compact table that opens the full import " +
       "page, pre-filled, where they review/edit and bulk-save. One entry per position. " +
-      "Read each value EXACTLY as printed — never invent a number; omit a field you " +
-      "can't read. " +
-      "IMPORTANT — Thai broker apps usually show a position's market VALUE " +
-      "(มูลค่าปัจจุบัน) + invested amount (ยอดเงินลงทุน) + P/L (กำไร/ขาดทุน) but NO unit " +
-      "count. When you DON'T see a printed unit count, pass `value` (the current market " +
-      "value) and `pl` (the gain/loss), and leave `units` AND `avgCost` EMPTY — the " +
-      "importer derives them. NEVER invent a unit count (e.g. 1), and NEVER put the " +
-      "invested total into `avgCost` (that field is the price PER UNIT, not a total). " +
-      "Set `units`/`avgCost` ONLY when they are literally printed per unit. For a SINGLE " +
-      "position use propose_holding instead. After calling this, tell the user you've " +
-      "drafted the rows for them to review and import.",
+      "FIRST classify the screenshot: if each position shows the DATE it was purchased " +
+      "(วันที่ทำรายการ — a LOT / position-detail view, even when it ALSO shows the current " +
+      "value and P/L), it is a BUY, NOT a current snapshot — use propose_transactions_import " +
+      "instead, so the cost is dated to the real purchase. Recording it here as a Balance " +
+      "would date the whole cost basis to today and distort the money-weighted return. Use " +
+      "THIS tool only for a CURRENT positions snapshot with NO per-position purchase date. " +
+      "Apply this classification SILENTLY — pick the right tool, don't explain the date / " +
+      "cost-basis / money-weighted-return reasoning to the user. " +
+      "Read each value EXACTLY as printed — never invent a number; omit ONLY a field you " +
+      "genuinely can't read, but DO capture every figure that IS printed (a dropped fact " +
+      "loses cost basis or accuracy). For each row pass whatever it shows: `units` (unit " +
+      "count, จำนวนหน่วย/หน่วย), `avgCost` (cost per unit, NAV ต้นทุน — a small per-unit " +
+      "number), `nav` (current price per unit), `value` (current market value, " +
+      "มูลค่าปัจจุบัน — the large ฿ figure), `pl` (P/L, กำไร/ขาดทุน). " +
+      "Two common shapes: (a) a SUMMARY view shows value + invested (ยอดเงินลงทุน) + P/L " +
+      "but NO unit count → pass `value` and `pl`, leave `units` AND `avgCost` EMPTY (the " +
+      "importer derives units from NAV). (b) a dateless DETAIL view shows BOTH a unit count " +
+      "AND a per-unit cost (e.g. '18,657.4125 units @ 10.7196') → pass BOTH `units` AND " +
+      "`avgCost`, plus `value`/`pl` if shown, so the cost basis is preserved. " +
+      "NEVER invent a unit count (e.g. 1), and NEVER put the invested TOTAL into `avgCost` " +
+      "(that field is the price PER UNIT, not a total). For a SINGLE position use " +
+      "propose_holding instead. After calling this, confirm in ONE brief sentence (e.g. " +
+      "'Drafted 2 holdings below — review and import when ready.') — do NOT restate the " +
+      "rows, describe the table, or explain your reasoning.",
     inputSchema: z.object({
       rows: z
         .array(
@@ -680,11 +784,22 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
       "(b) The TYPE is the action word — ซื้อ = buy, ขาย = sell, เงินปันผล = dividend; " +
       "'AMC' and other channel/agent badges are NOT the type, ignore them. " +
       "(c) A สับเปลี่ยน (switch) is TWO rows — the ออก (out) leg a 'sell', the เข้า (in) " +
-      "leg a 'buy'. Read each value EXACTLY as printed; omit a field you genuinely can't " +
-      "read (the user fills it in) — never invent one, and never ask the user to confirm " +
-      "B.E. dates or what สับเปลี่ยน/ซื้อ/ขาย mean. For a CURRENT positions snapshot (no " +
-      "per-row dates) use propose_holdings_import instead. After calling this, tell the " +
-      "user you've drafted the transactions for them to review and import.",
+      "leg a 'buy'. " +
+      "(d) A LOT / purchase-detail view (e.g. 'LOT 1', a dated row with units + a cost " +
+      "NAV + an invested total) IS a transaction: record the BUY from the PURCHASE facts " +
+      "— `tradeDate` (the purchase date), `units`, `pricePerUnit` (the cost NAV ต้นทุน, a " +
+      "small per-unit number), and `amount` (the invested total ยอดเงินลงทุน). Such a view " +
+      "often ALSO shows the position's current value (มูลค่าปัจจุบัน) and unrealised P/L " +
+      "(กำไร/ขาดทุน) — those are TODAY'S market state, NOT the trade: do NOT use them as " +
+      "the transaction `amount` or `pricePerUnit`. " +
+      "Read each value EXACTLY as printed and capture every TRADE figure that's shown " +
+      "(date, units, price, amount, fee); omit ONLY a field you genuinely can't read (the " +
+      "user fills it in) — never invent one, and never ask the user to confirm B.E. dates " +
+      "or what สับเปลี่ยน/ซื้อ/ขาย mean. For a CURRENT positions snapshot (no per-row " +
+      "dates) use propose_holdings_import instead. After calling this, confirm in ONE " +
+      "brief sentence (e.g. 'Drafted 2 buy transactions below — review and import when " +
+      "ready.') — do NOT restate the rows, describe the table, or explain your " +
+      "classification reasoning.",
     inputSchema: z.object({
       rows: z
         .array(

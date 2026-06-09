@@ -321,6 +321,58 @@ describe("advisor tools — propose_holding", () => {
     expect(out.holding.avgCost).toBeNull();
     expect(out.holding.assetClass).toBeNull();
   });
+
+  it("routes a value-only position into the reviewable importer (no units, no DB write)", async () => {
+    const result = await withFresh(async () => {
+      createBucket(BUCKET);
+      // NAV keyed by the composite source:TICKER — a catalog fund resolves to
+      // thai_mutual_fund, so value÷NAV derives the (estimated) unit count.
+      upsertFundQuote({
+        ticker: quoteCacheKey("thai_mutual_fund", "K-USA-A"),
+        nav: 20,
+        updatedAt: new Date().toISOString(),
+      });
+      upsertFund({
+        projId: "K-USA-A",
+        abbrName: "K-USA-A",
+        englishName: "K-USA-A",
+        assetClass: "equity",
+        fundType: "Equity",
+        status: "active",
+      });
+      upsertShareClasses([
+        { projId: "K-USA-A", className: "main", ticker: "K-USA-A", investorType: "retail" },
+      ]);
+      const tools = createAdvisorTools({ userId: null });
+      const out = (await run(tools.propose_holding, {
+        ticker: "k-usa-a",
+        englishName: "K US Equity",
+        value: 1000, // 1000 ÷ 20 = 50 units, derived (estimated), value kept as the fact
+        pl: 100,
+        rationale: "Read from a single-fund screenshot.",
+      })) as {
+        ok: boolean;
+        holding?: unknown;
+        holdingsImport: {
+          rows: Array<{ ticker: string; units?: number; estimated: boolean; quoteSource: string }>;
+          source: string | null;
+          note: string | null;
+        };
+      };
+      return { out, count: listHoldings().length };
+    });
+    expect(result.out.ok).toBe(true);
+    // Value-only → a holdingsImport batch, NOT a one-tap holding card.
+    expect(result.out.holding).toBeUndefined();
+    expect(result.out.holdingsImport.rows).toHaveLength(1);
+    const row = result.out.holdingsImport.rows[0];
+    expect(row.units).toBeCloseTo(50);
+    expect(row.estimated).toBe(true);
+    expect(row.quoteSource).toBe("thai_mutual_fund");
+    expect(result.out.holdingsImport.note).toBe("Read from a single-fund screenshot.");
+    // Proposing must not write a holding.
+    expect(result.count).toBe(0);
+  });
 });
 
 describe("advisor tools — propose_holdings_import", () => {

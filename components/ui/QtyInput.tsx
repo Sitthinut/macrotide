@@ -83,7 +83,14 @@ export function QtyInput({
   const toggle = () => {
     const next = inBaht ? "units" : "total";
     setMode(next);
-    apply(text, next); // re-type the SAME number as the new kind — don't clear it
+    // If the side we're switching TO already holds a value — an imported row that
+    // carries BOTH a unit count and a ฿ amount (the broker printed both) — surface
+    // that real value and keep both, instead of clobbering it with the number we're
+    // looking at. Only when the target side is empty (manual single-value entry) do
+    // we re-type the current number as the new kind — the "fix the wrong type" case.
+    const existing = next === "total" ? value : units;
+    if (existing != null && existing.trim() !== "") return;
+    apply(text, next);
   };
 
   return (
