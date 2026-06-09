@@ -10,11 +10,13 @@ import { getDb, runWithDbContext } from "../context";
 import * as schema from "../schema";
 import { chatThreads } from "../schema";
 import {
+  appendMessage,
   archiveThread,
   createThread,
   findIdleThreads,
   getThread,
   listByStatus,
+  listMessages,
   markIdle,
 } from "./chat";
 
@@ -205,6 +207,37 @@ describe("closeStaleSessions backstop", () => {
       const result = await closeStaleSessions({ close: closeStub(2) });
       expect(result.closedCount).toBe(2);
       expect(result.extractedCount).toBe(4);
+    });
+  });
+});
+
+describe("appendMessage — cards payload round-trip", () => {
+  it("persists propose_* card payloads and returns them from listMessages", () => {
+    withFresh(() => {
+      const t = createThread();
+      const cards = {
+        transactionsImport: {
+          rows: [{ ticker: "VOO", units: 10, pricePerUnit: 400, amount: 4000 }],
+          source: "Broker",
+          note: "from a screenshot",
+        },
+      };
+      appendMessage({ threadId: t.id, role: "user", content: "import" });
+      appendMessage({ threadId: t.id, role: "assistant", content: "Drafted below.", cards });
+
+      const rows = listMessages(t.id);
+      const assistant = rows.find((r) => r.role === "assistant");
+      expect(assistant?.cards).toBe(JSON.stringify(cards));
+      expect(JSON.parse(assistant?.cards ?? "null")).toEqual(cards);
+    });
+  });
+
+  it("stores NULL cards for a turn with no card payload", () => {
+    withFresh(() => {
+      const t = createThread();
+      appendMessage({ threadId: t.id, role: "assistant", content: "just text" });
+      const row = listMessages(t.id).find((r) => r.role === "assistant");
+      expect(row?.cards).toBeNull();
     });
   });
 });

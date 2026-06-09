@@ -15,6 +15,43 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Chat history is now a faithful, durable record.** The assistant's full reply
+  is persisted (every generation step, not just the final one), so prose written
+  before a tool call survives reload. Advisor-generated cards — import tables,
+  single-holding and plan proposals — are now stored server-side on the message
+  (a new `chat_messages.cards` column) instead of browser-only `localStorage`, so
+  they reappear after a reload and follow you to another device. The stored
+  payload doubles as a durable record of exactly what the Advisor extracted. A
+  `DEBUG_ADVISOR=1` flag logs per-turn internals (served model, step/finish-reason
+  chain, full tool inputs) to the server console for local debugging.
+
+- **Advisor imports a single value-only holding without inventing units.** When
+  you share a screenshot of one position that shows a ฿ value but no unit count,
+  the Advisor no longer computes and freezes `units = value ÷ price` into a
+  one-tap card. It now opens the same reviewable importer the multi-holding path
+  uses: the ฿ value is kept as the fact, units are derived from the NAV on the
+  snapshot date (shown as an estimate to verify), and they self-correct as NAV
+  lands. A position you describe with a unit count still gets the one-tap card.
+- **Advisor captures every figure on an import screenshot, and classifies a dated
+  LOT as a transaction.** The import tool guidance now tells the Advisor to read
+  all printed values into their fields — a dateless detail view with a unit count
+  *and* a per-unit cost keeps its cost basis instead of importing units alone, and
+  a summary view (value + invested + P/L, no units) passes value and P/L. It also
+  classifies up front: a position view that shows a *purchase date* (วันที่ทำรายการ,
+  a LOT view) is a BUY, so it's recorded as a transaction dated to the actual
+  purchase — using the invested total as the trade amount, never the current value
+  or unrealised P/L. Recording such a view as a current Balance would date the
+  whole cost basis to today and distort the money-weighted return.
+- **Import quantity toggle reveals the real ฿ amount.** On an imported row that
+  carries both a unit count and a ฿ amount (broker statements that print both),
+  flipping the Units ↔ ฿ switch now shows the stored amount instead of re-reading
+  the unit figure as baht. Manually typing a single value and switching its type
+  is unchanged.
+- **Advisor transaction-import card shows price per unit.** The in-chat "Review
+  transactions" table now has a Price column alongside Units and Total, so you
+  can check the per-unit figure against the screenshot before importing. The
+  holdings-import card's "needs units" / "estimated" badge moved onto the Units
+  value it describes (clearer on narrow widths).
 - **Privacy toggle for portfolio amounts.** An eye control in the balance
   header (Portfolios tab) masks every ฿ figure — total, all-time P&L amount,
   per-holding values, and the "Recently recorded" / History amounts — while all

@@ -105,6 +105,25 @@ function attachmentCount(json: string | null | undefined): number {
   }
 }
 
+// Parse the assistant row's `cards` column — the propose_* tool payloads persisted
+// server-side so the in-chat tables / proposals survive reload and follow the user
+// across devices (previously browser-only; see lib/stores/chat-cards.ts). Returns
+// null for non-card turns / legacy rows / malformed JSON.
+function parseCards(json: string | null | undefined): {
+  holdingsImport?: HoldingsImport;
+  transactionsImport?: TransactionsImport;
+  holdings?: HoldingProposal[];
+  proposal?: PlanProposal;
+} | null {
+  if (!json) return null;
+  try {
+    const o = JSON.parse(json);
+    return o && typeof o === "object" ? o : null;
+  } catch {
+    return null;
+  }
+}
+
 interface PlanProposal {
   section: string;
   rationale: string;
@@ -395,11 +414,16 @@ function HoldingsImportCard({ data, onOpen }: { data: HoldingsImport; onOpen: ()
             <tr key={`${r.ticker}-${i}`}>
               <td data-label="Symbol">
                 <span className="t">{r.ticker.toUpperCase()}</span>
-                {r.needsUnits && <span className="flag">needs units</span>}
-                {!r.needsUnits && r.estimated && <span className="flag est">estimated</span>}
               </td>
               <td data-label="Units" style={{ textAlign: "right" }}>
-                {fmt(r.units)}
+                {r.needsUnits ? (
+                  <span className="flag">needs units</span>
+                ) : (
+                  <>
+                    {fmt(r.units)}
+                    {r.estimated && <span className="flag est">estimated</span>}
+                  </>
+                )}
               </td>
               <td data-label="Avg cost" style={{ textAlign: "right" }}>
                 {fmt(r.avgCost)}
@@ -448,6 +472,7 @@ function TransactionsImportCard({
             <th>Symbol</th>
             <th>Type</th>
             <th style={{ textAlign: "right" }}>Units</th>
+            <th style={{ textAlign: "right" }}>Price</th>
             <th style={{ textAlign: "right" }}>Total</th>
           </tr>
         </thead>
@@ -461,6 +486,9 @@ function TransactionsImportCard({
               <td data-label="Type">{r.kind ?? "—"}</td>
               <td data-label="Units" style={{ textAlign: "right" }}>
                 {fmt(r.units)}
+              </td>
+              <td data-label="Price" style={{ textAlign: "right" }}>
+                {fmt(r.pricePerUnit)}
               </td>
               <td data-label="Total" style={{ textAlign: "right" }}>
                 {fmt(r.amount)}
@@ -600,6 +628,8 @@ export function ChatScreen({
             model?: string | null;
             // JSON-encoded ChatAttachmentMeta[] for an image turn; NULL otherwise.
             attachments?: string | null;
+            // JSON-encoded propose_* card payloads for an assistant turn; NULL otherwise.
+            cards?: string | null;
           }>;
         };
         setThreadId(id);
@@ -622,6 +652,9 @@ export function ChatScreen({
                 const isUser = r.role !== "assistant";
                 if (isUser) userSeq += 1;
                 const imgs = isUser ? storedImages.get(userSeq) : undefined;
+                // Prefer the server-persisted cards; fall back to the browser
+                // cache for threads written before the `cards` column existed.
+                const dbCards = isUser ? null : parseCards(r.cards);
                 const card = isUser ? undefined : storedCards.get(userSeq);
                 // Images aren't persisted server-side, so a device without the
                 // browser-cached thumbnails needs a "[N images attached]" marker
@@ -643,8 +676,10 @@ export function ChatScreen({
                   id: `db-${r.id}`,
                   model: r.model ?? null,
                   images: imgs,
-                  holdingsImport: card?.holdingsImport,
-                  transactionsImport: card?.transactionsImport,
+                  holdingsImport: dbCards?.holdingsImport ?? card?.holdingsImport,
+                  transactionsImport: dbCards?.transactionsImport ?? card?.transactionsImport,
+                  holdings: dbCards?.holdings,
+                  proposal: dbCards?.proposal,
                 } as Message;
               }),
         );

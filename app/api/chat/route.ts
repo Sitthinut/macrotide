@@ -28,6 +28,12 @@ import { classifyReasoningIntent } from "@/lib/advisor/intent";
 import { ADVISOR_SYSTEM_PROMPT } from "@/lib/advisor/system-prompt";
 import { createAdvisorTools } from "@/lib/advisor/tools";
 import {
+  debugLogTurn,
+  extractCards,
+  joinStepText,
+  type TurnCards,
+} from "@/lib/advisor/turn-persist";
+import {
   resolveDemoProvider,
   resolveOwnerProvider,
   resolveTierProvider,
@@ -249,8 +255,12 @@ interface AdvisorStreamOptions {
   maxOutputTokens: number;
   threadId: string;
   setContextHeader: (res: Response) => void;
-  /** Persist the final assistant text. Runs inside the captured DB context. */
-  persist: (text: string, modelId: string | null) => void;
+  /**
+   * Persist the assistant turn. Runs inside the captured DB context. `cards`
+   * carries the turn's propose_* payloads (null when none) so the in-chat tables
+   * survive reload.
+   */
+  persist: (text: string, modelId: string | null, cards: TurnCards | null) => void;
   /**
    * Record token usage (and cost) even on an empty turn (free tier). Runs inside
    * ctx. Gets the served `modelId` so the caller can price the turn.
@@ -315,12 +325,19 @@ function streamAdvisorResponse(opts: AdvisorStreamOptions): Response {
       let modelId: string | null = null;
       let inputTokens = 0;
       let outputTokens = 0;
+      let cards: TurnCards | null = null;
 
       if (a.ok) {
-        text = a.text;
+        // Persist EVERY step's text (the UI shows all of them — e.g. prose before
+        // a tool call + the closing line), not just the final step's `a.text`.
+        text = joinStepText(a.steps) || a.text;
         modelId = a.response.modelId ?? null;
         inputTokens = a.usage.inputTokens ?? 0;
         outputTokens = a.usage.outputTokens ?? 0;
+        // Lift the turn's propose_* card payloads so they persist on the row and
+        // survive reload / other devices (previously browser-only).
+        cards = extractCards(a.steps);
+        debugLogTurn(opts.path, modelId, a.steps);
         logEmptyTurn(opts.path, text, modelId, a.finishReason, a.steps);
 
         // Recover-on-empty (#21): a read tool ran but no prose came back. Re-ask
@@ -345,7 +362,7 @@ function streamAdvisorResponse(opts: AdvisorStreamOptions): Response {
       }
 
       runWithDbContext(opts.ctx, () => {
-        if (text.trim()) opts.persist(text, modelId);
+        if (text.trim()) opts.persist(text, modelId, cards);
         opts.recordUsageFor?.({ inputTokens, outputTokens, modelId });
       });
     },
@@ -555,12 +572,13 @@ export async function POST(req: Request) {
         maxOutputTokens: 1024,
         threadId: finalThreadId,
         setContextHeader,
-        persist: (text, modelId) =>
+        persist: (text, modelId, cards) =>
           appendMessage({
             threadId: finalThreadId,
             role: "assistant",
             content: text,
             model: modelId,
+            cards,
           }),
       });
     }
@@ -632,12 +650,13 @@ export async function POST(req: Request) {
         maxOutputTokens: tier === "trusted" ? 2048 : 1024,
         threadId: finalThreadId,
         setContextHeader,
-        persist: (text, modelId) =>
+        persist: (text, modelId, cards) =>
           appendMessage({
             threadId: finalThreadId,
             role: "assistant",
             content: text,
             model: modelId,
+            cards,
           }),
         // Log tokens (and estimated cost) regardless of whether prose came back
         // — a tool-only turn still consumes budget. Cost is 0 for free/unpriced
@@ -688,12 +707,13 @@ export async function POST(req: Request) {
       maxOutputTokens: 2048,
       threadId: finalThreadId,
       setContextHeader,
-      persist: (text, modelId) =>
+      persist: (text, modelId, cards) =>
         appendMessage({
           threadId: finalThreadId,
           role: "assistant",
           content: text,
           model: modelId,
+          cards,
         }),
     });
   });

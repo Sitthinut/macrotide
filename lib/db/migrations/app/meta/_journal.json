@@ -113,6 +113,13 @@
       "when": 1780950264378,
       "tag": "0015_eminent_demogoblin",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1780995268360,
+      "tag": "0016_neat_klaw",
+      "breakpoints": true
     }
   ]
 }
