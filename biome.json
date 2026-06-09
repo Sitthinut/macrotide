@@ -15,7 +15,8 @@
       "!**/.playwright-cli",
       "!**/.claude",
       "!**/next-env.d.ts",
-      "!**/*.tsbuildinfo"
+      "!**/*.tsbuildinfo",
+      "!**/lib/db/migrations"
     ]
   },
   "formatter": {
