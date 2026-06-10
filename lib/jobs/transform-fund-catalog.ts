@@ -34,7 +34,14 @@ import {
   upsertFund,
   upsertFundFees,
 } from "../db/queries/funds";
-import { readSecRaw, readSecRawItems, SEC_ENDPOINTS } from "../db/queries/sec-raw";
+import {
+  listSecRawProjIds,
+  readSecRaw,
+  readSecRawItemFor,
+  readSecRawItems,
+  readSecRawItemsFor,
+  SEC_ENDPOINTS,
+} from "../db/queries/sec-raw";
 import {
   classifyDistribution,
   classifyFxHedging,
@@ -319,17 +326,22 @@ function deriveGrouped<TItem, TRow extends { projId: string }>(
   endpoint: string,
   mapItem: (item: TItem) => TRow | null,
   upsert: (projId: string, rows: TRow[]) => void,
+  eachRow?: (row: TRow) => void,
 ): number {
-  const byProj = new Map<string, TRow[]>();
-  for (const it of readSecRawItems<TItem>(endpoint)) {
-    const row = mapItem(it);
-    if (!row) continue;
-    const list = byProj.get(row.projId) ?? [];
-    list.push(row);
-    byProj.set(row.projId, list);
+  let funds = 0;
+  for (const projId of listSecRawProjIds(endpoint)) {
+    const rows: TRow[] = [];
+    for (const it of readSecRawItemsFor<TItem>(endpoint, projId)) {
+      const row = mapItem(it);
+      if (!row) continue;
+      rows.push(row);
+      eachRow?.(row);
+    }
+    if (rows.length === 0) continue;
+    upsert(projId, rows);
+    funds++;
   }
-  for (const [projId, rows] of byProj) upsert(projId, rows);
-  return byProj.size;
+  return funds;
 }
 
 /**
@@ -357,34 +369,58 @@ export function transformFundCatalog(): TransformFundCatalogResult {
     if (it.proj_id && it.risk_spectrum) rsByProj.set(it.proj_id, it.risk_spectrum);
   }
 
-  // 1. Catalog rows from landed profiles (one landed row per fund).
-  const profiles = readSecRawItems<SecFundProfile>(SEC_ENDPOINTS.profiles);
+  // 1. Catalog rows from landed profiles (one landed row per fund), streamed —
+  // profile payloads carry the long investment-policy text, so they're read
+  // per fund here and again in the facet pass rather than held throughout.
+  const profileIds = listSecRawProjIds(SEC_ENDPOINTS.profiles);
   let fundsUpserted = 0;
-  for (const p of profiles) {
-    if (!p.proj_id) continue;
+  for (const projId of profileIds) {
+    const p = readSecRawItemFor<SecFundProfile>(SEC_ENDPOINTS.profiles, projId);
+    if (!p?.proj_id) continue;
     upsertFund(profileToFundInsert(p, aumByProj.get(p.proj_id) ?? null, rsByProj.get(p.proj_id)));
     fundsUpserted++;
   }
 
   // 2. Fee rows from landed fees (one landed row per fund holds its fee array).
-  const feeRows: FundFeeInsert[] = [];
+  // STREAMED per fund, flushed in fund-batches, instead of materializing the
+  // whole catalog's fee history at once: that history is ~800k rows and grows
+  // every month, and holding it (plus every parsed payload) was the transform's
+  // memory whale — a heap OOM at the job container's limit. Peak memory is now
+  // one batch (~70k rows); upsertFundFees recomputes current_ter per flush.
+  const FEE_FLUSH_FUNDS = 200;
   let fundsWithFees = 0;
-  for (const items of readSecRawItems<SecFundFeeItem[]>(SEC_ENDPOINTS.fees)) {
+  let feeRowsUpserted = 0;
+  let feeBatch: FundFeeInsert[] = [];
+  let feeBatchFunds = 0;
+  for (const projId of listSecRawProjIds(SEC_ENDPOINTS.fees)) {
+    const items = readSecRawItemFor<SecFundFeeItem[]>(SEC_ENDPOINTS.fees, projId);
     if (!Array.isArray(items) || items.length === 0) continue;
     fundsWithFees++;
-    for (const item of items) feeRows.push(feeItemToFeeRow(item));
+    feeRowsUpserted += items.length;
+    for (const item of items) feeBatch.push(feeItemToFeeRow(item));
+    if (++feeBatchFunds >= FEE_FLUSH_FUNDS) {
+      upsertFundFees(feeBatch);
+      feeBatch = [];
+      feeBatchFunds = 0;
+    }
   }
-  // One upsert: it batches the inserts and recomputes current_ter for every
-  // touched fund in a single pass (see upsertFundFees).
-  upsertFundFees(feeRows);
+  upsertFundFees(feeBatch);
 
   // 3. Per-fund enrichment tables from the landed bulk sweeps — each one maps,
   // groups per fund, and replaces that fund's set atomically (dividend history
   // appends instead — payments are never deleted).
+  // The facet pass (step 4) needs each fund's benchmark STRINGS — tap them
+  // here while the rows stream by, instead of re-reading the endpoint.
+  const benchStringsByProj = new Map<string, Array<{ seq: number; benchmark: string }>>();
   const fundsWithBenchmarks = deriveGrouped<SecBenchmarkItem, FundBenchmarkInsert>(
     SEC_ENDPOINTS.benchmarks,
     benchmarkItemToRow,
     upsertFundBenchmarks,
+    (row) => {
+      const list = benchStringsByProj.get(row.projId) ?? [];
+      list.push({ seq: row.groupSeq, benchmark: row.benchmark });
+      benchStringsByProj.set(row.projId, list);
+    },
   );
   const fundsWithStatistics = deriveGrouped<SecFundStatisticsItem, FundStatisticsInsert>(
     SEC_ENDPOINTS.statistics,
@@ -417,17 +453,8 @@ export function transformFundCatalog(): TransformFundCatalogResult {
   );
 
   // 4. Derived facets (region/sector focus + index family) — computed from the
-  // fund's benchmark strings (primary) with name/policy-text fallback, per
-  // lib/market/fund-facets.ts. Needs both the profiles and the landed
-  // benchmarks, so it runs last and writes via one batched update.
-  const benchStringsByProj = new Map<string, Array<{ seq: number; benchmark: string }>>();
-  for (const it of readSecRawItems<SecBenchmarkItem>(SEC_ENDPOINTS.benchmarks)) {
-    const row = benchmarkItemToRow(it);
-    if (!row) continue;
-    const list = benchStringsByProj.get(row.projId) ?? [];
-    list.push({ seq: row.groupSeq, benchmark: row.benchmark });
-    benchStringsByProj.set(row.projId, list);
-  }
+  // fund's benchmark strings (tapped in step 3) with name fallback, per
+  // lib/market/fund-facets.ts. Runs last and writes via one batched update.
   // AIMC peer-group codes from the one-shot v1 snapshot (see
   // scripts/backfill-aimc-v1.ts — the v1 portal retires mid-2026, so this is
   // snapshot data, not a recurring crawl; absent rows simply claim nothing).
@@ -443,8 +470,9 @@ export function transformFundCatalog(): TransformFundCatalogResult {
 
   const facetUpdates: Array<{ projId: string } & FundFacetsUpdate> = [];
   let fundsWithRegionFocus = 0;
-  for (const p of profiles) {
-    if (!p.proj_id) continue;
+  for (const projId of profileIds) {
+    const p = readSecRawItemFor<SecFundProfile>(SEC_ENDPOINTS.profiles, projId);
+    if (!p?.proj_id) continue;
     const benchmarks = (benchStringsByProj.get(p.proj_id) ?? [])
       .sort((a, b) => a.seq - b.seq)
       .map((b) => b.benchmark);
@@ -469,7 +497,7 @@ export function transformFundCatalog(): TransformFundCatalogResult {
   return {
     fundsUpserted,
     fundsWithFees,
-    feeRowsUpserted: feeRows.length,
+    feeRowsUpserted,
     fundsWithBenchmarks,
     fundsWithStatistics,
     fundsWithSpecifications,

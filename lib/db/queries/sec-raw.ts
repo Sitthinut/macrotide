@@ -6,7 +6,7 @@
 // with a JSON `payload`. Adding an endpoint is a new SEC_ENDPOINT value + a
 // transform step — never a schema change. See lib/db/schema/market.ts.
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getMarketDb } from "../context";
 import { secRaw } from "../schema";
 
@@ -76,6 +76,60 @@ export function upsertSecRaw(rows: SecRawInsert[]): void {
 /** Every landed row for one endpoint — the transform's input for that endpoint. */
 export function readSecRaw(endpoint: string): SecRawRow[] {
   return getMarketDb().select().from(secRaw).where(eq(secRaw.endpoint, endpoint)).all();
+}
+
+/**
+ * Distinct landed proj_ids for one endpoint, payloads NOT loaded — pair with
+ * {@link readSecRawItemFor} / {@link readSecRawItemsFor} to stream an endpoint
+ * one fund at a time instead of materializing every payload at once.
+ */
+export function listSecRawProjIds(endpoint: string): string[] {
+  return getMarketDb()
+    .selectDistinct({ projId: secRaw.projId })
+    .from(secRaw)
+    .where(eq(secRaw.endpoint, endpoint))
+    .all()
+    .map((r) => r.projId);
+}
+
+/**
+ * One fund's landed singleton payload (rowKey "") for an endpoint, parsed.
+ * Null when absent or unparseable (never abort the transform over one row).
+ */
+export function readSecRawItemFor<T>(endpoint: string, projId: string): T | null {
+  const row = getMarketDb()
+    .select()
+    .from(secRaw)
+    .where(and(eq(secRaw.endpoint, endpoint), eq(secRaw.projId, projId), eq(secRaw.rowKey, "")))
+    .get();
+  if (!row) return null;
+  try {
+    return JSON.parse(row.payload) as T;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One fund's landed payloads across ALL rowKeys for an endpoint, parsed —
+ * the per-fund unit for endpoints that land several rows per fund (benchmark
+ * blend rows, per-class statistics…). Unparseable rows are skipped.
+ */
+export function readSecRawItemsFor<T>(endpoint: string, projId: string): T[] {
+  const out: T[] = [];
+  const rows = getMarketDb()
+    .select()
+    .from(secRaw)
+    .where(and(eq(secRaw.endpoint, endpoint), eq(secRaw.projId, projId)))
+    .all();
+  for (const row of rows) {
+    try {
+      out.push(JSON.parse(row.payload) as T);
+    } catch {
+      // Skip an unparseable row; the next crawl re-lands it.
+    }
+  }
+  return out;
 }
 
 /**

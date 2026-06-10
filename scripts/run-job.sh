@@ -26,9 +26,21 @@ job="$1"
 shift
 cd "$(dirname "$0")/.." # repo root = the compose project dir
 
-# The compose service caps the container at 3GB, and node then defaults its
-# old-space to ~half of that — the catalog transform (≈800k fee rows + the
-# enrichment endpoints in one pass) OOMs at that ~1.5GB default. Pin the heap
-# just under the container cap so jobs use the memory they're actually given.
-exec docker compose run --rm --no-deps -e NODE_OPTIONS=--max-old-space-size=2560 macrotide \
-  npx tsx --tsconfig tsconfig.scripts.json "scripts/${job}.ts" "$@"
+# Node defaults its heap to ~half the container's 3GB cap, so a growing job
+# would OOM at ~1.5GB with half its memory unused. Pin the heap just under the
+# cap — a ceiling, not a reservation, so it costs nothing while jobs stay small.
+#
+# The in-container wrapper reads cgroup v2's memory.peak after the script exits,
+# so every run ends with a greppable summary line (journalctl -t or unit logs):
+#   job-summary: job=<name> exit=<code> duration=<s>s peak_mem=<MB>MB
+# Memory creep then shows up in logs long before it becomes an OOM.
+start=$(date +%s)
+docker compose run --rm --no-deps -e NODE_OPTIONS=--max-old-space-size=2560 macrotide \
+  sh -c 'npx tsx --tsconfig tsconfig.scripts.json "$@"; ec=$?;
+    peak=$(cat /sys/fs/cgroup/memory.peak 2>/dev/null);
+    if [ -n "$peak" ]; then echo "job-peak-mem: $((peak / 1048576))MB"; else echo "job-peak-mem: n/a"; fi;
+    exit $ec' \
+  sh "scripts/${job}.ts" "$@"
+ec=$?
+echo "job-summary: job=${job} exit=${ec} duration=$(( $(date +%s) - start ))s"
+exit $ec
