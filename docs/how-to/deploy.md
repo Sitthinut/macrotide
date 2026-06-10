@@ -446,7 +446,7 @@ timer fires; the app process itself schedules nothing. The roster, in run order:
 | `jobs:refresh-catalog` | `refresh-fund-catalog.ts` | SEC crawl — lands raw payloads in `sec_raw`, then transforms → fund catalog + fees + AUM | 11:00 daily |
 | `jobs:transform-catalog` | `transform-catalog.ts` | Re-derive catalog + fees from already-landed `sec_raw` — API-free, seconds (no SEC key). Run after a classification/derivation change instead of a full re-crawl | on demand (not scheduled) |
 | `jobs:refresh-share-classes` | `refresh-share-classes.ts` | Priceable share classes (FK-after catalog) | 11:45 daily |
-| `jobs:refresh-market` | `refresh-tracked-market.ts` | **Freshness** — NAV for held positions + indicators | 12:30 daily |
+| `jobs:refresh-market` | `refresh-tracked-market.ts` | **Freshness** — NAV for held positions + indicators (held `market` positions deepened to `max`) | 12:30 daily |
 | `jobs:prewarm-nav` | `prewarm-nav.ts` | **Coverage** — NAV/AUM for the *whole* catalog | one-off backfill; optional daily append 02:00 |
 | `jobs:prewarm-benchmark` | `prewarm-benchmark.ts` | **Coverage** — total-return benchmark series (`benchmark_tr`) for the curated proxy set | one-off backfill; daily append 23:30 |
 | `jobs:close-stale` | `close-stale-sessions.ts` | Session-expiry backstop (real-time path is primary) | optional |

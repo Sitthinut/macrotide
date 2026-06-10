@@ -26,6 +26,10 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   cached as dividend-reinvested adjusted close (~20 years deep) under a dedicated
   `benchmark_tr` data source, warmed by a `prewarm-benchmark` job, labeled by the
   index it tracks (MSCI ACWI, S&P 500, Nasdaq-100, MSCI Japan, MSCI Thailand…).
+- **Held foreign ETFs and gold are now deep on the "All" chart from first open.**
+  The daily market refresh proactively warms held non-fund (`market`-sourced)
+  positions to full depth, so the portfolio "All" chart no longer pays a cold
+  one-time backfill the first time you open it with such a holding.
 - **Accumulating vs dividend classification now uses the formal factsheet
   code.** The catalog and share classes previously parsed Thai class-detail
   text, which only caught explicit wording; the formal dividend-policy code
