@@ -6,20 +6,48 @@
 // layout with a chart-sized skeleton while the chunk loads (once per session).
 // Import charts from here, not from ./InteractiveCharts, in app code.
 
-import { lazy, Suspense } from "react";
+import { type ComponentType, lazy, Suspense } from "react";
 import type {
   AllocationDonut as AllocationDonutImpl,
   DriftBars as DriftBarsImpl,
   NavChart as NavChartImpl,
 } from "./InteractiveCharts";
 
-const LazyNavChart = lazy(() =>
+// A lazy chunk request can 404 after a deploy: hashed chunk files don't
+// survive the image rebuild, so a tab still running the previous build asks
+// for a file that no longer exists. Retry once (transient network blips),
+// then reload the page a single time to pick up the new build — the
+// sessionStorage guard stops a reload loop if the chunk is broken for a
+// deeper reason, and is cleared on success so the next deploy gets its own
+// reload. Runs client-side only (the whole app is behind ssr:false).
+const RELOADED_KEY = "macrotide-chunk-reloaded";
+
+// biome-ignore lint/suspicious/noExplicitAny: mirrors React.lazy's own constraint
+function lazyChunk<T extends ComponentType<any>>(load: () => Promise<{ default: T }>) {
+  return lazy(async () => {
+    try {
+      const mod = await load().catch(load);
+      sessionStorage.removeItem(RELOADED_KEY);
+      return mod;
+    } catch (err) {
+      if (sessionStorage.getItem(RELOADED_KEY) == null) {
+        sessionStorage.setItem(RELOADED_KEY, "1");
+        window.location.reload();
+        // Stay suspended (skeleton showing) while the reload takes over.
+        return new Promise<never>(() => {});
+      }
+      throw err;
+    }
+  });
+}
+
+const LazyNavChart = lazyChunk(() =>
   import("./InteractiveCharts").then((m) => ({ default: m.NavChart })),
 );
-const LazyAllocationDonut = lazy(() =>
+const LazyAllocationDonut = lazyChunk(() =>
   import("./InteractiveCharts").then((m) => ({ default: m.AllocationDonut })),
 );
-const LazyDriftBars = lazy(() =>
+const LazyDriftBars = lazyChunk(() =>
   import("./InteractiveCharts").then((m) => ({ default: m.DriftBars })),
 );
 

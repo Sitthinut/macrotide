@@ -74,7 +74,9 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   portfolio's live quote refresh derives its tickers server-side
   (`/api/quotes?refresh=1&mine=1`) and fires in parallel with the holdings
   fetch instead of waiting behind it, and a tab refocus no longer refires
-  every active data request at once.
+  every active data request at once. A tab left open across a deploy
+  self-heals when its lazy chart chunk no longer exists (retry, then one
+  guarded reload) instead of showing the error screen.
 
 - **Broker-synced holdings are marked in the portfolio.** A holding imported
   from a connected broker now shows a small sync icon beside its ticker in the
