@@ -78,10 +78,9 @@ export interface RefreshedQuote extends QuoteRef {
  * "market" or "thai_mutual_fund") and `ticker` (the bare user-visible code).
  */
 export function useRefreshedQuotes(refs: QuoteRef[] | null) {
-  const key =
-    refs && refs.length
-      ? `/api/quotes?refresh=1&refs=${encodeURIComponent(refs.map((r) => `${r.source}:${r.ticker}`).join(","))}`
-      : null;
+  const key = refs?.length
+    ? `/api/quotes?refresh=1&refs=${encodeURIComponent(refs.map((r) => `${r.source}:${r.ticker}`).join(","))}`
+    : null;
   return useResource<RefreshedQuote[]>(key);
 }
 

@@ -204,14 +204,10 @@ export async function extractHoldingsFromImage(input: OcrInput): Promise<OcrResu
     return await transcribe(apiKey, primary, input);
   } catch (err) {
     if (err instanceof OcrProviderUnavailableError && fallback && fallback !== primary) {
-      try {
-        return await transcribe(apiKey, fallback, input);
-      } catch (fallbackErr) {
-        // Surface the FALLBACK's error — the operator already knew the primary
-        // was free/quota-bound; they need to see why their no-train safety net
-        // also failed.
-        throw fallbackErr;
-      }
+      // Surface the FALLBACK's error — the operator already knew the primary
+      // was free/quota-bound; they need to see why their no-train safety net
+      // also failed.
+      return await transcribe(apiKey, fallback, input);
     }
     throw err;
   }

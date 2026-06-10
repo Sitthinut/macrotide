@@ -1195,7 +1195,7 @@ export function ChatScreen({
     if (loading) return;
     const withoutFailed = messages.filter((m) => m.id !== failedId);
     const last = withoutFailed[withoutFailed.length - 1];
-    if (!last || last.role !== "user") return;
+    if (last?.role !== "user") return;
     setMessages(withoutFailed);
     void askLive(last.text, withoutFailed.slice(0, -1));
   };
@@ -1412,121 +1412,126 @@ export function ChatScreen({
             `removeChild` throws). Carries the column+gap layout the OS host
             would otherwise strip. Mirrors `.ra-panel-body-content`. */}
         <div className="chat-stream-content">
-          {messages.map((m, i) => (
-            <div key={m.id} className={`msg ${m.role}`}>
-              {m.role === "ai" && (
-                <div className="meta">
-                  Advisor ·{" "}
-                  {new Date(m.ts).toLocaleTimeString("en-US", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                  {m.model && <> · {m.model}</>}
-                </div>
-              )}
-              {m.role === "ai" && !m.text && loading ? (
-                <div className="typing">
-                  <span></span>
-                  <span></span>
-                  <span></span>
-                </div>
-              ) : m.role === "ai" ? (
-                // Advisor replies are Markdown — render them styled. User bubbles
-                // stay plain text (below) so nothing the user typed is reinterpreted
-                // as markup.
-                m.text && <MarkdownMessage text={m.text} />
-              ) : (
-                m.text && <div style={{ whiteSpace: "pre-wrap" }}>{m.text}</div>
-              )}
-              {m.images && m.images.length > 0 && (
-                <div className="chat-attachments">
-                  {m.images.map((img) => (
-                    <button
-                      type="button"
-                      key={img.id}
-                      className="thumb"
-                      onClick={() => setLightbox(img.fullDataUrl ?? img.dataUrl)}
-                      title={img.name}
-                      aria-label={`View ${img.name}`}
-                    >
-                      {/* biome-ignore lint/performance/noImgElement: data-URL thumbnail, not a remote asset */}
-                      <img src={img.dataUrl} alt={img.name} />
-                    </button>
-                  ))}
-                </div>
-              )}
-              {m.canRetry && (
-                <button
-                  type="button"
-                  className="btn ghost sm"
-                  onClick={() => retry(m.id)}
-                  disabled={loading}
-                  style={{ marginTop: 6 }}
-                >
-                  Try again
-                </button>
-              )}
-              {m.proposal && (
-                <PlanProposalCard
-                  proposal={m.proposal}
-                  applied={m.applied}
-                  onApply={() => applyProposal(i, m.proposal!)}
-                  onReject={() => {
-                    setMessages((prev) =>
-                      prev.map((x, idx) =>
-                        idx === i ? { ...x, applied: false, rejected: true } : x,
-                      ),
-                    );
-                  }}
-                />
-              )}
-              {m.holdings?.map((h, hIdx) => (
-                <HoldingProposalCard
-                  key={`${m.id}-holding-${hIdx}`}
-                  holding={h}
-                  status={m.holdingStatus?.[hIdx]}
-                  onApply={() => applyHolding(i, hIdx, h)}
-                  onReject={() => rejectHolding(i, hIdx)}
-                />
-              ))}
-              {m.holdingsImport && (
-                <HoldingsImportCard
-                  data={m.holdingsImport}
-                  onOpen={() => requestImportWithRows(m.holdingsImport!.rows)}
-                />
-              )}
-              {m.transactionsImport && (
-                <TransactionsImportCard
-                  data={m.transactionsImport}
-                  onOpen={() => requestTxnImportWithRows(m.transactionsImport!.rows)}
-                />
-              )}
-              {m.role === "ai" &&
-                i > 0 &&
-                !m.proposal &&
-                !m.holdings?.length &&
-                !m.holdingsImport &&
-                !m.transactionsImport && (
-                  <FeedbackRow
-                    label="HELPFUL?"
-                    value={msgFeedback[i]?.rating ?? null}
-                    saved={msgFeedback[i]?.saved}
-                    onChange={(rating) =>
-                      setMsgFeedback({
-                        ...msgFeedback,
-                        [i]: { ...msgFeedback[i], rating },
-                      })
-                    }
-                    onSave={() =>
-                      setMsgFeedback({
-                        ...msgFeedback,
-                        [i]: { ...msgFeedback[i], saved: !msgFeedback[i]?.saved },
-                      })
-                    }
+          {messages.map((m, i) => {
+            const proposal = m.proposal;
+            const holdingsImport = m.holdingsImport;
+            const transactionsImport = m.transactionsImport;
+            return (
+              <div key={m.id} className={`msg ${m.role}`}>
+                {m.role === "ai" && (
+                  <div className="meta">
+                    Advisor ·{" "}
+                    {new Date(m.ts).toLocaleTimeString("en-US", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                    {m.model && <> · {m.model}</>}
+                  </div>
+                )}
+                {m.role === "ai" && !m.text && loading ? (
+                  <div className="typing">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </div>
+                ) : m.role === "ai" ? (
+                  // Advisor replies are Markdown — render them styled. User bubbles
+                  // stay plain text (below) so nothing the user typed is reinterpreted
+                  // as markup.
+                  m.text && <MarkdownMessage text={m.text} />
+                ) : (
+                  m.text && <div style={{ whiteSpace: "pre-wrap" }}>{m.text}</div>
+                )}
+                {m.images && m.images.length > 0 && (
+                  <div className="chat-attachments">
+                    {m.images.map((img) => (
+                      <button
+                        type="button"
+                        key={img.id}
+                        className="thumb"
+                        onClick={() => setLightbox(img.fullDataUrl ?? img.dataUrl)}
+                        title={img.name}
+                        aria-label={`View ${img.name}`}
+                      >
+                        {/* biome-ignore lint/performance/noImgElement: data-URL thumbnail, not a remote asset */}
+                        <img src={img.dataUrl} alt={img.name} />
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {m.canRetry && (
+                  <button
+                    type="button"
+                    className="btn ghost sm"
+                    onClick={() => retry(m.id)}
+                    disabled={loading}
+                    style={{ marginTop: 6 }}
+                  >
+                    Try again
+                  </button>
+                )}
+                {proposal && (
+                  <PlanProposalCard
+                    proposal={proposal}
+                    applied={m.applied}
+                    onApply={() => applyProposal(i, proposal)}
+                    onReject={() => {
+                      setMessages((prev) =>
+                        prev.map((x, idx) =>
+                          idx === i ? { ...x, applied: false, rejected: true } : x,
+                        ),
+                      );
+                    }}
                   />
                 )}
-            </div>
-          ))}
+                {m.holdings?.map((h, hIdx) => (
+                  <HoldingProposalCard
+                    key={`${m.id}-holding-${hIdx}`}
+                    holding={h}
+                    status={m.holdingStatus?.[hIdx]}
+                    onApply={() => applyHolding(i, hIdx, h)}
+                    onReject={() => rejectHolding(i, hIdx)}
+                  />
+                ))}
+                {holdingsImport && (
+                  <HoldingsImportCard
+                    data={holdingsImport}
+                    onOpen={() => requestImportWithRows(holdingsImport.rows)}
+                  />
+                )}
+                {transactionsImport && (
+                  <TransactionsImportCard
+                    data={transactionsImport}
+                    onOpen={() => requestTxnImportWithRows(transactionsImport.rows)}
+                  />
+                )}
+                {m.role === "ai" &&
+                  i > 0 &&
+                  !m.proposal &&
+                  !m.holdings?.length &&
+                  !m.holdingsImport &&
+                  !m.transactionsImport && (
+                    <FeedbackRow
+                      label="HELPFUL?"
+                      value={msgFeedback[i]?.rating ?? null}
+                      saved={msgFeedback[i]?.saved}
+                      onChange={(rating) =>
+                        setMsgFeedback({
+                          ...msgFeedback,
+                          [i]: { ...msgFeedback[i], rating },
+                        })
+                      }
+                      onSave={() =>
+                        setMsgFeedback({
+                          ...msgFeedback,
+                          [i]: { ...msgFeedback[i], saved: !msgFeedback[i]?.saved },
+                        })
+                      }
+                    />
+                  )}
+              </div>
+            );
+          })}
           {/* Standalone "thinking" bubble only when there's no streaming
             placeholder yet — i.e. proposal flow with 700ms setTimeout. The
             stream flow renders typing dots inline inside the empty AI msg. */}

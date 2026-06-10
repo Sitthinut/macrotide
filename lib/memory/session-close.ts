@@ -49,7 +49,7 @@ export async function closeSession(
   const userId = opts.userId ?? null;
 
   const thread = getThread(threadId);
-  if (!thread || thread.status !== "active") {
+  if (thread?.status !== "active") {
     return { threadId, closed: false, thread };
   }
 

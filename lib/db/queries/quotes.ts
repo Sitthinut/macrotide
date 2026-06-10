@@ -7,7 +7,7 @@ export type FundQuoteInsert = typeof fundQuotes.$inferInsert;
 
 export function listFundQuotes(tickers?: string[]): FundQuote[] {
   const q = getMarketDb().select().from(fundQuotes);
-  return (tickers && tickers.length ? q.where(inArray(fundQuotes.ticker, tickers)) : q).all();
+  return (tickers?.length ? q.where(inArray(fundQuotes.ticker, tickers)) : q).all();
 }
 
 /**

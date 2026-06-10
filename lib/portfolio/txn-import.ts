@@ -299,7 +299,7 @@ export function parseTxnPaste(text: string): TxnDraftRow[] {
   for (let i = hasHeader ? 1 : 0; i < lines.length; i++) {
     const cells = split(lines[i]);
     const draft = colMap ? rowFromColumns(cells, colMap) : rowPositional(cells);
-    if (draft && draft.ticker) rows.push(normalizeTxnDraft(draft));
+    if (draft?.ticker) rows.push(normalizeTxnDraft(draft));
   }
   return rows;
 }

@@ -149,7 +149,7 @@ describe("closeStaleSessions backstop", () => {
     (savedPerThread = 0) =>
     async (threadId: string) => {
       const before = getThread(threadId);
-      if (!before || before.status !== "active") {
+      if (before?.status !== "active") {
         return { threadId, closed: false as const, thread: before };
       }
       markIdle(threadId);

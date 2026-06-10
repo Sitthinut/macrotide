@@ -36,7 +36,6 @@ import {
 function makeMockDb(rows: unknown[] = []) {
   const run = vi.fn();
   const all = vi.fn().mockReturnValue(rows);
-  const get = vi.fn().mockReturnValue(rows[0] ?? null);
   const orderBy = vi.fn().mockReturnValue({ all });
   const where = vi.fn().mockReturnValue({ all, orderBy, run });
   const values = vi

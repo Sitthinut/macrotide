@@ -163,7 +163,12 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
         continue;
       }
       const ym = t.tradeDate.slice(0, 7);
-      (groups.get(ym) ?? groups.set(ym, []).get(ym))!.push(t);
+      let rows = groups.get(ym);
+      if (!rows) {
+        rows = [];
+        groups.set(ym, rows);
+      }
+      rows.push(t);
     }
     for (const [, rows] of groups) rows.reverse();
     return {
