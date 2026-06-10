@@ -15,6 +15,22 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Broker connectors handle header-auth APIs and several brokers at once.** The
+  connector SDK gained a `transport` block so a broker whose data API lives on a
+  different origin and authenticates with request headers (an `Authorization`
+  bearer / `x-api-key` the page holds in memory, not a cookie) can sync: the
+  collector captures those headers from the broker app's own requests and replays
+  them, reaching the API cross-origin. History can now page by **date range**
+  (not just a cursor), order field paths resolve **nested keys** (e.g.
+  `fund.code`), per-order **fees** carry through, and `pendingPath` is optional.
+  `BROKER_CONNECTOR_PATH`/`URL` accept a **comma-separated list**, so multiple
+  brokers run side by side — the Connect wizard shows a broker picker, Settings →
+  Connections groups synced accounts per broker, and each syncs under its own tag.
+  A **single global userscript** covers every configured broker: it matches all
+  their hosts and resolves which connector applies at run time from the page's
+  hostname, so you install once. (Installed userscripts get a one-time reinstall
+  nudge for the collector bump.)
+
 - **Chat history is now a faithful, durable record.** The assistant's full reply
   is persisted (every generation step, not just the final one), so prose written
   before a tool call survives reload. Advisor-generated cards — import tables,

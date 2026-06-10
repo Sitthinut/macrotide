@@ -136,8 +136,8 @@ import still work). Authoring guide: [add-a-broker-connector.md](../how-to/add-a
 
 | Var | Default | Read by | Notes |
 | --- | --- | --- | --- |
-| `BROKER_CONNECTOR_PATH` | unset | [lib/portfolio/connector.ts](../../lib/portfolio/connector.ts) | Path to a local manifest JSON (recommended for self-host). Real manifests live gitignored under `.connectors/`; see [.connectors/example.json](../../.connectors/example.json) for the full shape. |
-| `BROKER_CONNECTOR_URL` | unset (used only if `…PATH` unset) | [lib/portfolio/connector.ts](../../lib/portfolio/connector.ts) | URL the app fetches the manifest from (shared / published connectors). Cached ~5 min in-memory; data-only, so low-risk. |
+| `BROKER_CONNECTOR_PATH` | unset | [lib/portfolio/connector.ts](../../lib/portfolio/connector.ts) | Path to a local manifest JSON (recommended for self-host), or a **comma-separated list** to run several brokers side by side. Real manifests live gitignored under `.connectors/`; see [.connectors/example.json](../../.connectors/example.json) for the full shape. |
+| `BROKER_CONNECTOR_URL` | unset (used only if `…PATH` unset) | [lib/portfolio/connector.ts](../../lib/portfolio/connector.ts) | URL the app fetches the manifest from (shared / published connectors), or a comma-separated list. Cached ~5 min in-memory; data-only, so low-risk. |
 | `BROKER_IMPORT_*` | unset (used only if neither above set) | [lib/portfolio/connector.ts](../../lib/portfolio/connector.ts) | Legacy individual vars (`_HOST`, `_PLAN_PATH`, `_HISTORY_PATH`, `_PENDING_PATH`, `_SOURCE_TAG`, `_DISPLAY_NAME`, `_OPEN_URL`, `_LOGIN_URL`) — back-compat for the manifest's endpoint fields; superseded by `BROKER_CONNECTOR_PATH`/`URL`. No `shape` support (defaults only). |
 
 The per-user import token the userscript carries is a stored secret (months of

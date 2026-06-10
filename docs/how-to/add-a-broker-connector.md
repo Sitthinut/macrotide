@@ -18,13 +18,23 @@ Log in to the broker in your browser, open the order-history page, and watch the
 | Endpoint | Returns | Manifest field |
 |---|---|---|
 | **Plan / portfolio list** | the customer's accounts/portfolios | `planPath` |
-| **Order history** | one account's completed orders (usually cursor-paginated) | `historyPath` |
-| **Pending orders** | one account's not-yet-settled orders | `pendingPath` |
+| **Order history** | one account's completed orders (cursor- or date-range-paged) | `historyPath` |
+| **Pending orders** | one account's not-yet-settled orders | `pendingPath` *(optional)* |
 
-Note the **host** they're served from (the collector must run same-origin with
-the user's cookies — it can't reach the API cross-origin), the query parameter
-that selects an account, and the cursor/paging fields. Record the JSON **field
-paths** for everything in [step 3](#3-map-the-response-shape).
+Note the **host** they're served from, the query parameter that selects an
+account, and the cursor/paging fields. Record the JSON **field paths** for
+everything in [step 3](#3-map-the-response-shape).
+
+Two things to check up front, because they decide whether you need the
+[`transport`](#header-auth--cross-origin-apis) block:
+
+- **Where the data API lives.** If the JSON comes from the **same host** as the
+  page and rides your **session cookies**, the defaults work as-is. If it's a
+  **different origin** (e.g. the page is `app.broker.com` but XHRs hit
+  `api.broker.com`) and/or authenticates with **request headers** (an
+  `Authorization` bearer / `x-api-key`) the page holds in memory rather than a
+  cookie, set `transport`.
+- **No pending endpoint?** Omit `pendingPath` — the collector skips that fetch.
 
 ## 2. Write the manifest skeleton
 
@@ -48,6 +58,14 @@ Copy [`.connectors/example.json`](../../.connectors/example.json) to
 Then set `BROKER_CONNECTOR_PATH=.connectors/acme.json` (or host the JSON and use
 `BROKER_CONNECTOR_URL`). See the [configuration reference](../reference/configuration.md#one-click-broker-import).
 
+To run **several brokers** side by side, pass a comma-separated list
+(`BROKER_CONNECTOR_PATH=.connectors/acme.json,.connectors/other.json`, or the
+same for `BROKER_CONNECTOR_URL`). The Connect wizard then shows a broker picker
+and Settings → Connections groups synced accounts per broker; each broker's rows
+are tagged with its own `sourceTag`. There's still just **one userscript to
+install** — it `@match`es every configured broker's host and resolves which
+connector applies at run time from the page's hostname (`/runtime?host=`).
+
 If the broker's responses happen to match the built-in defaults (the reference
 shape in `example.json`), you're **done** — skip step 3.
 
@@ -55,11 +73,18 @@ shape in `example.json`), you're **done** — skip step 3.
 
 Add a `shape` object so the generic collector/parser can read *your* broker's
 field names. **Every field is optional** — omit one to fall back to the built-in
-default. Dot-paths (`"data.accounts"`) read nested objects; an `order` field may
-be a single name or an array (first present wins).
+default. Dot-paths (`"data.accounts"`, `"fund.code"`) read nested objects
+everywhere — including `order` fields like `ticker`; an `order` field may also be
+an array of candidates (first present wins).
 
 ```jsonc
 "shape": {
+  // ── Transport (omit entirely for a same-origin cookie API) ──
+  "transport": {
+    "apiBase":        "https://api.broker.com",   // prefixed to plan/history/pending paths
+    "credentials":    "omit",                     // "include" (cookies, default) | "omit" (header auth)
+    "captureHeaders": ["authorization", "x-api-key"]  // see "Header auth" below
+  },
   // ── Collector (runs in the broker page) ──
   "plan": {
     "accountsPath": "data.accounts",   // where the account array lives in the plan response
@@ -69,14 +94,20 @@ be a single name or an array (first present wins).
     "labelPaths":   ["data.customer_name", "data.email"]  // login identifier (first found)
   },
   "history": {
+    "mode":           "cursor",                // "cursor" (default) | "dateRange"
     "accountParam":   "account_code",          // query param selecting the account
     "cursorParam":    "cursor",                // query param carrying the page cursor
     "itemsPath":      "data",                  // array of orders in the response
     "nextCursorPath": "pagination.next_cursor",
     "hasNextPath":    "pagination.has_next",
-    "maxPages":       200                       // pagination safety cap
+    "maxPages":       200,                      // pagination safety cap
+    // dateRange mode only — one bounded request (no cursor); end is "now":
+    "startParam":     "startedAt",
+    "endParam":       "endedAt",
+    "startValue":     "2010-01-01T00:00:00+07:00",  // ISO floor for the range start
+    "extraQuery":     "sortType=d&status="          // appended verbatim
   },
-  "pending": { "accountParam": "account_code", "itemsPath": "data" },
+  "pending": { "accountParam": "account_code", "itemsPath": "data" },  // omit if no pending endpoint
 
   // ── Parser (turns each order into ledger rows) ──
   "order": {
@@ -116,6 +147,32 @@ How the SDK uses these:
 - **Kinds.** Only `success` orders import; `cancel`/`pending` and unrecognized
   types are counted but skipped. A `switch` expands into two rows (sell-out +
   buy-in) sharing the ref with `:out`/`:in` suffixes.
+
+### Header auth & cross-origin APIs
+
+When the data API is on a **different origin** and authenticates with **request
+headers the page only holds in memory** (common in SPA brokers), cookies can't
+reach it. Set `transport.captureHeaders` to the header names the broker's own
+requests carry. The loader then:
+
+- installs a hook (via `unsafeWindow`, at `document-start`) that records those
+  headers off the **app's own** calls to `apiBase` — nothing is guessed or
+  stored; the value never leaves the browser, and never reaches Macrotide;
+- waits (up to ~15s) for the page to make an authed request, then replays the
+  captured headers on its own calls with `credentials: "omit"`.
+
+This needs a userscript manager that exposes `unsafeWindow` (Tampermonkey,
+Violentmonkey — the recommended ones do). The collector reaches `apiBase`
+cross-origin via the page's `fetch` (CORS), so the broker's CORS policy must
+already allow the page origin — which it does, since the app makes the same
+calls.
+
+### Date-range history
+
+Some brokers return the whole order history bounded by a date range instead of a
+cursor. Set `history.mode: "dateRange"` with `startParam`/`endParam` and a
+`startValue` (the ISO floor; the end is filled with "now" at collection time).
+`extraQuery` is appended verbatim for any fixed filter params.
 
 ## 4. Test it
 
