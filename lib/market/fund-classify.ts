@@ -205,3 +205,55 @@ export function classifyInvestRegion(flag: string | null | undefined): string | 
       return null;
   }
 }
+
+// exchange_rate_protection_policy (Thai label, free-ish text with parentheticals)
+// → normalized FX-hedging policy, matched by prefix on the leading Thai phrase;
+// the raw label stays verbatim in sec_raw. Observed values (live probe):
+//   ทั้งหมด / ทั้งหมด/เกือบทั้งหมด (fully hedged)   → 'full'
+//   ดุลยพินิจ (dynamic/discretionary hedging)       → 'discretionary'
+//   บางส่วน (partial)                               → 'partial'
+//   ไม่ป้องกัน (no hedge)                           → 'none'
+//   กำหนดในระดับชนิดหน่วยลงทุน (set per share class) → 'per-class'
+const FX_HEDGING_BY_PREFIX: ReadonlyArray<readonly [string, string]> = [
+  ["ทั้งหมด", "full"],
+  ["ดุลยพินิจ", "discretionary"],
+  ["บางส่วน", "partial"],
+  ["ไม่ป้องกัน", "none"],
+  ["กำหนดในระดับชนิดหน่วยลงทุน", "per-class"],
+];
+
+/**
+ * Normalized FX-hedging policy for foreign-exposure funds:
+ * 'full' | 'discretionary' | 'partial' | 'none' | 'per-class' | null (not
+ * stated — typically domestic funds with no FX risk to hedge). A hedged and an
+ * unhedged class of the same exposure are different products — this feeds
+ * like-for-like comparison and a future screener facet.
+ */
+export function classifyFxHedging(label: string | null | undefined): string | null {
+  const t = label?.trim();
+  if (!t) return null;
+  for (const [prefix, value] of FX_HEDGING_BY_PREFIX) {
+    if (t.startsWith(prefix)) return value;
+  }
+  return null;
+}
+
+/**
+ * investment_policy_desc arrives as HTML (`<p>…`, entities). Strip tags and
+ * collapse whitespace so the catalog column holds plain searchable text; the
+ * verbatim HTML stays in sec_raw. Returns null for empty/whitespace-only input.
+ */
+export function stripPolicyHtml(html: string | null | undefined): string | null {
+  if (!html) return null;
+  const text = html
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text || null;
+}

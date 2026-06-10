@@ -166,10 +166,30 @@ export const fundCatalog = sqliteTable(
     // Feeder funds (the main vehicle for Thai access to global indices).
     isFeederFund: integer("is_feeder_fund", { mode: "boolean" }).notNull().default(false),
     feederMasterFund: text("feeder_master_fund"),
+    // Country where the master fund is REGISTERED (its domicile — Luxembourg /
+    // Ireland UCITS etc., Thai country name verbatim). NOT an investment-region
+    // signal: a Luxembourg-domiciled master can invest anywhere.
+    feederFundCountry: text("feeder_fund_country"),
+    // Full investment-policy text (investment_policy_desc, HTML stripped) —
+    // far richer than the short `policy_desc` label; feeds search, the
+    // region/sector gazetteer, and Advisor context. ~70% coverage.
+    investmentPolicyDesc: text("investment_policy_desc"),
+    // Normalized FX-hedging policy from `exchange_rate_protection_policy`:
+    // 'full' | 'discretionary' | 'partial' | 'none' | 'per-class' | NULL (not
+    // stated — typically domestic funds). Hedged vs unhedged is a different
+    // product — feeds like-for-like comparison and a screener facet.
+    fxHedgingPolicy: text("fx_hedging_policy"),
     // Fixed-term funds mature and stop accepting subscriptions; excluded from
     // ongoing-investment recommendations.
     isFixedTerm: integer("is_fixed_term", { mode: "boolean" }).notNull().default(false),
+    // Maturity duration for fixed-term funds, verbatim SEC components (a "6-month
+    // term fund" lands as 0y/6m/0d). All NULL for open-ended funds.
+    termYears: integer("term_years"),
+    termMonths: integer("term_months"),
+    termDays: integer("term_days"),
     initDate: text("init_date"), // fund inception (ISO date)
+    regisDate: text("regis_date"), // SEC registration date (ISO; distinct from inception)
+    cancelDate: text("cancel_date"), // cancellation date for dead funds (ISO)
     isinCode: text("isin_code"), // ~30% coverage; for external cross-reference
     // Latest total net asset value (THB) + the NAV date it was read on. Small
     // funds (low AUM) have poor liquidity; used to down-rank dormant funds.
