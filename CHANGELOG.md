@@ -31,6 +31,19 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   hostname, so you install once. (Installed userscripts get a one-time reinstall
   nudge for the collector bump.)
 
+- **The portfolio value-over-time chart now tells an honest wealth story.** It
+  replays your transaction ledger point-in-time instead of projecting today's
+  position backward: a holding contributes nothing before its first event,
+  exited positions still appear over the dates you held them, and history before
+  a fund's price cache begins is valued from the prices you actually transacted
+  at (flagged with a caption). Sale proceeds in transit during a fund switch stay
+  in the line — no more fake drawdowns on every rebalance — and a second
+  **net-invested** line draws your contributions, so the gap to the value line
+  reads as gain (tinted green, or red when underwater). Short ranges rebase to
+  the window start ("how did I do this month"); All keeps the absolute lifetime
+  curve. Fixes false ~18% steps caused by NAV-coverage changes
+  ([ADR 0005](./docs/explanation/decisions/0005-value-over-time-ledger-replay.md)).
+
 - **Chat history is now a faithful, durable record.** The assistant's full reply
   is persisted (every generation step, not just the final one), so prose written
   before a tool call survives reload. Advisor-generated cards — import tables,

@@ -34,7 +34,7 @@ import { BENCHMARK_OPTIONS } from "@/lib/market/benchmark-options";
 import { DEFAULT_QUOTE_SOURCE, isQuoteSource } from "@/lib/market/sources";
 import { feeCreepKey } from "@/lib/portfolio/action-item-key";
 import { REASON_CHIPS, type ReasonChip } from "@/lib/portfolio/action-item-resurface";
-import { seriesReturnPct } from "@/lib/portfolio/adapter";
+import { formatTooltipDate, seriesReturnPct, windowStartIso } from "@/lib/portfolio/adapter";
 import { buildNamedChecks, type NamedCheck } from "@/lib/portfolio/checks";
 import {
   feeCheckInlineIntro,
@@ -468,6 +468,7 @@ interface ViewPortfolio {
   type: string;
   holdings: Holding[];
   series: { d: string; v: number }[];
+  netInvested: { d: string; v: number }[];
   totalValue: number;
   initialInvestment: number;
   perfPct: Portfolio["perfPct"];
@@ -565,7 +566,7 @@ export function PortfolioScreen({
     }
   }, [range]);
 
-  const { portfolios, aggregate, hasDistributingHolding, isLoading } =
+  const { portfolios, aggregate, hasDistributingHolding, estimatedThrough, cashSeries, isLoading } =
     usePortfolioView(seriesRange);
   const { models } = useModelPortfoliosView();
   const { data: feeCreepData, mutate: mutateFeeCreep } = useFeeCreep();
@@ -601,6 +602,7 @@ export function PortfolioScreen({
         type: "free",
         holdings: aggregate.holdings,
         series: aggregate.series,
+        netInvested: aggregate.netInvested ?? [],
         totalValue: aggregate.totalValue,
         initialInvestment: aggregate.initialInvestment,
         perfPct: aggregate.perfPct,
@@ -613,6 +615,7 @@ export function PortfolioScreen({
       type: activePf.type,
       holdings: activePf.holdings,
       series: activePf.series,
+      netInvested: activePf.netInvested ?? [],
       totalValue: activePf.totalValue,
       initialInvestment: activePf.initialInvestment,
       perfPct: activePf.perfPct,
@@ -824,8 +827,34 @@ export function PortfolioScreen({
   const pnl = view.totalValue - view.initialInvestment;
   const pnlPct = view.initialInvestment > 0 ? (pnl / view.initialInvestment) * 100 : 0;
 
-  // % return across the selected chart range (first → last value of the window).
-  const periodReturn = seriesReturnPct(view.series);
+  // Window rebase for the chart: a CLIPPED range (the series starts exactly on
+  // the window boundary, carrying pre-window state) draws change-from-window-
+  // start, so 1M answers "how did I do this month". An unclipped range (All, or
+  // a book younger than the window) keeps absolute wealth levels — the lifetime
+  // story.
+  const since = windowStartIso(seriesRange);
+  const clipped = since !== null && view.series.length > 0 && view.series[0].d <= since;
+  const baselineValue = clipped ? view.series[0].v : 0;
+  const baselineInvested = clipped ? (view.netInvested[0]?.v ?? 0) : 0;
+
+  // % return for the range pill — MONEY-WEIGHTED (gain ÷ invested), matching the
+  // chart tooltip's Gain %. The value line now includes contributions, so a
+  // naive first→last ratio (seriesReturnPct) would read deposits as "return"
+  // (e.g. +41000% on a long book). Lifetime: gain ÷ total invested. Windowed:
+  // the change in gain over the window ÷ the wealth held at window start. Falls
+  // back to the price-ratio when net-invested data is absent (static placeholder).
+  const periodReturn = ((): number | null => {
+    const lastV = view.series.at(-1)?.v;
+    if (lastV == null) return null;
+    if (view.netInvested.length === 0) return seriesReturnPct(view.series);
+    const lastInv = view.netInvested.at(-1)?.v ?? 0;
+    const gain = lastV - baselineValue - (lastInv - baselineInvested);
+    const denom = clipped ? baselineValue : lastInv;
+    return denom > 0 ? (gain / denom) * 100 : null;
+  })();
+  // In-transit cash is reported for the whole book; per-portfolio views skip
+  // the tooltip note rather than implying a per-bucket number we don't have.
+  const chartCash = activePf ? null : (cashSeries?.map((p) => ({ d: p.date, v: p.value })) ?? null);
 
   const showAnalysis = activePfId === "all" || activePf?.targetModelId;
 
@@ -976,6 +1005,11 @@ export function PortfolioScreen({
         </div>
         <NavChart
           data={view.series}
+          investedData={view.netInvested}
+          cashData={chartCash}
+          valuesHidden={valuesHidden}
+          baselineValue={baselineValue}
+          baselineInvested={baselineInvested}
           benchmarkData={benchmark !== "none" ? benchmarkSeries : null}
           benchmarkLabel={benchmark !== "none" ? (benchmarkResp?.label ?? null) : null}
           height={130}
@@ -1026,6 +1060,19 @@ export function PortfolioScreen({
             </p>
           ) : null;
         })()}
+        {estimatedThrough && (
+          <p
+            style={{
+              fontSize: 11,
+              color: "var(--muted)",
+              lineHeight: 1.5,
+              padding: "8px 4px 0",
+            }}
+          >
+            Values up to {formatTooltipDate(estimatedThrough)} are estimated from your recorded
+            prices — exact fund prices weren't available that far back.
+          </p>
+        )}
       </div>
 
       {/* ── Health: the plain-language headline + four named checks. This leads

@@ -6,6 +6,7 @@
 import type Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getBenchmarkSeries } from "@/lib/market/benchmarks";
+import { PORTFOLIOS } from "@/lib/mock/data";
 import { DEMO_HOLDING_HISTORY } from "@/lib/mock/demo-history";
 import { demoIndexSeries } from "@/lib/mock/demo-history-read";
 import { seedDemoData } from "@/lib/mock/demo-seed";
@@ -79,12 +80,21 @@ describe("getPortfolioSeries — demo mode (fixture-backed)", () => {
     expect(aggregate.length).toBeGreaterThanOrEqual(18);
   });
 
+  // Full seeded book value: last per-unit fixture NAV × the holding's terminal
+  // unit count (the seed's trade story always folds back to data.ts units).
+  function fullBookValue(): number {
+    let total = 0;
+    for (const p of PORTFOLIOS) {
+      for (const h of p.holdings) {
+        const nav = DEMO_HOLDING_HISTORY[`thai_mutual_fund:${h.ticker}`]?.at(-1)?.[1] ?? 0;
+        total += nav * h.units;
+      }
+    }
+    return total;
+  }
+
   it("the window's FIRST date is full, not partial (carry-in seeds the left edge)", async () => {
-    // Total seeded book value (all holdings' last fixture point).
-    const fullBook = Object.values(DEMO_HOLDING_HISTORY).reduce(
-      (s, series) => s + (series.at(-1)?.[1] ?? 0),
-      0,
-    );
+    const fullBook = fullBookValue();
     // The first 1M point must already include every holding — close to the full
     // book (a month's drift, never a fraction like 3/12 ≈ 20%). Regression guard
     // for the left-edge jump: pre-fix this was ~250k (3 of 12 funds present).
@@ -97,13 +107,9 @@ describe("getPortfolioSeries — demo mode (fixture-backed)", () => {
   it("the demo aggregate equals the sum of every seeded holding's current value", async () => {
     const { aggregate } = await runDemo(() => getPortfolioSeries("max"));
     const lastTotal = aggregate.at(-1)?.value as number;
-    // The fixture scales each holding's last point to its seeded current value,
-    // so the final aggregate ≈ sum of all holdings' last (encoded) points.
-    const expected = Object.values(DEMO_HOLDING_HISTORY).reduce(
-      (s, series) => s + (series.at(-1)?.[1] ?? 0),
-      0,
-    );
-    expect(lastTotal).toBeCloseTo(expected, 0);
+    // Terminal replayed units × last fixture NAV per holding: the trade story
+    // always folds back to data.ts's unit counts.
+    expect(lastTotal).toBeCloseTo(fullBookValue(), 0);
   });
 
   it("a shorter range returns fewer points (range filter applies)", async () => {
@@ -113,10 +119,19 @@ describe("getPortfolioSeries — demo mode (fixture-backed)", () => {
     expect(oneYear.aggregate.length).toBeGreaterThan(0);
   });
 
-  it("owner mode does NOT read the fixture (empty market.db → empty series)", async () => {
-    const { aggregate, asOf } = await runOwner(() => getPortfolioSeries("max"));
-    expect(aggregate).toEqual([]);
-    expect(asOf).toBeNull();
+  it("owner mode does NOT read the fixture (empty market.db → trade-priced only)", async () => {
+    // With market.db empty, owner mode can price only from the ledger's own
+    // trades — a handful of event-dated, estimate-flagged points. If the owner
+    // branch ever read the fixture, this would be a dense multi-hundred-point
+    // series with estimatedThrough = null (like the demo assertions above).
+    const owner = await runOwner(() => getPortfolioSeries("max"));
+    expect(owner.aggregate.length).toBeGreaterThan(0);
+    expect(owner.aggregate.length).toBeLessThan(30);
+    expect(owner.estimatedThrough).not.toBeNull();
+
+    const demo = await runDemo(() => getPortfolioSeries("max"));
+    expect(demo.aggregate.length).toBeGreaterThanOrEqual(300);
+    expect(demo.estimatedThrough).toBeNull();
   });
 
   it("hasDistributingHolding reflects the shared market.db catalog in demo mode", async () => {

@@ -28,6 +28,7 @@ plan, and journal — including plan edits it proposes as accept/reject cards.
 
 - **Unified ledger** — your holdings are a projection of one buy/sell + balance ledger; full-screen History and per-fund Position pages, in-place edits, custom self-priced assets, and graceful handling of unknown cost basis
 - **Performance** — realized gains, money-weighted return (XIRR) per-fund and whole-portfolio, cost-basis timeline, contributions and income
+- **Wealth-over-time chart** — replays the ledger so value tracks the position you actually held (exited funds included, no back-projection), with a net-invested line whose gap to value reads as gain; fund-switch cash stays in the line and short ranges rebase to "this period"
 - **Plain-language health checks** — allocation drift, blended fees, cash drag, and look-through diversification (underlying single-name concentration, feeder-aware); fee-creep alerts you can dismiss or snooze
 - **Flexible import** — paste, a screenshot, CSV, or typed rows, all reviewed in one editable list before saving; symbol autocomplete; enter by units or baht value
 - **Broker auto-sync** — connect a broker once and it imports your full order history and keeps it in sync, each account as its own portfolio

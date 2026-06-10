@@ -1,11 +1,18 @@
 import { and, eq, gte, inArray, lt, sql } from "drizzle-orm";
-import { inferHoldingCurrency } from "@/lib/market/currency";
+import { BASE_CURRENCY, inferHoldingCurrency } from "@/lib/market/currency";
 import { buildFxConverter } from "@/lib/market/fx";
 import { quoteCacheKey } from "@/lib/market/sources";
 import { demoHoldingSeries } from "@/lib/mock/demo-history-read";
+import { type LedgerTxn, type PositionCheckpoint, reduceLots } from "@/lib/portfolio/lots";
+import { type CashPoint, foldSettlementCash } from "@/lib/portfolio/settlement-cash";
+import { toLedgerTxn } from "@/lib/portfolio/transaction-analytics";
+import { isAnchorKind } from "@/lib/portfolio/txn-import";
 import { getMarketDb, isDemoRequest, type MarketDb } from "../context";
 import { fundCatalog, navHistory } from "../schema";
+import { listBuckets } from "./buckets";
 import { listHoldings } from "./holdings";
+import { foldableEvents } from "./resolve-derived-units";
+import { listTransactionsForBuckets, type Transaction } from "./transactions";
 
 export type SeriesRange = "1mo" | "3mo" | "6mo" | "1y" | "5y" | "max";
 
@@ -18,7 +25,22 @@ export interface SeriesPoint {
 export interface PortfolioSeriesResult {
   aggregate: SeriesPoint[];
   perBucket: Record<string, SeriesPoint[]>;
-  /** ISO timestamp of the most recent nav_history row used. */
+  /**
+   * Cumulative EXTERNAL money in the book (inflows minus expired/withdrawn
+   * proceeds) on the same dates as `aggregate` — the chart's contribution
+   * line. Derived from the settlement-cash fold, NOT from
+   * `reduceLots().netInvested`: that subtracts sale PROCEEDS (the right sign
+   * convention for XIRR) and so would phantom-swing on every fund switch.
+   */
+  netInvested: SeriesPoint[];
+  netInvestedByBucket: Record<string, SeriesPoint[]>;
+  /**
+   * In-transit settlement cash included in `aggregate` per date (sell proceeds
+   * not yet reinvested, within the settlement window). Lets the UI disclose
+   * "incl. ฿X cash in transit" instead of baking it in silently.
+   */
+  cash: SeriesPoint[];
+  /** ISO timestamp of the most recent plotted date. */
   asOf: string | null;
   /**
    * Currencies whose USD/THB (or cross) rate could not be resolved, so those
@@ -38,7 +60,34 @@ export interface PortfolioSeriesResult {
    * and correctly don't trigger it.
    */
   hasDistributingHolding: boolean;
+  /**
+   * Latest plotted date on which some position was valued from the ledger's own
+   * trade-implied prices (or carried at cost) rather than a cached NAV — i.e.
+   * history up to here is partly estimated. Null = every point is cache-priced.
+   * Drives the chart's disclosure caption.
+   */
+  estimatedThrough: string | null;
+  /**
+   * Tickers that had held-but-unpriceable dates with no cost basis to carry —
+   * those positions contributed nothing on those dates. Rare (a derived-units
+   * row with no NAV anywhere); surfaced rather than silently dropped.
+   */
+  unpriced: string[];
 }
+
+const EMPTY_RESULT: Omit<PortfolioSeriesResult, "hasDistributingHolding"> = {
+  aggregate: [],
+  perBucket: {},
+  netInvested: [],
+  netInvestedByBucket: {},
+  cash: [],
+  asOf: null,
+  missingFx: [],
+  estimatedThrough: null,
+  unpriced: [],
+};
+
+const UNIT_EPSILON = 1e-9;
 
 function rangeStartDate(range: SeriesRange): string {
   const days =
@@ -59,37 +108,14 @@ function rangeStartDate(range: SeriesRange): string {
 }
 
 /**
- * Compose per-bucket and aggregate value series from `nav_history` rows, with
- * every holding's value FX-converted into the base currency (THB) before it is
- * summed.
- *
- * For each holding we forward-fill the most recent NAV onto every business
- * date between the holding's first known nav and the latest date in range.
- * That way Thai funds (which skip weekends) and US ETFs (which skip TH
- * holidays) line up on a shared timeline. Each holding's native currency is
- * inferred from its routing key (see lib/market/currency.ts) and its
- * `units * nav` is converted to THB at that date's USD/THB (or cross) rate
- * before summing — without this, a USD ETF and a THB fund were added as if both
- * were baht. FX rates come from the existing keyless Frankfurter chain.
- *
- * NOTE: `units` is the holding's CURRENT unit count applied to every past date,
- * so any buy/sell inside the window distorts the historical curve. Fixing that
- * needs a transactions/lots table (tracked by backlog issue #38); until then
- * the comparison assumes the current book was held throughout the window.
- *
- * Aggregate series is `sum(perBucket[i])` on each shared date. Async because FX
- * rates are fetched (cached) from the market layer.
- */
-/**
  * Demo-mode replacement for the market.db `nav_history` read. Builds the same
  * `{ ticker (cache key), date, nav }` rows the DB would, but from the committed
- * fixture: fixture points are the holding's TOTAL THB value, so per-unit
- * `nav = value / units` recovers what the downstream `units * nav * fx` math
- * expects. Holdings with no fixture series (unmapped) are simply omitted —
- * graceful degradation, identical to a market.db cache miss.
+ * fixture: fixture points are the holding's per-unit NAV in THB, same shape as
+ * a market.db row. Holdings with no fixture series (unmapped) are simply
+ * omitted — graceful degradation, identical to a market.db cache miss.
  */
 function demoNavRows(
-  allHoldings: { quoteSource: string; ticker: string; units: number }[],
+  allHoldings: { quoteSource: string; ticker: string }[],
   since: string,
 ): { ticker: string; date: string; nav: number }[] {
   const seen = new Set<string>();
@@ -98,12 +124,11 @@ function demoNavRows(
     const key = quoteCacheKey(h.quoteSource, h.ticker);
     if (seen.has(key)) continue;
     seen.add(key);
-    if (!h.units) continue;
     // demoHoldingSeries supplies the in-window points plus a carry-in dated to
     // `since`, so every holding has a value on the window's first date.
     const series = demoHoldingSeries(key, since);
     if (!series) continue;
-    for (const p of series) rows.push({ ticker: key, date: p.date, nav: p.value / h.units });
+    for (const p of series) rows.push({ ticker: key, date: p.date, nav: p.value });
   }
   return rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
@@ -173,88 +198,193 @@ function holdsDistributingFund(marketDb: MarketDb, tickers: string[]): boolean {
   return (row?.n ?? 0) > 0;
 }
 
+/**
+ * Real prices the user transacted at, recovered from the ledger itself: a
+ * trade's execution price (else |amount| ÷ units), and a Balance's
+ * value ÷ units. These honestly price the era BEFORE a fund's cached NAV
+ * coverage begins — and funds that never get coverage (e.g. liquidated ones).
+ * An anchor's `pricePerUnit` is an avg COST, not a market price — never used.
+ * THB-priced keys only: the ledger's money fields are THB, so an implied point
+ * for a foreign-currency key would corrupt the per-date FX conversion.
+ */
+function tradeImpliedRows(
+  events: readonly Transaction[],
+  currencyByKey: ReadonlyMap<string, string>,
+): { ticker: string; date: string; nav: number }[] {
+  const rows: { ticker: string; date: string; nav: number }[] = [];
+  for (const r of events) {
+    if (r.units == null || r.units <= 0) continue;
+    const key = quoteCacheKey(r.quoteSource, r.ticker);
+    if (currencyByKey.get(key) !== BASE_CURRENCY) continue;
+    let price: number | null = null;
+    if (r.kind === "buy" || r.kind === "sell" || r.kind === "reinvest") {
+      price =
+        r.pricePerUnit && r.pricePerUnit > 0
+          ? r.pricePerUnit
+          : Math.abs(r.amount) > 0
+            ? Math.abs(r.amount) / r.units
+            : null;
+    } else if (isAnchorKind(r.kind) && r.value != null && r.value > 0) {
+      price = r.value / r.units;
+    }
+    if (price !== null && Number.isFinite(price)) {
+      rows.push({ ticker: key, date: r.tradeDate, nav: price });
+    }
+  }
+  return rows;
+}
+
+/**
+ * Pointer walker over a date-ascending point list: `at(d)` returns the last
+ * point with date ≤ d. Queries MUST come in ascending date order (they do —
+ * the axis is sorted); that makes the whole replay O(events + dates).
+ */
+function stepWalker<T extends { date: string }>(points: readonly T[]): (d: string) => T | null {
+  let i = 0;
+  let last: T | null = null;
+  return (d: string) => {
+    while (i < points.length && points[i].date <= d) {
+      last = points[i];
+      i++;
+    }
+    return last;
+  };
+}
+
+/**
+ * Compose per-bucket and aggregate value series by REPLAYING THE LEDGER, plus a
+ * contribution (net-invested) line, with every value FX-converted into the base
+ * currency (THB) before it is summed.
+ *
+ * Per bucket, the lot fold (`reduceLots`) yields every position's units and
+ * remaining cost basis after each event; the settlement-cash fold yields the
+ * bucket's in-transit cash and external flows. On each chart date:
+ *
+ *   value = Σ units(position, date) × NAV(date) × fx(date) + cash(date)
+ *
+ * A position contributes 0 before its first ledger event — a Balance entered
+ * today is a point today, never a back-projected multi-year curve (an anchor
+ * asserts nothing about the past, ADR 0004). Exited positions keep
+ * contributing over the dates they were held. NAV gaps are forward-filled per
+ * holding so Thai funds (skip weekends) and US ETFs (skip TH holidays) share a
+ * timeline; dates a fund was held before its cached NAV coverage are priced
+ * from the ledger's own trade-implied prices (`tradeImpliedRows`), falling
+ * back to carrying the position at cost — both reported via
+ * `estimatedThrough`. Each holding's native currency is inferred from its
+ * routing key (lib/market/currency.ts) and converted at that date's USD/THB
+ * (or cross) rate before summing — without this, a USD ETF and a THB fund were
+ * added as if both were baht. FX rates come from the existing keyless
+ * Frankfurter chain. Aggregate series is the per-bucket sum on each date.
+ * Async because FX rates are fetched (cached) from the market layer.
+ */
 export async function getPortfolioSeries(
   range: SeriesRange = "6mo",
 ): Promise<PortfolioSeriesResult> {
-  // Cross-domain read: holdings live in app.db, their NAV series in market.db.
+  // Cross-domain read: the ledger lives in app.db, NAV series in market.db.
   // There is no SQL join — we read each side and join app-side on the soft
   // `${quoteSource}:${ticker}` cache key.
   const marketDb = getMarketDb();
   const since = rangeStartDate(range);
+  const today = new Date().toISOString().slice(0, 10);
 
-  // Read-through fold (ADR 0004): listHoldings overlays live units/cost from the
-  // ledger, so the value-over-time chart sums fresh units × NAV — consistent with the
-  // holdings list and analytics, never a position frozen at the last write.
+  const buckets = listBuckets();
+  const ledger = listTransactionsForBuckets(buckets.map((b) => b.id));
+  // Holdings are NOT the basket (exited positions must chart) — they supply the
+  // distributing-fund flag and the demo fixture mapping only.
   const allHoldings = listHoldings();
-  if (allHoldings.length === 0) {
-    return {
-      aggregate: [],
-      perBucket: {},
-      asOf: null,
-      missingFx: [],
-      hasDistributingHolding: false,
-    };
-  }
 
-  // Does the book hold any dividend-paying fund? Joined app-side: held tickers
-  // are catalog `abbr_name`s. Independent of the NAV/date math below, so it's
-  // returned even when the series itself comes back empty.
   const heldTickers = Array.from(new Set(allHoldings.map((h) => h.ticker)));
   const hasDistributingHolding = holdsDistributingFund(marketDb, heldTickers);
+  if (ledger.length === 0) return { ...EMPTY_RESULT, hasDistributingHolding };
 
-  const cacheKeys = Array.from(
-    new Set(allHoldings.map((h) => quoteCacheKey(h.quoteSource, h.ticker))),
-  );
+  // Facts-only rows → fold-ready events (derive value-only Balance units at
+  // tradeDate NAV; drop anchors that stay unresolved) — the same pre-pass the
+  // holdings projection and analytics run, so the chart can't disagree with them.
+  const events = foldableEvents(ledger);
+  const byBucket = new Map<string, Transaction[]>();
+  for (const r of events) {
+    let arr = byBucket.get(r.bucketId);
+    if (!arr) {
+      arr = [];
+      byBucket.set(r.bucketId, arr);
+    }
+    arr.push(r);
+  }
+
+  // One cache key + currency per (bucket, ledger ticker) — the last row's
+  // quote_source wins, matching how the holdings projection routes a ticker.
+  const keyByBucketTicker = new Map<string, string>();
+  const keyMeta = new Map<string, { quoteSource: string; ticker: string }>();
+  for (const r of events) {
+    const key = quoteCacheKey(r.quoteSource, r.ticker);
+    keyByBucketTicker.set(`${r.bucketId} ${r.ticker}`, key);
+    keyMeta.set(key, { quoteSource: r.quoteSource, ticker: r.ticker });
+  }
+  const cacheKeys = Array.from(keyMeta.keys());
+  const currencyByKey = new Map<string, string>();
+  const currencies = new Set<string>();
+  for (const [key, m] of keyMeta) {
+    const ccy = inferHoldingCurrency(m.quoteSource, m.ticker);
+    currencyByKey.set(key, ccy);
+    currencies.add(ccy);
+  }
 
   // DEMO MODE: source NAV history from the committed fixture instead of
-  // market.db. The fixture holds ~5y of TOTAL value per holding (units × NAV,
-  // already scaled to the seeded current value, in THB); we divide by the
-  // holding's units to recover a per-unit "nav" so the rest of this function —
-  // forward-fill, FX (THB→THB = 1), aggregation — runs unchanged. Owner mode is
-  // untouched and still reads market.db. Both sources seed a carry-in on `since`
-  // so the window's first date is never partial. See lib/mock/demo-history.ts.
+  // market.db. Both sources seed a carry-in on `since` so the window's first
+  // date is never partial. See lib/mock/demo-history.ts.
   const navRows = isDemoRequest()
     ? demoNavRows(allHoldings, since)
     : marketNavRows(marketDb, cacheKeys, since);
 
-  // ticker (cache key) → ordered [date, nav][]
-  const navByKey = new Map<string, { date: string; nav: number }[]>();
-  for (const r of navRows) {
-    let arr = navByKey.get(r.ticker);
-    if (!arr) {
-      arr = [];
-      navByKey.set(r.ticker, arr);
+  // Merge cached NAVs with trade-implied prices per key. Cached rows win on a
+  // date collision (the provider's close beats a fee-skewed implied point).
+  // Implied rows keep their PRE-WINDOW dates: they never join the axis, but
+  // they seed the forward-fill so a window opening mid-gap is still priced.
+  const rowsByKey = new Map<string, Map<string, number>>();
+  const firstCachedByKey = new Map<string, string>();
+  for (const r of tradeImpliedRows(events, currencyByKey)) {
+    let m = rowsByKey.get(r.ticker);
+    if (!m) {
+      m = new Map();
+      rowsByKey.set(r.ticker, m);
     }
-    arr.push({ date: r.date, nav: r.nav });
+    m.set(r.date, r.nav);
+  }
+  for (const r of navRows) {
+    let m = rowsByKey.get(r.ticker);
+    if (!m) {
+      m = new Map();
+      rowsByKey.set(r.ticker, m);
+    }
+    m.set(r.date, r.nav);
+    const first = firstCachedByKey.get(r.ticker);
+    if (first === undefined || r.date < first) firstCachedByKey.set(r.ticker, r.date);
   }
 
-  // The shared timeline is the union of every date that ANY ticker has data
-  // for, in range. We forward-fill missing values per holding.
+  // The shared timeline: every in-window date any key has data for, plus every
+  // in-window ledger event date (cash and contribution step on event dates,
+  // which need not be NAV dates).
   const dateSet = new Set<string>();
   for (const r of navRows) dateSet.add(r.date);
+  for (const r of events) {
+    if (r.tradeDate >= since && r.tradeDate <= today) dateSet.add(r.tradeDate);
+  }
   const dates = Array.from(dateSet).sort();
-  if (dates.length === 0) {
-    return { aggregate: [], perBucket: {}, asOf: null, missingFx: [], hasDistributingHolding };
-  }
+  if (dates.length === 0) return { ...EMPTY_RESULT, hasDistributingHolding };
 
-  // Native currency per holding (from quoteSource + ticker) and the per-date FX
-  // converter into THB. THB-only books need no rates; the converter degrades
-  // gracefully if a rate is cold (rateOn → null) and reports which currencies
-  // failed via `missing`.
-  const currencyByHolding = new Map<number, string>();
-  const currencies = new Set<string>();
-  for (const h of allHoldings) {
-    const ccy = inferHoldingCurrency(h.quoteSource, h.ticker);
-    currencyByHolding.set(h.id, ccy);
-    currencies.add(ccy);
-  }
+  // Native-currency → THB converter for the shared dates. THB-only books need
+  // no rates; the converter degrades gracefully if a rate is cold (rateOn →
+  // null) and reports which currencies failed via `missing`.
   const fx = await buildFxConverter(currencies, range, dates);
 
-  // For each cache key, build a forward-fill function over the shared dates.
-  const forwardFill = (key: string): Map<string, number> => {
+  // Forward-fill each key over the shared dates (pre-window implied rows fold
+  // into the seed value before the first axis date).
+  const filled = new Map<string, Map<string, number>>();
+  for (const [key, byDate] of rowsByKey) {
+    const rows = Array.from(byDate.entries())
+      .map(([date, nav]) => ({ date, nav }))
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     const out = new Map<string, number>();
-    const rows = navByKey.get(key);
-    if (!rows || rows.length === 0) return out;
     let i = 0;
     let last: number | null = null;
     for (const d of dates) {
@@ -264,62 +394,135 @@ export async function getPortfolioSeries(
       }
       if (last !== null) out.set(d, last);
     }
-    return out;
+    filled.set(key, out);
+  }
+  // A date is estimate-priced for a key until its first CACHED nav lands.
+  const isEstimated = (key: string, d: string): boolean => {
+    const first = firstCachedByKey.get(key);
+    return first === undefined || d < first;
   };
 
-  const filled = new Map<string, Map<string, number>>();
-  for (const key of cacheKeys) filled.set(key, forwardFill(key));
-
-  // Group holdings by bucket once so we sum efficiently.
-  const byBucket = new Map<string, typeof allHoldings>();
-  for (const h of allHoldings) {
-    let arr = byBucket.get(h.bucketId);
-    if (!arr) {
-      arr = [];
-      byBucket.set(h.bucketId, arr);
-    }
-    arr.push(h);
-  }
-
   const perBucket: Record<string, SeriesPoint[]> = {};
+  const netInvestedByBucket: Record<string, SeriesPoint[]> = {};
   const aggregateByDate = new Map<string, number>();
+  const investedByDate = new Map<string, number>();
+  const cashByDate = new Map<string, number>();
+  // THB value priced from trade-implied prices / cost-carry (not cached NAV) per
+  // date — drives a MATERIALITY-gated `estimatedThrough` so one dust position
+  // with shallow NAV coverage can't imply the whole history is estimated.
+  const estimatedByDate = new Map<string, number>();
+  const emittedDates = new Set<string>();
+  const unpriced = new Set<string>();
 
-  for (const [bucketId, bucketHoldings] of byBucket) {
+  for (const [bucketId, bucketEvents] of byBucket) {
+    const ledgerTxns: LedgerTxn[] = bucketEvents.map(toLedgerTxn);
+    const { positionTimeline, realized } = reduceLots(ledgerTxns);
+    // Per-sell cost basis so a withdrawal removes capital, not realized gain —
+    // otherwise cashing out at a profit drives the contribution line negative.
+    const costBySellId = new Map<number, number>();
+    for (const ev of realized) if (ev.id != null) costBySellId.set(ev.id, ev.costRemoved);
+    const { cashTimeline, externalFlows } = foldSettlementCash(
+      ledgerTxns,
+      today,
+      undefined,
+      costBySellId,
+    );
+
+    const tickerWalkers: [string, (d: string) => PositionCheckpoint | null][] = [];
+    for (const [ticker, checkpoints] of positionTimeline) {
+      tickerWalkers.push([ticker, stepWalker(checkpoints)]);
+    }
+    const cashAt = stepWalker<CashPoint>(cashTimeline);
+    let running = 0;
+    const contributions = externalFlows.map((f) => {
+      running += f.amount;
+      return { date: f.date, value: running };
+    });
+    const contribAt = stepWalker(contributions);
+
+    // The bucket exists on the chart from its first ledger event — never before.
+    const firstEvent = bucketEvents.reduce(
+      (min, r) => (r.tradeDate < min ? r.tradeDate : min),
+      bucketEvents[0].tradeDate,
+    );
+
     const series: SeriesPoint[] = [];
+    const invested: SeriesPoint[] = [];
     for (const d of dates) {
-      let value = 0;
-      let anyValue = false;
-      for (const h of bucketHoldings) {
-        const key = quoteCacheKey(h.quoteSource, h.ticker);
-        const nav = filled.get(key)?.get(d);
-        if (nav === undefined) continue;
-        // Convert native value → THB at this date's rate. A null rate (cold FX
-        // cache) drops the holding from the total rather than summing raw
-        // foreign NAV as if it were baht — reported via missingFx below.
-        const ccy = currencyByHolding.get(h.id) ?? "USD";
-        const rate = fx.rateOn(ccy, d);
-        if (rate === null) continue;
-        value += h.units * nav * rate;
-        anyValue = true;
+      if (d < firstEvent) continue;
+      const cash = cashAt(d)?.cash ?? 0;
+      let value = cash;
+      for (const [ticker, at] of tickerWalkers) {
+        const cp = at(d);
+        if (!cp || cp.units <= UNIT_EPSILON) continue;
+        const key = keyByBucketTicker.get(`${bucketId} ${ticker}`);
+        const nav = key === undefined ? undefined : filled.get(key)?.get(d);
+        if (nav !== undefined && key !== undefined) {
+          // Convert native value → THB at this date's rate. A null rate (cold
+          // FX cache) drops the holding from the total rather than summing raw
+          // foreign NAV as if it were baht — reported via missingFx below.
+          const rate = fx.rateOn(currencyByKey.get(key) ?? "USD", d);
+          if (rate === null) continue;
+          const thb = cp.units * nav * rate;
+          value += thb;
+          if (isEstimated(key, d)) estimatedByDate.set(d, (estimatedByDate.get(d) ?? 0) + thb);
+        } else if (cp.costBasis !== null && cp.costBasis > 0) {
+          // Held but unpriceable on this date: carry at remaining cost (THB) —
+          // contribution-without-growth beats vanishing from the chart.
+          value += cp.costBasis;
+          estimatedByDate.set(d, (estimatedByDate.get(d) ?? 0) + cp.costBasis);
+        } else {
+          unpriced.add(ticker);
+        }
       }
-      // Skip leading dates where no holding in this bucket has data yet.
-      if (anyValue) {
-        series.push({ date: d, value });
-        aggregateByDate.set(d, (aggregateByDate.get(d) ?? 0) + value);
-      }
+      series.push({ date: d, value });
+      const contributed = contribAt(d)?.value ?? 0;
+      invested.push({ date: d, value: contributed });
+      aggregateByDate.set(d, (aggregateByDate.get(d) ?? 0) + value);
+      investedByDate.set(d, (investedByDate.get(d) ?? 0) + contributed);
+      cashByDate.set(d, (cashByDate.get(d) ?? 0) + cash);
+      emittedDates.add(d);
     }
     perBucket[bucketId] = series;
+    netInvestedByBucket[bucketId] = invested;
   }
 
-  const aggregate: SeriesPoint[] = dates
-    .filter((d) => aggregateByDate.has(d))
-    .map((d) => ({ date: d, value: aggregateByDate.get(d) ?? 0 }));
+  const plotted = dates.filter((d) => emittedDates.has(d));
+
+  // Latest date where estimate-priced positions are a MATERIAL share (>2%) of
+  // the day's value. Gating by share (not "any position") stops a tiny
+  // late-covered holding from captioning the whole chart as estimated, while
+  // still flagging the genuine pre-NAV-coverage era when major holdings were
+  // trade-priced. `plotted` is date-ascending, so the last match wins.
+  const ESTIMATE_MATERIALITY = 0.02;
+  let estimatedThrough: string | null = null;
+  for (const d of plotted) {
+    const total = aggregateByDate.get(d) ?? 0;
+    if (total > 0 && (estimatedByDate.get(d) ?? 0) / total > ESTIMATE_MATERIALITY) {
+      estimatedThrough = d;
+    }
+  }
+
+  const aggregate: SeriesPoint[] = plotted.map((d) => ({
+    date: d,
+    value: aggregateByDate.get(d) ?? 0,
+  }));
+  const netInvested: SeriesPoint[] = plotted.map((d) => ({
+    date: d,
+    value: investedByDate.get(d) ?? 0,
+  }));
+  const cash: SeriesPoint[] = plotted.map((d) => ({ date: d, value: cashByDate.get(d) ?? 0 }));
 
   return {
     aggregate,
     perBucket,
-    asOf: dates[dates.length - 1] ?? null,
+    netInvested,
+    netInvestedByBucket,
+    cash,
+    asOf: plotted[plotted.length - 1] ?? null,
     missingFx: Array.from(fx.missing).sort(),
     hasDistributingHolding,
+    estimatedThrough,
+    unpriced: Array.from(unpriced).sort(),
   };
 }

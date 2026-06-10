@@ -70,6 +70,8 @@ export interface Portfolio {
   brokerage: string;
   perfPct: PerfPct;
   series: SeriesPoint[];
+  /** Cumulative external money in (the chart's contribution line), same dates as `series`. Absent in static placeholder data. */
+  netInvested?: SeriesPoint[];
   holdings: Holding[];
 }
 
@@ -82,6 +84,8 @@ export interface AggregatePortfolio {
   brokerage: string;
   holdings: Holding[];
   series: SeriesPoint[];
+  /** Cumulative external money in (the chart's contribution line), same dates as `series`. Absent in static placeholder data. */
+  netInvested?: SeriesPoint[];
   target: { equity: number; bond: number; alternative: number; cash: number };
 }
 

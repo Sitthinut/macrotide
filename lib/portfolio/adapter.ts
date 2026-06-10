@@ -185,6 +185,7 @@ export function adaptBucket(
   bucketHoldings: DbHolding[],
   quotes: Map<string, FundQuote>,
   rawSeries?: { date: string; value: number }[],
+  rawNetInvested?: { date: string; value: number }[],
 ): Portfolio {
   const holdings = bucketHoldings.map((h) => holdingFromDb(h, quotes));
   const totalValue = holdings.reduce((s, h) => s + h.value, 0);
@@ -219,6 +220,7 @@ export function adaptBucket(
       y1: weightedPct(holdings, totalValue, "y1"),
     },
     series: toSeriesPoints(rawSeries),
+    netInvested: toSeriesPoints(rawNetInvested),
     holdings,
   };
 }
@@ -226,6 +228,8 @@ export function adaptBucket(
 export interface SeriesBundle {
   aggregate: { date: string; value: number }[];
   perBucket: Record<string, { date: string; value: number }[]>;
+  netInvested?: { date: string; value: number }[];
+  netInvestedByBucket?: Record<string, { date: string; value: number }[]>;
 }
 
 export function adaptPortfolios(
@@ -241,6 +245,7 @@ export function adaptPortfolios(
       holdings.filter((h) => h.bucketId === b.id),
       byTicker,
       series?.perBucket[b.id],
+      series?.netInvestedByBucket?.[b.id],
     ),
   );
 }
@@ -248,6 +253,7 @@ export function adaptPortfolios(
 export function adaptAggregate(
   portfolios: Portfolio[],
   rawSeries?: { date: string; value: number }[],
+  rawNetInvested?: { date: string; value: number }[],
 ): AggregatePortfolio {
   const allHoldings = portfolios.flatMap((p) => p.holdings);
   const totalValue = portfolios.reduce((s, p) => s + p.totalValue, 0);
@@ -266,8 +272,31 @@ export function adaptAggregate(
     brokerage: portfolios[0]?.brokerage ?? "",
     holdings: allHoldings,
     series: toSeriesPoints(rawSeries),
+    netInvested: toSeriesPoints(rawNetInvested),
     target: { equity: 70, bond: 20, alternative: 7, cash: 3 },
   };
+}
+
+// Mirrors the server's rangeStartDate (lib/db/queries/series.ts) so the client
+// can tell whether a window CLIPPED history: a series whose first point sits on
+// the window start carries pre-window state, so "change this period" must be
+// rebased against that first point; a series starting later was born inside the
+// window and already reads as change-from-zero.
+const RANGE_DAYS: Record<string, number> = {
+  "1mo": 31,
+  "3mo": 92,
+  "6mo": 183,
+  "1y": 366,
+  "5y": 5 * 366,
+};
+
+/** The window's start date for a SeriesRange, or null for "max" (never clips). */
+export function windowStartIso(range: string): string | null {
+  const days = RANGE_DAYS[range];
+  if (!days) return null;
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
 }
 
 export function adaptModelPortfolio(m: DbModelPortfolio): ModelPortfolio {

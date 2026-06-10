@@ -200,7 +200,7 @@ function solveIrr(
 }
 
 /** Narrow a stored row to the pure-engine shape, defaulting an unknown kind to "buy". */
-function toLedgerTxn(r: Transaction): LedgerTxn {
+export function toLedgerTxn(r: Transaction): LedgerTxn {
   const kind: TxnKind = isTxnKind(r.kind) ? r.kind : "buy";
   return {
     id: r.id,

@@ -284,3 +284,62 @@ describe("reduceLots — multi-ticker", () => {
     expect(r.basisTimeline.at(-1)?.netInvested).toBeCloseTo(350, 6);
   });
 });
+
+describe("reduceLots — positionTimeline (point-in-time replay)", () => {
+  it("checkpoints units and basis after each event, per ticker", () => {
+    const r = reduceLots([
+      tx({ kind: "buy", units: 100, amount: -1000, tradeDate: "2024-01-01" }),
+      tx({ kind: "buy", units: 100, amount: -2000, tradeDate: "2024-02-01" }),
+      tx({ kind: "sell", units: 50, amount: 900, tradeDate: "2024-03-01" }),
+    ]);
+    const cps = r.positionTimeline.get(A);
+    expect(cps).toHaveLength(3);
+    expect(cps?.[0]).toEqual({ date: "2024-01-01", units: 100, costBasis: 1000 });
+    expect(cps?.[1]).toEqual({ date: "2024-02-01", units: 200, costBasis: 3000 });
+    // Sell removes 50 × avg 15 = 750 basis.
+    expect(cps?.[2].units).toBeCloseTo(150, 6);
+    expect(cps?.[2].costBasis).toBeCloseTo(2250, 6);
+  });
+
+  it("anchors RESET the running position at their date", () => {
+    const r = reduceLots([
+      tx({ kind: "buy", units: 100, amount: -1000, tradeDate: "2024-01-01" }),
+      tx({ kind: "snapshot", units: 80, amount: 0, tradeDate: "2024-06-01" }),
+    ]);
+    const cps = r.positionTimeline.get(A);
+    expect(cps?.[1].units).toBe(80);
+    // Value-only snapshot carries the prior per-unit cost: 80 × 10.
+    expect(cps?.[1].costBasis).toBeCloseTo(800, 6);
+  });
+
+  it("records the zero-unit checkpoint on a full exit", () => {
+    const r = reduceLots([
+      tx({ kind: "buy", units: 100, amount: -1000, tradeDate: "2024-01-01" }),
+      tx({ kind: "sell", units: 100, amount: 1500, tradeDate: "2024-02-01" }),
+    ]);
+    const cps = r.positionTimeline.get(A);
+    expect(cps?.[1]).toEqual({ date: "2024-02-01", units: 0, costBasis: 0 });
+  });
+
+  it("reports null basis while cost is unknown (uncosted opening)", () => {
+    const r = reduceLots([tx({ kind: "opening", units: 100, amount: 0, tradeDate: "2024-01-01" })]);
+    const cps = r.positionTimeline.get(A);
+    expect(cps?.[0].units).toBe(100);
+    expect(cps?.[0].costBasis).toBeNull();
+  });
+
+  it("checkpoints agree with the terminal fold (last checkpoint == positions)", () => {
+    const r = reduceLots([
+      tx({ kind: "buy", units: 100, amount: -1000, tradeDate: "2024-01-01" }),
+      tx({ kind: "split", units: 2, amount: 0, tradeDate: "2024-02-01" }),
+      tx({ kind: "sell", units: 60, amount: 500, tradeDate: "2024-03-01" }),
+      tx({ kind: "dividend", amount: 12, tradeDate: "2024-04-01" }),
+    ]);
+    const last = r.positionTimeline.get(A)?.at(-1);
+    const pos = r.positions[0];
+    expect(last?.units).toBeCloseTo(pos.units, 9);
+    expect(last?.costBasis).toBeCloseTo(pos.costBasis ?? Number.NaN, 9);
+    // The no-op dividend still checkpoints (same state, later date).
+    expect(last?.date).toBe("2024-04-01");
+  });
+});
