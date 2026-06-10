@@ -88,6 +88,7 @@ export function HoldingSheet({
     if (open) {
       setValues(initial);
       setError(null);
+      setSubmitting(false);
     }
     // initial intentionally captured at open time — avoids re-rendering as parent re-renders
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -150,6 +151,7 @@ export function HoldingSheet({
     try {
       await onDelete();
       setConfirmDelete(false);
+      setSubmitting(false);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete");

@@ -361,7 +361,7 @@ function DisconnectModal({
   broker: string;
   source: string;
   onClose: () => void;
-  onDone: () => void;
+  onDone: () => void | Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
 
@@ -374,7 +374,8 @@ function DisconnectModal({
         body: JSON.stringify({ all: true, source, mode }),
       });
       if (!res.ok) throw new Error();
-      onDone();
+      await onDone();
+      setBusy(false);
     } catch {
       window.alert("Failed to disconnect.");
       setBusy(false);
