@@ -288,5 +288,6 @@ details and switch to the live NAV, keeping your units and cost.
   (`lib/portfolio/lots.ts`) — see its header comment for the invariants.
 - Why one ledger, positions derived:
   [ADR 0004](./decisions/0004-unified-ledger-positions-derived.md).
-</content>
-</invoke>
+- How the value-over-time chart replays this ledger (point-in-time units,
+  settlement cash, the contribution line):
+  [ADR 0005](./decisions/0005-value-over-time-ledger-replay.md).
