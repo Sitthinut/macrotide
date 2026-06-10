@@ -23,6 +23,20 @@ import { useResource } from "@/lib/fetchers/swr";
 type AssetClassFilter = "equity" | "bond" | "alternative" | "cash" | "";
 type TaxIncentiveFilter = "SSF" | "ThaiESG" | "RMF" | "";
 type RegionFilter = "foreign" | "domestic" | "mixed" | "";
+type IndexTypeFilter = "index" | "active" | "";
+
+const INDEX_TYPE_OPTIONS: { value: IndexTypeFilter; label: string; title: string }[] = [
+  {
+    value: "index",
+    label: "Index",
+    title: "Passive/index-tracking funds only (management style PN or PM)",
+  },
+  {
+    value: "active",
+    label: "Active",
+    title: "Actively managed funds (everything that isn't a pure index fund)",
+  },
+];
 
 const ASSET_CLASS_OPTIONS: { value: AssetClassFilter; label: string }[] = [
   { value: "", label: "All classes" },
@@ -61,14 +75,14 @@ const REGION_OPTIONS: { value: RegionFilter; label: string }[] = [
 function buildUrl(
   assetClass: AssetClassFilter,
   query: string,
-  indexOnly: boolean,
+  indexType: IndexTypeFilter,
   taxIncentive: TaxIncentiveFilter,
   region: RegionFilter,
 ): string {
   const params = new URLSearchParams();
   if (assetClass) params.set("assetClass", assetClass);
   if (query.trim()) params.set("query", query.trim());
-  if (indexOnly) params.set("indexOnly", "1");
+  if (indexType) params.set("indexType", indexType);
   if (taxIncentive) params.set("taxIncentive", taxIncentive);
   if (region) params.set("region", region);
   params.set("limit", "30");
@@ -79,11 +93,11 @@ function buildUrl(
 function useFunds(
   assetClass: AssetClassFilter,
   query: string,
-  indexOnly: boolean,
+  indexType: IndexTypeFilter,
   taxIncentive: TaxIncentiveFilter,
   region: RegionFilter,
 ) {
-  const url = buildUrl(assetClass, query, indexOnly, taxIncentive, region);
+  const url = buildUrl(assetClass, query, indexType, taxIncentive, region);
   return useResource<ShareClassListItem[]>(url);
 }
 
@@ -167,7 +181,7 @@ const ASSET_CLASS_LABELS: Record<string, string> = {
 // Class-character tags — distribution, index style, tax wrapper. Shown inline to
 // the right of the fund name (these qualify the specific share class).
 function FundClassTags({ cls }: { cls: ShareClassListItem }) {
-  const isIndex = cls.managementStyle === "PN" || cls.managementStyle === "PM";
+  const isIndex = cls.indexType === "index";
   const tax = cls.taxIncentiveType;
   const dist = cls.distributionPolicy;
 
@@ -566,7 +580,7 @@ export interface FundSelectProps {
 
 export function FundSelect({ onAskAdvisor }: FundSelectProps) {
   const [assetClass, setAssetClass] = useState<AssetClassFilter>("");
-  const [indexOnly, setIndexOnly] = useState(false);
+  const [indexType, setIndexType] = useState<IndexTypeFilter>("");
   const [taxIncentive, setTaxIncentive] = useState<TaxIncentiveFilter>("");
   const [region, setRegion] = useState<RegionFilter>("");
   const [queryInput, setQueryInput] = useState("");
@@ -581,7 +595,7 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
     return () => clearTimeout(timer);
   }, [queryInput]);
 
-  const { data: funds, isLoading } = useFunds(assetClass, query, indexOnly, taxIncentive, region);
+  const { data: funds, isLoading } = useFunds(assetClass, query, indexType, taxIncentive, region);
 
   const handleAskAdvisor = (ticker: string) => {
     const prompt = `Tell me about ${ticker} — is it a good low-fee option for my portfolio, and are there cheaper alternatives?`;
@@ -652,7 +666,7 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
             ))}
           </div>
 
-          {/* Index-only toggle + region chips on one row */}
+          {/* Index/active chips + region chips on one row */}
           <div
             style={{
               display: "flex",
@@ -662,14 +676,18 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
               alignItems: "center",
             }}
           >
-            {/* Index-only toggle — the star filter for passive investors */}
-            <ChipButton
-              label="Index funds only"
-              active={indexOnly}
-              onClick={() => setIndexOnly((v) => !v)}
-              title="Restrict to passive/index-tracking funds (management style PN or PM)"
-              size="xs"
-            />
+            {/* Index/active facet — the star filter for passive investors. Same
+                toggle-off-on-second-click pattern as the region chips. */}
+            {INDEX_TYPE_OPTIONS.map((opt) => (
+              <ChipButton
+                key={opt.value}
+                label={opt.label}
+                active={indexType === opt.value}
+                onClick={() => setIndexType((v) => (v === opt.value ? "" : opt.value))}
+                title={opt.title}
+                size="xs"
+              />
+            ))}
             <span
               style={{
                 width: 1,
@@ -734,17 +752,8 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
           >
             {list.length} class{list.length === 1 ? "" : "es"} ·{" "}
             {list.filter((f) => f.ter != null).length} with TER data
-            {list.filter((f) => f.managementStyle === "PN" || f.managementStyle === "PM").length >
-              0 && (
-              <>
-                {" "}
-                ·{" "}
-                {
-                  list.filter((f) => f.managementStyle === "PN" || f.managementStyle === "PM")
-                    .length
-                }{" "}
-                index
-              </>
+            {list.filter((f) => f.indexType === "index").length > 0 && (
+              <> · {list.filter((f) => f.indexType === "index").length} index</>
             )}
           </div>
         )}

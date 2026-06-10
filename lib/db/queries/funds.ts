@@ -9,8 +9,8 @@
 // after a per-fund fetch rather than in SQL — catalog scale is a few thousand
 // funds on a single-VM SQLite, so clarity beats a window-function query here.
 
-import { and, eq, inArray, sql } from "drizzle-orm";
-import { isIndexStyle } from "../../market/fund-classify";
+import { and, eq, inArray, isNull, not, or, sql } from "drizzle-orm";
+import { indexTypeFromManagementStyle, isIndexStyle } from "../../market/fund-classify";
 import { type FeeType, TER_FEE_TYPE } from "../../market/fund-fees";
 import { compareClassesForList } from "../../market/share-class-select";
 import { type QuoteSource, quoteCacheKey } from "../../market/sources";
@@ -225,7 +225,17 @@ export type FindFundsFilter = {
   activeOnly?: boolean;
   /** Cap result size. Defaults to 50. */
   limit?: number;
-  /** Restrict to index / passive funds (managementStyle IN 'PN', 'PM'). */
+  /**
+   * Index/active facet: 'index' = pure passive (managementStyle PN/PM);
+   * 'active' = everything else INCLUDING funds with no published style.
+   * Omit for both.
+   */
+  indexType?: "index" | "active";
+  /**
+   * @deprecated Back-compat alias: `true` ≡ `indexType: 'index'` (the advisor
+   * tool schema and old API URLs still send it). `indexType` wins when both
+   * are present. New callers use `indexType`.
+   */
   indexOnly?: boolean;
   /** Restrict to a specific tax-advantaged wrapper. */
   taxIncentive?: "SSF" | "ThaiESG" | "RMF";
@@ -253,7 +263,7 @@ export type FindFundsFilter = {
  *     breaks ties between funds of equal relevance rank.
  *
  * Structured filters (activeOnly / assetClass / taxIncentive / region /
- * indexOnly / excludeFixedTerm) and the batched cheapest-first TER fetch are
+ * indexType / excludeFixedTerm) and the batched cheapest-first TER fetch are
  * applied identically in both paths, and the `FundWithTer[]` shape is unchanged.
  */
 export function findFunds(filter: FindFundsFilter = {}): FundWithTer[] {
@@ -262,6 +272,7 @@ export function findFunds(filter: FindFundsFilter = {}): FundWithTer[] {
     query,
     activeOnly = true,
     limit = 50,
+    indexType,
     indexOnly,
     taxIncentive,
     region,
@@ -273,6 +284,22 @@ export function findFunds(filter: FindFundsFilter = {}): FundWithTer[] {
   if (taxIncentive) conds.push(eq(fundCatalog.taxIncentiveType, taxIncentive));
   if (region) conds.push(eq(fundCatalog.investRegion, region));
   if (excludeFixedTerm) conds.push(eq(fundCatalog.isFixedTerm, false));
+
+  // Index/active facet in SQL (uses idx_fund_catalog_mgmt_style). The 'active'
+  // bucket must include NULL styles explicitly — in SQL, `x NOT IN (…)` is
+  // NULL (falsy) when x is NULL, so a bare NOT IN would silently drop the
+  // ~thousands of funds with no published style.
+  const resolvedIndexType = indexType ?? (indexOnly ? "index" : undefined);
+  const INDEX_STYLES = ["PN", "PM"];
+  if (resolvedIndexType === "index") {
+    conds.push(inArray(fundCatalog.managementStyle, INDEX_STYLES));
+  } else if (resolvedIndexType === "active") {
+    const activeCond = or(
+      not(inArray(fundCatalog.managementStyle, INDEX_STYLES)),
+      isNull(fundCatalog.managementStyle),
+    );
+    if (activeCond) conds.push(activeCond);
+  }
 
   // Relevance rank by projId when a text query is present (0 = best match).
   // Absent → all funds share rank 0 and we fall back to TER ordering below.
@@ -293,13 +320,9 @@ export function findFunds(filter: FindFundsFilter = {}): FundWithTer[] {
     .where(conds.length ? and(...conds) : undefined)
     .all();
 
-  // indexOnly filter is applied in JS after the query so we can reuse
-  // isIndexStyle() without duplicating the PN/PM logic in SQL.
-  const filtered = indexOnly ? funds.filter((f) => isIndexStyle(f.managementStyle)) : funds;
-
   // TER rides along with the catalog row (fund_catalog.current_ter — a derived
   // cache maintained by upsertFundFees), so no fee query is needed here at all.
-  const withTer: FundWithTer[] = filtered.map((f) => ({
+  const withTer: FundWithTer[] = funds.map((f) => ({
     ...f,
     ter: f.currentTer ?? null,
   }));
@@ -342,6 +365,8 @@ export interface ShareClassListItem {
   amcName: string | null;
   assetClass: string | null;
   managementStyle: string | null;
+  /** 'index' = pure passive (PN/PM); 'active' = everything else, incl. unknown style. */
+  indexType: "index" | "active";
   investRegion: string | null;
   isFeederFund: boolean;
   /** Master fund name when this is a feeder fund; null otherwise. */
@@ -431,6 +456,7 @@ export function findShareClasses(
         amcName: p.amcName,
         assetClass: p.assetClass,
         managementStyle: p.managementStyle,
+        indexType: indexTypeFromManagementStyle(p.managementStyle),
         investRegion: p.investRegion,
         isFeederFund: p.isFeederFund,
         feederMasterFund: p.feederMasterFund,
@@ -543,9 +569,11 @@ function attachQuotesAndAum(items: ShareClassListItem[]): void {
  * reference, capped.
  *
  * "Comparable" means same ACTUAL exposure, not just broad asset class: a
- * suggested peer must share both the reference fund's normalized `assetClass`
- * AND its geographic mandate (`investRegion`). Asset class alone is too loose —
- * it would offer a Thai-equity fund as an "alternative" to a global-equity one.
+ * suggested peer must share the reference fund's normalized `assetClass`,
+ * its geographic mandate (`investRegion`), AND its index/active character.
+ * Asset class alone is too loose — it would offer a Thai-equity fund as an
+ * "alternative" to a global-equity one, or an active fund as an "alternative"
+ * to an index fund (different product, not a cheaper version of the same one).
  * We deliberately err toward showing nothing over showing a wrong match.
  *
  * Region matching is exact, including null: if the reference has no region we
@@ -569,7 +597,8 @@ export function getCheaperAlternatives(projId: string, limit = 5): FundWithTer[]
         f.projId !== projId &&
         f.ter != null &&
         f.ter < refTer &&
-        f.investRegion === ref.investRegion,
+        f.investRegion === ref.investRegion &&
+        isIndexStyle(f.managementStyle) === isIndexStyle(ref.managementStyle),
     )
     .slice(0, limit);
 }

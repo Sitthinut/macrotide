@@ -25,9 +25,28 @@ export function shouldFetchFees(secStatus: string | null | undefined): boolean {
   return secStatus === "Registered";
 }
 
-/** Index/passive funds are the `PN` (and `PM`) management styles. */
+/**
+ * Index/passive funds are the `PM` (passive/index-tracking) and `PN` (feeder
+ * whose MASTER fund is passive) management styles — nothing else. Notably
+ * `SM` ("index tracking with occasional alpha", i.e. enhanced index) and `AN`
+ * (feeder whose master is active) stay OUT: only pure passive earns "index"
+ * in an index-investor app.
+ */
 export function isIndexStyle(managementStyle: string | null | undefined): boolean {
   return managementStyle === "PN" || managementStyle === "PM";
+}
+
+/**
+ * The screener's index/active facet, derived from `management_style` on read
+ * (a pure 1:1 function of a stored, indexed column — no catalog column needed).
+ * 'active' is the complement bucket: AM/AN active, SM enhanced-index, BH
+ * buy-and-hold, IM/IN inverse, LM/LN leveraged, OT other, and NULL (the SEC
+ * didn't publish a style — certainly not a verified index fund).
+ */
+export function indexTypeFromManagementStyle(
+  managementStyle: string | null | undefined,
+): "index" | "active" {
+  return isIndexStyle(managementStyle) ? "index" : "active";
 }
 
 // policy_desc (Thai short label) → normalized asset class. `ผสม` (mixed) and

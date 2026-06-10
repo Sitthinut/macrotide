@@ -6,7 +6,8 @@
 // funds) is unchanged and still backs the advisor's find_funds tool.
 //
 // Query params (all optional): assetClass, query, limit (default 50, max 100),
-// activeOnly ('0' to include closed), indexOnly ('1'), taxIncentive
+// activeOnly ('0' to include closed), indexType ('index'|'active'; indexOnly
+// '1' still accepted as a deprecated alias for indexType=index), taxIncentive
 // ('SSF'|'ThaiESG'|'RMF'), region ('foreign'|'domestic'|'mixed'),
 // excludeFixedTerm ('0' to include), includeNonRetail ('1' to show
 // institutional/insurance classes).
@@ -25,6 +26,7 @@ export async function GET(req: Request) {
   const query = url.searchParams.get("query") ?? undefined;
   const limitParam = url.searchParams.get("limit");
   const activeOnlyParam = url.searchParams.get("activeOnly");
+  const indexTypeParam = url.searchParams.get("indexType");
   const indexOnlyParam = url.searchParams.get("indexOnly");
   const taxIncentiveParam = url.searchParams.get("taxIncentive");
   const regionParam = url.searchParams.get("region");
@@ -33,6 +35,8 @@ export async function GET(req: Request) {
 
   const limit = Math.min(limitParam ? Math.max(1, Number.parseInt(limitParam, 10) || 50) : 50, 100);
   const activeOnly = activeOnlyParam !== "0";
+  const indexType =
+    indexTypeParam === "index" || indexTypeParam === "active" ? indexTypeParam : undefined;
   const indexOnly = indexOnlyParam === "1" ? true : undefined;
   const excludeFixedTerm = excludeFixedTermParam !== "0";
 
@@ -52,6 +56,7 @@ export async function GET(req: Request) {
       query,
       activeOnly,
       limit,
+      indexType,
       indexOnly,
       taxIncentive,
       region,
