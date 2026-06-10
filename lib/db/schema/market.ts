@@ -163,6 +163,25 @@ export const fundCatalog = sqliteTable(
     // Geographic mandate from the SEC `invest_country_flag`:
     // 'foreign' | 'mixed' | 'domestic' | NULL.
     investRegion: text("invest_region"),
+    // ── Derived facets (see lib/market/fund-facets.ts) — claimed only when the
+    // signal is unambiguous; NULL = unknown/diversified, never a guess. Updated
+    // by the transform after benchmarks are derived. ──
+    // Geographic focus, finer than investRegion: 'thailand' | 'us' | 'japan' |
+    // 'europe' | 'china' | 'india' | 'vietnam' | 'korea' | 'singapore' |
+    // 'asia' | 'asean' | 'emerging' | 'global' | NULL.
+    regionFocus: text("region_focus"),
+    // Provenance of regionFocus: 'aimc' | 'benchmark' | 'invest-flag' | 'name' | NULL.
+    regionFocusSource: text("region_focus_source"),
+    // Sector/theme focus: 'technology' | 'healthcare' | 'energy' | 'financials'
+    // | 'consumer' | 'gold' | 'commodities' | 'property' | NULL (diversified).
+    sectorFocus: text("sector_focus"),
+    // Normalized benchmark index family ("SET50", "S&P 500", "MSCI ACWI"…) —
+    // only ever claimed from a declared benchmark, never inferred from a name.
+    indexFamily: text("index_family"),
+    // Official AIMC peer-group code ("USEQ", "EQLC", "CPM"…), verbatim from the
+    // legacy v1 FundFactsheet API (optional SEC_V1_API_KEY subscription).
+    // NULL = unclassified by AIMC or the v1 key isn't configured.
+    aimcCategory: text("aimc_category"),
     // Feeder funds (the main vehicle for Thai access to global indices).
     isFeederFund: integer("is_feeder_fund", { mode: "boolean" }).notNull().default(false),
     feederMasterFund: text("feeder_master_fund"),
@@ -223,6 +242,8 @@ export const fundCatalog = sqliteTable(
     index("idx_fund_catalog_asset_class").on(table.assetClass),
     index("idx_fund_catalog_status").on(table.status),
     index("idx_fund_catalog_mgmt_style").on(table.managementStyle),
+    index("idx_fund_catalog_region_focus").on(table.regionFocus),
+    index("idx_fund_catalog_sector_focus").on(table.sectorFocus),
     index("idx_fund_catalog_tax").on(table.taxIncentiveType),
     // Name columns the fund-finder search LIKE-matches on. A leading-wildcard
     // LIKE ('%term%') can't use a btree index, but anchored/prefix matches and

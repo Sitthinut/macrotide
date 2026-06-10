@@ -72,6 +72,41 @@ export function upsertFund(input: FundInsert): Fund {
     .get();
 }
 
+/** Derived facet columns (see lib/market/fund-facets.ts), updated by the transform. */
+export interface FundFacetsUpdate {
+  regionFocus: string | null;
+  regionFocusSource: string | null;
+  sectorFocus: string | null;
+  indexFamily: string | null;
+  /** Raw AIMC peer-group code, verbatim (null = unclassified / v1 key absent). */
+  aimcCategory: string | null;
+}
+
+/**
+ * Batch-update the derived facet columns. Separate from upsertFund because the
+ * facets depend on MORE than the profile (benchmarks + names + policy text), so
+ * the transform computes them after the benchmark table is derived. One
+ * transaction for the whole catalog (~9k updates, milliseconds on SQLite).
+ */
+export function updateFundFacets(updates: Array<{ projId: string } & FundFacetsUpdate>): void {
+  if (updates.length === 0) return;
+  const db = getMarketDb();
+  db.transaction((tx) => {
+    for (const u of updates) {
+      tx.update(fundCatalog)
+        .set({
+          regionFocus: u.regionFocus,
+          regionFocusSource: u.regionFocusSource,
+          sectorFocus: u.sectorFocus,
+          indexFamily: u.indexFamily,
+          aimcCategory: u.aimcCategory,
+        })
+        .where(eq(fundCatalog.projId, u.projId))
+        .run();
+    }
+  });
+}
+
 /**
  * Upsert a batch of fee rows in a single transaction. The composite PK
  * (projId, fundClassName, feeTypeRaw, periodStart) makes this idempotent, so a
@@ -250,6 +285,14 @@ export type FindFundsFilter = {
   /** Restrict to a geographic mandate. */
   region?: "foreign" | "domestic" | "mixed";
   /**
+   * Restrict to a derived geographic FOCUS (finer than `region`): 'thailand',
+   * 'us', 'japan', 'global', … — see fund_catalog.region_focus. Funds with an
+   * unknown focus (NULL) are excluded when this is set.
+   */
+  regionFocus?: string;
+  /** Restrict to a derived sector/theme focus ('technology', 'gold', …). */
+  sectorFocus?: string;
+  /**
    * Exclude fixed-term funds — they stop accepting new subscriptions once
    * closed and aren't suitable for ongoing investing. Defaults to true.
    */
@@ -284,6 +327,8 @@ export function findFunds(filter: FindFundsFilter = {}): FundWithTer[] {
     indexOnly,
     taxIncentive,
     region,
+    regionFocus,
+    sectorFocus,
     excludeFixedTerm = true,
   } = filter;
   const conds = [];
@@ -291,6 +336,8 @@ export function findFunds(filter: FindFundsFilter = {}): FundWithTer[] {
   if (assetClass) conds.push(eq(fundCatalog.assetClass, assetClass));
   if (taxIncentive) conds.push(eq(fundCatalog.taxIncentiveType, taxIncentive));
   if (region) conds.push(eq(fundCatalog.investRegion, region));
+  if (regionFocus) conds.push(eq(fundCatalog.regionFocus, regionFocus));
+  if (sectorFocus) conds.push(eq(fundCatalog.sectorFocus, sectorFocus));
   if (excludeFixedTerm) conds.push(eq(fundCatalog.isFixedTerm, false));
 
   // Index/active facet in SQL (uses idx_fund_catalog_mgmt_style). The 'active'
@@ -578,11 +625,12 @@ function attachQuotesAndAum(items: ShareClassListItem[]): void {
  *
  * "Comparable" means same ACTUAL exposure, not just broad asset class: a
  * suggested peer must share the reference fund's normalized `assetClass`,
- * its geographic mandate (`investRegion`), AND its index/active character.
- * Asset class alone is too loose — it would offer a Thai-equity fund as an
- * "alternative" to a global-equity one, or an active fund as an "alternative"
- * to an index fund (different product, not a cheaper version of the same one).
- * We deliberately err toward showing nothing over showing a wrong match.
+ * its geographic mandate (`investRegion`), its index/active character, AND its
+ * derived region/sector focus. Asset class alone is too loose — it would offer
+ * a Thai-equity fund as an "alternative" to a global-equity one, an active
+ * fund for an index fund, or a gold fund for a diversified one (a different
+ * product, not a cheaper version of the same one). We deliberately err toward
+ * showing nothing over showing a wrong match.
  *
  * Region matching is exact, including null: if the reference has no region we
  * only match other region-less funds, never a fund with a differing non-null
@@ -599,6 +647,16 @@ export function getCheaperAlternatives(projId: string, limit = 5): FundWithTer[]
     assetClass: ref.assetClass ?? undefined,
     limit: 200,
   });
+  // Facet semantics differ:
+  //   • regionFocus null = "we don't know" → enforce equality only when BOTH
+  //     sides are known (don't punish unknowns beyond the coarse investRegion
+  //     match, which still applies exactly including null).
+  //   • sectorFocus null = "diversified" (sector funds are detectable from
+  //     benchmark/name) → exact match including null: a gold fund is never a
+  //     cheaper version of a diversified fund, and vice versa.
+  const regionCompatible = (a: string | null, b: string | null) =>
+    a == null || b == null || a === b;
+
   return peers
     .filter(
       (f) =>
@@ -606,7 +664,9 @@ export function getCheaperAlternatives(projId: string, limit = 5): FundWithTer[]
         f.ter != null &&
         f.ter < refTer &&
         f.investRegion === ref.investRegion &&
-        isIndexStyle(f.managementStyle) === isIndexStyle(ref.managementStyle),
+        isIndexStyle(f.managementStyle) === isIndexStyle(ref.managementStyle) &&
+        regionCompatible(f.regionFocus, ref.regionFocus) &&
+        f.sectorFocus === ref.sectorFocus,
     )
     .slice(0, limit);
 }
