@@ -28,6 +28,9 @@ const nextConfig: NextConfig = {
     root: __dirname,
   },
   outputFileTracingRoot: path.join(__dirname),
+  outputFileTracingExcludes: {
+    "/*": ["data/**/*"],
+  },
   // Dev-only escape hatch: trust one extra origin when the dev server is reached
   // through a reverse proxy or remote host (Codespaces, a LAN IP, a tunnel, etc.)
   // instead of plain localhost. Set DEV_ALLOWED_ORIGIN in .env.local. No effect on

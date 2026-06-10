@@ -1,10 +1,9 @@
 import "server-only";
 import { existsSync, mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { backupIfStale } from "./backup";
 import * as appSchema from "./schema/app";
 import * as marketSchema from "./schema/market";
 
@@ -13,10 +12,17 @@ import * as marketSchema from "./schema/market";
 //                 preferences). Precious; backed up nightly.
 //   - market.db — regenerable market data (fund catalog, fees, NAV/quote cache,
 //                 feeder look-through). Rebuildable from upstream; NOT backed up.
-const APP_DB_PATH = resolve(process.env.DB_PATH ?? "data/app.db");
-const MARKET_DB_PATH = resolve(process.env.MARKET_DB_PATH ?? "data/market.db");
-const APP_MIGRATIONS_DIR = resolve("lib/db/migrations/app");
-const MARKET_MIGRATIONS_DIR = resolve("lib/db/migrations/market");
+function runtimePath(envPath: string | undefined, ...fallbackSegments: string[]) {
+  if (envPath) {
+    return isAbsolute(envPath) ? envPath : join(/*turbopackIgnore: true*/ process.cwd(), envPath);
+  }
+  return join(/*turbopackIgnore: true*/ process.cwd(), ...fallbackSegments);
+}
+
+const APP_DB_PATH = runtimePath(process.env.DB_PATH, "data", "app.db");
+const MARKET_DB_PATH = runtimePath(process.env.MARKET_DB_PATH, "data", "market.db");
+const APP_MIGRATIONS_DIR = runtimePath(undefined, "lib", "db", "migrations", "app");
+const MARKET_MIGRATIONS_DIR = runtimePath(undefined, "lib", "db", "migrations", "market");
 
 // `next build` collects page data for routes in parallel worker processes, each
 // of which imports this module and would run `migrate()` against the same fresh
@@ -56,9 +62,11 @@ function initApp() {
   // Back up app.db only — it is the precious system of record. market.db is
   // regenerable from upstream and is deliberately not backed up.
   if (!BUILD_PHASE) {
-    backupIfStale(sqlite).catch((err) => {
-      console.error("[macrotide] backup failed:", err);
-    });
+    void import("./backup")
+      .then(({ backupIfStale }) => backupIfStale(sqlite))
+      .catch((err) => {
+        console.error("[macrotide] backup failed:", err);
+      });
   }
 
   return { sqlite, db };

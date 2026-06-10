@@ -84,6 +84,7 @@ export function HoldingSheet({
   // catalog should adopt the fund's official details + live price.
   const canPromote = known && values.quoteSource === "manual";
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: initial is intentionally captured only on open; the parent recreates it while the sheet is open.
   useEffect(() => {
     if (open) {
       setValues(initial);
