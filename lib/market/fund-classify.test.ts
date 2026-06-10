@@ -235,6 +235,7 @@ describe("stripPolicyHtml", () => {
     );
     expect(stripPolicyHtml("plain text")).toBe("plain text");
     expect(stripPolicyHtml("a &amp; b &lt;c&gt;")).toBe("a & b <c>");
+    expect(stripPolicyHtml("&amp;lt;tag&amp;gt;")).toBe("&lt;tag&gt;");
   });
 
   it("returns null for empty input or tags-only markup", () => {

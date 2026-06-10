@@ -248,11 +248,12 @@ export function stripPolicyHtml(html: string | null | undefined): string | null 
   const text = html
     .replace(/<[^>]*>/g, " ")
     .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
+    // &amp; last, so a double-encoded entity ("&amp;lt;") unescapes only once.
+    .replace(/&amp;/gi, "&")
     .replace(/\s+/g, " ")
     .trim();
   return text || null;
