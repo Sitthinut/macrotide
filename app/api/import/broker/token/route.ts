@@ -19,7 +19,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const connector = await getConnector();
+  // `?c=` picks a specific broker when several are configured; absent → first.
+  const connectorId = new URL(req.url).searchParams.get("c")?.trim() || undefined;
+  const connector = await getConnector(connectorId);
   if (!connector) return NextResponse.json({ error: "not_configured" }, { status: 404 });
 
   const installUrl = brokerInstallUrl(req);
@@ -27,6 +29,7 @@ export async function GET(req: Request) {
   return withDb(() => {
     if (isDemoRequest()) return NextResponse.json({ error: "not_available" }, { status: 404 });
     return NextResponse.json({
+      id: connector.id,
       token: getOrCreateBrokerImportToken(),
       displayName: connector.displayName,
       accountLabel: getSetting<string>(`broker_login_label:${connector.sourceTag}`) ?? null,

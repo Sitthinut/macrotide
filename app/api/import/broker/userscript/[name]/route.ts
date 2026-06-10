@@ -3,7 +3,7 @@ import { withDb } from "@/lib/api/with-db";
 import { isDemoRequest } from "@/lib/db/context";
 import { getOrCreateBrokerImportToken } from "@/lib/db/queries/broker-token";
 import { buildUserscript } from "@/lib/portfolio/broker-import";
-import { getConnector } from "@/lib/portfolio/connector";
+import { getConnectors } from "@/lib/portfolio/connector";
 
 // Serve the install-ready userscript. The `[name]` segment only exists so the
 // URL can end in `.user.js`, which is what userscript managers (Tampermonkey,
@@ -16,16 +16,19 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const connector = await getConnector();
-  if (!connector) return new NextResponse("// broker import not configured", { status: 404 });
-
   const url = new URL(req.url);
+  // ONE global script for every configured broker — it @matches all their hosts
+  // and resolves which connector applies at run time from the page's hostname.
+  const connectors = await getConnectors();
+  if (connectors.length === 0)
+    return new NextResponse("// broker import not configured", { status: 404 });
+
   const origin = process.env.PUBLIC_APP_URL?.trim() || url.origin;
 
   return withDb(() => {
     if (isDemoRequest()) return new NextResponse("// not available in demo", { status: 404 });
     const token = getOrCreateBrokerImportToken();
-    const script = buildUserscript(connector, origin, token);
+    const script = buildUserscript(connectors, origin, token);
     return new NextResponse(script, {
       status: 200,
       headers: {

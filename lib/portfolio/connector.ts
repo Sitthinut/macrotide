@@ -30,8 +30,9 @@ function toConnector(raw: unknown): Connector | null {
   const host = str(o.host);
   const planPath = str(o.planPath);
   const historyPath = str(o.historyPath);
+  // Pending orders are optional — a broker with no pending endpoint omits it.
   const pendingPath = str(o.pendingPath);
-  if (!host || !planPath || !historyPath || !pendingPath) return null;
+  if (!host || !planPath || !historyPath) return null;
   const sourceTag = str(o.sourceTag) || "broker";
   return {
     id: str(o.id) || sourceTag,
@@ -39,7 +40,7 @@ function toConnector(raw: unknown): Connector | null {
     host,
     planPath,
     historyPath,
-    pendingPath,
+    pendingPath: pendingPath || undefined,
     sourceTag,
     openUrl: str(o.openUrl) || undefined,
     loginUrl: str(o.loginUrl) || undefined,
@@ -57,23 +58,44 @@ function fromFile(path: string): Connector | null {
   }
 }
 
-// Brief in-memory cache for the URL path so we don't refetch on every request.
-let urlCache: { at: number; data: Connector | null } | null = null;
+// Brief in-memory cache per URL so we don't refetch on every request.
+const urlCache = new Map<string, { at: number; data: Connector | null }>();
 const URL_TTL_MS = 5 * 60_000;
 
 async function fromUrl(url: string): Promise<Connector | null> {
   const now = Date.now();
-  if (urlCache && now - urlCache.at < URL_TTL_MS) return urlCache.data;
+  const cached = urlCache.get(url);
+  if (cached && now - cached.at < URL_TTL_MS) return cached.data;
   try {
     const res = await fetch(url, { headers: { Accept: "application/json" } });
     if (!res.ok) throw new Error(`status ${res.status}`);
     const data = toConnector(await res.json());
-    urlCache = { at: now, data };
+    urlCache.set(url, { at: now, data });
     return data;
   } catch {
     // On failure keep serving the last good value (if any), else null.
-    return urlCache?.data ?? null;
+    return cached?.data ?? null;
   }
+}
+
+/** Split a comma-separated env list into trimmed, non-empty entries. */
+function splitList(v: string): string[] {
+  return v
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** De-dupe connectors by id (first wins), so a doubled-up env can't yield two. */
+function uniqueById(list: Connector[]): Connector[] {
+  const seen = new Set<string>();
+  const out: Connector[] = [];
+  for (const c of list) {
+    if (seen.has(c.id)) continue;
+    seen.add(c.id);
+    out.push(c);
+  }
+  return out;
 }
 
 function fromLegacyEnv(): Connector | null {
@@ -90,11 +112,37 @@ function fromLegacyEnv(): Connector | null {
   });
 }
 
-/** Resolve the configured connector, or null when none is set up. */
-export async function getConnector(): Promise<Connector | null> {
+/**
+ * Resolve every configured connector. `BROKER_CONNECTOR_PATH` and
+ * `BROKER_CONNECTOR_URL` each accept a comma-separated list, so several brokers
+ * (e.g. two fund platforms) can run side by side. Checked in order
+ * (paths → URLs → legacy env); the first source that yields any connector wins.
+ */
+export async function getConnectors(): Promise<Connector[]> {
   const path = process.env.BROKER_CONNECTOR_PATH?.trim();
-  if (path) return fromFile(path);
+  if (path) {
+    const fromPaths = splitList(path)
+      .map(fromFile)
+      .filter((c): c is Connector => c !== null);
+    if (fromPaths.length) return uniqueById(fromPaths);
+  }
   const url = process.env.BROKER_CONNECTOR_URL?.trim();
-  if (url) return fromUrl(url);
-  return fromLegacyEnv();
+  if (url) {
+    const fetched = await Promise.all(splitList(url).map(fromUrl));
+    const fromUrls = fetched.filter((c): c is Connector => c !== null);
+    if (fromUrls.length) return uniqueById(fromUrls);
+  }
+  const legacy = fromLegacyEnv();
+  return legacy ? [legacy] : [];
+}
+
+/**
+ * Resolve a single connector: the one matching `id`, or the first configured
+ * (back-compat for callers that assume one broker). Null when none is set up.
+ */
+export async function getConnector(id?: string): Promise<Connector | null> {
+  const all = await getConnectors();
+  if (!all.length) return null;
+  if (id) return all.find((c) => c.id === id) ?? null;
+  return all[0];
 }

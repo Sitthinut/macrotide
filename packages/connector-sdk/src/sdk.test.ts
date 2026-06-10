@@ -326,6 +326,138 @@ describe("parseBrokerExport (custom shape — genericity)", () => {
   });
 });
 
+// ── Header-auth broker: nested fields + dateRange history + fee. ──────────────
+// Models a broker with a cross-origin, header-authenticated API whose order
+// objects nest the ticker under `fund.code` / `toFund.code` and code the
+// type/status as single letters. Synthetic data only (placeholder fund codes +
+// account numbers). Proves dot-path field refs, fee passthrough, and that
+// single-letter type/status maps drive buy/sell + cancel correctly.
+const NESTED_SHAPE: ConnectorShape = {
+  transport: {
+    apiBase: "https://api.example-broker.com",
+    credentials: "omit",
+    captureHeaders: ["authorization", "x-api-key"],
+  },
+  plan: {
+    accountsPath: "data.accountList",
+    accountCode: "accountNumber",
+    accountName: "name",
+    labelPaths: ["data.accountList.0.name"],
+  },
+  history: {
+    mode: "dateRange",
+    accountParam: "accountNumbers[]",
+    startParam: "startedAt",
+    endParam: "endedAt",
+    startValue: "2010-01-01T00:00:00+07:00",
+    extraQuery: "sortType=d&status=&isRemarkExists=",
+    itemsPath: "data",
+  },
+  order: {
+    type: "tradeType",
+    ticker: "fund.code",
+    status: "status",
+    tradeDate: "tradeDate",
+    amount: "amount",
+    units: "unit",
+    fee: "fee",
+    ref: "orderNumber",
+    switch: { toTicker: "toFund.code" },
+  },
+  values: { success: ["C"], cancel: ["X"], buy: ["B"], sell: ["S"], switch: ["SW"] },
+};
+
+const NESTED_EXPORT = {
+  source: "examplebroker",
+  accounts: [
+    {
+      account_code: "ACC111",
+      name: "Main",
+      history: [
+        {
+          orderNumber: "2106036271",
+          tradeType: "B",
+          fund: { code: "EXAMPLE-FUND-A" },
+          status: "C",
+          tradeDate: "2021-04-30",
+          amount: 400.07,
+          unit: 29.9962,
+          fee: 0,
+        },
+        {
+          orderNumber: "2106036272",
+          tradeType: "S",
+          fund: { code: "EXAMPLE-FUND-A" },
+          status: "C",
+          tradeDate: "2021-06-29",
+          amount: 200,
+          unit: 15,
+          fee: 1.5,
+        },
+        {
+          // Cancelled (status X) → dropped.
+          orderNumber: "2106036273",
+          tradeType: "B",
+          fund: { code: "EXAMPLE-FUND-B" },
+          status: "X",
+          tradeDate: "2021-07-01",
+          amount: 999,
+          unit: 50,
+          fee: 0,
+        },
+        {
+          // Switch (best-effort) → sell EXAMPLE-FUND-A + buy EXAMPLE-FUND-C.
+          orderNumber: "2106036274",
+          tradeType: "SW",
+          fund: { code: "EXAMPLE-FUND-A" },
+          toFund: { code: "EXAMPLE-FUND-C" },
+          status: "C",
+          tradeDate: "2021-08-01",
+          amount: 100,
+          unit: 8,
+        },
+      ],
+    },
+  ],
+};
+
+describe("parseBrokerExport (nested fields + single-letter codes)", () => {
+  const res = parseBrokerExport(NESTED_EXPORT, NESTED_SHAPE);
+
+  it("resolves a dot-path ticker (fund.code) and imports buy + sell", () => {
+    const buy = res.rows.find((r) => r.kind === "buy" && r.ticker === "EXAMPLE-FUND-A");
+    const sell = res.rows.find((r) => r.kind === "sell" && r.ticker === "EXAMPLE-FUND-A");
+    expect(buy).toMatchObject({ ticker: "EXAMPLE-FUND-A", units: 29.9962, amount: 400.07 });
+    expect(sell).toMatchObject({ ticker: "EXAMPLE-FUND-A", units: 15, amount: 200 });
+  });
+
+  it("threads fee through to the row", () => {
+    const sell = res.rows.find((r) => r.kind === "sell" && r.ticker === "EXAMPLE-FUND-A");
+    const buy = res.rows.find((r) => r.kind === "buy" && r.ticker === "EXAMPLE-FUND-A");
+    expect(sell?.fee).toBe(1.5);
+    expect(buy?.fee).toBe(0);
+  });
+
+  it("drops a status-X order as cancelled", () => {
+    expect(res.stats.skippedCancel).toBe(1);
+    expect(res.rows.find((r) => r.amount === 999)).toBeUndefined();
+  });
+
+  it("expands a switch via a dot-path toFund.code", () => {
+    const out = res.rows.find((r) => r.ticker === "EXAMPLE-FUND-A" && r.amount === 100);
+    const into = res.rows.find((r) => r.ticker === "EXAMPLE-FUND-C");
+    expect(out).toMatchObject({ kind: "sell", units: 8 });
+    expect(into).toMatchObject({ kind: "buy" });
+    expect(res.stats.switches).toBe(1);
+  });
+
+  it("stamps externalId from sourceTag:account:orderNumber", () => {
+    const buy = res.rows.find((r) => r.kind === "buy" && r.ticker === "EXAMPLE-FUND-A");
+    expect(buy?.externalId).toBe("examplebroker:ACC111:2106036271");
+    expect(buy?.externalAccount).toBe("ACC111");
+  });
+});
+
 describe("looksLikeBrokerExport", () => {
   it("recognizes export shapes, rejects the line-paste format", () => {
     expect(looksLikeBrokerExport(JSON.stringify(EXPORT))).toBe(true);
@@ -351,6 +483,25 @@ describe("resolveCollectorShape", () => {
     expect(s.plan.accountCode).toBe("portfolioRef");
     expect(s.history.accountParam).toBe("pf");
     expect(s.history.nextCursorPath).toBe("paging.next");
+  });
+
+  it("defaults to same-origin cookie transport + cursor history", () => {
+    const s = resolveCollectorShape();
+    expect(s.transport).toMatchObject({ apiBase: "", credentials: "include", captureHeaders: [] });
+    expect(s.history.mode).toBe("cursor");
+  });
+
+  it("surfaces a connector's transport + dateRange history to the loader", () => {
+    const s = resolveCollectorShape(NESTED_SHAPE);
+    expect(s.transport).toMatchObject({
+      apiBase: "https://api.example-broker.com",
+      credentials: "omit",
+      captureHeaders: ["authorization", "x-api-key"],
+    });
+    expect(s.history.mode).toBe("dateRange");
+    expect(s.history.accountParam).toBe("accountNumbers[]");
+    expect(s.history.startParam).toBe("startedAt");
+    expect(s.history.startValue).toBe("2010-01-01T00:00:00+07:00");
   });
 });
 
@@ -393,5 +544,52 @@ describe("buildUserscript (self-updating loader)", () => {
     expect(us).not.toContain('"/api/plan"');
     expect(us).not.toContain('"data.accounts"');
     expect(us).not.toContain("agent_account_id");
+  });
+
+  it("a cookie broker runs at document-idle with no unsafeWindow grant", () => {
+    const us = buildUserscript(endpoints, "https://macrotide.example", "x");
+    expect(us).toContain("// @run-at       document-idle");
+    // The capture helper (which references unsafeWindow) ships in every loader,
+    // but the GRANT — what actually exposes it — is only for capture brokers.
+    expect(us).not.toContain("// @grant        unsafeWindow");
+  });
+
+  it("resolves its connector by the page hostname at run time", () => {
+    const us = buildUserscript(endpoints, "https://macrotide.example", "x");
+    expect(us).toContain("/api/import/broker/runtime?host=");
+    expect(us).toContain("location.hostname");
+  });
+
+  it("a header-capture broker runs at document-start, grants unsafeWindow, and @connects the API host", () => {
+    const us = buildUserscript(
+      { ...endpoints, id: "examplebroker", shape: NESTED_SHAPE },
+      "https://macrotide.example",
+      "x",
+    );
+    expect(us).toContain("// @run-at       document-start");
+    expect(us).toContain("// @grant        unsafeWindow");
+    expect(us).toContain("// @connect      api.example-broker.com");
+    expect(us).not.toMatch(/__[A-Z_]+__/);
+  });
+
+  it("ONE global script @matches every broker host + unions @connect across connectors", () => {
+    const cookieBroker = { ...endpoints, host: "trade.cookie.com" };
+    const headerBroker = {
+      host: "app.header.com",
+      planPath: "/p",
+      historyPath: "/h",
+      sourceTag: "header",
+      shape: NESTED_SHAPE, // apiBase https://api.example-broker.com + capture
+    };
+    const us = buildUserscript([cookieBroker, headerBroker], "https://macrotide.example", "x");
+    // Both hosts matched by the single script.
+    expect(us).toContain("// @match        https://trade.cookie.com/*");
+    expect(us).toContain("// @match        https://app.header.com/*");
+    // @connect unions the app origin + the header broker's API host.
+    expect(us).toContain("// @connect      macrotide.example");
+    expect(us).toContain("// @connect      api.example-broker.com");
+    // Capture needed by ANY connector → document-start + unsafeWindow for all.
+    expect(us).toContain("// @run-at       document-start");
+    expect(us).toContain("// @grant        unsafeWindow");
   });
 });

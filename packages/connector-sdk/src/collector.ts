@@ -22,7 +22,11 @@ import type { BrokerEndpoints, ConnectorShape } from "./types";
 // v2: outcome-driven retries — throttle only after a successful sync, and retry
 // transient failures in-page with backoff (so a not-logged-in attempt no longer
 // blocks the post-login sync for 5 minutes).
-export const COLLECTOR_PROTOCOL_VERSION = 2;
+// v3: pluggable transport — a cross-origin `apiBase`, header-capture auth (grab
+// the page's own Authorization/api-key headers and replay them), and a dateRange
+// history mode (one bounded request, no cursor). Cookie/same-origin/cursor stays
+// the default, so a v2 manifest behaves identically after the reinstall nudge.
+export const COLLECTOR_PROTOCOL_VERSION = 3;
 
 // The collector-side default response shape (the reference broker the defaults
 // were modeled on). The parser owns its own order/value defaults; these are only
@@ -44,6 +48,7 @@ const DEFAULT_COLLECTOR_SHAPE = {
     ],
   },
   history: {
+    mode: "cursor",
     accountParam: "account_code",
     cursorParam: "current_cursor",
     itemsPath: "data",
@@ -52,15 +57,19 @@ const DEFAULT_COLLECTOR_SHAPE = {
     maxPages: 200,
   },
   pending: { accountParam: "account_code", itemsPath: "data" },
+  // Same-origin, cookie-authenticated (the reference broker). A connector
+  // overrides these only to reach a cross-origin API or to use header auth.
+  transport: { apiBase: "", credentials: "include", captureHeaders: [] as string[] },
 };
 
 /**
- * Merge the connector's plan/history/pending over the built-in defaults into the
- * complete collector shape the loader reads at run time. Exported so the app's
- * `/runtime` endpoint can hand the loader a fully-resolved shape (no gaps).
+ * Merge the connector's transport/plan/history/pending over the built-in defaults
+ * into the complete collector shape the loader reads at run time. Exported so the
+ * app's `/runtime` endpoint can hand the loader a fully-resolved shape (no gaps).
  */
 export function resolveCollectorShape(shape?: ConnectorShape) {
   return {
+    transport: { ...DEFAULT_COLLECTOR_SHAPE.transport, ...shape?.transport },
     plan: { ...DEFAULT_COLLECTOR_SHAPE.plan, ...shape?.plan },
     history: { ...DEFAULT_COLLECTOR_SHAPE.history, ...shape?.history },
     pending: { ...DEFAULT_COLLECTOR_SHAPE.pending, ...shape?.pending },
@@ -81,24 +90,51 @@ const COLLECTOR_TOAST = `var MTMARK='<svg width="30" height="30" viewBox="0 0 22
   function toast(m,bad){var k=card(false);var bo=document.createElement("div");bo.textContent=m;bo.style.cssText="font-size:12.5px;line-height:1.45;color:"+(bad?"#b00020":"#3a3d43");k.col.appendChild(bo);setTimeout(k.close,6000);return k.d}
   function nudge(url){var k=card(true);var bo=document.createElement("div");bo.textContent="A newer version is available. Update it here, or from Settings → Connections.";bo.style.cssText="font-size:12.5px;line-height:1.45;color:#3a3d43";k.col.appendChild(bo);var ac=document.createElement("div");ac.style.cssText="display:flex;gap:8px;margin-top:9px;align-items:center";var u=document.createElement("button");u.type="button";u.textContent="Update";u.style.cssText="border:0;border-radius:6px;background:#0a0a0b;color:#f8f8f9;font:500 12.5px system-ui;padding:7px 12px;cursor:pointer";u.onclick=function(){try{window.open(url,"_blank")}catch(e){}};var x=document.createElement("button");x.type="button";x.textContent="Dismiss";x.style.cssText="border:0;border-radius:9px;background:transparent;color:#5f6368;font:600 12px system-ui;padding:7px 11px;cursor:pointer";x.onclick=k.close;ac.appendChild(u);ac.appendChild(x);k.col.appendChild(ac)}`;
 
-// JSON fetch that rides the page's own cookies.
-const COLLECTOR_FETCH = `var J=function(u){return fetch(u,{credentials:"include",headers:{"Content-Type":"application/json"}}).then(function(r){return r.json()})};`;
+// JSON fetch. Default: rides the page's cookies (same-origin broker). A connector
+// with header auth passes captured headers + credentials:"omit" per call.
+const COLLECTOR_FETCH = `var sleep=function(ms){return new Promise(function(r){setTimeout(r,ms)})};
+  var J=function(u,hdrs,cred){return fetch(u,{credentials:cred||"include",headers:Object.assign({"Content-Type":"application/json"},hdrs||{})}).then(function(r){return r.json()})};`;
+
+// Header-capture (for brokers whose data API uses request-header auth the page
+// holds only in memory). Wraps the PAGE's fetch + XHR (via unsafeWindow, set up at
+// document-start) to record the named request headers off the app's OWN calls to
+// `apiBase`, so the gather can replay them. CAPH accumulates the latest values;
+// ensureHook is idempotent. No-op for cookie brokers (captureHeaders empty).
+const COLLECTOR_CAPTURE = `var CAPH=null,HOOKED=false;
+  function pick(h,names){if(!h)return null;var out={},got=false;for(var i=0;i<names.length;i++){var n=names[i],v=null;if(typeof h.get==="function"){v=h.get(n)}else{for(var k in h){if((""+k).toLowerCase()===n){v=h[k];break}}}if(v!=null){out[n]=v;got=true}}return got?out:null}
+  function mergeCap(c){if(c)CAPH=Object.assign(CAPH||{},c)}
+  function ensureHook(apiBase,names){
+    if(HOOKED||!names||!names.length||!apiBase)return;HOOKED=true;
+    var W;try{W=unsafeWindow}catch(e){W=window}if(!W)W=window;
+    var lower=names.map(function(s){return(""+s).toLowerCase()});
+    try{var of=W.fetch;if(of)W.fetch=function(input,init){try{var url=(typeof input==="string")?input:(input&&input.url);if(url&&(""+url).indexOf(apiBase)===0){mergeCap(pick(init&&init.headers,lower));if(input&&input.headers)mergeCap(pick(input.headers,lower))}}catch(e){}return of.apply(this,arguments)}}catch(e){}
+    try{var OX=W.XMLHttpRequest,oop=OX&&OX.prototype.open,osr=OX&&OX.prototype.setRequestHeader,os=OX&&OX.prototype.send;if(OX&&oop&&osr&&os){OX.prototype.open=function(m,u){this.__mtu=u;this.__mth={};return oop.apply(this,arguments)};OX.prototype.setRequestHeader=function(k,v){try{if(this.__mth)this.__mth[(""+k).toLowerCase()]=v}catch(e){}return osr.apply(this,arguments)};OX.prototype.send=function(){try{if(this.__mtu&&(""+this.__mtu).indexOf(apiBase)===0)mergeCap(pick(this.__mth,lower))}catch(e){}return os.apply(this,arguments)}}}catch(e){}
+  }`;
 
 // The gather: list portfolios, paginate every history + pending list, build the
 // export object. Every broker-specific field path is read from SH (the injected
 // shape) via GP. Assumes H/PLAN/HIST/PEND/SRC/SH, GP(), toast() and J() in scope.
 const COLLECTOR_GATHER = `if(location.hostname!==H){toast("Open "+H+" (your orders page), then run this again.",true);return "host"}
+  var TR=SH.transport||{},APIBASE=TR.apiBase||"",CRED=TR.credentials||"include",CAPN=TR.captureHeaders||[];
+  if(CAPN.length){ensureHook(APIBASE,CAPN);var waited=0;while(!CAPH&&waited<15000){await sleep(250);waited+=250}if(!CAPH){toast("Open your portfolio or history page on "+H+", then it'll sync.",true);return "noauth"}}
   var busy=toast("Collecting your history…");
   var PL=SH.plan,HS=SH.history,PD=SH.pending;
-  var plan=await J(PLAN);
+  var plan=await J(APIBASE+PLAN,CAPH,CRED);
   var LABEL="";for(var li=0;li<PL.labelPaths.length;li++){var lv=GP(plan,PL.labelPaths[li]);if(lv){LABEL=""+lv;break}}
   var accts=(GP(plan,PL.accountsPath)||[]).map(function(a){return{account_code:GP(a,PL.accountCode),name:GP(a,PL.accountName),type:GP(a,PL.accountType)}});
   if(!accts.length){busy.remove();toast("Log in to your broker and it'll sync automatically.",true);return "noauth"}
   for(var i=0;i<accts.length;i++){
-    var a=accts[i],cur=null,hist=[],g=0;
-    do{var u=HIST+"?"+HS.accountParam+"="+a.account_code+(cur?("&"+HS.cursorParam+"="+cur):"");var j=await J(u);hist=hist.concat(GP(j,HS.itemsPath)||[]);cur=GP(j,HS.hasNextPath)?GP(j,HS.nextCursorPath):null;g++}while(cur&&g<HS.maxPages);
-    var pj=await J(PEND+"?"+PD.accountParam+"="+a.account_code);
-    a.history=hist;a.pending=GP(pj,PD.itemsPath)||[]
+    var a=accts[i],hist=[];
+    if(HS.mode==="dateRange"){
+      var end=new Date().toISOString();
+      var u=APIBASE+HIST+"?"+HS.accountParam+"="+encodeURIComponent(a.account_code)+"&"+HS.startParam+"="+encodeURIComponent(HS.startValue||"")+"&"+HS.endParam+"="+encodeURIComponent(end)+(HS.extraQuery?("&"+HS.extraQuery):"");
+      var j=await J(u,CAPH,CRED);hist=GP(j,HS.itemsPath)||[];
+    }else{
+      var cur=null,g=0;
+      do{var uu=APIBASE+HIST+"?"+HS.accountParam+"="+a.account_code+(cur?("&"+HS.cursorParam+"="+cur):"");var jj=await J(uu,CAPH,CRED);hist=hist.concat(GP(jj,HS.itemsPath)||[]);cur=GP(jj,HS.hasNextPath)?GP(jj,HS.nextCursorPath):null;g++}while(cur&&g<HS.maxPages);
+    }
+    if(PEND){var pj=await J(APIBASE+PEND+"?"+PD.accountParam+"="+a.account_code,CAPH,CRED);a.pending=GP(pj,PD.itemsPath)||[]}else{a.pending=[]}
+    a.history=hist;
   }
   var n=accts.reduce(function(s,a){return s+a.history.length},0);
   var payload={source:SRC,exportedAt:new Date().toISOString(),accountLabel:LABEL,accounts:accts};`;
@@ -123,7 +159,8 @@ const USERSCRIPT_TEMPLATE = `(function(){
   var T=__TOKEN__,O=__ORIGIN__,LV=__LOADER_VERSION__,SKEY="__macrotide_last_sync__",AKEY="__macrotide_last_try__",NKEY="__macrotide_nag__",CFGKEY="__macrotide_cfg__",MIN=300000,DEDUPE=4000,NAGMIN=86400000;
   ${COLLECTOR_TOAST}
   ${COLLECTOR_FETCH}
-  function cfg(){return new Promise(function(res,rej){try{GM_xmlhttpRequest({method:"GET",url:O+"/api/import/broker/runtime",headers:{"X-Import-Token":T},onload:function(r){if(r.status>=200&&r.status<300){try{res(JSON.parse(r.responseText))}catch(e){rej(e)}}else rej(new Error("status "+r.status))},onerror:function(){rej(new Error("network"))},ontimeout:function(){rej(new Error("timeout"))}})}catch(e){rej(e)}})}
+  ${COLLECTOR_CAPTURE}
+  function cfg(){return new Promise(function(res,rej){try{GM_xmlhttpRequest({method:"GET",url:O+"/api/import/broker/runtime?host="+encodeURIComponent(location.hostname),headers:{"X-Import-Token":T},onload:function(r){if(r.status>=200&&r.status<300){try{res(JSON.parse(r.responseText))}catch(e){rej(e)}}else rej(new Error("status "+r.status))},onerror:function(){rej(new Error("network"))},ontimeout:function(){rej(new Error("timeout"))}})}catch(e){rej(e)}})}
   function send(s){return new Promise(function(res){try{GM_xmlhttpRequest({method:"POST",url:O+"/api/import/broker/ingest",headers:{"Content-Type":"application/json","X-Import-Token":T},data:s,onload:function(r){res(r.status>=200&&r.status<300)},onerror:function(){res(false)},ontimeout:function(){res(false)}})}catch(e){res(false)}})}
   // One collection attempt against resolved config C. Returns an outcome:
   //   "ok" | "noauth" (not logged in) | "host" (wrong page) | "transient" (retry).
@@ -155,46 +192,79 @@ const USERSCRIPT_TEMPLATE = `(function(){
     };
     drive(0);
   }
-  try{
-    var ls=+(localStorage.getItem(SKEY)||0);if(Date.now()-ls<MIN)return;
-    var la=+(localStorage.getItem(AKEY)||0);if(Date.now()-la<DEDUPE)return;
-    localStorage.setItem(AKEY,""+Date.now());
-  }catch(e){}
-  start();
+  // Install the capture hook synchronously from cached config — this loader runs
+  // at document-start for capture brokers, so the page's first authed request is
+  // seen. No-op for cookie brokers (captureHeaders empty / no cached config yet).
+  try{var pc=JSON.parse(localStorage.getItem(CFGKEY)||"null");var pt=pc&&pc.shape&&pc.shape.transport;if(pt&&pt.captureHeaders&&pt.captureHeaders.length)ensureHook(pt.apiBase||"",pt.captureHeaders)}catch(e){}
+  function boot(){
+    try{
+      var ls=+(localStorage.getItem(SKEY)||0);if(Date.now()-ls<MIN)return;
+      var la=+(localStorage.getItem(AKEY)||0);if(Date.now()-la<DEDUPE)return;
+      localStorage.setItem(AKEY,""+Date.now());
+    }catch(e){}
+    start();
+  }
+  // Toasts need document.body; defer the run until the DOM is ready (matters when
+  // the loader runs at document-start for capture brokers).
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",boot);else boot();
 })();`;
 
 /**
- * Build a userscript (the `// ==UserScript==` text a manager installs from a
- * `.user.js` URL). A thin self-updating loader: only the app `macrotideOrigin`,
- * the per-user `token`, and this loader's protocol version are baked in; the
- * broker endpoints + shape are fetched from the app at run time (so they need no
- * reinstall to change). The host is still baked into the `@match` line. Returns
- * the full script text.
+ * Build the ONE global userscript (the `// ==UserScript==` text a manager
+ * installs from a `.user.js` URL). A thin self-updating loader: only the app
+ * `macrotideOrigin`, the per-user `token`, and this loader's protocol version are
+ * baked in. It `@match`es every configured broker's host and, at run time,
+ * resolves which connector applies from the page's hostname (`/runtime?host=`) —
+ * so a single install covers all brokers and endpoint/shape changes need no
+ * reinstall. Accepts one connector or the full list.
  */
 export function buildUserscript(
-  endpoints: BrokerEndpoints,
+  connectorOrList:
+    | (BrokerEndpoints & { id?: string; shape?: ConnectorShape })
+    | Array<BrokerEndpoints & { id?: string; shape?: ConnectorShape }>,
   macrotideOrigin: string,
   token: string,
 ): string {
+  const connectors = Array.isArray(connectorOrList) ? connectorOrList : [connectorOrList];
   const body = USERSCRIPT_TEMPLATE.replace("__TOKEN__", JSON.stringify(token))
     .replace("__ORIGIN__", JSON.stringify(macrotideOrigin))
     .replace("__LOADER_VERSION__", JSON.stringify(COLLECTOR_PROTOCOL_VERSION));
-  let connectHost = macrotideOrigin;
+
+  let originHost = macrotideOrigin;
   try {
-    connectHost = new URL(macrotideOrigin).hostname;
+    originHost = new URL(macrotideOrigin).hostname;
   } catch {
     // leave as-is if origin isn't a full URL (e.g. empty in tests)
   }
+
+  // @connect = the app origin + every broker's data-API host (deduped). A
+  // header-auth broker reads a cross-origin API and captures the page's headers,
+  // so if ANY connector does, the loader runs at document-start with unsafeWindow.
+  const connectHosts = new Set<string>([originHost]);
+  let capture = false;
+  for (const c of connectors) {
+    const transport = c.shape?.transport;
+    if (transport?.captureHeaders?.length) capture = true;
+    if (transport?.apiBase) {
+      try {
+        connectHosts.add(new URL(transport.apiBase).hostname);
+      } catch {
+        // ignore malformed apiBase
+      }
+    }
+  }
+
   const header = [
     "// ==UserScript==",
     "// @name         Macrotide Connector",
     "// @namespace    macrotide",
     "// @version      1.0.0",
     "// @description  Sync your broker order history into Macrotide automatically",
-    `// @match        https://${endpoints.host}/*`,
-    `// @connect      ${connectHost}`,
+    ...connectors.map((c) => `// @match        https://${c.host}/*`),
+    ...[...connectHosts].map((h) => `// @connect      ${h}`),
     "// @grant        GM_xmlhttpRequest",
-    "// @run-at       document-idle",
+    ...(capture ? ["// @grant        unsafeWindow"] : []),
+    `// @run-at       ${capture ? "document-start" : "document-idle"}`,
     "// ==/UserScript==",
     "",
   ].join("\n");

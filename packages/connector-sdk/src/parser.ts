@@ -22,6 +22,7 @@ type OrderMap = Required<{
   tradeDate: FieldRef;
   amount: FieldRef;
   units: FieldRef;
+  fee: FieldRef;
   dividendAmount: FieldRef;
   ref: FieldRef;
   switch: { toTicker: FieldRef; inAmount: FieldRef; inUnits: FieldRef };
@@ -35,6 +36,7 @@ const DEFAULT_ORDER: OrderMap = {
   tradeDate: "trade_date",
   amount: "net_transaction_amount",
   units: ["net_transaction_unit", "unit"],
+  fee: "fee",
   dividendAmount: ["amount", "net_transaction_amount"],
   ref: "ref",
   switch: {
@@ -53,14 +55,29 @@ const DEFAULT_VALUES: ValuesMap = {
   dividend: ["dividend"],
 };
 
-/** First-present value for a field ref. */
+/** Walk a dot-path (`fund.code`) off an object; a key with no dots is a plain
+ *  lookup. Mirrors the collector's `GP` so client + server resolve paths alike. */
+function getPath(obj: unknown, path: string): unknown {
+  if (path.indexOf(".") === -1) return (obj as Record<string, unknown>)?.[path];
+  let cur: unknown = obj;
+  for (const k of path.split(".")) {
+    if (cur == null) return undefined;
+    cur = (cur as Record<string, unknown>)[k];
+  }
+  return cur;
+}
+
+/** First-present value for a field ref (a key/dot-path, or candidates tried in
+ *  order — first non-null wins). */
 function get(o: BrokerOrder, ref: FieldRef): unknown {
-  const obj = o as Record<string, unknown>;
   if (Array.isArray(ref)) {
-    for (const k of ref) if (obj[k] != null) return obj[k];
+    for (const k of ref) {
+      const v = getPath(o, k);
+      if (v != null) return v;
+    }
     return undefined;
   }
-  return obj[ref];
+  return getPath(o, ref);
 }
 function num(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
@@ -83,11 +100,15 @@ function orderToRows(
   const raw = text(get(o, ord.type)).trim().toLowerCase();
   const units = () => num(get(o, ord.units));
   const amount = () => num(get(o, ord.amount));
+  const fee = () => num(get(o, ord.fee));
 
   if (lc(vals.buy).includes(raw) || lc(vals.sell).includes(raw)) {
     if (!ticker) return { rows: [], kind: "unknown" };
     const kind = lc(vals.buy).includes(raw) ? "buy" : "sell";
-    return { kind, rows: [{ ticker, kind, tradeDate: date, units: units(), amount: amount() }] };
+    return {
+      kind,
+      rows: [{ ticker, kind, tradeDate: date, units: units(), amount: amount(), fee: fee() }],
+    };
   }
 
   if (lc(vals.dividend).includes(raw)) {
@@ -104,7 +125,14 @@ function orderToRows(
     const toFund = text(get(o, ord.switch.toTicker)).trim();
     const rows: ExtractedTxnRow[] = [];
     if (ticker)
-      rows.push({ ticker, kind: "sell", tradeDate: date, units: units(), amount: amount() });
+      rows.push({
+        ticker,
+        kind: "sell",
+        tradeDate: date,
+        units: units(),
+        amount: amount(),
+        fee: fee(),
+      });
     if (toFund)
       rows.push({
         ticker: toFund,

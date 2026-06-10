@@ -2,7 +2,7 @@ import { COLLECTOR_PROTOCOL_VERSION, resolveCollectorShape } from "@macrotide/co
 import { NextResponse } from "next/server";
 import { withImportToken } from "@/lib/api/broker-token-auth";
 import { brokerInstallUrl } from "@/lib/portfolio/broker-install";
-import { getConnector } from "@/lib/portfolio/connector";
+import { getConnector, getConnectors } from "@/lib/portfolio/connector";
 
 // Runtime config for the installed userscript loader. The loader fetches this on
 // each run (token in a header, never a URL) and uses it to drive the gather — so
@@ -17,7 +17,20 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const connector = await getConnector();
+  // The global userscript resolves its connector by the page's `?host=`; a `?c=`
+  // (explicit id) still works. Absent → the first configured.
+  const sp = new URL(req.url).searchParams;
+  const connectorId = sp.get("c")?.trim() || undefined;
+  const host = sp.get("host")?.trim() || undefined;
+  let connector: Awaited<ReturnType<typeof getConnector>> = null;
+  if (connectorId) {
+    connector = await getConnector(connectorId);
+  } else if (host) {
+    const all = await getConnectors();
+    connector = all.find((c) => c.host === host || host.endsWith(`.${c.host}`)) ?? null;
+  } else {
+    connector = await getConnector();
+  }
   if (!connector) return NextResponse.json({ error: "not_configured" }, { status: 404 });
 
   const token = req.headers.get("x-import-token")?.trim() ?? "";
@@ -30,7 +43,7 @@ export async function GET(req: Request) {
         host: connector.host,
         planPath: connector.planPath,
         historyPath: connector.historyPath,
-        pendingPath: connector.pendingPath,
+        pendingPath: connector.pendingPath ?? null,
         openUrl: connector.openUrl ?? null,
         // Where the loader's "Update" button points (the .user.js → manager reinstall).
         installUrl: brokerInstallUrl(req),

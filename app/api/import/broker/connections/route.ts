@@ -115,10 +115,11 @@ export async function PATCH(req: Request) {
 
 const deleteBody = z
   .object({
-    // Disconnect the whole broker (all accounts) + rotate the import token —
-    // the user-facing "Disconnect". Or target a single accountCode (internal).
+    // The user-facing "Disconnect": `all:true` with a `source` drops that one
+    // broker (all its accounts); `all:true` with no `source` drops every broker.
+    // `accountCode` targets a single account (internal).
     all: z.boolean().optional(),
-    source: z.string().trim().min(1).default("broker"),
+    source: z.string().trim().min(1).optional(),
     accountCode: z.string().trim().min(1).optional(),
     // "leave" keeps the imported transactions; "purge" deletes them too.
     mode: z.enum(["leave", "purge"]).default("leave"),
@@ -149,21 +150,26 @@ export async function DELETE(req: Request) {
     let removed = 0;
 
     if (all) {
-      // Disconnect everything: drop every connection (+ optionally its history),
-      // then rotate the token so the installed userscript can no longer sync.
-      for (const c of listBrokerConnections()) {
+      // Drop every account of the targeted broker (or all brokers when no
+      // `source` is given), plus optionally its imported history.
+      const connections = listBrokerConnections();
+      const targets = source ? connections.filter((c) => c.source === source) : connections;
+      for (const c of targets) {
         if (mode === "purge")
           removed += deleteTransactionsByExternalAccount(c.accountCode, ownedIds);
         deleteBrokerConnection(c.source, c.accountCode);
       }
-      rotateBrokerImportToken();
-      return NextResponse.json({ ok: true, removed, tokenRotated: true });
+      // The import token is shared across brokers, so only rotate it (killing
+      // every installed userscript) when nothing is left connected.
+      const tokenRotated = listBrokerConnections().length === 0;
+      if (tokenRotated) rotateBrokerImportToken();
+      return NextResponse.json({ ok: true, removed, tokenRotated });
     }
 
     // Single account (internal / fallback).
     if (accountCode) {
       if (mode === "purge") removed = deleteTransactionsByExternalAccount(accountCode, ownedIds);
-      deleteBrokerConnection(source, accountCode);
+      deleteBrokerConnection(source ?? "broker", accountCode);
     }
     return NextResponse.json({ ok: true, removed });
   });

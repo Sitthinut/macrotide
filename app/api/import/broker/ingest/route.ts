@@ -12,7 +12,7 @@ import {
   type TransactionInsert,
 } from "@/lib/db/queries/transactions";
 import { parseBrokerExport } from "@/lib/portfolio/broker-import";
-import { getConnector } from "@/lib/portfolio/connector";
+import { getConnectors } from "@/lib/portfolio/connector";
 import type { ExtractedTxnRow } from "@/lib/portfolio/ocr";
 import { LEDGER_KINDS, signedAmount } from "@/lib/portfolio/txn-import";
 
@@ -54,7 +54,7 @@ function accountNames(exportData: unknown): Map<string, string> {
 function toInsertRows(
   rows: ValidRow[],
   bucketId: string,
-  sourceTag: string,
+  sourceLabel: string,
   catalogSources: Map<string, string>,
   importBatchId: string,
 ): TransactionInsert[] {
@@ -81,7 +81,9 @@ function toInsertRows(
       tradeCurrency: "THB",
       fxToThb: 1,
       note: null,
-      source: sourceTag,
+      // Human-readable provenance shown on holdings (the broker's display name),
+      // not the internal sourceTag.
+      source: sourceLabel,
       importBatchId,
       externalId: r.externalId ?? null,
       externalAccount: r.externalAccount ?? null,
@@ -100,6 +102,7 @@ interface AccountResult {
 function commit(
   rows: ExtractedTxnRow[],
   sourceTag: string,
+  sourceLabel: string,
   names: Map<string, string>,
   fallbackBucketId: string | undefined,
   accountLabel: string,
@@ -151,7 +154,13 @@ function commit(
       bucketId = fallback;
     }
 
-    const insertRows = toInsertRows(groupRows, bucketId, sourceTag, catalogSources, importBatchId);
+    const insertRows = toInsertRows(
+      groupRows,
+      bucketId,
+      sourceLabel,
+      catalogSources,
+      importBatchId,
+    );
     const { inserted, skipped } = insertTransactionsDeduped(insertRows);
     totalInserted += inserted.length;
     totalSkipped += skipped;
@@ -204,9 +213,18 @@ export async function POST(req: Request) {
   const bodyToken = typeof env?.token === "string" ? env.token : "";
   const token = headerToken || bodyToken;
 
-  // Resolve the connector's response-shape so parsing is broker-agnostic
-  // (falls back to the SDK's built-in defaults when absent).
-  const connector = await getConnector();
+  // The export names its broker via `source` (the connector's sourceTag) — match
+  // it to the right connector so the correct response-shape drives parsing (with
+  // several connectors configured). Falls back to the first, then SDK defaults.
+  const exportSource =
+    exportData &&
+    typeof exportData === "object" &&
+    typeof (exportData as { source?: unknown }).source === "string"
+      ? (exportData as { source: string }).source
+      : undefined;
+  const connectors = await getConnectors();
+  const connector =
+    (exportSource && connectors.find((c) => c.sourceTag === exportSource)) || connectors[0] || null;
   const { rows } = parseBrokerExport(exportData, connector?.shape);
   if (rows.length === 0) {
     return NextResponse.json(
@@ -214,12 +232,10 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
-  const sourceTag =
-    exportData &&
-    typeof exportData === "object" &&
-    typeof (exportData as { source?: unknown }).source === "string"
-      ? (exportData as { source: string }).source
-      : "broker";
+  const sourceTag = exportSource ?? "broker";
+  // Human-readable provenance for the holdings' source label (the broker's
+  // display name); the sourceTag stays the routing/dedup key.
+  const sourceLabel = connector?.displayName?.trim() || sourceTag;
   const names = accountNames(exportData);
   const accountLabel =
     exportData &&
@@ -232,11 +248,11 @@ export async function POST(req: Request) {
   // the owner. Falls through to session auth when no token is supplied.
   if (token) {
     const res = await withImportToken(token, () =>
-      commit(rows, sourceTag, names, fallbackBucketId, accountLabel),
+      commit(rows, sourceTag, sourceLabel, names, fallbackBucketId, accountLabel),
     );
     if (!res.ok) return NextResponse.json({ error: "invalid_token" }, { status: 401 });
     return res.value;
   }
 
-  return withDb(() => commit(rows, sourceTag, names, fallbackBucketId, accountLabel));
+  return withDb(() => commit(rows, sourceTag, sourceLabel, names, fallbackBucketId, accountLabel));
 }

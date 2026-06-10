@@ -39,6 +39,12 @@ export interface BrokerOrder {
   sw_to_fund?: string;
   sw_in_net_transaction_amount?: number | null;
   sw_in_net_transaction_unit?: number | null;
+  /** Nested shapes are read via dot-path field refs (e.g. `fund.code`), so an
+   *  order is an open record; these document the common nested carriers. */
+  fund?: { code?: string; name?: string };
+  toFund?: { code?: string; name?: string };
+  fee?: number | null;
+  [key: string]: unknown;
 }
 
 /** One portfolio in a multi-account export (what the collector POSTs). */
@@ -82,10 +88,11 @@ export interface BrokerEndpoints {
   host: string;
   /** Path returning the customer's portfolios. */
   planPath: string;
-  /** Path returning one portfolio's order history (cursor-paginated). */
+  /** Path returning one portfolio's order history (cursor- or date-range-paged). */
   historyPath: string;
-  /** Path returning one portfolio's pending orders. */
-  pendingPath: string;
+  /** Path returning one portfolio's pending orders. Optional — omit when the
+   *  broker has no pending-orders endpoint (the collector skips that fetch). */
+  pendingPath?: string;
   /** Free-text tag stamped on the export so the source is recorded. */
   sourceTag: string;
   /** The broker's order-history page (the UI's "Open broker" / sync link). */
@@ -102,6 +109,25 @@ export type FieldRef = string | string[];
  * collector (client); `order`/`values` drive the parser (server).
  */
 export interface ConnectorShape {
+  /**
+   * How the collector reaches the broker's API. Omitted → the default
+   * same-origin, cookie-authenticated transport (the reference broker).
+   * Set when the data API lives on a different origin and/or authenticates with
+   * request headers the page holds in memory rather than cookies.
+   */
+  transport?: {
+    /** Absolute origin prefixed to plan/history/pending paths (default `""` =
+     *  same-origin, paths resolved against the page). */
+    apiBase?: string;
+    /** Fetch credentials mode — `"include"` (default; rides the page's cookies)
+     *  or `"omit"` (header auth; sending cookies cross-origin would fail CORS). */
+    credentials?: "include" | "omit";
+    /** Request header names the collector captures from the app's OWN requests to
+     *  `apiBase` and replays on its calls (lower-cased; e.g.
+     *  `["authorization","x-api-key"]`). Set → the loader installs a fetch/XHR
+     *  hook at document-start and waits for these before gathering. */
+    captureHeaders?: string[];
+  };
   plan?: {
     accountsPath?: string;
     accountCode?: string;
@@ -110,12 +136,21 @@ export interface ConnectorShape {
     labelPaths?: string[];
   };
   history?: {
+    /** `"cursor"` (default): paginate via cursorParam/nextCursorPath/hasNextPath.
+     *  `"dateRange"`: one request bounded by startParam/endParam (no cursor). */
+    mode?: "cursor" | "dateRange";
     accountParam?: string;
     cursorParam?: string;
     itemsPath?: string;
     nextCursorPath?: string;
     hasNextPath?: string;
     maxPages?: number;
+    /** dateRange mode — query params + the ISO floor for the range start. The
+     *  range end is "now" at collection time. `extraQuery` is appended verbatim. */
+    startParam?: string;
+    endParam?: string;
+    startValue?: string;
+    extraQuery?: string;
   };
   pending?: { accountParam?: string; itemsPath?: string };
   order?: {
@@ -125,6 +160,7 @@ export interface ConnectorShape {
     tradeDate?: FieldRef;
     amount?: FieldRef;
     units?: FieldRef;
+    fee?: FieldRef;
     dividendAmount?: FieldRef;
     ref?: FieldRef;
     switch?: { toTicker?: FieldRef; inAmount?: FieldRef; inUnits?: FieldRef };

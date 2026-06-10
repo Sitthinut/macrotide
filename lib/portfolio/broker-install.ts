@@ -7,7 +7,11 @@ import "server-only";
 // agree on one URL.
 export const USERSCRIPT_FILE = "macrotide-connector.user.js";
 
-/** Absolute install URL for the userscript, derived from the request origin. */
+/**
+ * Absolute install URL for the ONE global userscript, derived from the request
+ * origin. A single install covers every configured broker — the script @matches
+ * all their hosts and resolves the connector at run time from the page hostname.
+ */
 export function brokerInstallUrl(req: Request): string {
   const origin = process.env.PUBLIC_APP_URL?.trim() || new URL(req.url).origin;
   return `${origin}/api/import/broker/userscript/${USERSCRIPT_FILE}`;
