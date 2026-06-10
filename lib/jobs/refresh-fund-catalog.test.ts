@@ -17,6 +17,15 @@ vi.mock("../db/queries/fund-enrichment", () => ({
   upsertFundTopHoldings: vi.fn(),
   upsertFundPortfolio: vi.fn(),
   upsertFundPortfolioAssetType: vi.fn(),
+  // Derived by the transform from landed sweeps — stubbed here because this
+  // suite focuses on the land half (sweeps land [], so these never fire).
+  upsertFundBenchmarks: vi.fn(),
+  upsertFundStatistics: vi.fn(),
+  upsertFundSpecifications: vi.fn(),
+  upsertFundFactsheetUrls: vi.fn(),
+  upsertFundSubscriptionMinimums: vi.fn(),
+  upsertFundDividendPolicy: vi.fn(),
+  upsertFundDividendHistory: vi.fn(),
 }));
 
 import { eq } from "drizzle-orm";
@@ -87,11 +96,22 @@ function makeFetchRS(items: SecRiskSpectrumItem[] = []) {
 }
 
 /**
- * refreshFundCatalog with a default (empty) risk-spectrum stub so tests don't hit
- * the real bulk API; pass `_fetchRiskSpectrum` to override.
+ * refreshFundCatalog with default (empty) bulk-sweep stubs (risk-spectrum,
+ * benchmarks, statistics) so tests don't hit the real bulk APIs; pass the
+ * corresponding _fetch* to override.
  */
 function refresh(opts: Parameters<typeof refreshFundCatalog>[0] = {}) {
-  return refreshFundCatalog({ _fetchRiskSpectrum: makeFetchRS(), ...opts });
+  return refreshFundCatalog({
+    _fetchRiskSpectrum: makeFetchRS(),
+    _fetchBenchmarks: vi.fn().mockResolvedValue([]),
+    _fetchStatistics: vi.fn().mockResolvedValue([]),
+    _fetchSpecifications: vi.fn().mockResolvedValue([]),
+    _fetchFactsheetUrls: vi.fn().mockResolvedValue([]),
+    _fetchMinimums: vi.fn().mockResolvedValue([]),
+    _fetchDividendPolicy: vi.fn().mockResolvedValue([]),
+    _fetchDividendHistory: vi.fn().mockResolvedValue([]),
+    ...opts,
+  });
 }
 
 /** Run a job body inside a fresh in-memory market.db context. */
@@ -134,6 +154,13 @@ describe("refreshFundCatalog", () => {
         fundsWithPortfolio: 0,
         fundsWithFeederLookThrough: 0,
         riskSpectrumLanded: 0,
+        benchmarksLanded: 0,
+        statisticsLanded: 0,
+        specificationsLanded: 0,
+        factsheetUrlsLanded: 0,
+        minimumsLanded: 0,
+        dividendPolicyLanded: 0,
+        dividendHistoryLanded: 0,
         errors: [],
       });
       expect(readSecRaw(SEC_ENDPOINTS.profiles)).toHaveLength(0);

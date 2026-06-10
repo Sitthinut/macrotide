@@ -15,6 +15,15 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Nightly crawl lands fund benchmarks and factsheet statistics.** Two new
+  bulk sweeps (same cheap paginated pattern as risk-spectrum, no per-fund
+  calls) land every fund's declared benchmark index — which names the index,
+  geography, and hedging variant, covering ~94% of active funds — and per-class
+  risk/return statistics (Sharpe, max drawdown, FX-hedging ratio, tracking
+  error, turnover). Raw payloads land verbatim in `sec_raw`; the transform
+  derives `fund_benchmarks` (blend rows kept) and `fund_statistics` (string
+  figures parsed). Groundwork for region / index-family screener facets and
+  honest like-for-like fund comparison.
 - **Fund catalog carries FX-hedging policy, full policy text, and lifecycle
   dates.** The transform now maps profile fields that were already landed but
   unused: a normalized FX-hedging policy (full / discretionary / partial /

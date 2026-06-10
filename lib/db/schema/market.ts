@@ -324,6 +324,190 @@ export const fundFees = sqliteTable(
 // effective snapshot to keep the DB small (no full history).
 // ───────────────────────────────────────────────────────────────────────────
 
+// Fund benchmarks — the declared benchmark index per fund from the factsheet
+// (/v2/fund/factsheet/benchmarks, latest=true). One row per (projId, groupSeq):
+// a fund can declare a BLENDED benchmark as several weighted rows. The
+// benchmark string names the index, geography, and hedging variant — the
+// authoritative classification signal for region/index-family facets.
+export const fundBenchmarks = sqliteTable(
+  "fund_benchmarks",
+  {
+    projId: text("proj_id")
+      .notNull()
+      .references(() => fundCatalog.projId, { onDelete: "cascade" }),
+    groupSeq: integer("group_seq").notNull(),
+    // Verbatim benchmark text, factsheet §8.1 (Thai/EN mixed).
+    benchmark: text("benchmark").notNull(),
+    benchmarkRemark: text("benchmark_remark"),
+    // Start/end date of the factsheet period (end IS NULL = currently active).
+    startDate: text("start_date"),
+    endDate: text("end_date"),
+    prospectusType: text("prospectus_type"),
+    lastUpdDate: text("last_upd_date"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projId, table.groupSeq] }),
+    index("idx_fund_benchmarks_proj").on(table.projId),
+  ],
+);
+
+// Fund statistics — quantitative risk/return stats per fund class from the
+// factsheet (/v2/fund/factsheet/statistics, latest=true). One row per
+// (projId, fundClassName). Figures arrive as strings and are parsed at
+// transform time; the verbatim payload stays in sec_raw. fx_hedging_ratio and
+// tracking_error feed like-for-like comparison (hedged vs unhedged classes,
+// index-replication quality).
+export const fundStatistics = sqliteTable(
+  "fund_statistics",
+  {
+    projId: text("proj_id")
+      .notNull()
+      .references(() => fundCatalog.projId, { onDelete: "cascade" }),
+    fundClassName: text("fund_class_name").notNull(),
+    portfolioTurnoverRatio: real("portfolio_turnover_ratio"),
+    maximumDrawdown: real("maximum_drawdown"),
+    sharpeRatio: real("sharpe_ratio"),
+    beta: real("beta"),
+    alpha: real("alpha"),
+    fxHedgingRatio: real("fx_hedging_ratio"),
+    trackingError: real("tracking_error"),
+    // Kept as text: the SEC serves mixed shapes here (a percent for bond funds,
+    // a date-like string in some payloads) — parse at read once shapes settle.
+    yieldToMaturity: text("yield_to_maturity"),
+    // Thai duration descriptions ("1 เดือน 13 วัน"), not parseable numbers.
+    recoveringPeriod: text("recovering_period"),
+    portfolioDurationPeriod: text("portfolio_duration_period"),
+    // Start/end date of the factsheet period (end IS NULL = currently active).
+    startDate: text("start_date"),
+    endDate: text("end_date"),
+    prospectusType: text("prospectus_type"),
+    lastUpdDate: text("last_upd_date"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projId, table.fundClassName] }),
+    index("idx_fund_statistics_proj").on(table.projId),
+  ],
+);
+
+// Fund specifications — special-characteristic codes per fund class from
+// /v2/fund/general-info/specifications (SorNor 87/2558 Appendix 2): ETF,
+// cross-investing (CIV), FIF, etc. One row per (projId, fundClassName, specCode)
+// — a class can carry several codes.
+export const fundSpecifications = sqliteTable(
+  "fund_specifications",
+  {
+    projId: text("proj_id")
+      .notNull()
+      .references(() => fundCatalog.projId, { onDelete: "cascade" }),
+    fundClassName: text("fund_class_name").notNull(),
+    specCode: text("spec_code").notNull(),
+    specDesc: text("spec_desc"),
+    lastUpdDate: text("last_upd_date"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projId, table.fundClassName, table.specCode] }),
+    index("idx_fund_specifications_proj").on(table.projId),
+  ],
+);
+
+// Factsheet URLs — the SEC-hosted PDF + the AMC's own factsheet page per fund
+// class, from /v2/fund/factsheet/urls. Latest row per (projId, fundClassName).
+export const fundFactsheetUrls = sqliteTable(
+  "fund_factsheet_urls",
+  {
+    projId: text("proj_id")
+      .notNull()
+      .references(() => fundCatalog.projId, { onDelete: "cascade" }),
+    fundClassName: text("fund_class_name").notNull(),
+    amcUrlFactsheet: text("amc_url_factsheet"),
+    pdfFactsheet: text("pdf_factsheet"),
+    asOfDate: text("as_of_date"),
+    prospectusType: text("prospectus_type"),
+    lastUpdDate: text("last_upd_date"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projId, table.fundClassName] }),
+    index("idx_fund_factsheet_urls_proj").on(table.projId),
+  ],
+);
+
+// Subscription/redemption minimums — the latest factsheet minimums per fund
+// class from /v2/fund/factsheet/subscription-redemption-minimums. Amounts are
+// parsed from the SEC's strings; the `*Unit` columns keep the SEC's unit label
+// (บาท = baht vs หน่วย = units) since redemption minimums can be in either.
+export const fundSubscriptionMinimums = sqliteTable(
+  "fund_subscription_minimums",
+  {
+    projId: text("proj_id")
+      .notNull()
+      .references(() => fundCatalog.projId, { onDelete: "cascade" }),
+    fundClassName: text("fund_class_name").notNull(),
+    minimumSubIpo: real("minimum_sub_ipo"),
+    minimumSubIpoCur: text("minimum_sub_ipo_cur"),
+    minimumSub: real("minimum_sub"),
+    minimumSubCur: text("minimum_sub_cur"),
+    minimumSubUnit: text("minimum_sub_unit"),
+    minimumRedempt: real("minimum_redempt"),
+    minimumRedemptCur: text("minimum_redempt_cur"),
+    minimumRedemptUnit: text("minimum_redempt_unit"),
+    lowbalVal: real("lowbal_val"),
+    lowbalValCur: text("lowbal_val_cur"),
+    lowbalUnit: text("lowbal_unit"),
+    // Start/end date of the factsheet period (end IS NULL = currently active).
+    startDate: text("start_date"),
+    endDate: text("end_date"),
+    prospectusType: text("prospectus_type"),
+    lastUpdDate: text("last_upd_date"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projId, table.fundClassName] }),
+    index("idx_fund_subscription_minimums_proj").on(table.projId),
+  ],
+);
+
+// Formal dividend-policy code per fund class from
+// /v2/fund/factsheet/dividend-policy — authoritative vs the Thai-text parsing
+// of fund_class_detail that derives `distribution_policy` today. Kept verbatim.
+export const fundDividendPolicy = sqliteTable(
+  "fund_dividend_policy",
+  {
+    projId: text("proj_id")
+      .notNull()
+      .references(() => fundCatalog.projId, { onDelete: "cascade" }),
+    fundClassName: text("fund_class_name").notNull(),
+    dividendPolicy: text("dividend_policy"),
+    startDate: text("start_date"),
+    endDate: text("end_date"),
+    prospectusType: text("prospectus_type"),
+    lastUpdDate: text("last_upd_date"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projId, table.fundClassName] }),
+    index("idx_fund_dividend_policy_proj").on(table.projId),
+  ],
+);
+
+// Dividend payment history per fund class from /v2/fund/daily-info/dividend-history
+// — append-only time series (book-close date, payment date, THB per unit).
+// Backs trailing-yield computation and verifies a dividend class actually pays.
+export const fundDividendHistory = sqliteTable(
+  "fund_dividend_history",
+  {
+    projId: text("proj_id")
+      .notNull()
+      .references(() => fundCatalog.projId, { onDelete: "cascade" }),
+    classAbbrName: text("class_abbr_name").notNull(),
+    bookCloseDate: text("book_close_date").notNull(),
+    dividendDate: text("dividend_date"),
+    dividendValue: real("dividend_value"),
+    lastUpdDate: text("last_upd_date"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projId, table.classAbbrName, table.bookCloseDate] }),
+    index("idx_fund_dividend_history_proj").on(table.projId),
+  ],
+);
+
 // Fund performance — all performance types per fund/class from the factsheet
 // performance endpoint (/v2/fund/factsheet/performance). One row per
 // (projId, fundClassName, performanceTypeDesc, referencePeriod) — the latest

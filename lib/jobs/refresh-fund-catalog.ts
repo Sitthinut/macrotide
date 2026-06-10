@@ -28,6 +28,10 @@
 //                             WARNING: Full portfolio ingestion roughly doubles
 //                             crawl API calls (many funds have 100+ holdings).
 //                             Recommend running on a weekly cadence, not nightly.
+// SEC_INGEST_DIVIDENDS=1    — bulk-sweep /v2/fund/daily-info/dividend-history
+//                             (FULL payment history; the endpoint has no date
+//                             filter, so each pass re-reads everything — ~1k
+//                             pages). Recommend a weekly cadence, not nightly.
 // EXTERNAL_INGEST_FEEDER_HOLDINGS=1 — for feeder funds whose master is a
 //                             US-registered fund in the EDGAR_FUNDS registry,
 //                             fetch its latest SEC NPORT-P holdings (official,
@@ -64,14 +68,21 @@ import { shouldFetchFees } from "../market/fund-classify";
 import { EDGAR_FUNDS, fetchNportHoldings, matchEdgarFund } from "../market/providers/edgar-nport";
 import {
   enumerateFundProfiles,
+  fetchBenchmarksLatest,
+  fetchDividendHistory,
+  fetchDividendPolicyLatest,
+  fetchFactsheetUrls,
   fetchFundAssetAllocation,
   fetchFundAum,
   fetchFundFees,
   fetchFundPerformance,
   fetchFundPortfolio,
   fetchFundPortfolioAssetType,
+  fetchFundSpecifications,
+  fetchFundStatisticsLatest,
   fetchFundTop5Holdings,
   fetchRiskSpectrumLatest,
+  fetchSubscriptionMinimumsLatest,
   type SecFundProfile,
 } from "../market/providers/sec-thailand";
 import { transformFundCatalog } from "./transform-fund-catalog";
@@ -111,6 +122,20 @@ export interface RefreshFundCatalogOptions {
   _fetchFeederHoldings?: typeof fetchNportHoldings;
   /** Injectable risk-spectrum fetcher (replaces the real bulk API call in tests). */
   _fetchRiskSpectrum?: typeof fetchRiskSpectrumLatest;
+  /** Injectable benchmarks fetcher (replaces the real bulk API call in tests). */
+  _fetchBenchmarks?: typeof fetchBenchmarksLatest;
+  /** Injectable statistics fetcher (replaces the real bulk API call in tests). */
+  _fetchStatistics?: typeof fetchFundStatisticsLatest;
+  /** Injectable specifications fetcher (replaces the real bulk API call in tests). */
+  _fetchSpecifications?: typeof fetchFundSpecifications;
+  /** Injectable factsheet-URLs fetcher (replaces the real bulk API call in tests). */
+  _fetchFactsheetUrls?: typeof fetchFactsheetUrls;
+  /** Injectable minimums fetcher (replaces the real bulk API call in tests). */
+  _fetchMinimums?: typeof fetchSubscriptionMinimumsLatest;
+  /** Injectable dividend-policy fetcher (replaces the real bulk API call in tests). */
+  _fetchDividendPolicy?: typeof fetchDividendPolicyLatest;
+  /** Injectable dividend-history fetcher (replaces the real bulk API call in tests). */
+  _fetchDividendHistory?: typeof fetchDividendHistory;
 }
 
 export interface RefreshFundCatalogResult {
@@ -133,6 +158,17 @@ export interface RefreshFundCatalogResult {
   fundsWithFeederLookThrough: number;
   /** Funds for which a latest risk-spectrum record was landed (drives asset class). */
   riskSpectrumLanded: number;
+  /** Benchmark rows landed by the bulk sweep (a fund can have several — blends). */
+  benchmarksLanded: number;
+  /** Statistics rows landed by the bulk sweep (one per fund class). */
+  statisticsLanded: number;
+  /** Rows landed by the remaining always-on bulk sweeps. */
+  specificationsLanded: number;
+  factsheetUrlsLanded: number;
+  minimumsLanded: number;
+  dividendPolicyLanded: number;
+  /** Dividend-history rows landed (only when SEC_INGEST_DIVIDENDS is set). */
+  dividendHistoryLanded: number;
   errors: Array<{ projId: string; error: string }>;
 }
 
@@ -170,6 +206,13 @@ export async function refreshFundCatalog(
   const getPortfolioAssetType = opts._fetchPortfolioAssetType ?? fetchFundPortfolioAssetType;
   const getFeederHoldings = opts._fetchFeederHoldings ?? fetchNportHoldings;
   const getRiskSpectrum = opts._fetchRiskSpectrum ?? fetchRiskSpectrumLatest;
+  const getBenchmarks = opts._fetchBenchmarks ?? fetchBenchmarksLatest;
+  const getStatistics = opts._fetchStatistics ?? fetchFundStatisticsLatest;
+  const getSpecifications = opts._fetchSpecifications ?? fetchFundSpecifications;
+  const getFactsheetUrls = opts._fetchFactsheetUrls ?? fetchFactsheetUrls;
+  const getMinimums = opts._fetchMinimums ?? fetchSubscriptionMinimumsLatest;
+  const getDividendPolicy = opts._fetchDividendPolicy ?? fetchDividendPolicyLatest;
+  const getDividendHistory = opts._fetchDividendHistory ?? fetchDividendHistory;
 
   // Read enrichment flags once per run (not per fund).
   const doPerformance = envFlag("SEC_INGEST_PERFORMANCE");
@@ -192,6 +235,13 @@ export async function refreshFundCatalog(
   let fundsWithPortfolio = 0;
   let fundsWithFeederLookThrough = 0;
   let riskSpectrumLanded = 0;
+  let benchmarksLanded = 0;
+  let statisticsLanded = 0;
+  let specificationsLanded = 0;
+  let factsheetUrlsLanded = 0;
+  let minimumsLanded = 0;
+  let dividendPolicyLanded = 0;
+  let dividendHistoryLanded = 0;
   const errors: Array<{ projId: string; error: string }> = [];
 
   // 1b. Bulk-land the latest risk-spectrum for the enumerated funds in ONE
@@ -199,19 +249,90 @@ export async function refreshFundCatalog(
   // class (RS primary, policy/name fallback). Resilient: a failed sweep is
   // logged and the transform simply falls back to policy/name — never aborts the
   // crawl. Scoped to the enumerated proj_ids so a --limit dev run stays small.
-  try {
-    const enumeratedIds = new Set(profiles.map((p) => p.proj_id));
-    const rsItems = await getRiskSpectrum();
-    const rsRows = rsItems
-      .filter((it) => it.proj_id && enumeratedIds.has(it.proj_id))
-      .map((it) => makeSecRaw(SEC_ENDPOINTS.riskSpectrum, it.proj_id, "", it));
-    upsertSecRaw(rsRows);
-    riskSpectrumLanded = rsRows.length;
-  } catch (err) {
-    errors.push({
-      projId: "(risk-spectrum)",
-      error: err instanceof Error ? err.message : String(err),
-    });
+  const enumeratedIds = new Set(profiles.map((p) => p.proj_id));
+
+  /**
+   * Land one bulk sweep: fetch every row in one paginated pass, scope to the
+   * enumerated funds (so a --limit dev run stays small), key each row by
+   * `rowKeyOf`, and land verbatim. Resilient: a failed sweep is collected as a
+   * pseudo-fund error and never aborts the crawl — the transform simply works
+   * with whatever landed last time.
+   */
+  async function landSweep<T extends { proj_id?: string | null }>(
+    name: string,
+    endpoint: string,
+    fetcher: () => Promise<T[]>,
+    rowKeyOf: (item: T) => string,
+  ): Promise<number> {
+    try {
+      const items = await fetcher();
+      const rows = items
+        .filter((it) => it.proj_id && enumeratedIds.has(it.proj_id))
+        .map((it) => makeSecRaw(endpoint, it.proj_id as string, rowKeyOf(it), it));
+      upsertSecRaw(rows);
+      return rows.length;
+    } catch (err) {
+      errors.push({
+        projId: `(${name})`,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return 0;
+    }
+  }
+
+  // Always-on bulk sweeps (each is one cheap paginated pass over the universe;
+  // new and IPO funds are covered automatically every run):
+  //   risk-spectrum → asset class; benchmarks → region/index-family facets;
+  //   statistics → per-class risk stats; specifications → ETF/CIV flags;
+  //   factsheet URLs; subscription minimums; formal dividend policy.
+  riskSpectrumLanded = await landSweep(
+    "risk-spectrum",
+    SEC_ENDPOINTS.riskSpectrum,
+    getRiskSpectrum,
+    () => "",
+  );
+  // rowKey = group_seq so a blended benchmark's several rows coexist.
+  benchmarksLanded = await landSweep("benchmarks", SEC_ENDPOINTS.benchmarks, getBenchmarks, (it) =>
+    String(it.group_seq ?? 1),
+  );
+  const classKey = (it: { fund_class_name?: string | null }) => it.fund_class_name ?? "main";
+  statisticsLanded = await landSweep(
+    "statistics",
+    SEC_ENDPOINTS.statistics,
+    getStatistics,
+    classKey,
+  );
+  specificationsLanded = await landSweep(
+    "specifications",
+    SEC_ENDPOINTS.specifications,
+    getSpecifications,
+    // A class can carry several spec codes — key on both.
+    (it) => `${it.fund_class_name ?? "main"}:${it.spec_code ?? ""}`,
+  );
+  factsheetUrlsLanded = await landSweep(
+    "factsheet-urls",
+    SEC_ENDPOINTS.factsheetUrls,
+    getFactsheetUrls,
+    classKey,
+  );
+  minimumsLanded = await landSweep("minimums", SEC_ENDPOINTS.minimums, getMinimums, classKey);
+  dividendPolicyLanded = await landSweep(
+    "dividend-policy",
+    SEC_ENDPOINTS.dividendPolicy,
+    getDividendPolicy,
+    classKey,
+  );
+
+  // Dividend HISTORY is the one heavy sweep — the endpoint has no date filter,
+  // so every pass re-reads all payments ever (~1k pages). Gated behind
+  // SEC_INGEST_DIVIDENDS; run it on a weekly cadence like the portfolio ingest.
+  if (envFlag("SEC_INGEST_DIVIDENDS")) {
+    dividendHistoryLanded = await landSweep(
+      "dividend-history",
+      SEC_ENDPOINTS.dividendHistory,
+      getDividendHistory,
+      (it) => `${it.class_abbr_name ?? "main"}:${it.book_close_date ?? ""}`,
+    );
   }
 
   // Enrichment writes are DEFERRED: their tables FK-reference fund_catalog, which
@@ -455,6 +576,13 @@ export async function refreshFundCatalog(
     fundsWithPortfolio,
     fundsWithFeederLookThrough,
     riskSpectrumLanded,
+    benchmarksLanded,
+    statisticsLanded,
+    specificationsLanded,
+    factsheetUrlsLanded,
+    minimumsLanded,
+    dividendPolicyLanded,
+    dividendHistoryLanded,
     errors,
   };
 }

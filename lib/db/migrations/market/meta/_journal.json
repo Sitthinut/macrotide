@@ -71,6 +71,20 @@
       "when": 1781070422231,
       "tag": "0009_silky_umar",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1781071015728,
+      "tag": "0010_noisy_hex",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1781071713138,
+      "tag": "0011_legal_oracle",
+      "breakpoints": true
     }
   ]
 }

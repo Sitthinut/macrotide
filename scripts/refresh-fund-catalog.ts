@@ -103,6 +103,8 @@ async function main() {
   console.log(`  Funds seen:          ${result.fundsSeen}`);
   console.log(`  Funds upserted:      ${result.fundsUpserted}`);
   console.log(`  Fee rows upserted:   ${result.feeRowsUpserted}`);
+  console.log(`  Benchmarks landed:   ${result.benchmarksLanded}`);
+  console.log(`  Statistics landed:   ${result.statisticsLanded}`);
   if (result.errors.length > 0) {
     console.log(`  Errors (${result.errors.length}):`);
     for (const { projId, error } of result.errors) {
