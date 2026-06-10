@@ -239,6 +239,20 @@ describe("profileToFundInsert", () => {
     });
   });
 
+  it("prefers the formal dividend-policy code over the class-detail text", () => {
+    // Code says dividend, text says accumulating — the formal code wins.
+    const coded = profileToFundInsert(
+      makeProfile({ fund_class_detail: "สะสมมูลค่า" }),
+      null,
+      null,
+      "Y",
+    );
+    expect(coded.distributionPolicy).toBe("dividend");
+    // No code → text parsing stays the fallback.
+    const fallback = profileToFundInsert(makeProfile({ fund_class_detail: "สะสมมูลค่า" }));
+    expect(fallback.distributionPolicy).toBe("accumulating");
+  });
+
   it("maps term components only for fixed-term funds (0s elsewhere stay null)", () => {
     const fixed = profileToFundInsert(
       makeProfile({ proj_term_flag: "Y", proj_term_year: 0, proj_term_month: 6, proj_term_day: 0 }),

@@ -7,6 +7,7 @@ import {
   classifyInvestRegion,
   classifyTaxIncentive,
   deriveAssetClass,
+  distributionFromDividendPolicy,
   indexTypeFromManagementStyle,
   inferAssetClass,
   isIndexStyle,
@@ -206,6 +207,16 @@ describe("classifyInvestRegion", () => {
     expect(classifyInvestRegion("3")).toBe("mixed");
     expect(classifyInvestRegion("4")).toBe("domestic");
     expect(classifyInvestRegion("9")).toBeNull();
+  });
+});
+
+describe("distributionFromDividendPolicy", () => {
+  it("maps the formal factsheet codes, null for unknown/absent", () => {
+    expect(distributionFromDividendPolicy("Y")).toBe("dividend");
+    expect(distributionFromDividendPolicy("N")).toBe("accumulating");
+    expect(distributionFromDividendPolicy(" y ")).toBe("dividend");
+    expect(distributionFromDividendPolicy(null)).toBeNull();
+    expect(distributionFromDividendPolicy("?")).toBeNull();
   });
 });
 

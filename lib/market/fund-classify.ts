@@ -206,6 +206,25 @@ export function classifyInvestRegion(flag: string | null | undefined): string | 
   }
 }
 
+/**
+ * Formal factsheet dividend-policy code (fund_dividend_policy) → the catalog's
+ * distribution vocabulary. Authoritative when present — prefer it over the
+ * Thai-text parsing of fund_class_detail (classifyDistribution), which stays
+ * as the fallback for the ~20% of classes without a landed code.
+ */
+export function distributionFromDividendPolicy(
+  code: string | null | undefined,
+): "dividend" | "accumulating" | null {
+  switch (code?.trim().toUpperCase()) {
+    case "Y":
+      return "dividend";
+    case "N":
+      return "accumulating";
+    default:
+      return null;
+  }
+}
+
 // exchange_rate_protection_policy (Thai label, free-ish text with parentheticals)
 // → normalized FX-hedging policy, matched by prefix on the leading Thai phrase;
 // the raw label stays verbatim in sec_raw. Observed values (live probe):

@@ -10,11 +10,12 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { getMarketDb } from "../db/context";
 import { type ShareClassInsert, upsertShareClasses } from "../db/queries/share-classes";
-import { fundCatalog, fundFees } from "../db/schema";
+import { fundCatalog, fundDividendPolicy, fundFees } from "../db/schema";
 import {
   classifyDistribution,
   classifyInvestorType,
   classifyTaxIncentive,
+  distributionFromDividendPolicy,
 } from "../market/fund-classify";
 import { TER_FEE_TYPE } from "../market/fund-fees";
 import { enumerateShareClasses } from "../market/providers/sec-thailand";
@@ -72,6 +73,22 @@ export async function refreshShareClasses(
       .map((r) => r.id),
   );
 
+  // Formal factsheet dividend-policy codes per (projId, className) — landed by
+  // the catalog transform (which runs before this job on the nightly schedule).
+  // Authoritative where present; the Thai-text parse below stays the fallback.
+  const divPolicyByKey = new Map(
+    getMarketDb()
+      .select({
+        projId: fundDividendPolicy.projId,
+        className: fundDividendPolicy.fundClassName,
+        code: fundDividendPolicy.dividendPolicy,
+      })
+      .from(fundDividendPolicy)
+      .all()
+      .filter((r) => r.code)
+      .map((r) => [`${r.projId}:${r.className}`, r.code as string]),
+  );
+
   const rows: ShareClassInsert[] = [];
   const seenTickers = new Set<string>();
   let skippedNoParent = 0;
@@ -98,7 +115,9 @@ export async function refreshShareClasses(
       className,
       ticker,
       classDetailTh: p.fund_class_detail ?? null,
-      distributionPolicy: classifyDistribution(p.fund_class_detail),
+      distributionPolicy:
+        distributionFromDividendPolicy(divPolicyByKey.get(`${p.proj_id}:${className}`)) ??
+        classifyDistribution(p.fund_class_detail),
       investorType: classifyInvestorType(p.fund_class_detail),
       taxIncentiveType: classifyTaxIncentive(p.fund_class_tax_incentive_type),
       isinCode: p.fund_class_isin_code ?? null,

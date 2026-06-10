@@ -15,6 +15,11 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Accumulating vs dividend classification now uses the formal factsheet
+  code.** The catalog and share classes previously parsed Thai class-detail
+  text, which only caught explicit wording; the formal dividend-policy code
+  (landed nightly) is now preferred with the text parse as fallback — coverage
+  jumped from ~600 to ~3,900 funds, so far more rows carry correct ACC/DIV tags.
 - **Fund catalog gains derived region, sector, and index-family facets.** Each
   fund now carries a geographic focus (thailand / us / japan / china / global…),
   a sector/theme focus (technology / gold / property…), and the index family it

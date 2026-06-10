@@ -48,6 +48,7 @@ import {
   classifyInvestRegion,
   classifyTaxIncentive,
   deriveAssetClass,
+  distributionFromDividendPolicy,
   statusFromSec,
   stripPolicyHtml,
 } from "../market/fund-classify";
@@ -88,6 +89,7 @@ export function profileToFundInsert(
   p: SecFundProfile,
   aum?: AumSnapshot | null,
   rsCode?: string | null,
+  dividendPolicyCode?: string | null,
 ): FundInsert {
   const secStatus = p.fund_status ?? null;
   const feederMaster = p.feederfund_master_fund ?? null;
@@ -111,7 +113,10 @@ export function profileToFundInsert(
     riskSpectrum: rsCode ?? null,
     managementStyle: p.management_style ?? null,
     taxIncentiveType: classifyTaxIncentive(p.fund_class_tax_incentive_type),
-    distributionPolicy: classifyDistribution(p.fund_class_detail),
+    // Formal factsheet code first (authoritative), Thai-text parsing as fallback.
+    distributionPolicy:
+      distributionFromDividendPolicy(dividendPolicyCode) ??
+      classifyDistribution(p.fund_class_detail),
     investRegion: classifyInvestRegion(p.invest_country_flag),
     isFeederFund: !!feederMaster,
     feederMasterFund: feederMaster,
@@ -369,6 +374,18 @@ export function transformFundCatalog(): TransformFundCatalogResult {
     if (it.proj_id && it.risk_spectrum) rsByProj.set(it.proj_id, it.risk_spectrum);
   }
 
+  // Formal dividend-policy codes per (projId, class) — small items, read up
+  // front so the profiles pass below can prefer them over Thai-text parsing.
+  const divPolicyByKey = new Map<string, string>();
+  for (const it of readSecRawItems<SecDividendPolicyItem>(SEC_ENDPOINTS.dividendPolicy)) {
+    if (it.proj_id && it.dividend_policy?.trim()) {
+      divPolicyByKey.set(
+        `${it.proj_id}:${it.fund_class_name ?? "main"}`,
+        it.dividend_policy.trim(),
+      );
+    }
+  }
+
   // 1. Catalog rows from landed profiles (one landed row per fund), streamed —
   // profile payloads carry the long investment-policy text, so they're read
   // per fund here and again in the facet pass rather than held throughout.
@@ -377,7 +394,14 @@ export function transformFundCatalog(): TransformFundCatalogResult {
   for (const projId of profileIds) {
     const p = readSecRawItemFor<SecFundProfile>(SEC_ENDPOINTS.profiles, projId);
     if (!p?.proj_id) continue;
-    upsertFund(profileToFundInsert(p, aumByProj.get(p.proj_id) ?? null, rsByProj.get(p.proj_id)));
+    upsertFund(
+      profileToFundInsert(
+        p,
+        aumByProj.get(p.proj_id) ?? null,
+        rsByProj.get(p.proj_id),
+        divPolicyByKey.get(`${p.proj_id}:${p.fund_class_name ?? "main"}`),
+      ),
+    );
     fundsUpserted++;
   }
 
