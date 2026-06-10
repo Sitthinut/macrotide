@@ -277,6 +277,44 @@ describe("findFunds", () => {
     });
   });
 
+  it("indexType='index' matches only PN/PM, same set as the deprecated indexOnly", () => {
+    withDb(() => {
+      upsertFund(fund("AM1", { managementStyle: "AM" }));
+      upsertFund(fund("PN1", { managementStyle: "PN" }));
+      upsertFund(fund("PM1", { managementStyle: "PM" }));
+      upsertFund(fund("NOSTYLE", { managementStyle: null }));
+      upsertFundFees([ter("AM1", 1.2), ter("PN1", 0.3), ter("PM1", 0.4), ter("NOSTYLE", 0.5)]);
+      const viaIndexType = findFunds({ indexType: "index" }).map((f) => f.projId);
+      expect(viaIndexType.sort()).toEqual(["PM1", "PN1"]);
+      const viaIndexOnly = findFunds({ indexOnly: true }).map((f) => f.projId);
+      expect(viaIndexOnly.sort()).toEqual(viaIndexType.sort());
+    });
+  });
+
+  it("indexType='active' includes AM/SM/AN and NULL styles, excludes PN/PM", () => {
+    withDb(() => {
+      // NULL is the trap: SQL `NOT IN ('PN','PM')` is falsy for NULL, so the
+      // active bucket must OR an IS NULL — a fund with no published style is
+      // certainly not a verified index fund.
+      upsertFund(fund("AM2", { managementStyle: "AM" }));
+      upsertFund(fund("SM2", { managementStyle: "SM" }));
+      upsertFund(fund("AN2", { managementStyle: "AN" }));
+      upsertFund(fund("NULL2", { managementStyle: null }));
+      upsertFund(fund("PN2", { managementStyle: "PN" }));
+      upsertFund(fund("PM2", { managementStyle: "PM" }));
+      upsertFundFees([
+        ter("AM2", 1.2),
+        ter("SM2", 0.8),
+        ter("AN2", 0.9),
+        ter("NULL2", 0.7),
+        ter("PN2", 0.3),
+        ter("PM2", 0.4),
+      ]);
+      const ids = findFunds({ indexType: "active" }).map((f) => f.projId);
+      expect(ids.sort()).toEqual(["AM2", "AN2", "NULL2", "SM2"]);
+    });
+  });
+
   it("taxIncentive filter restricts to the given wrapper", () => {
     withDb(() => {
       upsertFund(fund("SSF1", { taxIncentiveType: "SSF" }));
@@ -421,6 +459,28 @@ describe("getCheaperAlternatives", () => {
       const alts = getCheaperAlternatives("GLOBAL-EQ").map((f) => f.projId);
       expect(alts).toEqual(["GLOBAL-EQ-CHEAP"]);
       expect(alts).not.toContain("DOMESTIC-EQ");
+    });
+  });
+
+  it("does NOT cross the index/active boundary (no active 'alternative' to an index fund)", () => {
+    withDb(() => {
+      // Held: an index fund. A cheaper ACTIVE fund of the same class+region is a
+      // different product, not a cheaper version of the same exposure. And the
+      // reverse: an index fund is not a like-for-like swap for an active one.
+      upsertFund(fund("IDX-HELD", { managementStyle: "PN", investRegion: "foreign" }));
+      upsertFund(fund("ACT-CHEAP", { managementStyle: "AM", investRegion: "foreign" }));
+      upsertFund(fund("IDX-CHEAP", { managementStyle: "PM", investRegion: "foreign" }));
+      upsertFundFees([ter("IDX-HELD", 0.8), ter("ACT-CHEAP", 0.2), ter("IDX-CHEAP", 0.4)]);
+      const alts = getCheaperAlternatives("IDX-HELD").map((f) => f.projId);
+      expect(alts).toEqual(["IDX-CHEAP"]);
+      expect(alts).not.toContain("ACT-CHEAP");
+
+      // Reverse direction: held active fund, cheaper index peer must not show.
+      upsertFund(fund("ACT-HELD", { managementStyle: "AM", investRegion: "foreign" }));
+      upsertFundFees([ter("ACT-HELD", 1.5)]);
+      const actAlts = getCheaperAlternatives("ACT-HELD").map((f) => f.projId);
+      expect(actAlts).toEqual(["ACT-CHEAP"]);
+      expect(actAlts).not.toContain("IDX-CHEAP");
     });
   });
 

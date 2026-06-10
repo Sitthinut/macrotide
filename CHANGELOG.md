@@ -15,12 +15,21 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Explore filters index vs active funds.** The screener's "Index funds only"
+  toggle became an **Index / Active** chip pair, so actively-managed funds are
+  now a first-class filter too. The facet derives on read from the SEC
+  management style (PM passive, PN feeder-of-passive = index; everything else,
+  including unpublished styles, = active) and filters in SQL on the indexed
+  column. `/api/fund-classes` and `/api/funds` accept `indexType=index|active`
+  (`indexOnly=1` still works), each share-class row carries `indexType`, and
+  fee-creep cheaper-alternatives no longer cross the index/active boundary — an
+  active fund is never offered as a cheaper version of an index fund or vice
+  versa.
 - **Broker-synced holdings are marked in the portfolio.** A holding imported
   from a connected broker now shows a small sync icon beside its ticker in the
   holdings list. The signal is reliable — it keys off the broker import's dedup
   marker on the ledger, so a manually-entered holding that merely names a broker
   in its free-text source is not flagged.
-
 - **Broker connectors handle header-auth APIs and several brokers at once.** The
   connector SDK gained a `transport` block so a broker whose data API lives on a
   different origin and authenticates with request headers (an `Authorization`

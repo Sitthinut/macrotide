@@ -6,6 +6,7 @@ import {
   classifyInvestRegion,
   classifyTaxIncentive,
   deriveAssetClass,
+  indexTypeFromManagementStyle,
   inferAssetClass,
   isIndexStyle,
   shouldFetchFees,
@@ -108,6 +109,28 @@ describe("isIndexStyle", () => {
     expect(isIndexStyle("PM")).toBe(true);
     expect(isIndexStyle("AM")).toBe(false);
     expect(isIndexStyle(null)).toBe(false);
+  });
+
+  it("keeps near-passive and exotic styles out of the index bucket", () => {
+    expect(isIndexStyle("SM")).toBe(false); // enhanced index — not pure passive
+    expect(isIndexStyle("AN")).toBe(false); // feeder of an ACTIVE master
+    expect(isIndexStyle("BH")).toBe(false);
+    expect(isIndexStyle("IM")).toBe(false); // inverse
+    expect(isIndexStyle("LN")).toBe(false); // leveraged feeder
+    expect(isIndexStyle("OT")).toBe(false);
+    expect(isIndexStyle(undefined)).toBe(false);
+  });
+});
+
+describe("indexTypeFromManagementStyle", () => {
+  it("maps pure passive to 'index' and everything else (incl. unknown) to 'active'", () => {
+    expect(indexTypeFromManagementStyle("PN")).toBe("index");
+    expect(indexTypeFromManagementStyle("PM")).toBe("index");
+    expect(indexTypeFromManagementStyle("AM")).toBe("active");
+    expect(indexTypeFromManagementStyle("SM")).toBe("active");
+    expect(indexTypeFromManagementStyle("BH")).toBe("active");
+    expect(indexTypeFromManagementStyle(null)).toBe("active");
+    expect(indexTypeFromManagementStyle(undefined)).toBe("active");
   });
 });
 

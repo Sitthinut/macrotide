@@ -147,9 +147,13 @@ export const fundCatalog = sqliteTable(
     // Short Thai asset-type label from the SEC (ตราสารหนี้ / ตราสารทุน / ผสม /
     // ทรัพย์สินทางเลือก) — the source for `assetClass` inference.
     policyDescTh: text("policy_desc_th"),
-    // Management style: 'AM' active | 'PN' passive/index-tracking | 'SM'
-    // systematic | 'PM' passive multi-factor | 'BH' buy-and-hold (fixed term).
-    // 'PN' is the index-fund marker — core to the index-investor filter.
+    // Management style, per the SEC v2 profiles spec: 'AM' active | 'AN' feeder
+    // of an active master | 'PM' passive/index-tracking | 'PN' feeder of a
+    // passive master | 'SM' index-tracking with occasional alpha (enhanced
+    // index) | 'BH' buy-and-hold (fixed term) | 'IM'/'IN' inverse |
+    // 'LM'/'LN' leveraged | 'OT' other | NULL not published.
+    // PM/PN are the index-fund markers — core to the index-investor filter
+    // (see isIndexStyle / indexTypeFromManagementStyle in fund-classify.ts).
     managementStyle: text("management_style"),
     // Tax-advantaged wrapper, if any: 'SSF' | 'ThaiESG' | NULL. Primary driver
     // for Thai retail investors.
