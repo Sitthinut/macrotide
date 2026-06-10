@@ -10,7 +10,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { freshMarketDb } from "@/tests/db-helpers";
-import { type DbContext, getMarketDb, runWithDbContext } from "../context";
+import { type DbContext, getDb, getMarketDb, runWithDbContext } from "../context";
 import * as schema from "../schema";
 import { createBucket } from "./buckets";
 import { getHolding, listHoldings, renameHoldingSource } from "./holdings";
@@ -18,6 +18,7 @@ import {
   createHoldingViaLedger,
   deleteHoldingViaLedger,
   editHoldingViaLedger,
+  rebuildHoldingsForBucket,
 } from "./project-holdings";
 
 function freshDb() {
@@ -251,6 +252,72 @@ describe("holding catalog enrichment", () => {
           .where(eq(schema.holdings.id, h?.id as number))
           .get(),
       ).toBeUndefined();
+    });
+  });
+});
+
+// A holding is "synced" only when a backing ledger row carries a non-null
+// external_id (the marker only broker imports stamp) — a hand-typed `source`
+// that merely names a broker must NOT qualify. These lock in that reliable
+// detection plus the broker label + last-synced timestamp surfaced to the UI.
+describe("syncedBroker detection", () => {
+  /** Insert a broker-imported buy (external_id set) and rebuild the projection. */
+  function seedSynced(
+    bucketId: string,
+    ticker: string,
+    opts: { source: string | null; sourceTag: string; account: string; ref: string },
+  ) {
+    getDb()
+      .insert(schema.transactions)
+      .values({
+        bucketId,
+        ticker,
+        englishName: ticker,
+        quoteSource: "thai_mutual_fund",
+        kind: "buy",
+        tradeDate: "2026-01-01",
+        units: 10,
+        pricePerUnit: 10,
+        amount: -100,
+        tradeCurrency: "THB",
+        fxToThb: 1,
+        source: opts.source,
+        externalId: `${opts.sourceTag}:${opts.account}:${opts.ref}`,
+        externalAccount: opts.account,
+        importBatchId: "test-sync",
+      })
+      .run();
+    rebuildHoldingsForBucket(bucketId);
+  }
+
+  it("flags a broker-imported holding with its broker label, not a manual one", () => {
+    runWithDbContext(ctx(), () => {
+      createBucket({ ...BUCKET, id: "b1" });
+      seedSynced("b1", "EXAMPLE-FUND-A", {
+        source: "Finnomena",
+        sourceTag: "finnomena",
+        account: "AC-001",
+        ref: "ord-1",
+      });
+      // Manual holding whose free-text source merely *names* a broker (no external_id).
+      seedHolding("b1", "EXAMPLE-FUND-B", "Finnomena");
+
+      const bySym = new Map(listHoldings("b1").map((h) => [h.ticker, h]));
+      expect(bySym.get("EXAMPLE-FUND-A")?.syncedBroker).toBe("Finnomena");
+      expect(bySym.get("EXAMPLE-FUND-B")?.syncedBroker).toBeNull();
+    });
+  });
+
+  it("falls back to the sourceTag when the synced row has no source label", () => {
+    runWithDbContext(ctx(), () => {
+      createBucket({ ...BUCKET, id: "b1" });
+      seedSynced("b1", "EXAMPLE-FUND-A", {
+        source: null,
+        sourceTag: "krungsri",
+        account: "AC-002",
+        ref: "ord-2",
+      });
+      expect(listHoldings("b1")[0].syncedBroker).toBe("krungsri");
     });
   });
 });

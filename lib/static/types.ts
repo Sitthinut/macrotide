@@ -39,6 +39,13 @@ export interface Holding {
    * holdings (color then falls back to asset class).
    */
   riskSpectrum?: string | null;
+  /**
+   * Broker name when this position was imported from a connected broker (e.g.
+   * "Finnomena"), else null/absent. Reliable — set only for holdings with
+   * broker-imported ledger rows, never from a hand-typed source. Drives the
+   * "synced" icon in the holdings list.
+   */
+  syncedBroker?: string | null;
 }
 
 export interface PerfPct {

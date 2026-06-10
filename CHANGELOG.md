@@ -15,6 +15,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Broker-synced holdings are marked in the portfolio.** A holding imported
+  from a connected broker now shows a small sync icon beside its ticker in the
+  holdings list. The signal is reliable — it keys off the broker import's dedup
+  marker on the ledger, so a manually-entered holding that merely names a broker
+  in its free-text source is not flagged.
+
 - **Broker connectors handle header-auth APIs and several brokers at once.** The
   connector SDK gained a `transport` block so a broker whose data API lives on a
   different origin and authenticates with request headers (an `Authorization`

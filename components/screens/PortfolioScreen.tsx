@@ -11,6 +11,7 @@ import { Icon } from "@/components/Icon";
 import { AllocationDonut, DriftBars, NavChart } from "@/components/InteractiveCharts";
 import { Modal } from "@/components/Modal";
 import { PrivateAmount } from "@/components/PrivateAmount";
+import { SyncedIcon } from "@/components/SyncedBadge";
 import { KebabMenu } from "@/components/ui/KebabMenu";
 import {
   useModelPortfoliosView,
@@ -1673,7 +1674,12 @@ export function PortfolioScreen({
                   {swatchAbbr(h.ticker)}
                 </div>
                 <div style={{ minWidth: 0 }}>
-                  <div className="name">{h.ticker}</div>
+                  <div className="name" style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {h.ticker}
+                    </span>
+                    {h.syncedBroker && <SyncedIcon broker={h.syncedBroker} />}
+                  </div>
                   <div className="sub">
                     {h.category} · {pct.toFixed(1)}%
                   </div>
