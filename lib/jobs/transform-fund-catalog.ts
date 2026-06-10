@@ -19,10 +19,12 @@ import {
 import { readSecRaw, readSecRawItems, SEC_ENDPOINTS } from "../db/queries/sec-raw";
 import {
   classifyDistribution,
+  classifyFxHedging,
   classifyInvestRegion,
   classifyTaxIncentive,
   deriveAssetClass,
   statusFromSec,
+  stripPolicyHtml,
 } from "../market/fund-classify";
 import { normalizeFeeType, type SecFundFeeItem } from "../market/fund-fees";
 import type { SecFundProfile, SecRiskSpectrumItem } from "../market/providers/sec-thailand";
@@ -53,6 +55,11 @@ export function profileToFundInsert(
 ): FundInsert {
   const secStatus = p.fund_status ?? null;
   const feederMaster = p.feederfund_master_fund ?? null;
+  const isFixedTerm = p.proj_term_flag === "Y";
+  // Term components only mean anything on fixed-term funds — the SEC sends 0s
+  // elsewhere, which would read as a "0-day term" rather than "open-ended".
+  const term = (n: number | null | undefined) =>
+    isFixedTerm && n != null && Number.isFinite(Number(n)) ? Number(n) : null;
 
   const insert: FundInsert = {
     projId: p.proj_id,
@@ -72,8 +79,18 @@ export function profileToFundInsert(
     investRegion: classifyInvestRegion(p.invest_country_flag),
     isFeederFund: !!feederMaster,
     feederMasterFund: feederMaster,
-    isFixedTerm: p.proj_term_flag === "Y",
+    // Master-fund DOMICILE (where it's registered) — kept as data, but never a
+    // region signal: a Luxembourg/Ireland UCITS master can invest anywhere.
+    feederFundCountry: p.feederfund_country?.trim() || null,
+    investmentPolicyDesc: stripPolicyHtml(p.investment_policy_desc),
+    fxHedgingPolicy: classifyFxHedging(p.exchange_rate_protection_policy),
+    isFixedTerm,
+    termYears: term(p.proj_term_year),
+    termMonths: term(p.proj_term_month),
+    termDays: term(p.proj_term_day),
     initDate: p.init_date ?? null,
+    regisDate: p.regis_date?.trim() || null,
+    cancelDate: p.cancel_date?.trim() || null,
     isinCode: p.fund_class_isin_code ?? null,
     secStatus,
     status: statusFromSec(secStatus),

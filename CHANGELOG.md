@@ -15,6 +15,14 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Fund catalog carries FX-hedging policy, full policy text, and lifecycle
+  dates.** The transform now maps profile fields that were already landed but
+  unused: a normalized FX-hedging policy (full / discretionary / partial /
+  none / per-class — hedged vs unhedged is a different product), the full
+  investment-policy text (HTML stripped; feeds search and Advisor context),
+  the master fund's domicile country for feeders, SEC registration and
+  cancellation dates, and the maturity duration of fixed-term funds. No new
+  API calls — a transform re-run over the landed raw data populates everything.
 - **Explore filters index vs active funds.** The screener's "Index funds only"
   toggle became an **Index / Active** chip pair, so actively-managed funds are
   now a first-class filter too. The facet derives on read from the SEC

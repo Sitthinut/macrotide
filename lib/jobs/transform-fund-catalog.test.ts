@@ -210,6 +210,43 @@ describe("profileToFundInsert", () => {
       isinCode: null,
     });
   });
+
+  it("maps the enrichment fields: FX policy, stripped policy text, dates, feeder country", () => {
+    const insert = profileToFundInsert(
+      makeProfile({
+        exchange_rate_protection_policy: "ทั้งหมด (fully hedged) (95%-105% ของมูลค่าความเสี่ยง)",
+        investment_policy_desc: "<p>ลงทุนใน&nbsp;ETF ต่างประเทศ</p>\n<p>ไม่น้อยกว่า 80%</p>",
+        feederfund_master_fund: "EXAMPLE MASTER UCITS",
+        feederfund_country: "ลักเซมเบิร์ก",
+        regis_date: "2019-01-16",
+        cancel_date: null,
+      }),
+    );
+    expect(insert).toMatchObject({
+      fxHedgingPolicy: "full",
+      investmentPolicyDesc: "ลงทุนใน ETF ต่างประเทศ ไม่น้อยกว่า 80%",
+      feederFundCountry: "ลักเซมเบิร์ก",
+      regisDate: "2019-01-16",
+      cancelDate: null,
+    });
+  });
+
+  it("maps term components only for fixed-term funds (0s elsewhere stay null)", () => {
+    const fixed = profileToFundInsert(
+      makeProfile({ proj_term_flag: "Y", proj_term_year: 0, proj_term_month: 6, proj_term_day: 0 }),
+    );
+    expect(fixed).toMatchObject({ isFixedTerm: true, termYears: 0, termMonths: 6, termDays: 0 });
+
+    const openEnded = profileToFundInsert(
+      makeProfile({ proj_term_flag: "N", proj_term_year: 0, proj_term_month: 0, proj_term_day: 0 }),
+    );
+    expect(openEnded).toMatchObject({
+      isFixedTerm: false,
+      termYears: null,
+      termMonths: null,
+      termDays: null,
+    });
+  });
 });
 
 // ─── Pure mapper: feeItemToFeeRow ───────────────────────────────────────────

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assetClassFromRiskSpectrum,
   classifyDistribution,
+  classifyFxHedging,
   classifyInvestorType,
   classifyInvestRegion,
   classifyTaxIncentive,
@@ -11,6 +12,7 @@ import {
   isIndexStyle,
   shouldFetchFees,
   statusFromSec,
+  stripPolicyHtml,
 } from "./fund-classify";
 
 describe("statusFromSec", () => {
@@ -204,5 +206,40 @@ describe("classifyInvestRegion", () => {
     expect(classifyInvestRegion("3")).toBe("mixed");
     expect(classifyInvestRegion("4")).toBe("domestic");
     expect(classifyInvestRegion("9")).toBeNull();
+  });
+});
+
+describe("classifyFxHedging", () => {
+  it("normalizes the Thai FX-protection labels, tolerating trailing detail", () => {
+    expect(classifyFxHedging("ทั้งหมด")).toBe("full");
+    expect(classifyFxHedging("ทั้งหมด/เกือบทั้งหมด")).toBe("full");
+    expect(classifyFxHedging("ทั้งหมด (fully hedged) (95%-105% ของมูลค่าความเสี่ยง)")).toBe("full");
+    expect(classifyFxHedging("ดุลยพินิจ (dynamic hedging) (0%-105%)")).toBe("discretionary");
+    expect(classifyFxHedging("บางส่วน")).toBe("partial");
+    expect(classifyFxHedging("ไม่ป้องกัน")).toBe("none");
+    expect(classifyFxHedging("กำหนดในระดับชนิดหน่วยลงทุน")).toBe("per-class");
+  });
+
+  it("returns null for empty/unknown labels", () => {
+    expect(classifyFxHedging(null)).toBeNull();
+    expect(classifyFxHedging("")).toBeNull();
+    expect(classifyFxHedging("   ")).toBeNull();
+    expect(classifyFxHedging("something else")).toBeNull();
+  });
+});
+
+describe("stripPolicyHtml", () => {
+  it("strips tags and entities, collapses whitespace", () => {
+    expect(stripPolicyHtml("<p>ลงทุนใน&nbsp;ETF</p>\n<p>ไม่น้อยกว่า  80%</p>")).toBe(
+      "ลงทุนใน ETF ไม่น้อยกว่า 80%",
+    );
+    expect(stripPolicyHtml("plain text")).toBe("plain text");
+    expect(stripPolicyHtml("a &amp; b &lt;c&gt;")).toBe("a & b <c>");
+  });
+
+  it("returns null for empty input or tags-only markup", () => {
+    expect(stripPolicyHtml(null)).toBeNull();
+    expect(stripPolicyHtml("")).toBeNull();
+    expect(stripPolicyHtml("<p>   </p>")).toBeNull();
   });
 });

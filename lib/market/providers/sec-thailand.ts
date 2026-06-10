@@ -421,10 +421,24 @@ export interface SecFundProfile {
   invest_country_flag?: string | null;
   /** Master fund name if this is a feeder fund; null/undefined otherwise. */
   feederfund_master_fund?: string | null;
+  /** Country where the master fund is registered (Thai name) — its DOMICILE, not mandate. */
+  feederfund_country?: string | null;
+  /** Full investment-policy text (HTML). Richer than the short policy_desc label. */
+  investment_policy_desc?: string | null;
+  /** FX-hedging policy, Thai label (ทั้งหมด / ดุลยพินิจ / บางส่วน / ไม่ป้องกัน / …). */
+  exchange_rate_protection_policy?: string | null;
   /** 'Y' if the fund has a fixed maturity date. */
   proj_term_flag?: string | null;
+  /** Maturity duration components for fixed-term funds (0 when not applicable). */
+  proj_term_year?: number | null;
+  proj_term_month?: number | null;
+  proj_term_day?: number | null;
   /** Fund inception date (ISO date string). */
   init_date?: string | null;
+  /** SEC registration date (ISO date string; distinct from inception). */
+  regis_date?: string | null;
+  /** Cancellation date for dead funds (ISO date string). */
+  cancel_date?: string | null;
   /** ISIN code (~30% coverage). */
   fund_class_isin_code?: string | null;
   /** Share-class name (e.g. 'A', 'B', 'main'). Used only for symbol resolution. */
