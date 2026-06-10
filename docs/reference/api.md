@@ -35,7 +35,7 @@ themselves are the source of truth for exact request/response shapes.
 
 | Route | Methods | Purpose |
 |---|---|---|
-| `/api/quotes` | GET | Latest NAV / price quotes for tickers |
+| `/api/quotes` | GET | Latest NAV / price quotes for tickers; `refresh=1` re-fetches through the provider chain, `refresh=1&mine=1` derives the refs from the caller's holdings server-side |
 | `/api/market/indices` | GET | SET + global index levels and deltas |
 | `/api/market/news` | GET | Market news (RSS) |
 | `/api/admin/refresh-market` | GET, POST | Trigger a market data refresh (admin) |

@@ -91,6 +91,28 @@ function overlayLive(rows: HoldingRow[]): Holding[] {
   return out;
 }
 
+/**
+ * The distinct `{source, ticker}` quote refs of every held instrument —
+ * metadata rows only, no ledger fold. Cheap enough for a hot request path:
+ * the quotes-refresh route uses it to derive the user's refs server-side so
+ * the client doesn't have to fetch holdings first (request waterfall).
+ */
+export function listHeldQuoteRefs(): { source: string; ticker: string }[] {
+  const rows = getDb()
+    .select({ ticker: holdings.ticker, source: holdings.quoteSource })
+    .from(holdings)
+    .all();
+  const seen = new Set<string>();
+  const out: { source: string; ticker: string }[] = [];
+  for (const r of rows) {
+    const key = `${r.source}:${r.ticker}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ source: r.source, ticker: r.ticker });
+  }
+  return out;
+}
+
 export function listHoldings(bucketId?: string): Holding[] {
   const q = getDb().select().from(holdings);
   const rows = (bucketId ? q.where(eq(holdings.bucketId, bucketId)) : q).all();

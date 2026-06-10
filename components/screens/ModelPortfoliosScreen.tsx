@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ModelDonut } from "@/components/charts";
 import { Icon } from "@/components/Icon";
+import { SkeletonRows } from "@/components/ui/Skeleton";
 import { useModelPortfoliosView } from "@/lib/fetchers/legacy";
 import { invalidate } from "@/lib/fetchers/swr";
 import { modelPortfolioToInsert } from "@/lib/portfolio/adapter";
@@ -105,7 +106,7 @@ export function ModelPortfoliosScreen({
             <span>Templates</span>
           </div>
         </div>
-        <div style={{ padding: 24, color: "var(--muted)" }}>Loading…</div>
+        <SkeletonRows rows={3} height={88} padding="14px 16px" />
       </div>
     );
   }

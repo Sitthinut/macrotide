@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { ManageIndicatorsSheet } from "@/components/ManageIndicatorsSheet";
+import { SkeletonRows } from "@/components/ui/Skeleton";
 import {
   type MarketIndexResponse,
   type MarketNewsItem,
@@ -172,6 +173,10 @@ function MarketsTodayInner({
               ))}
             </div>
           </div>
+        ) : loading ? (
+          <div className="card" style={{ padding: 14 }}>
+            <SkeletonRows rows={4} height={44} gap={10} padding={0} />
+          </div>
         ) : (
           <div
             className="card"
@@ -182,7 +187,7 @@ function MarketsTodayInner({
               fontSize: 13,
             }}
           >
-            {loading ? "Loading market data…" : "Market data is unavailable right now."}
+            Market data is unavailable right now.
           </div>
         )}
       </div>
@@ -206,19 +211,7 @@ function MarketsNewsSection() {
         </span>
       </div>
       <div className="card" style={{ padding: "4px 14px" }}>
-        {isLoading && (
-          <div
-            style={{
-              padding: 12,
-              fontSize: 12,
-              color: "var(--muted)",
-              fontFamily: "var(--font-mono)",
-              letterSpacing: "0.02em",
-            }}
-          >
-            Loading headlines…
-          </div>
-        )}
+        {isLoading && <SkeletonRows rows={3} height={34} gap={10} padding="12px 0" />}
         {!isLoading && allFailed && (
           <div
             style={{

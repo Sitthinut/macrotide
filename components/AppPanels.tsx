@@ -7,6 +7,7 @@ import { type CSSProperties, type ReactNode, useEffect, useState } from "react";
 import { ChatThreadList } from "@/components/ChatThreadList";
 import { Icon } from "@/components/Icon";
 import { ChatScreen, type SeedPrompt } from "@/components/screens/ChatScreen";
+import { SkeletonRows } from "@/components/ui/Skeleton";
 import {
   useJournalView,
   useModelPortfoliosView,
@@ -300,7 +301,7 @@ export function PortfoliosPanel({ onClose }: { onClose: () => void }) {
       <PanelHeader title="Portfolios" onClose={onClose} />
       <PanelScrollBody style={{ padding: "10px 14px 14px" }}>
         {isLoading || !portfolios ? (
-          <div style={{ padding: 12, color: "var(--muted)", fontSize: 12.5 }}>Loading…</div>
+          <SkeletonRows rows={3} height={56} padding={0} />
         ) : order.length === 0 ? (
           <div style={{ padding: 12, color: "var(--muted)", fontSize: 12.5 }}>
             No portfolios yet.
@@ -363,8 +364,8 @@ export function PlanPanel({ onClose }: { onClose: () => void }) {
     return (
       <>
         <PanelHeader title="Plan & Health" onClose={onClose} />
-        <PanelScrollBody style={{ padding: 16, color: "var(--muted)", fontSize: 12.5 }}>
-          Loading…
+        <PanelScrollBody style={{ padding: 16 }}>
+          <SkeletonRows rows={4} height={42} padding={0} />
         </PanelScrollBody>
       </>
     );

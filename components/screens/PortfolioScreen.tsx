@@ -8,11 +8,12 @@ import { FundDetailSheet } from "@/components/FundDetailSheet";
 import { type HoldingFormValues, HoldingSheet } from "@/components/HoldingSheet";
 import { RecentActivityPeek } from "@/components/history/RecentActivityPeek";
 import { Icon } from "@/components/Icon";
-import { AllocationDonut, DriftBars, NavChart } from "@/components/InteractiveCharts";
+import { AllocationDonut, DriftBars, NavChart } from "@/components/InteractiveChartsLazy";
 import { Modal } from "@/components/Modal";
 import { PrivateAmount } from "@/components/PrivateAmount";
 import { SyncedIcon } from "@/components/SyncedBadge";
 import { KebabMenu } from "@/components/ui/KebabMenu";
+import { Skeleton, SkeletonRows } from "@/components/ui/Skeleton";
 import {
   useModelPortfoliosView,
   usePortfolioView,
@@ -762,7 +763,12 @@ export function PortfolioScreen({
             <span>Macrotide</span>
           </div>
         </div>
-        <div style={{ padding: 24, color: "var(--muted)" }}>Loading…</div>
+        <div style={{ padding: "20px 16px" }} aria-hidden>
+          <Skeleton width="42%" height={30} />
+          <Skeleton width="26%" height={13} style={{ marginTop: 8 }} />
+          <Skeleton height={130} style={{ marginTop: 18 }} />
+          <SkeletonRows rows={4} height={52} padding="18px 0 0" />
+        </div>
       </div>
     );
   }

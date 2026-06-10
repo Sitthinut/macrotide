@@ -14,6 +14,7 @@ import { EventLine } from "@/components/history/EventLine";
 import { Icon } from "@/components/Icon";
 import { SymbolCombobox } from "@/components/portfolio/SymbolCombobox";
 import { QtyInput, qtyDefaultMode } from "@/components/ui/QtyInput";
+import { Skeleton, SkeletonRows } from "@/components/ui/Skeleton";
 import { Stat } from "@/components/ui/Stat";
 import { mergeWithHoldings, type TickerSuggestion } from "@/lib/data/known-holdings";
 import type { Transaction } from "@/lib/db/queries/transactions";
@@ -125,7 +126,7 @@ export interface HistoryListProps {
 }
 
 export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: HistoryListProps) {
-  const { data: allTxns } = useResource<Transaction[]>("/api/transactions");
+  const { data: allTxns, isLoading: txnsLoading } = useResource<Transaction[]>("/api/transactions");
   const { data: analytics } = useResource<AnalyticsResponse>(
     `/api/transactions/analytics${ticker ? `?ticker=${encodeURIComponent(ticker)}` : ""}`,
   );
@@ -297,6 +298,23 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
     (allTxns ?? []).filter(
       (t) => t.ticker === a.ticker && t.id !== a.id && t.tradeDate >= a.tradeDate,
     ).length;
+
+  // Without this branch the empty-state ("Your record is empty") flashes on
+  // every mount while the statement is still in flight.
+  if (txnsLoading && !hasTxns) {
+    return (
+      <div aria-hidden>
+        {showRecap && (
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} height={62} style={{ flex: 1 }} />
+            ))}
+          </div>
+        )}
+        <SkeletonRows rows={6} height={44} gap={6} padding={0} />
+      </div>
+    );
+  }
 
   if (!hasTxns) {
     return (

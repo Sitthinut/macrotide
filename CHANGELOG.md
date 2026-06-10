@@ -56,6 +56,21 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   fee-creep cheaper-alternatives no longer cross the index/active boundary — an
   active fund is never offered as a cheaper version of an index fund or vice
   versa.
+- **The app loads with an instant feel everywhere.** First paint no longer
+  waits on an external fonts stylesheet (fonts are self-hosted with the build)
+  or a blank page while the client bundle downloads (a boot spinner paints
+  immediately). The charting library is code-split out of the initial bundle
+  and loads on demand behind chart-shaped placeholders. Every screen shows a
+  content-shaped loading skeleton instead of plain "Loading…" text (the
+  statement no longer flashes its empty state while loading). Chart range
+  switches and screener filter changes redraw from the previous data instead
+  of blanking. The Explore screen warms the top rows' fund detail and NAV
+  series in the background, so the first fund-detail open is instant. The
+  portfolio's live quote refresh derives its tickers server-side
+  (`/api/quotes?refresh=1&mine=1`) and fires in parallel with the holdings
+  fetch instead of waiting behind it, and a tab refocus no longer refires
+  every active data request at once.
+
 - **Broker-synced holdings are marked in the portfolio.** A holding imported
   from a connected broker now shows a small sync icon beside its ticker in the
   holdings list. The signal is reliable — it keys off the broker import's dedup

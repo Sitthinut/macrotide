@@ -1,6 +1,6 @@
 "use client";
 
-import useSWR, { mutate as globalMutate } from "swr";
+import useSWR, { mutate as globalMutate, preload, type SWRConfiguration } from "swr";
 
 async function fetcher<T>(url: string): Promise<T> {
   const res = await fetch(url);
@@ -12,8 +12,17 @@ async function fetcher<T>(url: string): Promise<T> {
   return res.json();
 }
 
-export function useResource<T>(key: string | null) {
-  return useSWR<T>(key, fetcher);
+export function useResource<T>(key: string | null, config?: SWRConfiguration<T>) {
+  return useSWR<T>(key, fetcher, config);
+}
+
+/**
+ * Warm the SWR cache for a key before any component subscribes to it, so the
+ * eventual `useResource(key)` mount renders instantly from cache. Errors are
+ * swallowed — a failed prefetch just means the real mount pays the fetch.
+ */
+export function prefetchResource(key: string) {
+  preload(key, fetcher).catch(() => {});
 }
 
 export function invalidate(key: string | RegExp) {

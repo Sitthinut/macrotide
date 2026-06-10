@@ -9,9 +9,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
-import { NavChart } from "@/components/InteractiveCharts";
+import { NavChart } from "@/components/InteractiveChartsLazy";
 import { Modal } from "@/components/Modal";
 import { KebabMenu } from "@/components/ui/KebabMenu";
+import { Skeleton, SkeletonRows } from "@/components/ui/Skeleton";
 import type {
   FeederLookThroughHoldingRow,
   FeederMasterMapRow,
@@ -1000,18 +1001,19 @@ function LookThroughSection({
 // ─── Loading / error states ───────────────────────────────────────────────────
 
 function LoadingState() {
+  // Sheet-shaped placeholder: title block, range pills, chart, info rows.
   return (
-    <div
-      style={{
-        padding: "32px 0",
-        textAlign: "center",
-        color: "var(--muted)",
-        fontFamily: "var(--font-mono)",
-        fontSize: 12,
-        letterSpacing: "0.04em",
-      }}
-    >
-      Loading…
+    <div aria-hidden>
+      <Skeleton width="58%" height={18} />
+      <Skeleton width="36%" height={12} style={{ marginTop: 8 }} />
+      <div style={{ display: "flex", gap: 6, marginTop: 18 }}>
+        {[44, 44, 44, 44].map((w, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder list
+          <Skeleton key={i} width={w} height={22} radius={11} />
+        ))}
+      </div>
+      <Skeleton height={140} style={{ marginTop: 12 }} />
+      <SkeletonRows rows={3} height={44} padding="16px 0 0" />
     </div>
   );
 }
