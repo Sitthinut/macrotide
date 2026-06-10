@@ -174,13 +174,21 @@ async function main() {
         return;
       }
       const terPct = h.ter ?? 0;
-      holdings[key] = buildHoldingSeries({
+      const valueSeries = buildHoldingSeries({
         seedKey: key,
         index,
         terPct,
         currentValue: h.value,
         wobbleAmp: wobbleAmpForTer(terPct),
       });
+      // The fixture stores PER-UNIT NAV (same shape as a market.db nav_history
+      // row): the demo ledger replays units over time, so the read path computes
+      // value = units(date) × nav — a total-value series would double-count the
+      // unit story. Scale the built total-value series by the seeded unit count.
+      holdings[key] = valueSeries.map((p) => ({
+        date: p.date,
+        value: Math.round((p.value / h.units) * 1e4) / 1e4,
+      }));
     }
   }
 
@@ -237,7 +245,7 @@ function renderFixture(data: {
 /** A committed point: [ISO YYYY-MM-DD date, value]. */
 export type EncodedPoint = [string, number];
 
-/** Per-holding series (integer THB total value), keyed by \`\${quoteSource}:\${ticker}\`. */
+/** Per-holding PER-UNIT NAV series (THB), keyed by \`\${quoteSource}:\${ticker}\` — same shape as a market.db nav_history row. The demo ledger replays units over time; value = units(date) × this nav. */
 export const DEMO_HOLDING_HISTORY: Record<string, EncodedPoint[]> = {
 ${block(data.holdings)}
 };

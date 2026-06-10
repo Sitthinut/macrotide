@@ -23,12 +23,113 @@ import {
 } from "../db/schema";
 import type * as appSchema from "../db/schema/app";
 import { MODEL_PORTFOLIOS, PORTFOLIOS, USER_GOALS, USER_JOURNAL, USER_PLAN } from "./data";
+import { demoHoldingSeries } from "./demo-history-read";
 
 type Db = ReturnType<typeof drizzle<typeof appSchema>>;
 const REFERENCE_TODAY = new Date("2026-05-21T00:00:00Z");
 
 // All demo seed holdings are Thai mutual funds, per the existing seed.
 const DEMO_QUOTE_SOURCE = "thai_mutual_fund" as const;
+
+/** One ledger row of the persona's trade history. */
+interface StoryLeg {
+  kind: "buy" | "sell";
+  tradeDate: string;
+  units: number;
+  /** Signed THB (buy negative, sell positive). */
+  amount: number;
+}
+
+const round4 = (n: number): number => Math.round(n * 1e4) / 1e4;
+
+/**
+ * The persona's DATED trade history for one holding — the value-over-time
+ * chart REPLAYS the ledger (a position contributes nothing before its first
+ * event), so a believable demo needs believable trades, not an opening anchor
+ * stamped "today" (that would collapse the 5-year chart to a single point).
+ *
+ * Default story: one buy on the holding's first fixture date at the seeded
+ * cost (terminal units and avg cost stay exactly data.ts's). The first
+ * portfolio gets flavour that exercises the replay machinery end-to-end:
+ *   • holding[0]: bought in two tranches (a DCA step on the contribution line),
+ *   • holding[1]: bought 10% heavy, trimmed mid-history at the then-current
+ *     fixture NAV (a realized gain),
+ *   • holding[2]: the trim's proceeds re-deployed a week later (a fund switch —
+ *     in-transit settlement cash, no external flow).
+ * Every story still folds to data.ts's terminal unit count.
+ */
+function storyLegs(
+  portfolioIndex: number,
+  holdingIndex: number,
+  h: { ticker: string; units: number; cost: number },
+  siblings: { ticker: string; units: number; cost: number }[],
+): StoryLeg[] {
+  const nav = (ticker: string) => demoHoldingSeries(`${DEMO_QUOTE_SOURCE}:${ticker}`);
+  const series = nav(h.ticker);
+  // No fixture series → a plain dated buy; the chart prices it from the trade.
+  const FALLBACK_START = "2022-06-01";
+  const start = series?.[0]?.date ?? FALLBACK_START;
+  const single: StoryLeg[] = [{ kind: "buy", tradeDate: start, units: h.units, amount: -h.cost }];
+  if (portfolioIndex !== 0 || !series || series.length < 12) return single;
+
+  if (holdingIndex === 0) {
+    // DCA: 60% at inception, 40% a third of the way through the history.
+    const mid = series[Math.floor(series.length / 3)];
+    return [
+      { kind: "buy", tradeDate: start, units: round4(h.units * 0.6), amount: -h.cost * 0.6 },
+      { kind: "buy", tradeDate: mid.date, units: round4(h.units * 0.4), amount: -h.cost * 0.4 },
+    ];
+  }
+
+  if (holdingIndex === 1 || holdingIndex === 2) {
+    // The switch pair: trim holding[1] mid-history, redeploy into holding[2].
+    const seller = siblings[1];
+    const buyer = siblings[2];
+    const sellerSeries = seller ? nav(seller.ticker) : null;
+    const buyerSeries = buyer ? nav(buyer.ticker) : null;
+    if (seller && buyer && sellerSeries && buyerSeries) {
+      const m = Math.floor(sellerSeries.length / 2);
+      const sellPoint = sellerSeries[m];
+      const rebuyPoint = buyerSeries.find((p) => p.date > sellPoint.date) ?? null;
+      const trimUnits = round4(seller.units * 0.1);
+      const proceeds = round4(trimUnits * sellPoint.value);
+      const rebuyUnits = rebuyPoint ? round4(proceeds / rebuyPoint.value) : 0;
+      const safe =
+        rebuyPoint !== null &&
+        proceeds > 0 &&
+        proceeds < buyer.cost * 0.4 &&
+        rebuyUnits < buyer.units * 0.4;
+      if (safe && holdingIndex === 1) {
+        return [
+          {
+            kind: "buy",
+            tradeDate: start,
+            units: round4(h.units + trimUnits),
+            amount: -(h.cost * (1 + trimUnits / h.units)),
+          },
+          { kind: "sell", tradeDate: sellPoint.date, units: trimUnits, amount: proceeds },
+        ];
+      }
+      if (safe && holdingIndex === 2) {
+        return [
+          {
+            kind: "buy",
+            tradeDate: start,
+            units: round4(h.units - rebuyUnits),
+            amount: -(h.cost - proceeds),
+          },
+          {
+            kind: "buy",
+            tradeDate: (rebuyPoint as { date: string }).date,
+            units: rebuyUnits,
+            amount: -proceeds,
+          },
+        ];
+      }
+    }
+  }
+  return single;
+}
 
 function parseRelativeDate(text: string, today = REFERENCE_TODAY): string {
   const rel = text.match(/^(\d+)\s+(day|days|week|weeks|month|months)\s+ago$/i);
@@ -72,7 +173,7 @@ export function seedDemoData(db: Db): void {
       .run();
   }
 
-  for (const p of PORTFOLIOS) {
+  for (const [portfolioIndex, p] of PORTFOLIOS.entries()) {
     db.insert(buckets)
       .values({
         id: p.id,
@@ -90,8 +191,7 @@ export function seedDemoData(db: Db): void {
       })
       .run();
 
-    for (const h of p.holdings) {
-      const avgCost = h.units > 0 ? h.cost / h.units : null;
+    for (const [holdingIndex, h] of p.holdings.entries()) {
       db.insert(holdings)
         .values({
           bucketId: p.id,
@@ -112,28 +212,31 @@ export function seedDemoData(db: Db): void {
           updatedAt: now,
         })
         .run();
-      // Matching `opening` anchor — the ledger is the source of truth and the
-      // holding above is its projection (ADR 0004).
-      db.insert(transactions)
-        .values({
-          bucketId: p.id,
-          ticker: h.ticker,
-          englishName: h.name,
-          quoteSource: DEMO_QUOTE_SOURCE,
-          kind: "opening",
-          tradeDate: now.slice(0, 10),
-          units: h.units,
-          pricePerUnit: avgCost,
-          amount: avgCost == null ? 0 : -(h.units * avgCost),
-          fee: null,
-          tradeCurrency: "THB",
-          fxToThb: 1,
-          source: h.source,
-          importBatchId: "seed-opening",
-          createdAt: now,
-          updatedAt: now,
-        })
-        .run();
+      // Dated trade history — the ledger is the source of truth and the holding
+      // above is its projection (ADR 0004). Real dates matter: the value chart
+      // replays the ledger, so these legs ARE the persona's 5-year story.
+      for (const leg of storyLegs(portfolioIndex, holdingIndex, h, p.holdings)) {
+        db.insert(transactions)
+          .values({
+            bucketId: p.id,
+            ticker: h.ticker,
+            englishName: h.name,
+            quoteSource: DEMO_QUOTE_SOURCE,
+            kind: leg.kind,
+            tradeDate: leg.tradeDate,
+            units: leg.units,
+            pricePerUnit: leg.units > 0 ? round4(Math.abs(leg.amount) / leg.units) : null,
+            amount: leg.amount,
+            fee: null,
+            tradeCurrency: "THB",
+            fxToThb: 1,
+            source: h.source,
+            importBatchId: "seed-history",
+            createdAt: now,
+            updatedAt: now,
+          })
+          .run();
+      }
     }
   }
 
