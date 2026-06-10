@@ -1,15 +1,22 @@
 "use client";
 
-// Settings → Connections: the broker LOGIN (account) on the outside, its
-// portfolios nested inside. Account-level Sync + Disconnect; per-portfolio you
+// Settings → Connections: one card per connected broker (its accounts nested
+// inside), in configured order. Broker-level Sync + Disconnect; per-portfolio you
 // only remap (merge = point two accounts at one portfolio). One login syncs all
-// accounts, so there's no "connect another." Setup (installing the userscript)
-// is the "Install connector" link / the Add-sheet banner / empty-state CTA.
-// Disconnect rotates the import token (kills the old script) — no separate reset.
+// of a broker's accounts. Setup (installing a userscript) is the "Connect
+// another broker" / "Install connector" link, the Add-sheet banner, or the
+// empty-state CTA — all open the Connect wizard (which picks the broker).
+// Disconnecting a broker drops its accounts; the shared import token is only
+// rotated (killing every installed script) when nothing is left connected.
 
 import { useState } from "react";
 import { Modal } from "@/components/Modal";
-import { type Bucket, useBrokerConfig, useBuckets } from "@/lib/fetchers/portfolio";
+import {
+  type BrokerConnectorInfo,
+  type Bucket,
+  useBrokerConnectors,
+  useBuckets,
+} from "@/lib/fetchers/portfolio";
 import { invalidate, useResource } from "@/lib/fetchers/swr";
 import { fmtRelativeDate } from "@/lib/format";
 
@@ -31,33 +38,53 @@ const CONNECTIONS_KEY = "/api/import/broker/connections";
 async function refresh() {
   await Promise.all([
     invalidate(CONNECTIONS_KEY),
-    invalidate("/api/import/broker/token"),
+    invalidate("/api/import/broker/connectors"),
     invalidate("/api/buckets"),
     invalidate(/^\/api\/holdings/),
     invalidate(/^\/api\/transactions/),
   ]);
 }
 
+interface BrokerGroup {
+  source: string;
+  info?: BrokerConnectorInfo;
+  rows: ConnectionRow[];
+}
+
 export function BrokerConnections({ onConnect }: { onConnect: () => void }) {
-  const { data: cfg } = useBrokerConfig();
+  const { data: connectors } = useBrokerConnectors();
   const { data: conns } = useResource<ConnectionRow[]>(CONNECTIONS_KEY);
   const { data: buckets } = useBuckets();
-  const [disconnecting, setDisconnecting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState<{ source: string; name: string } | null>(null);
 
-  // Not configured for this deployment → keep the original placeholder.
-  if (cfg && !cfg.installUrl) return <Placeholder />;
+  // Configured connectors loaded but none → not set up for this deployment.
+  if (connectors && connectors.length === 0) return <Placeholder />;
 
-  const broker = cfg?.displayName || "your broker";
   const rows = conns ?? [];
+  const multi = (connectors?.length ?? 0) > 1;
 
-  // Empty state: one connect = all accounts (single connection model).
+  // Empty state: nothing synced yet. One connect brings every account of a broker.
   if (rows.length === 0) {
+    const only = connectors?.length === 1 ? connectors[0] : null;
+    // Names of the brokers this deployment supports (from the configured
+    // connectors — never hardcoded).
+    const supportedText = new Intl.ListFormat("en", { style: "long", type: "conjunction" }).format(
+      (connectors ?? []).map((c) => c.displayName),
+    );
     return (
       <div className="card" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ fontSize: 13, fontWeight: 500 }}>Sync {broker} automatically</div>
+        <div style={{ fontSize: 13, fontWeight: 500 }}>
+          Sync {only ? only.displayName : "your brokers"} automatically
+        </div>
         <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
           Import your full order history and keep it up to date — no manual entry. One connect
           brings every account.
+          {supportedText && (
+            <>
+              <br />
+              Supported brokers: {supportedText}.
+            </>
+          )}
         </div>
         <button
           type="button"
@@ -65,12 +92,78 @@ export function BrokerConnections({ onConnect }: { onConnect: () => void }) {
           style={{ alignSelf: "flex-start" }}
           onClick={onConnect}
         >
-          Connect {broker}
+          {only ? `Connect ${only.displayName}` : "Connect a broker"}
         </button>
       </div>
     );
   }
 
+  // Group synced accounts by broker (source), in configured order; any source
+  // without a matching connector (e.g. one since removed) trails behind.
+  const bySource = new Map<string, ConnectionRow[]>();
+  for (const r of rows) {
+    const g = bySource.get(r.source);
+    if (g) g.push(r);
+    else bySource.set(r.source, [r]);
+  }
+  const groups: BrokerGroup[] = [];
+  const seen = new Set<string>();
+  for (const c of connectors ?? []) {
+    const rs = bySource.get(c.source);
+    if (rs) {
+      groups.push({ source: c.source, info: c, rows: rs });
+      seen.add(c.source);
+    }
+  }
+  for (const [source, rs] of bySource) {
+    if (!seen.has(source)) groups.push({ source, rows: rs });
+  }
+
+  return (
+    <>
+      {groups.map((g) => (
+        <BrokerCard
+          key={g.source}
+          group={g}
+          buckets={buckets ?? []}
+          onDisconnect={() =>
+            setDisconnecting({ source: g.source, name: g.info?.displayName ?? g.source })
+          }
+        />
+      ))}
+
+      <div style={{ marginTop: 8, padding: "0 4px" }}>
+        <button type="button" className="btn ghost sm" onClick={onConnect}>
+          {multi ? "Connect another broker" : "Install connector"}
+        </button>
+      </div>
+
+      {disconnecting && (
+        <DisconnectModal
+          broker={disconnecting.name}
+          source={disconnecting.source}
+          onClose={() => setDisconnecting(null)}
+          onDone={async () => {
+            await refresh();
+            setDisconnecting(null);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function BrokerCard({
+  group,
+  buckets,
+  onDisconnect,
+}: {
+  group: BrokerGroup;
+  buckets: Bucket[];
+  onDisconnect: () => void;
+}) {
+  const { info, rows } = group;
+  const name = info?.displayName ?? group.source;
   const lastSynced =
     rows
       .map((r) => r.lastSyncedAt)
@@ -78,88 +171,62 @@ export function BrokerConnections({ onConnect }: { onConnect: () => void }) {
       .sort()
       .at(-1) ?? null;
   const syncHref =
-    cfg?.openUrl && rows[0]
-      ? `${cfg.openUrl}?account_code=${encodeURIComponent(rows[0].accountCode)}`
-      : (cfg?.openUrl ?? undefined);
+    info?.openUrl && rows[0]
+      ? `${info.openUrl}?account_code=${encodeURIComponent(rows[0].accountCode)}`
+      : (info?.openUrl ?? undefined);
 
   return (
-    <>
-      <div className="card" style={{ padding: 0 }}>
-        {/* Login (account) header — mirrors the Account → Passkeys list */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-start",
-            gap: 8,
-            padding: "12px 14px",
-          }}
-        >
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 500, letterSpacing: "-0.01em" }}>
-              {broker}
-            </div>
-            {cfg?.accountLabel && (
-              <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 1 }}>
-                {cfg.accountLabel}
-              </div>
-            )}
-            <div
-              style={{
-                marginTop: 2,
-                fontSize: 11,
-                color: "var(--muted)",
-                fontFamily: "var(--font-mono)",
-              }}
-            >
-              {lastSynced ? `Synced ${fmtRelativeDate(lastSynced)}` : "Not synced yet"}
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-            {syncHref && (
-              <a className="btn ghost sm" href={syncHref} target="_blank" rel="noreferrer">
-                Sync
-              </a>
-            )}
-            <button
-              type="button"
-              className="btn ghost sm"
-              style={{ color: "var(--loss)", borderColor: "var(--loss)" }}
-              onClick={() => setDisconnecting(true)}
-            >
-              Disconnect
-            </button>
+    <div className="card" style={{ padding: 0, marginTop: 8 }}>
+      {/* Login (broker) header — mirrors the Account → Passkeys list */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 8,
+          padding: "12px 14px",
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 500, letterSpacing: "-0.01em" }}>{name}</div>
+          <div
+            style={{
+              marginTop: 2,
+              fontSize: 11,
+              color: "var(--muted)",
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            {lastSynced ? `Synced ${fmtRelativeDate(lastSynced)}` : "Not synced yet"}
           </div>
         </div>
-
-        {/* Portfolios (per broker account) */}
-        {rows.map((c) => (
-          <PortfolioRow
-            key={`${c.source}:${c.accountCode}`}
-            conn={c}
-            buckets={buckets ?? []}
-            holdings={c.holdings}
-          />
-        ))}
+        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          {syncHref && (
+            <a className="btn ghost sm" href={syncHref} target="_blank" rel="noreferrer">
+              Sync
+            </a>
+          )}
+          <button
+            type="button"
+            className="btn ghost sm"
+            style={{ color: "var(--loss)", borderColor: "var(--loss)" }}
+            onClick={onDisconnect}
+          >
+            Disconnect
+          </button>
+        </div>
       </div>
 
-      <div style={{ marginTop: 8, padding: "0 4px" }}>
-        <button type="button" className="btn ghost sm" onClick={onConnect}>
-          Install connector
-        </button>
-      </div>
-
-      {disconnecting && (
-        <DisconnectModal
-          broker={broker}
-          onClose={() => setDisconnecting(false)}
-          onDone={async () => {
-            await refresh();
-            setDisconnecting(false);
-          }}
+      {/* Portfolios (per broker account) */}
+      {rows.map((c) => (
+        <PortfolioRow
+          key={`${c.source}:${c.accountCode}`}
+          conn={c}
+          buckets={buckets}
+          holdings={c.holdings}
         />
-      )}
-    </>
+      ))}
+    </div>
   );
 }
 
@@ -287,10 +354,12 @@ function PortfolioRow({
 
 function DisconnectModal({
   broker,
+  source,
   onClose,
   onDone,
 }: {
   broker: string;
+  source: string;
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -302,7 +371,7 @@ function DisconnectModal({
       const res = await fetch(CONNECTIONS_KEY, {
         method: "DELETE",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ all: true, mode }),
+        body: JSON.stringify({ all: true, source, mode }),
       });
       if (!res.ok) throw new Error();
       onDone();

@@ -21,7 +21,7 @@ import { Combobox } from "@/components/ui/Combobox";
 import { QtyInput, qtyDefaultMode } from "@/components/ui/QtyInput";
 import { mergeWithHoldings, type TickerSuggestion } from "@/lib/data/known-holdings";
 import { mergeSourceSuggestions } from "@/lib/data/sources";
-import { useBrokerConfig, useBuckets, useHoldings } from "@/lib/fetchers/portfolio";
+import { useBrokerConnectors, useBuckets, useHoldings } from "@/lib/fetchers/portfolio";
 import { cachedQuoteSource, resolveQuoteSources } from "@/lib/fetchers/quote-source";
 import { invalidate, useResource } from "@/lib/fetchers/swr";
 import { readExifCapture } from "@/lib/image-exif";
@@ -264,7 +264,7 @@ export function RecordSheet({
 }: RecordSheetProps) {
   const { data: buckets } = useBuckets();
   const { data: holdings } = useHoldings();
-  const { data: brokerCfg } = useBrokerConfig();
+  const { data: brokerConnectors } = useBrokerConnectors();
   // CTA shows only when a broker is configured, you haven't connected yet, and
   // you haven't dismissed it (persisted).
   const { data: brokerConns } = useResource<unknown[]>("/api/import/broker/connections");
@@ -274,9 +274,12 @@ export function RecordSheet({
       setCtaDismissed(localStorage.getItem(BROKER_CTA_DISMISS_KEY) === "1");
     } catch {}
   }, []);
+  // One broker → name it; several → stay generic.
+  const brokerCtaLabel =
+    brokerConnectors?.length === 1 ? brokerConnectors[0].displayName : "your broker";
   const showBrokerCta =
     !!onConnectBroker &&
-    !!brokerCfg?.displayName &&
+    !!brokerConnectors?.length &&
     !ctaDismissed &&
     !(Array.isArray(brokerConns) && brokerConns.length > 0);
   const dismissBrokerCta = () => {
@@ -698,7 +701,7 @@ export function RecordSheet({
             <button type="button" className="import-cta__main" onClick={onConnectBroker}>
               <Icon name="download" size={14} />
               <span className="import-cta__text">
-                <strong>Import from {brokerCfg?.displayName} automatically</strong>
+                <strong>Import from {brokerCtaLabel} automatically</strong>
                 <span>Skip manual entry — connect once and it syncs.</span>
               </span>
             </button>

@@ -3756,6 +3756,9 @@ button.private-amt:focus-visible {
   font-size: 13px;
   font-weight: 500;
   padding-top: 3px;
+  /* The title is a <button> (clickable to jump steps) — inherit the app text
+     color so the todo-muted rule below still applies. */
+  color: inherit;
 }
 .import-step--todo .import-step__title {
   color: var(--muted);
@@ -3786,7 +3789,9 @@ button.private-amt:focus-visible {
 .import-app {
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 1px;
+  min-height: 44px;
   padding: 8px 10px;
   border-radius: var(--r-md);
   border: 1px solid var(--line-soft);
@@ -3804,6 +3809,55 @@ button.private-amt:focus-visible {
 }
 .import-app--rec {
   border-color: var(--accent);
+}
+/* Per-broker rows on the wizard's final step: status dot + name + Open. */
+.broker-rows {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.broker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+.broker-row + .broker-row {
+  border-top: 1px solid var(--line-soft);
+}
+.broker-row__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.broker-row__dot--synced {
+  background: var(--gain);
+}
+.broker-row__dot--idle {
+  background: transparent;
+  border: 1.5px solid var(--muted);
+}
+.broker-row__main {
+  flex: 1;
+  min-width: 0;
+}
+.broker-row__name {
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.broker-row__status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--font-mono);
 }
 .import-actions {
   display: flex;

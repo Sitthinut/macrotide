@@ -32,6 +32,23 @@ export function useBrokerConfig() {
   return useResource<BrokerConfig>("/api/import/broker/token");
 }
 
+/** One configured connector, for the multi-broker picker / grouped list. */
+export interface BrokerConnectorInfo {
+  id: string;
+  /** The tag stamped on imported rows — matches a connection's `source`. */
+  source: string;
+  displayName: string;
+  host: string;
+  openUrl: string | null;
+  loginUrl: string | null;
+  installUrl: string;
+}
+
+/** All configured connectors (empty array ⇒ none configured). */
+export function useBrokerConnectors() {
+  return useResource<BrokerConnectorInfo[]>("/api/import/broker/connectors");
+}
+
 export function useHoldings(bucketId?: string) {
   const key = bucketId ? `/api/holdings?bucket=${encodeURIComponent(bucketId)}` : "/api/holdings";
   return useResource<DbHolding[]>(key);
