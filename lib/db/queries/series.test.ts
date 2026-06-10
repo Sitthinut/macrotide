@@ -310,3 +310,194 @@ describe("getPortfolioSeries — hasDistributingHolding flag", () => {
     expect(hasDistributingHolding).toBe(true);
   });
 });
+
+// ——— Ledger replay (#140): the basket is the ledger, not current holdings ———
+
+/** Insert a raw ledger row; no holdings row needed (the chart is ledger-driven). */
+function seedTxn(
+  db: AppDb,
+  t: {
+    bucketId?: string;
+    ticker: string;
+    kind: string;
+    tradeDate: string;
+    units?: number | null;
+    amount: number;
+    value?: number | null;
+    pricePerUnit?: number | null;
+  },
+): void {
+  db.insert(transactions)
+    .values({
+      bucketId: t.bucketId ?? "core",
+      ticker: t.ticker,
+      englishName: t.ticker,
+      quoteSource: "thai_mutual_fund",
+      kind: t.kind,
+      tradeDate: t.tradeDate,
+      units: t.units ?? null,
+      pricePerUnit: t.pricePerUnit ?? null,
+      amount: t.amount,
+      value: t.value ?? null,
+      fee: null,
+      tradeCurrency: "THB",
+      fxToThb: 1,
+      importBatchId: "test-seed",
+    })
+    .run();
+}
+
+function dateDaysAgo(daysAgo: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - daysAgo);
+  return d.toISOString().slice(0, 10);
+}
+
+function navOn(key: string, date: string, nav: number): void {
+  marketDb.insert(navHistory).values({ ticker: key, date, nav }).run();
+  marketDb
+    .insert(fundQuotes)
+    .values({ ticker: key, nav, updatedAt: new Date().toISOString() })
+    .onConflictDoNothing()
+    .run();
+}
+
+describe("getPortfolioSeries — ledger replay (#140)", () => {
+  const KEY_A = "thai_mutual_fund:EXAMPLE-FUND-A";
+  const KEY_B = "thai_mutual_fund:EXAMPLE-FUND-B";
+
+  it("never back-projects: a mid-window buy contributes nothing before its date", async () => {
+    seedBucket(appDb);
+    seedNav(marketDb, KEY_A, [10, 11, 12]);
+    seedTxn(appDb, {
+      ticker: "EXAMPLE-FUND-A",
+      kind: "buy",
+      tradeDate: DATES[1],
+      units: 100,
+      amount: -1000,
+    });
+
+    const { aggregate, netInvested } = await run(() => getPortfolioSeries("1mo"));
+
+    // No point exists before the first ledger event — the old code drew
+    // 100 units across all three dates (the #140 false-step bug).
+    expect(aggregate.map((p) => p.date)).toEqual([DATES[1], DATES[2]]);
+    expect(aggregate.map((p) => p.value)).toEqual([1100, 1200]);
+    expect(netInvested.map((p) => p.value)).toEqual([1000, 1000]);
+  });
+
+  it("keeps an exited position in history (proceeds become in-transit cash)", async () => {
+    seedBucket(appDb);
+    seedHolding(appDb, { ticker: "EXAMPLE-FUND-A", quoteSource: "thai_mutual_fund", units: 10 });
+    seedNav(marketDb, KEY_A, [12, 12, 12]);
+    seedTxn(appDb, {
+      ticker: "EXAMPLE-FUND-A",
+      kind: "sell",
+      tradeDate: DATES[1],
+      units: 10,
+      amount: 120,
+    });
+
+    const { aggregate, cash } = await run(() => getPortfolioSeries("1mo"));
+
+    // Held on the first date; sold on the second — the recent proceeds stay as
+    // pending settlement cash instead of the position vanishing from history.
+    expect(aggregate.map((p) => p.value)).toEqual([120, 120, 120]);
+    expect(cash.map((p) => p.value)).toEqual([0, 120, 120]);
+  });
+
+  it("draws no dip across a fund switch, and contribution stays flat", async () => {
+    seedBucket(appDb);
+    const [d20, d10, d8, d5] = [dateDaysAgo(20), dateDaysAgo(10), dateDaysAgo(8), dateDaysAgo(5)];
+    navOn(KEY_A, d20, 10);
+    navOn(KEY_A, d10, 15);
+    navOn(KEY_B, d8, 20);
+    navOn(KEY_B, d5, 21);
+    seedTxn(appDb, {
+      ticker: "EXAMPLE-FUND-A",
+      kind: "buy",
+      tradeDate: d20,
+      units: 100,
+      amount: -1000,
+    });
+    seedTxn(appDb, {
+      ticker: "EXAMPLE-FUND-A",
+      kind: "sell",
+      tradeDate: d10,
+      units: 100,
+      amount: 1500,
+    });
+    seedTxn(appDb, {
+      ticker: "EXAMPLE-FUND-B",
+      kind: "buy",
+      tradeDate: d8,
+      units: 75,
+      amount: -1500,
+    });
+
+    const { aggregate, netInvested } = await run(() => getPortfolioSeries("1mo"));
+
+    // During the 2 transit days the proceeds ARE the value — no fake drawdown.
+    expect(aggregate.map((p) => p.value)).toEqual([1000, 1500, 1500, 1575]);
+    // The switch is internal: only the original buy is external money.
+    expect(netInvested.map((p) => p.value)).toEqual([1000, 1000, 1000, 1000]);
+  });
+
+  it("prices pre-coverage history from the ledger's own trade prices", async () => {
+    seedBucket(appDb);
+    seedNav(marketDb, KEY_A, [12, 12, 12]); // cached coverage = recent only
+    seedTxn(appDb, {
+      ticker: "EXAMPLE-FUND-A",
+      kind: "buy",
+      tradeDate: "2020-06-01",
+      units: 100,
+      amount: -1000, // implies 10 THB/unit on 2020-06-01
+    });
+
+    const { aggregate, estimatedThrough } = await run(() => getPortfolioSeries("max"));
+
+    expect(aggregate[0]).toEqual({ date: "2020-06-01", value: 1000 });
+    expect(aggregate.at(-1)?.value).toBe(1200);
+    // The pre-coverage stretch is flagged so the UI can caption it.
+    expect(estimatedThrough).toBe("2020-06-01");
+  });
+
+  it("derives a value-only Balance's units at its date and replays forward", async () => {
+    seedBucket(appDb);
+    seedNav(marketDb, KEY_A, [12, 12, 15]);
+    seedTxn(appDb, {
+      ticker: "EXAMPLE-FUND-A",
+      kind: "snapshot",
+      tradeDate: DATES[0],
+      units: null,
+      amount: 0,
+      value: 1200, // ÷ nav 12 → 100 units
+    });
+
+    const { aggregate, netInvested, estimatedThrough } = await run(() => getPortfolioSeries("1mo"));
+
+    expect(aggregate.map((p) => p.value)).toEqual([1200, 1200, 1500]);
+    // A restatement moves no cash — the contribution line doesn't budge.
+    expect(netInvested.map((p) => p.value)).toEqual([0, 0, 0]);
+    expect(estimatedThrough).toBeNull();
+  });
+
+  it("does not flag a date where only a tiny dust position is estimate-priced", async () => {
+    seedBucket(appDb);
+    // Big holding fully cache-priced; a ฿1 dust holding is trade-implied only
+    // (no cached NAV) — under the 2% materiality gate, so it must NOT caption
+    // the whole chart as estimated.
+    seedHolding(appDb, { ticker: "EXAMPLE-FUND-A", quoteSource: "thai_mutual_fund", units: 1000 });
+    seedNav(marketDb, KEY_A, [10, 10, 10]); // 10,000 THB, cache-priced
+    seedTxn(appDb, {
+      ticker: "EXAMPLE-FUND-B", // no cached NAV → trade-implied
+      kind: "buy",
+      tradeDate: DATES[0],
+      units: 1,
+      amount: -1, // ฿1 dust ≪ 2% of the book
+    });
+
+    const { estimatedThrough } = await run(() => getPortfolioSeries("1mo"));
+    expect(estimatedThrough).toBeNull();
+  });
+});

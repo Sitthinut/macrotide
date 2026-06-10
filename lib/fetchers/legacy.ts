@@ -93,7 +93,7 @@ export function usePortfolioView(range: SeriesRange = "6mo") {
   );
 
   const aggregate = useMemo(
-    () => (portfolios ? adaptAggregate(portfolios, series?.aggregate) : null),
+    () => (portfolios ? adaptAggregate(portfolios, series?.aggregate, series?.netInvested) : null),
     [portfolios, series],
   );
 
@@ -103,6 +103,11 @@ export function usePortfolioView(range: SeriesRange = "6mo") {
     // Portfolio-wide: does the book hold a dividend-paying fund? Used by the
     // performance-vs-index disclaimer. Defaults false until the series loads.
     hasDistributingHolding: series?.hasDistributingHolding ?? false,
+    // Latest date partly valued from trade-implied prices — drives the chart's
+    // estimate caption. Null = every plotted point is cache-priced.
+    estimatedThrough: series?.estimatedThrough ?? null,
+    // In-transit settlement cash per date (aggregate) for the tooltip note.
+    cashSeries: series?.cash ?? null,
     isLoading: !buckets || !holdings || !quotes,
     error: e1 ?? e2 ?? e3 ?? e4,
   };

@@ -107,9 +107,16 @@ export interface PortfolioSeriesPoint {
 export interface PortfolioSeriesResponse {
   aggregate: PortfolioSeriesPoint[];
   perBucket: Record<string, PortfolioSeriesPoint[]>;
+  /** Cumulative external money in (the contribution line), same dates as aggregate. */
+  netInvested: PortfolioSeriesPoint[];
+  netInvestedByBucket: Record<string, PortfolioSeriesPoint[]>;
+  /** In-transit settlement cash included in `aggregate` per date. */
+  cash: PortfolioSeriesPoint[];
   asOf: string | null;
   /** True if the book holds a dividend-paying fund (price line drops payouts). */
   hasDistributingHolding: boolean;
+  /** Latest plotted date partly valued from trade-implied prices (estimate caption). */
+  estimatedThrough: string | null;
 }
 
 export function usePortfolioSeries(range: SeriesRange = "6mo") {
