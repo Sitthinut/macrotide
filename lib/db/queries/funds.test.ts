@@ -20,6 +20,7 @@ import {
   getCheaperAlternatives,
   getCurrentFees,
   getCurrentTer,
+  updateFundFacets,
   upsertFund,
   upsertFundFees,
 } from "./funds";
@@ -494,6 +495,111 @@ describe("getCheaperAlternatives", () => {
       upsertFundFees([ter("NOREGION", 1.0), ter("FOREIGN-CHEAP", 0.2), ter("NOREGION-CHEAP", 0.5)]);
       const alts = getCheaperAlternatives("NOREGION").map((f) => f.projId);
       expect(alts).toEqual(["NOREGION-CHEAP"]);
+    });
+  });
+
+  it("excludes peers whose KNOWN region/sector focus differs; unknown stays compatible", () => {
+    withDb(() => {
+      // Held: a US-focused foreign fund. Same coarse investRegion all around —
+      // the finer facets decide. A japan-focused peer is out; an unknown-focus
+      // peer stays in (null = "we don't know", not "different").
+      updateFundFacets([]); // no-op: exercise the empty-batch guard
+      upsertFund(fund("US-HELD", { investRegion: "foreign" }));
+      upsertFund(fund("JP-CHEAP", { investRegion: "foreign" }));
+      upsertFund(fund("US-CHEAP", { investRegion: "foreign" }));
+      upsertFund(fund("UNKNOWN-CHEAP", { investRegion: "foreign" }));
+      upsertFund(fund("GOLD-CHEAP", { investRegion: "foreign" }));
+      upsertFundFees([
+        ter("US-HELD", 1.0),
+        ter("JP-CHEAP", 0.2),
+        ter("US-CHEAP", 0.4),
+        ter("UNKNOWN-CHEAP", 0.5),
+        ter("GOLD-CHEAP", 0.3),
+      ]);
+      updateFundFacets([
+        {
+          projId: "US-HELD",
+          regionFocus: "us",
+          regionFocusSource: "benchmark",
+          sectorFocus: null,
+          indexFamily: "S&P 500",
+          aimcCategory: null,
+        },
+        {
+          projId: "JP-CHEAP",
+          regionFocus: "japan",
+          regionFocusSource: "benchmark",
+          sectorFocus: null,
+          indexFamily: "TOPIX",
+          aimcCategory: null,
+        },
+        {
+          projId: "US-CHEAP",
+          regionFocus: "us",
+          regionFocusSource: "benchmark",
+          sectorFocus: null,
+          indexFamily: "S&P 500",
+          aimcCategory: null,
+        },
+        {
+          projId: "UNKNOWN-CHEAP",
+          regionFocus: null,
+          regionFocusSource: null,
+          sectorFocus: null,
+          indexFamily: null,
+          aimcCategory: null,
+        },
+        {
+          projId: "GOLD-CHEAP",
+          regionFocus: "us",
+          regionFocusSource: "benchmark",
+          sectorFocus: "gold",
+          indexFamily: null,
+          aimcCategory: null,
+        },
+      ]);
+      const alts = getCheaperAlternatives("US-HELD").map((f) => f.projId);
+      expect(alts).toContain("US-CHEAP");
+      expect(alts).toContain("UNKNOWN-CHEAP");
+      expect(alts).not.toContain("JP-CHEAP"); // known different region
+      expect(alts).not.toContain("GOLD-CHEAP"); // known different sector
+    });
+  });
+
+  it("findFunds filters on regionFocus / sectorFocus in SQL", () => {
+    withDb(() => {
+      upsertFund(fund("TH1"));
+      upsertFund(fund("US1"));
+      upsertFund(fund("GOLD1", { assetClass: "alternative" }));
+      upsertFundFees([ter("TH1", 0.3), ter("US1", 0.4), ter("GOLD1", 0.5)]);
+      updateFundFacets([
+        {
+          projId: "TH1",
+          regionFocus: "thailand",
+          regionFocusSource: "invest-flag",
+          sectorFocus: null,
+          indexFamily: "SET50",
+          aimcCategory: null,
+        },
+        {
+          projId: "US1",
+          regionFocus: "us",
+          regionFocusSource: "benchmark",
+          sectorFocus: null,
+          indexFamily: "S&P 500",
+          aimcCategory: null,
+        },
+        {
+          projId: "GOLD1",
+          regionFocus: null,
+          regionFocusSource: null,
+          sectorFocus: "gold",
+          indexFamily: null,
+          aimcCategory: null,
+        },
+      ]);
+      expect(findFunds({ regionFocus: "us" }).map((f) => f.projId)).toEqual(["US1"]);
+      expect(findFunds({ sectorFocus: "gold" }).map((f) => f.projId)).toEqual(["GOLD1"]);
     });
   });
 });

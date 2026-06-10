@@ -32,6 +32,8 @@ export const SEC_ENDPOINTS = {
   minimums: "factsheet/subscription-redemption-minimums",
   dividendPolicy: "factsheet/dividend-policy",
   dividendHistory: "daily-info/dividend-history",
+  // v1 FundFactsheet (separate optional subscription) — AIMC peer-group code.
+  aimcCategory: "v1/fund-compare",
 } as const;
 
 export type SecEndpoint = (typeof SEC_ENDPOINTS)[keyof typeof SEC_ENDPOINTS];

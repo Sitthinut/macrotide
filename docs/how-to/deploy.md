@@ -97,6 +97,13 @@ AI_MODELS=openrouter/free,openrouter/auto
 # Separate key so demo traffic never burns the owner quota (hardening item):
 DEMO_OPENROUTER_API_KEY=sk-or-...
 SEC_API_KEY=...     # same subscription key works in every environment
+# Optional crawl extra (uses SEC_API_KEY): adds the dividend-history bulk
+# sweep to the nightly catalog crawl (small, ~40 pages).
+# SEC_INGEST_DIVIDENDS=1
+# Optional, one-shot: legacy v1 FundFactsheet key (a SEPARATE subscription)
+# for the AIMC peer-group snapshot (scripts/backfill-aimc-v1.ts). The v1
+# portal retires 2026-06-30; not used by the running app or the nightly crawl.
+# SEC_V1_API_KEY=...
 OWNER_EMAIL=you@actual-email   # must match the passkey account you register
 # Real index levels (optional, free-tier). Unset ⇒ the chain falls back to the
 # Twelve Data ETF proxy → Yahoo. See reference/auth-and-providers.md.

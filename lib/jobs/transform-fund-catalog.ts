@@ -27,8 +27,10 @@ import {
   upsertFundSubscriptionMinimums,
 } from "../db/queries/fund-enrichment";
 import {
+  type FundFacetsUpdate,
   type FundFeeInsert,
   type FundInsert,
+  updateFundFacets,
   upsertFund,
   upsertFundFees,
 } from "../db/queries/funds";
@@ -42,6 +44,7 @@ import {
   statusFromSec,
   stripPolicyHtml,
 } from "../market/fund-classify";
+import { deriveFundFacets } from "../market/fund-facets";
 import { normalizeFeeType, type SecFundFeeItem } from "../market/fund-fees";
 import type {
   SecBenchmarkItem,
@@ -301,6 +304,10 @@ export interface TransformFundCatalogResult {
   fundsWithMinimums: number;
   fundsWithDividendPolicy: number;
   fundsWithDividendHistory: number;
+  /** Funds whose derived region focus was claimed (coverage of the facet). */
+  fundsWithRegionFocus: number;
+  /** Funds with an AIMC peer-group code (from the legacy v1 snapshot). */
+  fundsWithAimcCategory: number;
 }
 
 /**
@@ -409,6 +416,52 @@ export function transformFundCatalog(): TransformFundCatalogResult {
     upsertFundDividendHistory,
   );
 
+  // 4. Derived facets (region/sector focus + index family) — computed from the
+  // fund's benchmark strings (primary) with name/policy-text fallback, per
+  // lib/market/fund-facets.ts. Needs both the profiles and the landed
+  // benchmarks, so it runs last and writes via one batched update.
+  const benchStringsByProj = new Map<string, Array<{ seq: number; benchmark: string }>>();
+  for (const it of readSecRawItems<SecBenchmarkItem>(SEC_ENDPOINTS.benchmarks)) {
+    const row = benchmarkItemToRow(it);
+    if (!row) continue;
+    const list = benchStringsByProj.get(row.projId) ?? [];
+    list.push({ seq: row.groupSeq, benchmark: row.benchmark });
+    benchStringsByProj.set(row.projId, list);
+  }
+  // AIMC peer-group codes from the one-shot v1 snapshot (see
+  // scripts/backfill-aimc-v1.ts — the v1 portal retires mid-2026, so this is
+  // snapshot data, not a recurring crawl; absent rows simply claim nothing).
+  const aimcByProj = new Map<string, string>();
+  for (const row of readSecRaw(SEC_ENDPOINTS.aimcCategory)) {
+    try {
+      const code = (JSON.parse(row.payload) as { fund_compare?: string | null }).fund_compare;
+      if (code?.trim()) aimcByProj.set(row.projId, code.trim());
+    } catch {
+      // Skip an unparseable row; a snapshot re-run re-lands it.
+    }
+  }
+
+  const facetUpdates: Array<{ projId: string } & FundFacetsUpdate> = [];
+  let fundsWithRegionFocus = 0;
+  for (const p of profiles) {
+    if (!p.proj_id) continue;
+    const benchmarks = (benchStringsByProj.get(p.proj_id) ?? [])
+      .sort((a, b) => a.seq - b.seq)
+      .map((b) => b.benchmark);
+    const aimcCategory = aimcByProj.get(p.proj_id) ?? null;
+    const facets = deriveFundFacets({
+      benchmarks,
+      aimcCategory,
+      englishName: p.proj_name_en,
+      thaiName: p.proj_name_th,
+      feederMasterFund: p.feederfund_master_fund,
+      investRegion: classifyInvestRegion(p.invest_country_flag),
+    });
+    if (facets.regionFocus) fundsWithRegionFocus++;
+    facetUpdates.push({ projId: p.proj_id, ...facets, aimcCategory });
+  }
+  updateFundFacets(facetUpdates);
+
   // Drop the cached search index so the next search rebuilds over the fresh
   // catalog.
   invalidateFundIndex();
@@ -424,5 +477,7 @@ export function transformFundCatalog(): TransformFundCatalogResult {
     fundsWithMinimums,
     fundsWithDividendPolicy,
     fundsWithDividendHistory,
+    fundsWithRegionFocus,
+    fundsWithAimcCategory: aimcByProj.size,
   };
 }

@@ -15,6 +15,20 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Fund catalog gains derived region, sector, and index-family facets.** Each
+  fund now carries a geographic focus (thailand / us / japan / china / global…),
+  a sector/theme focus (technology / gold / property…), and the index family it
+  benchmarks ("SET50", "S&P 500", "MSCI ACWI"…). Fresh sources outrank frozen
+  ones: the declared factsheet benchmark first (blend rows must agree before a
+  region is claimed), the SEC domestic-mandate flag next, then the official
+  **AIMC peer-group category** as a gap-filler (snapshotted from the legacy v1
+  FundFactsheet API before its mid-2026 retirement — a one-shot script, not a
+  recurring crawl; the raw code is kept on each fund, but a never-updating
+  snapshot must not override living signals), and a fund-name gazetteer last —
+  each value records its source, and nothing is guessed (unknown stays null). Region
+  coverage on active funds: ~84%, up from ~38% by name keywords alone. Fee-creep
+  cheaper-alternatives now respect the facets: a Japan fund is never offered as
+  a cheaper version of a US fund, nor a gold fund for a diversified one.
 - **Nightly crawl lands fund benchmarks and factsheet statistics.** Two new
   bulk sweeps (same cheap paginated pattern as risk-spectrum, no per-fund
   calls) land every fund's declared benchmark index — which names the index,

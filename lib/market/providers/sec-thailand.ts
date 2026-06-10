@@ -736,6 +736,37 @@ export async function fetchDividendHistory(): Promise<SecDividendHistoryItem[]> 
   return secFetchPaginated<SecDividendHistoryItem>("/v2/fund/daily-info/dividend-history", {}, key);
 }
 
+// ─── v1 FundFactsheet (separate subscription) ────────────────────────────────
+// The AIMC peer-group category exists ONLY on the legacy v1 FundFactsheet API —
+// it has no v2 equivalent (verified against the v2 product catalog). Same host
+// and gateway, but a DIFFERENT subscription key (SEC_V1_API_KEY). Everything
+// here is optional: when the key isn't configured, the crawl simply skips it.
+
+/** Whether the optional v1 FundFactsheet subscription is configured. */
+export function hasV1ApiKey(): boolean {
+  return !!process.env.SEC_V1_API_KEY;
+}
+
+function v1ApiKey(): string {
+  const k = process.env.SEC_V1_API_KEY;
+  if (!k) {
+    throw new ProviderError("SEC_V1_API_KEY is not set", "sec-thailand");
+  }
+  return k;
+}
+
+export interface SecFundCompareItem {
+  /** AIMC peer-group code (e.g. "USEQ", "VIEQ", "EQLC", "CPM"); null = unclassified. */
+  fund_compare?: string | null;
+  fund_compare_link?: string | null;
+  last_upd_date?: string | null;
+}
+
+/** Fetch one fund's AIMC peer-group code from the v1 FundFactsheet API. */
+export async function fetchFundCompareV1(projId: string): Promise<SecFundCompareItem | null> {
+  return secFetch<SecFundCompareItem>(`/FundFactsheet/fund/${projId}/fund_compare`, v1ApiKey());
+}
+
 interface SecDailyNavRow {
   proj_id: string;
   nav_date: string;
