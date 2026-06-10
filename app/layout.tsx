@@ -1,5 +1,18 @@
 import type { Metadata, Viewport } from "next";
+import { Geist, Geist_Mono, IBM_Plex_Sans_Thai } from "next/font/google";
 import "./globals.css";
+
+// Self-hosted via next/font: fonts ship with the build, same-origin, so first
+// paint no longer waits on a render-blocking fonts.googleapis.com stylesheet.
+// globals.css consumes these variables inside --font-sans / --font-mono.
+const geist = Geist({ subsets: ["latin"], variable: "--font-geist" });
+const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
+const plexThai = IBM_Plex_Sans_Thai({
+  subsets: ["thai", "latin"],
+  weight: ["400", "500"],
+  variable: "--font-plex-thai",
+});
+const fontVariables = `${geist.variable} ${geistMono.variable} ${plexThai.variable}`;
 
 // Resolve absolute URLs for og:image / twitter:image. Without this, Next.js
 // falls back to http://localhost:3000 in prod and social scrapers can't fetch
@@ -38,16 +51,10 @@ const themeBootstrap = `(function(){try{var t=localStorage.getItem('macrotide-th
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className={fontVariables}>
       <head>
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: hardcoded constant, runs before hydration */}
         <script dangerouslySetInnerHTML={{ __html: themeBootstrap }} />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans+Thai:wght@400;500&display=swap"
-        />
       </head>
       <body>{children}</body>
     </html>

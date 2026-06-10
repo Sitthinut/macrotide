@@ -12,6 +12,7 @@ import {
   adaptPortfolios,
 } from "@/lib/portfolio/adapter";
 import {
+  type RefreshedQuote,
   type SeriesRange,
   useBuckets,
   useHoldings,
@@ -20,9 +21,8 @@ import {
   usePlan,
   usePortfolioSeries,
   useQuotes,
-  useRefreshedQuotes,
 } from "./portfolio";
-import { invalidate } from "./swr";
+import { invalidate, useResource } from "./swr";
 
 export function usePortfolioView(range: SeriesRange = "6mo") {
   const { data: buckets, error: e1 } = useBuckets();
@@ -30,20 +30,36 @@ export function usePortfolioView(range: SeriesRange = "6mo") {
   const { data: quotes, error: e3 } = useQuotes();
   const { data: series, error: e4 } = usePortfolioSeries(range);
 
-  // Live-refresh quotes for every held position. Cache hits return from the
-  // DB synchronously; misses trigger a network call through the provider
+  // Live-refresh quotes for every held position. The server derives the refs
+  // from the holdings metadata (`mine=1`), so this fires in parallel with the
+  // holdings fetch instead of waterfalling behind it. Cache hits return from
+  // the DB synchronously; misses trigger a network call through the provider
   // registry. Failures are tolerated — the cached quote (or avgCost fallback
   // inside the adapter) keeps the UI rendering.
-  const refs = useMemo(
+  const { data: refreshed } = useResource<RefreshedQuote[]>("/api/quotes?refresh=1&mine=1");
+
+  // The refs used to live in the SWR key, so an add/remove holding re-ran the
+  // refresh automatically. The fixed `mine=1` key needs the nudge: when the
+  // held set changes (not on first load), re-run so a newly added ticker gets
+  // its first quote without a reload.
+  const heldSig = useMemo(
     () =>
-      holdings && holdings.length > 0
-        ? holdings.map((h) => ({ source: h.quoteSource, ticker: h.ticker }))
-        : null,
+      holdings
+        ?.map((h) => `${h.quoteSource}:${h.ticker}`)
+        .sort()
+        .join(",") ?? null,
     [holdings],
   );
-  const { data: refreshed } = useRefreshedQuotes(refs);
+  const prevHeldSig = useRef<string | null>(null);
+  useEffect(() => {
+    if (heldSig == null) return;
+    if (prevHeldSig.current != null && prevHeldSig.current !== heldSig) {
+      invalidate("/api/quotes?refresh=1&mine=1");
+    }
+    prevHeldSig.current = heldSig;
+  }, [heldSig]);
 
-  // The series endpoint reads nav_history, which `useRefreshedQuotes` writes
+  // The series endpoint reads nav_history, which the quotes refresh writes
   // to as a side-effect. On a cold cache (e.g. a fresh demo session) the
   // series query lands before history exists, so SWR caches an empty result.
   // Re-invalidate once a refresh response arrives that wrote at least one

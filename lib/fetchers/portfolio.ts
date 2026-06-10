@@ -71,19 +71,6 @@ export interface RefreshedQuote extends QuoteRef {
   error?: string;
 }
 
-/**
- * Live-refresh quotes through the provider registry (Yahoo / Thai SEC / …).
- * Cache hits return from the DB; misses trigger a network call. Pass `null`
- * to skip. Each ref must carry both `source` (the quote_source value, e.g.
- * "market" or "thai_mutual_fund") and `ticker` (the bare user-visible code).
- */
-export function useRefreshedQuotes(refs: QuoteRef[] | null) {
-  const key = refs?.length
-    ? `/api/quotes?refresh=1&refs=${encodeURIComponent(refs.map((r) => `${r.source}:${r.ticker}`).join(","))}`
-    : null;
-  return useResource<RefreshedQuote[]>(key);
-}
-
 export function useModelPortfolios() {
   return useResource<DbModelPortfolio[]>("/api/models");
 }
@@ -119,8 +106,11 @@ export interface PortfolioSeriesResponse {
 }
 
 export function usePortfolioSeries(range: SeriesRange = "6mo") {
+  // keepPreviousData: a range switch redraws from the old curve instead of
+  // blanking the chart while the new range loads.
   return useResource<PortfolioSeriesResponse>(
     `/api/portfolios/series?range=${encodeURIComponent(range)}`,
+    { keepPreviousData: true },
   );
 }
 
@@ -144,10 +134,13 @@ export interface FundSeriesResponse {
  * the sheet is closed. Re-fetches when the range changes.
  */
 export function useFundSeries(projId: string | null, range: SeriesRange = "1y") {
+  // keepPreviousData: range switches keep the old curve on screen while the
+  // new range loads (the fund stays the same; a fund change still resets).
   return useResource<FundSeriesResponse>(
     projId
       ? `/api/funds/${encodeURIComponent(projId)}/series?range=${encodeURIComponent(range)}`
       : null,
+    { keepPreviousData: true },
   );
 }
 
@@ -228,7 +221,7 @@ export function useBenchmarkSeries(key: string | null, range: SeriesRange = "6mo
   const url = key
     ? `/api/market/benchmark?key=${encodeURIComponent(key)}&range=${encodeURIComponent(range)}`
     : null;
-  return useResource<BenchmarkSeriesResponse>(url);
+  return useResource<BenchmarkSeriesResponse>(url, { keepPreviousData: true });
 }
 
 // ─── Fee-creep ────────────────────────────────────────────────────────────────

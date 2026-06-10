@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
+import { listHeldQuoteRefs } from "@/lib/db/queries/holdings";
 import { listFundQuotes } from "@/lib/db/queries/quotes";
 import { getCachedSeries } from "@/lib/market/cache";
 import { quoteCacheKey } from "@/lib/market/sources";
@@ -23,11 +24,15 @@ interface QuoteResult {
  * matching keys (read-only, no network calls).
  * With `refresh=1`, dispatches each ref through its provider, populates
  * the cache, and returns normalized post-fetch state.
+ * With `refresh=1&mine=1`, derives the refs from the caller's holdings
+ * server-side — the client can fire this in parallel with its holdings
+ * fetch instead of waterfalling refs through it.
  */
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const refsParam = url.searchParams.get("refs");
   const refresh = url.searchParams.get("refresh") === "1";
+  const mine = url.searchParams.get("mine") === "1";
 
   const refs = refsParam
     ? refsParam
@@ -43,13 +48,14 @@ export async function GET(req: Request) {
     return withDb(() => NextResponse.json(listFundQuotes(keys.length ? keys : undefined)));
   }
 
-  if (refs.length === 0) {
+  if (refs.length === 0 && !mine) {
     return NextResponse.json({ error: "refs query parameter required" }, { status: 400 });
   }
 
   return withDb(async () => {
+    const targets = mine ? listHeldQuoteRefs() : refs;
     const results = await Promise.allSettled(
-      refs.map(async (ref): Promise<QuoteResult> => {
+      targets.map(async (ref): Promise<QuoteResult> => {
         const cached = await getCachedSeries(ref.source, ref.ticker, "6mo", "1d");
         if (!cached.quote) {
           return { ...ref, ok: false, error: "no data" };
@@ -67,7 +73,7 @@ export async function GET(req: Request) {
     const payload: QuoteResult[] = results.map((r, i) => {
       if (r.status === "fulfilled") return r.value;
       return {
-        ...refs[i],
+        ...targets[i],
         ok: false,
         error: r.reason instanceof Error ? r.reason.message : String(r.reason),
       };

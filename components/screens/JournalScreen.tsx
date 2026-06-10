@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { ModelDonut } from "@/components/charts";
 import { Icon } from "@/components/Icon";
+import { SkeletonRows } from "@/components/ui/Skeleton";
 import { authClient } from "@/lib/auth/client";
 import { useJournalView, useModelPortfoliosView, useSelectedModelId } from "@/lib/fetchers/legacy";
 import { usePlan } from "@/lib/fetchers/portfolio";
@@ -112,7 +113,7 @@ function JournalPlan({
   if (planLoading) {
     return (
       <div className="section" style={{ marginTop: 0 }}>
-        <div style={{ padding: 24, color: "var(--muted)" }}>Loading…</div>
+        <SkeletonRows rows={3} height={64} padding="12px 0" />
       </div>
     );
   }

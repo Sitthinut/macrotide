@@ -12,11 +12,12 @@
 // fees, and tax wrapper are all per class. A small demo seed ensures the list is
 // non-empty in demo mode before the daily SEC refresh has run.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FundDetailSheet } from "@/components/FundDetailSheet";
 import { Icon } from "@/components/Icon";
+import { Skeleton } from "@/components/ui/Skeleton";
 import type { ShareClassListItem } from "@/lib/db/queries/funds";
-import { useResource } from "@/lib/fetchers/swr";
+import { prefetchResource, useResource } from "@/lib/fetchers/swr";
 
 // ─── filter state ────────────────────────────────────────────────────────────
 
@@ -98,8 +99,13 @@ function useFunds(
   region: RegionFilter,
 ) {
   const url = buildUrl(assetClass, query, indexType, taxIncentive, region);
-  return useResource<ShareClassListItem[]>(url);
+  // keepPreviousData: typing or toggling a filter keeps the previous results
+  // on screen while the narrowed list loads, instead of flashing to empty.
+  return useResource<ShareClassListItem[]>(url, { keepPreviousData: true });
 }
+
+/** How many top rows get their detail + series warmed for instant opens. */
+const PREFETCH_ROWS = 6;
 
 // ─── TER colour ──────────────────────────────────────────────────────────────
 // TER is the controllable edge — the headline number on every row. Shown as
@@ -444,23 +450,34 @@ function FundRow({
 
 // ─── empty + loading states ───────────────────────────────────────────────────
 
+function FundListSkeleton() {
+  return (
+    <div aria-hidden style={{ padding: "2px 14px" }}>
+      {Array.from({ length: 7 }, (_, i) => (
+        <div
+          // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder list
+          key={i}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "12px 0",
+            borderBottom: "1px solid var(--line-soft)",
+          }}
+        >
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 7 }}>
+            <Skeleton width="52%" height={13} />
+            <Skeleton width="34%" height={10} />
+          </div>
+          <Skeleton width={62} height={22} radius={6} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function EmptyState({ query, isLoading }: { query: string; isLoading: boolean }) {
-  if (isLoading) {
-    return (
-      <div
-        style={{
-          padding: "24px 16px",
-          textAlign: "center",
-          color: "var(--muted)",
-          fontSize: 13,
-          fontFamily: "var(--font-mono)",
-          letterSpacing: "0.02em",
-        }}
-      >
-        Searching…
-      </div>
-    );
-  }
+  if (isLoading) return <FundListSkeleton />;
   return (
     <div
       style={{
@@ -596,6 +613,21 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
   }, [queryInput]);
 
   const { data: funds, isLoading } = useFunds(assetClass, query, indexType, taxIncentive, region);
+
+  // Warm the top rows' detail + 1y NAV series in the SWR cache so the first
+  // detail-sheet open paints instantly instead of paying a cold fetch. The
+  // session-scoped set keeps filter hopping from re-issuing the same warms.
+  const prefetched = useRef(new Set<string>());
+  useEffect(() => {
+    if (!funds) return;
+    for (const cls of funds.slice(0, PREFETCH_ROWS)) {
+      if (prefetched.current.has(cls.ticker)) continue;
+      prefetched.current.add(cls.ticker);
+      const id = encodeURIComponent(cls.ticker);
+      prefetchResource(`/api/funds/${id}`);
+      prefetchResource(`/api/funds/${id}/series?range=1y`);
+    }
+  }, [funds]);
 
   const handleAskAdvisor = (ticker: string) => {
     const prompt = `Tell me about ${ticker} — is it a good low-fee option for my portfolio, and are there cheaper alternatives?`;

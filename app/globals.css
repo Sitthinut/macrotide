@@ -3,10 +3,12 @@
 
 :root {
   /* Type */
+  /* Family names come from next/font variables set on <html> (app/layout.tsx);
+     literal names stay as fallbacks for environments without the variables. */
   --font-sans:
-    "Geist", -apple-system, BlinkMacSystemFont, "SF Pro Display", "IBM Plex Sans Thai", system-ui,
-    sans-serif;
-  --font-mono: "Geist Mono", ui-monospace, "SF Mono", monospace;
+    var(--font-geist, "Geist"), -apple-system, BlinkMacSystemFont, "SF Pro Display",
+    var(--font-plex-thai, "IBM Plex Sans Thai"), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono, "Geist Mono"), ui-monospace, "SF Mono", monospace;
 
   /* Light tokens (default) */
   --bg: #f8f8f9;
@@ -4167,5 +4169,59 @@ button.private-amt:focus-visible {
   .rec-edit.is-anchor,
   .rec-edit.is-flow {
     grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* ── Loading skeletons + boot shell ─────────────────────────────────────────
+   `.skeleton` is the app-wide shimmer placeholder (components/ui/Skeleton.tsx
+   and chart fallbacks). `.app-boot` paints while the client bundle downloads
+   (the dynamic() loading shell in components/ClientApp.tsx). */
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--card-soft);
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--line-soft), transparent);
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes skeleton-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.app-boot {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+}
+.app-boot::after {
+  content: "";
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  animation: app-boot-spin 0.8s linear infinite;
+}
+@keyframes app-boot-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after,
+  .app-boot::after {
+    animation: none;
   }
 }
