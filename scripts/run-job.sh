@@ -26,5 +26,9 @@ job="$1"
 shift
 cd "$(dirname "$0")/.." # repo root = the compose project dir
 
-exec docker compose run --rm --no-deps macrotide \
+# The compose service caps the container at 3GB, and node then defaults its
+# old-space to ~half of that — the catalog transform (≈800k fee rows + the
+# enrichment endpoints in one pass) OOMs at that ~1.5GB default. Pin the heap
+# just under the container cap so jobs use the memory they're actually given.
+exec docker compose run --rm --no-deps -e NODE_OPTIONS=--max-old-space-size=2560 macrotide \
   npx tsx --tsconfig tsconfig.scripts.json "scripts/${job}.ts" "$@"
