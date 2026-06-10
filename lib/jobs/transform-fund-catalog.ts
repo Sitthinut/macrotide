@@ -11,6 +11,22 @@
 // (refresh-share-classes) — it reads the fund_fees this transform writes.
 
 import {
+  type FundBenchmarkInsert,
+  type FundDividendHistoryInsert,
+  type FundDividendPolicyInsert,
+  type FundFactsheetUrlInsert,
+  type FundSpecificationInsert,
+  type FundStatisticsInsert,
+  type FundSubscriptionMinimumInsert,
+  upsertFundBenchmarks,
+  upsertFundDividendHistory,
+  upsertFundDividendPolicy,
+  upsertFundFactsheetUrls,
+  upsertFundSpecifications,
+  upsertFundStatistics,
+  upsertFundSubscriptionMinimums,
+} from "../db/queries/fund-enrichment";
+import {
   type FundFeeInsert,
   type FundInsert,
   upsertFund,
@@ -27,7 +43,17 @@ import {
   stripPolicyHtml,
 } from "../market/fund-classify";
 import { normalizeFeeType, type SecFundFeeItem } from "../market/fund-fees";
-import type { SecFundProfile, SecRiskSpectrumItem } from "../market/providers/sec-thailand";
+import type {
+  SecBenchmarkItem,
+  SecDividendHistoryItem,
+  SecDividendPolicyItem,
+  SecFactsheetUrlItem,
+  SecFundProfile,
+  SecFundSpecificationItem,
+  SecFundStatisticsItem,
+  SecRiskSpectrumItem,
+  SecSubscriptionMinimumItem,
+} from "../market/providers/sec-thailand";
 import { invalidateFundIndex } from "../search/fund-index";
 
 // ─── Pure mappers (raw SEC item → catalog insert shape) ─────────────────────
@@ -105,6 +131,140 @@ export function profileToFundInsert(
   return insert;
 }
 
+/** SEC figures arrive as strings ("24.63", "-0.02"); parse or null — never NaN. */
+function numOrNull(s: string | number | null | undefined): number | null {
+  if (s == null || s === "") return null;
+  const n = typeof s === "number" ? s : Number.parseFloat(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Map a verbatim SEC benchmark item to a `fund_benchmarks` row, or null when it names no benchmark. */
+export function benchmarkItemToRow(item: SecBenchmarkItem): FundBenchmarkInsert | null {
+  const benchmark = item.benchmark?.trim();
+  if (!item.proj_id || !benchmark) return null;
+  return {
+    projId: item.proj_id,
+    groupSeq: numOrNull(item.group_seq) ?? 1,
+    benchmark,
+    benchmarkRemark: item.benchmark_remark?.trim() || null,
+    startDate: item.start_date ?? null,
+    endDate: item.end_date ?? null,
+    prospectusType: item.prospectus_type ?? null,
+    lastUpdDate: item.last_upd_date ?? null,
+  };
+}
+
+/** Map a verbatim SEC statistics item to a `fund_statistics` row (parsing the string figures). */
+export function statisticsItemToRow(item: SecFundStatisticsItem): FundStatisticsInsert | null {
+  if (!item.proj_id) return null;
+  return {
+    projId: item.proj_id,
+    fundClassName: item.fund_class_name ?? "main",
+    portfolioTurnoverRatio: numOrNull(item.portfolio_turnover_ratio),
+    maximumDrawdown: numOrNull(item.maximum_drawdown),
+    sharpeRatio: numOrNull(item.sharpe_ratio),
+    beta: numOrNull(item.beta),
+    alpha: numOrNull(item.alpha),
+    fxHedgingRatio: numOrNull(item.fx_hedging),
+    trackingError: numOrNull(item.tracking_error),
+    yieldToMaturity: item.yield_to_maturity?.trim() || null,
+    recoveringPeriod: item.recovering_period?.trim() || null,
+    portfolioDurationPeriod: item.portfolio_duration_period?.trim() || null,
+    startDate: item.start_date ?? null,
+    endDate: item.end_date ?? null,
+    prospectusType: item.prospectus_type ?? null,
+    lastUpdDate: item.last_upd_date ?? null,
+  };
+}
+
+/** Map a verbatim SEC specification item to a `fund_specifications` row. */
+export function specificationItemToRow(
+  item: SecFundSpecificationItem,
+): FundSpecificationInsert | null {
+  const specCode = item.spec_code?.trim();
+  if (!item.proj_id || !specCode) return null;
+  return {
+    projId: item.proj_id,
+    fundClassName: item.fund_class_name ?? "main",
+    specCode,
+    specDesc: item.spec_desc?.trim() || null,
+    lastUpdDate: item.last_upd_date ?? null,
+  };
+}
+
+/** Map a verbatim SEC factsheet-URL item to a `fund_factsheet_urls` row. */
+export function factsheetUrlItemToRow(item: SecFactsheetUrlItem): FundFactsheetUrlInsert | null {
+  const amcUrl = item.amc_url_factsheet?.trim() || null;
+  const pdfUrl = item.pdf_factsheet?.trim() || null;
+  if (!item.proj_id || (!amcUrl && !pdfUrl)) return null;
+  return {
+    projId: item.proj_id,
+    fundClassName: item.fund_class_name ?? "main",
+    amcUrlFactsheet: amcUrl,
+    pdfFactsheet: pdfUrl,
+    asOfDate: item.as_of_date ?? null,
+    prospectusType: item.prospectus_type ?? null,
+    lastUpdDate: item.last_upd_date ?? null,
+  };
+}
+
+/** Map a verbatim SEC minimums item to a `fund_subscription_minimums` row. */
+export function minimumItemToRow(
+  item: SecSubscriptionMinimumItem,
+): FundSubscriptionMinimumInsert | null {
+  if (!item.proj_id) return null;
+  return {
+    projId: item.proj_id,
+    fundClassName: item.fund_class_name ?? "main",
+    minimumSubIpo: numOrNull(item.minimum_sub_ipo),
+    minimumSubIpoCur: item.minimum_sub_ipo_cur?.trim() || null,
+    minimumSub: numOrNull(item.minimum_sub),
+    minimumSubCur: item.minimum_sub_cur?.trim() || null,
+    minimumSubUnit: item.minimum_sub_unit?.trim() || null,
+    minimumRedempt: numOrNull(item.minimum_redempt),
+    minimumRedemptCur: item.minimum_redempt_cur?.trim() || null,
+    minimumRedemptUnit: item.minimum_redempt_unit?.trim() || null,
+    lowbalVal: numOrNull(item.lowbal_val),
+    lowbalValCur: item.lowbal_val_cur?.trim() || null,
+    lowbalUnit: item.lowbal_unit?.trim() || null,
+    startDate: item.start_date ?? null,
+    endDate: item.end_date ?? null,
+    prospectusType: item.prospectus_type ?? null,
+    lastUpdDate: item.last_upd_date ?? null,
+  };
+}
+
+/** Map a verbatim SEC dividend-policy item to a `fund_dividend_policy` row. */
+export function dividendPolicyItemToRow(
+  item: SecDividendPolicyItem,
+): FundDividendPolicyInsert | null {
+  if (!item.proj_id) return null;
+  return {
+    projId: item.proj_id,
+    fundClassName: item.fund_class_name ?? "main",
+    dividendPolicy: item.dividend_policy?.trim() || null,
+    startDate: item.start_date ?? null,
+    endDate: item.end_date ?? null,
+    prospectusType: item.prospectus_type ?? null,
+    lastUpdDate: item.last_upd_date ?? null,
+  };
+}
+
+/** Map a verbatim SEC dividend-history item to a `fund_dividend_history` row. */
+export function dividendHistoryItemToRow(
+  item: SecDividendHistoryItem,
+): FundDividendHistoryInsert | null {
+  if (!item.proj_id || !item.book_close_date) return null;
+  return {
+    projId: item.proj_id,
+    classAbbrName: item.class_abbr_name?.trim() || "main",
+    bookCloseDate: item.book_close_date,
+    dividendDate: item.dividend_date ?? null,
+    dividendValue: numOrNull(item.dividend_value),
+    lastUpdDate: item.last_upd_date ?? null,
+  };
+}
+
 /** Map a verbatim SEC fee item to a `fund_fees` row (normalizing the fee type). */
 export function feeItemToFeeRow(item: SecFundFeeItem): FundFeeInsert {
   return {
@@ -130,6 +290,39 @@ export interface TransformFundCatalogResult {
   fundsWithFees: number;
   /** Total fee rows derived and upserted. */
   feeRowsUpserted: number;
+  /** Funds with at least one landed benchmark row. */
+  fundsWithBenchmarks: number;
+  /** Funds with at least one landed statistics row. */
+  fundsWithStatistics: number;
+  /** Funds with at least one landed specification / factsheet-URL / minimums /
+   * dividend-policy / dividend-history row. */
+  fundsWithSpecifications: number;
+  fundsWithFactsheetUrls: number;
+  fundsWithMinimums: number;
+  fundsWithDividendPolicy: number;
+  fundsWithDividendHistory: number;
+}
+
+/**
+ * Derive one per-fund enrichment table from its landed sec_raw endpoint: map
+ * each raw item, group rows per fund, replace each fund's set via its upsert.
+ * Returns the count of distinct funds touched.
+ */
+function deriveGrouped<TItem, TRow extends { projId: string }>(
+  endpoint: string,
+  mapItem: (item: TItem) => TRow | null,
+  upsert: (projId: string, rows: TRow[]) => void,
+): number {
+  const byProj = new Map<string, TRow[]>();
+  for (const it of readSecRawItems<TItem>(endpoint)) {
+    const row = mapItem(it);
+    if (!row) continue;
+    const list = byProj.get(row.projId) ?? [];
+    list.push(row);
+    byProj.set(row.projId, list);
+  }
+  for (const [projId, rows] of byProj) upsert(projId, rows);
+  return byProj.size;
 }
 
 /**
@@ -178,9 +371,58 @@ export function transformFundCatalog(): TransformFundCatalogResult {
   // touched fund in a single pass (see upsertFundFees).
   upsertFundFees(feeRows);
 
+  // 3. Per-fund enrichment tables from the landed bulk sweeps — each one maps,
+  // groups per fund, and replaces that fund's set atomically (dividend history
+  // appends instead — payments are never deleted).
+  const fundsWithBenchmarks = deriveGrouped<SecBenchmarkItem, FundBenchmarkInsert>(
+    SEC_ENDPOINTS.benchmarks,
+    benchmarkItemToRow,
+    upsertFundBenchmarks,
+  );
+  const fundsWithStatistics = deriveGrouped<SecFundStatisticsItem, FundStatisticsInsert>(
+    SEC_ENDPOINTS.statistics,
+    statisticsItemToRow,
+    upsertFundStatistics,
+  );
+  const fundsWithSpecifications = deriveGrouped<SecFundSpecificationItem, FundSpecificationInsert>(
+    SEC_ENDPOINTS.specifications,
+    specificationItemToRow,
+    upsertFundSpecifications,
+  );
+  const fundsWithFactsheetUrls = deriveGrouped<SecFactsheetUrlItem, FundFactsheetUrlInsert>(
+    SEC_ENDPOINTS.factsheetUrls,
+    factsheetUrlItemToRow,
+    upsertFundFactsheetUrls,
+  );
+  const fundsWithMinimums = deriveGrouped<
+    SecSubscriptionMinimumItem,
+    FundSubscriptionMinimumInsert
+  >(SEC_ENDPOINTS.minimums, minimumItemToRow, upsertFundSubscriptionMinimums);
+  const fundsWithDividendPolicy = deriveGrouped<SecDividendPolicyItem, FundDividendPolicyInsert>(
+    SEC_ENDPOINTS.dividendPolicy,
+    dividendPolicyItemToRow,
+    upsertFundDividendPolicy,
+  );
+  const fundsWithDividendHistory = deriveGrouped<SecDividendHistoryItem, FundDividendHistoryInsert>(
+    SEC_ENDPOINTS.dividendHistory,
+    dividendHistoryItemToRow,
+    upsertFundDividendHistory,
+  );
+
   // Drop the cached search index so the next search rebuilds over the fresh
   // catalog.
   invalidateFundIndex();
 
-  return { fundsUpserted, fundsWithFees, feeRowsUpserted: feeRows.length };
+  return {
+    fundsUpserted,
+    fundsWithFees,
+    feeRowsUpserted: feeRows.length,
+    fundsWithBenchmarks,
+    fundsWithStatistics,
+    fundsWithSpecifications,
+    fundsWithFactsheetUrls,
+    fundsWithMinimums,
+    fundsWithDividendPolicy,
+    fundsWithDividendHistory,
+  };
 }

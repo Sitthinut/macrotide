@@ -561,6 +561,181 @@ export async function fetchRiskSpectrumLatest(): Promise<SecRiskSpectrumItem[]> 
   );
 }
 
+export interface SecBenchmarkItem {
+  proj_id: string;
+  /** Sequence within a blended benchmark (a fund can declare several, weighted). */
+  group_seq?: number | string | null;
+  /** Benchmark index name, factsheet §8.1 — e.g. "ดัชนีผลตอบแทนรวมตลาดหลักทรัพย์ฯ (SET TRI)". */
+  benchmark?: string | null;
+  benchmark_remark?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  prospectus_type?: string | null;
+  last_upd_date?: string | null;
+}
+
+/**
+ * Bulk-fetch the LATEST declared benchmark rows for every fund in one paginated
+ * sweep (`latest=true`, no per-fund calls — same shape as the risk-spectrum
+ * sweep). The benchmark string is the authoritative classification signal for
+ * index funds: it names the index, the geography, and the hedging variant.
+ */
+export async function fetchBenchmarksLatest(): Promise<SecBenchmarkItem[]> {
+  const key = apiKey();
+  return secFetchPaginated<SecBenchmarkItem>(
+    "/v2/fund/factsheet/benchmarks",
+    { latest: "true" },
+    key,
+  );
+}
+
+export interface SecFundStatisticsItem {
+  proj_id: string;
+  /** Share-class abbreviation; "main" when the fund is not a class fund. */
+  fund_class_name?: string | null;
+  // All figures arrive as strings (e.g. "24.63", "-0.02", "0"); the transform
+  // parses them. "0" can mean either a true zero or not-applicable — the raw
+  // value is preserved verbatim in sec_raw.
+  portfolio_turnover_ratio?: string | null;
+  recovering_period?: string | null;
+  portfolio_duration_period?: string | null;
+  maximum_drawdown?: string | null;
+  sharpe_ratio?: string | null;
+  beta?: string | null;
+  alpha?: string | null;
+  fx_hedging?: string | null;
+  tracking_error?: string | null;
+  yield_to_maturity?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  prospectus_type?: string | null;
+  last_upd_date?: string | null;
+}
+
+/**
+ * Bulk-fetch the LATEST factsheet statistics (per fund class) for every fund in
+ * one paginated sweep — Sharpe, max drawdown, FX-hedging ratio, tracking error,
+ * turnover, YTM. Tracking error + FX hedging feed like-for-like comparison.
+ */
+export async function fetchFundStatisticsLatest(): Promise<SecFundStatisticsItem[]> {
+  const key = apiKey();
+  return secFetchPaginated<SecFundStatisticsItem>(
+    "/v2/fund/factsheet/statistics",
+    { latest: "true" },
+    key,
+  );
+}
+
+export interface SecFundSpecificationItem {
+  proj_id: string;
+  fund_class_name?: string | null;
+  /** Special-characteristic code per SorNor 87/2558 Appendix 2 (e.g. "CIV", ETF, FIF). */
+  spec_code?: string | null;
+  spec_desc?: string | null;
+  last_upd_date?: string | null;
+}
+
+/** Bulk-fetch every fund's special-characteristic codes (ETF / cross-investing / …). */
+export async function fetchFundSpecifications(): Promise<SecFundSpecificationItem[]> {
+  const key = apiKey();
+  return secFetchPaginated<SecFundSpecificationItem>(
+    "/v2/fund/general-info/specifications",
+    {},
+    key,
+  );
+}
+
+export interface SecFactsheetUrlItem {
+  proj_id: string;
+  fund_class_name?: string | null;
+  prospectus_type?: string | null;
+  /** Factsheet on the AMC's own site. */
+  amc_url_factsheet?: string | null;
+  /** SEC-hosted factsheet PDF. */
+  pdf_factsheet?: string | null;
+  as_of_date?: string | null;
+  last_upd_date?: string | null;
+}
+
+/** Bulk-fetch every fund's factsheet URLs (SEC-hosted PDF + AMC page). */
+export async function fetchFactsheetUrls(): Promise<SecFactsheetUrlItem[]> {
+  const key = apiKey();
+  return secFetchPaginated<SecFactsheetUrlItem>("/v2/fund/factsheet/urls", {}, key);
+}
+
+export interface SecSubscriptionMinimumItem {
+  proj_id: string;
+  fund_class_name?: string | null;
+  // Amounts arrive as strings; the transform parses them.
+  minimum_sub_ipo?: string | null;
+  minimum_sub_ipo_cur?: string | null;
+  minimum_sub?: string | null;
+  minimum_sub_cur?: string | null;
+  minimum_sub_unit?: string | null;
+  minimum_redempt?: string | null;
+  minimum_redempt_cur?: string | null;
+  minimum_redempt_unit?: string | null;
+  lowbal_val?: string | null;
+  lowbal_val_cur?: string | null;
+  lowbal_unit?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  prospectus_type?: string | null;
+  last_upd_date?: string | null;
+}
+
+/** Bulk-fetch the LATEST subscription/redemption minimums per fund class. */
+export async function fetchSubscriptionMinimumsLatest(): Promise<SecSubscriptionMinimumItem[]> {
+  const key = apiKey();
+  return secFetchPaginated<SecSubscriptionMinimumItem>(
+    "/v2/fund/factsheet/subscription-redemption-minimums",
+    { latest: "true" },
+    key,
+  );
+}
+
+export interface SecDividendPolicyItem {
+  proj_id: string;
+  fund_class_name?: string | null;
+  /** Formal dividend-policy code from the factsheet (authoritative vs class-detail text parsing). */
+  dividend_policy?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  prospectus_type?: string | null;
+  last_upd_date?: string | null;
+}
+
+/** Bulk-fetch the LATEST formal dividend-policy code per fund class. */
+export async function fetchDividendPolicyLatest(): Promise<SecDividendPolicyItem[]> {
+  const key = apiKey();
+  return secFetchPaginated<SecDividendPolicyItem>(
+    "/v2/fund/factsheet/dividend-policy",
+    { latest: "true" },
+    key,
+  );
+}
+
+export interface SecDividendHistoryItem {
+  proj_id: string;
+  unique_id?: string | null;
+  class_abbr_name?: string | null;
+  book_close_date?: string | null;
+  dividend_date?: string | null;
+  /** Dividend per unit (THB); arrives as a string or number. */
+  dividend_value?: string | number | null;
+  last_upd_date?: string | null;
+}
+
+/**
+ * Bulk-fetch the FULL dividend payment history for every fund. The endpoint has
+ * no date filter, so each sweep re-reads all history (~1k pages) — that's why
+ * the crawl gates it behind SEC_INGEST_DIVIDENDS and a weekly cadence.
+ */
+export async function fetchDividendHistory(): Promise<SecDividendHistoryItem[]> {
+  const key = apiKey();
+  return secFetchPaginated<SecDividendHistoryItem>("/v2/fund/daily-info/dividend-history", {}, key);
+}
+
 interface SecDailyNavRow {
   proj_id: string;
   nav_date: string;

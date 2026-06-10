@@ -9,9 +9,16 @@ import { and, eq, ne, sql } from "drizzle-orm";
 import { getMarketDb } from "../context";
 import {
   fundAssetAllocation,
+  fundBenchmarks,
+  fundDividendHistory,
+  fundDividendPolicy,
+  fundFactsheetUrls,
   fundPerformance,
   fundPortfolio,
   fundPortfolioAssetType,
+  fundSpecifications,
+  fundStatistics,
+  fundSubscriptionMinimums,
   fundTopHoldings,
 } from "../schema";
 
@@ -54,6 +61,27 @@ export type FundPortfolioInsert = typeof fundPortfolio.$inferInsert;
 
 export type FundPortfolioAssetTypeRow = typeof fundPortfolioAssetType.$inferSelect;
 export type FundPortfolioAssetTypeInsert = typeof fundPortfolioAssetType.$inferInsert;
+
+export type FundBenchmarkRow = typeof fundBenchmarks.$inferSelect;
+export type FundBenchmarkInsert = typeof fundBenchmarks.$inferInsert;
+
+export type FundStatisticsRow = typeof fundStatistics.$inferSelect;
+export type FundStatisticsInsert = typeof fundStatistics.$inferInsert;
+
+export type FundSpecificationRow = typeof fundSpecifications.$inferSelect;
+export type FundSpecificationInsert = typeof fundSpecifications.$inferInsert;
+
+export type FundFactsheetUrlRow = typeof fundFactsheetUrls.$inferSelect;
+export type FundFactsheetUrlInsert = typeof fundFactsheetUrls.$inferInsert;
+
+export type FundSubscriptionMinimumRow = typeof fundSubscriptionMinimums.$inferSelect;
+export type FundSubscriptionMinimumInsert = typeof fundSubscriptionMinimums.$inferInsert;
+
+export type FundDividendPolicyRow = typeof fundDividendPolicy.$inferSelect;
+export type FundDividendPolicyInsert = typeof fundDividendPolicy.$inferInsert;
+
+export type FundDividendHistoryRow = typeof fundDividendHistory.$inferSelect;
+export type FundDividendHistoryInsert = typeof fundDividendHistory.$inferInsert;
 
 // ─── Write side ──────────────────────────────────────────────────────────────
 
@@ -186,7 +214,184 @@ export function upsertFundPortfolioAssetType(
   });
 }
 
+/**
+ * Replace all benchmark rows for a fund with the latest declared set. Delete +
+ * insert (not upsert) so a fund that drops a blend component doesn't keep an
+ * orphan group_seq row.
+ */
+export function upsertFundBenchmarks(projId: string, rows: FundBenchmarkInsert[]): void {
+  if (rows.length === 0) return;
+  const db = getMarketDb();
+  db.transaction((tx) => {
+    tx.delete(fundBenchmarks).where(eq(fundBenchmarks.projId, projId)).run();
+    for (const row of rows) {
+      tx.insert(fundBenchmarks).values(row).run();
+    }
+  });
+}
+
+/**
+ * Replace all statistics rows for a fund with the latest factsheet set. Delete +
+ * insert so a class no longer reported doesn't keep stale stats.
+ */
+export function upsertFundStatistics(projId: string, rows: FundStatisticsInsert[]): void {
+  if (rows.length === 0) return;
+  const db = getMarketDb();
+  db.transaction((tx) => {
+    tx.delete(fundStatistics).where(eq(fundStatistics.projId, projId)).run();
+    for (const row of rows) {
+      tx.insert(fundStatistics).values(row).run();
+    }
+  });
+}
+
+/** Replace a fund's special-characteristic codes with the latest set. */
+export function upsertFundSpecifications(projId: string, rows: FundSpecificationInsert[]): void {
+  if (rows.length === 0) return;
+  const db = getMarketDb();
+  db.transaction((tx) => {
+    tx.delete(fundSpecifications).where(eq(fundSpecifications.projId, projId)).run();
+    for (const row of rows) {
+      tx.insert(fundSpecifications).values(row).run();
+    }
+  });
+}
+
+/** Replace a fund's factsheet URLs with the latest set. */
+export function upsertFundFactsheetUrls(projId: string, rows: FundFactsheetUrlInsert[]): void {
+  if (rows.length === 0) return;
+  const db = getMarketDb();
+  db.transaction((tx) => {
+    tx.delete(fundFactsheetUrls).where(eq(fundFactsheetUrls.projId, projId)).run();
+    for (const row of rows) {
+      tx.insert(fundFactsheetUrls).values(row).run();
+    }
+  });
+}
+
+/** Replace a fund's subscription/redemption minimums with the latest set. */
+export function upsertFundSubscriptionMinimums(
+  projId: string,
+  rows: FundSubscriptionMinimumInsert[],
+): void {
+  if (rows.length === 0) return;
+  const db = getMarketDb();
+  db.transaction((tx) => {
+    tx.delete(fundSubscriptionMinimums).where(eq(fundSubscriptionMinimums.projId, projId)).run();
+    for (const row of rows) {
+      tx.insert(fundSubscriptionMinimums).values(row).run();
+    }
+  });
+}
+
+/** Replace a fund's formal dividend-policy codes with the latest set. */
+export function upsertFundDividendPolicy(projId: string, rows: FundDividendPolicyInsert[]): void {
+  if (rows.length === 0) return;
+  const db = getMarketDb();
+  db.transaction((tx) => {
+    tx.delete(fundDividendPolicy).where(eq(fundDividendPolicy.projId, projId)).run();
+    for (const row of rows) {
+      tx.insert(fundDividendPolicy).values(row).run();
+    }
+  });
+}
+
+/**
+ * APPEND a fund's dividend payments — history is never deleted; a re-landed
+ * payment updates in place (heals corrections) keyed on
+ * (projId, classAbbrName, bookCloseDate).
+ */
+export function upsertFundDividendHistory(projId: string, rows: FundDividendHistoryInsert[]): void {
+  if (rows.length === 0) return;
+  const db = getMarketDb();
+  db.transaction((tx) => {
+    for (const row of rows) {
+      tx.insert(fundDividendHistory)
+        .values(row)
+        .onConflictDoUpdate({
+          target: [
+            fundDividendHistory.projId,
+            fundDividendHistory.classAbbrName,
+            fundDividendHistory.bookCloseDate,
+          ],
+          set: {
+            dividendDate: row.dividendDate,
+            dividendValue: row.dividendValue,
+            lastUpdDate: row.lastUpdDate,
+          },
+        })
+        .run();
+    }
+  });
+}
+
 // ─── Read side ────────────────────────────────────────────────────────────────
+
+/** Special-characteristic codes for one fund (ETF / CIV / FIF …). */
+export function getFundSpecifications(projId: string): FundSpecificationRow[] {
+  return getMarketDb()
+    .select()
+    .from(fundSpecifications)
+    .where(eq(fundSpecifications.projId, projId))
+    .all();
+}
+
+/** Factsheet URLs for one fund, per class. */
+export function getFundFactsheetUrls(projId: string): FundFactsheetUrlRow[] {
+  return getMarketDb()
+    .select()
+    .from(fundFactsheetUrls)
+    .where(eq(fundFactsheetUrls.projId, projId))
+    .all();
+}
+
+/** Subscription/redemption minimums for one fund, per class. */
+export function getFundSubscriptionMinimums(projId: string): FundSubscriptionMinimumRow[] {
+  return getMarketDb()
+    .select()
+    .from(fundSubscriptionMinimums)
+    .where(eq(fundSubscriptionMinimums.projId, projId))
+    .all();
+}
+
+/** Formal dividend-policy codes for one fund, per class. */
+export function getFundDividendPolicy(projId: string): FundDividendPolicyRow[] {
+  return getMarketDb()
+    .select()
+    .from(fundDividendPolicy)
+    .where(eq(fundDividendPolicy.projId, projId))
+    .all();
+}
+
+/** Dividend payment history for one fund, most recent first. */
+export function getFundDividendHistory(projId: string): FundDividendHistoryRow[] {
+  return getMarketDb()
+    .select()
+    .from(fundDividendHistory)
+    .where(eq(fundDividendHistory.projId, projId))
+    .orderBy(sql`${fundDividendHistory.bookCloseDate} DESC`)
+    .all();
+}
+
+/** Declared benchmark rows for one fund (latest factsheet), in blend order. */
+export function getFundBenchmarks(projId: string): FundBenchmarkRow[] {
+  return getMarketDb()
+    .select()
+    .from(fundBenchmarks)
+    .where(eq(fundBenchmarks.projId, projId))
+    .orderBy(fundBenchmarks.groupSeq)
+    .all();
+}
+
+/** Factsheet statistics rows for one fund (latest factsheet), per share class. */
+export function getFundStatistics(projId: string): FundStatisticsRow[] {
+  return getMarketDb()
+    .select()
+    .from(fundStatistics)
+    .where(eq(fundStatistics.projId, projId))
+    .orderBy(fundStatistics.fundClassName)
+    .all();
+}
 
 /** All performance rows for one fund (latest snapshot). */
 export function getFundPerformance(projId: string): FundPerformanceRow[] {

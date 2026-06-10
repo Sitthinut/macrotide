@@ -13,6 +13,7 @@ import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { makeTestDbContext } from "@/tests/db-helpers";
 import { getMarketDb, runWithDbContext } from "../db/context";
+import { getFundBenchmarks, getFundStatistics } from "../db/queries/fund-enrichment";
 import { getCurrentTer } from "../db/queries/funds";
 import { makeSecRaw, SEC_ENDPOINTS, type SecRawInsert, upsertSecRaw } from "../db/queries/sec-raw";
 import { fundCatalog } from "../db/schema";
@@ -20,8 +21,15 @@ import type { SecFundFeeItem } from "../market/fund-fees";
 import type { SecFundProfile } from "../market/providers/sec-thailand";
 import {
   type AumSnapshot,
+  benchmarkItemToRow,
+  dividendHistoryItemToRow,
+  dividendPolicyItemToRow,
+  factsheetUrlItemToRow,
   feeItemToFeeRow,
+  minimumItemToRow,
   profileToFundInsert,
+  specificationItemToRow,
+  statisticsItemToRow,
   transformFundCatalog,
 } from "./transform-fund-catalog";
 
@@ -283,6 +291,131 @@ describe("feeItemToFeeRow", () => {
 
 // ─── Round-trip: land raw → transform → derived rows ────────────────────────
 
+describe("benchmarkItemToRow", () => {
+  it("maps a benchmark item, defaulting group_seq to 1 and trimming text", () => {
+    expect(
+      benchmarkItemToRow({
+        proj_id: "B1",
+        benchmark: "  ดัชนี SET TRI ",
+        benchmark_remark: "",
+        start_date: "2026-01-31",
+      }),
+    ).toMatchObject({
+      projId: "B1",
+      groupSeq: 1,
+      benchmark: "ดัชนี SET TRI",
+      benchmarkRemark: null,
+      startDate: "2026-01-31",
+    });
+    // group_seq arrives as number OR string depending on the payload.
+    expect(benchmarkItemToRow({ proj_id: "B1", group_seq: "2", benchmark: "X" })?.groupSeq).toBe(2);
+  });
+
+  it("returns null when the item names no benchmark", () => {
+    expect(benchmarkItemToRow({ proj_id: "B1", benchmark: "  " })).toBeNull();
+    expect(benchmarkItemToRow({ proj_id: "", benchmark: "X" })).toBeNull();
+  });
+});
+
+describe("statisticsItemToRow", () => {
+  it("parses the string figures, keeping unparseable values null", () => {
+    expect(
+      statisticsItemToRow({
+        proj_id: "S1",
+        fund_class_name: "A",
+        portfolio_turnover_ratio: "24.63",
+        maximum_drawdown: "-0.02",
+        sharpe_ratio: "1.1",
+        beta: "0.95",
+        alpha: "0",
+        fx_hedging: "92.5",
+        tracking_error: "0.31",
+        yield_to_maturity: "2.45",
+        recovering_period: "1 เดือน",
+        portfolio_duration_period: "1 เดือน 13 วัน",
+      }),
+    ).toMatchObject({
+      projId: "S1",
+      fundClassName: "A",
+      portfolioTurnoverRatio: 24.63,
+      maximumDrawdown: -0.02,
+      sharpeRatio: 1.1,
+      beta: 0.95,
+      alpha: 0,
+      fxHedgingRatio: 92.5,
+      trackingError: 0.31,
+      yieldToMaturity: "2.45",
+      recoveringPeriod: "1 เดือน",
+    });
+    expect(
+      statisticsItemToRow({ proj_id: "S1", sharpe_ratio: "N/A", fund_class_name: null }),
+    ).toMatchObject({ sharpeRatio: null, fundClassName: "main" });
+  });
+});
+
+describe("P1/P2 sweep mappers", () => {
+  it("specificationItemToRow keeps the code, drops codeless items", () => {
+    expect(
+      specificationItemToRow({ proj_id: "X", fund_class_name: "A", spec_code: "CIV" }),
+    ).toMatchObject({ projId: "X", fundClassName: "A", specCode: "CIV" });
+    expect(specificationItemToRow({ proj_id: "X", spec_code: " " })).toBeNull();
+  });
+
+  it("factsheetUrlItemToRow needs at least one URL", () => {
+    expect(
+      factsheetUrlItemToRow({ proj_id: "X", pdf_factsheet: "https://sec.example/f.pdf" }),
+    ).toMatchObject({
+      projId: "X",
+      fundClassName: "main",
+      pdfFactsheet: "https://sec.example/f.pdf",
+    });
+    expect(factsheetUrlItemToRow({ proj_id: "X", amc_url_factsheet: "" })).toBeNull();
+  });
+
+  it("minimumItemToRow parses amounts and keeps currency/unit labels", () => {
+    expect(
+      minimumItemToRow({
+        proj_id: "X",
+        fund_class_name: "A",
+        minimum_sub_ipo: "5000",
+        minimum_sub: "100.50",
+        minimum_sub_cur: "THB",
+        minimum_redempt_unit: "หน่วย",
+      }),
+    ).toMatchObject({
+      minimumSubIpo: 5000,
+      minimumSub: 100.5,
+      minimumSubCur: "THB",
+      minimumRedempt: null,
+      minimumRedemptUnit: "หน่วย",
+    });
+  });
+
+  it("dividendHistoryItemToRow needs a book-close date and parses the per-unit value", () => {
+    expect(
+      dividendHistoryItemToRow({
+        proj_id: "X",
+        class_abbr_name: "EXAMPLE-D",
+        book_close_date: "2026-03-15",
+        dividend_date: "2026-03-30",
+        dividend_value: "0.25",
+      }),
+    ).toMatchObject({
+      projId: "X",
+      classAbbrName: "EXAMPLE-D",
+      bookCloseDate: "2026-03-15",
+      dividendValue: 0.25,
+    });
+    expect(dividendHistoryItemToRow({ proj_id: "X", dividend_value: "0.25" })).toBeNull();
+  });
+
+  it("dividendPolicyItemToRow keeps the verbatim code", () => {
+    expect(
+      dividendPolicyItemToRow({ proj_id: "X", fund_class_name: "D", dividend_policy: "Y" }),
+    ).toMatchObject({ projId: "X", fundClassName: "D", dividendPolicy: "Y" });
+  });
+});
+
 describe("transformFundCatalog", () => {
   it("derives a catalog row + fee rows + current_ter from landed raw", () =>
     transformWith(
@@ -325,6 +458,43 @@ describe("transformFundCatalog", () => {
         expect(result.fundsUpserted).toBe(2);
         expect(result.fundsWithFees).toBe(1);
         expect(result.feeRowsUpserted).toBe(1);
+      },
+    ));
+
+  it("derives benchmark + statistics tables from landed sweeps (blend rows kept)", () =>
+    transformWith(
+      [
+        makeSecRaw(SEC_ENDPOINTS.profiles, "BM1", "", makeProfile({ proj_id: "BM1" })),
+        makeSecRaw(SEC_ENDPOINTS.benchmarks, "BM1", "1", {
+          proj_id: "BM1",
+          group_seq: 1,
+          benchmark: "ดัชนี SET TRI (50%)",
+        }),
+        makeSecRaw(SEC_ENDPOINTS.benchmarks, "BM1", "2", {
+          proj_id: "BM1",
+          group_seq: 2,
+          benchmark: "S&P 500 Total Return (50%)",
+        }),
+        makeSecRaw(SEC_ENDPOINTS.statistics, "BM1", "A", {
+          proj_id: "BM1",
+          fund_class_name: "A",
+          tracking_error: "0.4",
+          fx_hedging: "95",
+        }),
+      ],
+      () => {
+        const result = transformFundCatalog();
+        expect(result.fundsWithBenchmarks).toBe(1);
+        expect(result.fundsWithStatistics).toBe(1);
+        expect(getFundBenchmarks("BM1").map((b) => b.benchmark)).toEqual([
+          "ดัชนี SET TRI (50%)",
+          "S&P 500 Total Return (50%)",
+        ]);
+        expect(getFundStatistics("BM1")[0]).toMatchObject({
+          fundClassName: "A",
+          trackingError: 0.4,
+          fxHedgingRatio: 95,
+        });
       },
     ));
 
