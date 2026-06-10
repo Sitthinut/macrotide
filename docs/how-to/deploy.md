@@ -468,6 +468,16 @@ refreshes). A `run --rm` one-off shares the app's image, `.env.local`, and
 `./data` volume but is its own ephemeral container, so an app redeploy leaves it
 untouched. The bare-Node units below use the `npx -y tsx` form.
 
+**Job observability.** Every `run-job.sh` run ends with two greppable lines in
+the unit's journal — `job-peak-mem: <MB>MB` (cgroup v2 peak for the job
+container) and `job-summary: job=<name> exit=<code> duration=<s>s` — so memory
+creep shows up in logs long before it becomes an OOM:
+`journalctl -u macrotide-fund-catalog | grep job-`. For loud failures, give each
+job unit an `OnFailure=macrotide-job-failed@%n.service` drop-in pointing at a
+one-shot template that logs at err priority and, when
+`/opt/services/macrotide/ops.env` defines `JOB_FAIL_WEBHOOK=<ntfy/webhook URL>`,
+POSTs the failing unit name to it.
+
 ### Fund-catalog refresh
 
 The SEC publishes fresh fee data after ~10:30 UTC daily. The timer fires at **11:00 UTC** to give a comfortable margin.
