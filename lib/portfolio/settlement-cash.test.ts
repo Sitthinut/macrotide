@@ -1,0 +1,175 @@
+import { describe, expect, it } from "vitest";
+import type { LedgerTxn } from "./lots";
+import { foldSettlementCash } from "./settlement-cash";
+
+// Synthetic data only (EXAMPLE-FUND-*), never real fund codes.
+const A = "EXAMPLE-FUND-A";
+const B = "EXAMPLE-FUND-B";
+
+const TODAY = "2025-06-01";
+
+function tx(p: Partial<LedgerTxn> & Pick<LedgerTxn, "kind" | "amount">): LedgerTxn {
+  return { ticker: A, tradeDate: "2024-01-01", ...p };
+}
+
+function cashOn(r: ReturnType<typeof foldSettlementCash>, date: string): number {
+  let level = 0;
+  for (const p of r.cashTimeline) {
+    if (p.date > date) break;
+    level = p.cash;
+  }
+  return level;
+}
+
+describe("foldSettlementCash", () => {
+  it("keeps switch proceeds as in-transit cash until the rebuy consumes them", () => {
+    const r = foldSettlementCash(
+      [
+        tx({ kind: "buy", units: 100, amount: -1000, tradeDate: "2024-01-01" }),
+        tx({ kind: "sell", units: 100, amount: 1500, tradeDate: "2024-03-01" }),
+        tx({ ticker: B, kind: "buy", units: 10, amount: -1500, tradeDate: "2024-03-08" }),
+      ],
+      TODAY,
+    );
+    // External money: only the original 1000. The switch is internal.
+    expect(r.externalFlows).toEqual([{ date: "2024-01-01", amount: 1000 }]);
+    // Cash exists exactly for the transit days [sell, rebuy).
+    expect(cashOn(r, "2024-03-01")).toBeCloseTo(1500, 6);
+    expect(cashOn(r, "2024-03-07")).toBeCloseTo(1500, 6);
+    expect(cashOn(r, "2024-03-08")).toBe(0);
+    expect(r.terminalCash).toBe(0);
+  });
+
+  it("nets a same-day switch to zero regardless of row order (sells fold first)", () => {
+    const r = foldSettlementCash(
+      [
+        // Buy row inserted BEFORE the sell row, same trade date.
+        tx({ ticker: B, kind: "buy", units: 10, amount: -500, tradeDate: "2024-03-01", id: 1 }),
+        tx({ kind: "sell", units: 50, amount: 500, tradeDate: "2024-03-01", id: 2 }),
+      ],
+      TODAY,
+    );
+    expect(r.externalFlows).toEqual([]);
+    expect(r.terminalCash).toBe(0);
+  });
+
+  it("treats a partial rebuy's leftover as withdrawn AT THE SELL DATE after the window", () => {
+    const r = foldSettlementCash(
+      [
+        tx({ kind: "sell", units: 100, amount: 1000, tradeDate: "2024-03-01" }),
+        tx({ ticker: B, kind: "buy", units: 10, amount: -800, tradeDate: "2024-03-10" }),
+      ],
+      TODAY,
+    );
+    // 800 consumed; the 200 remainder expired retroactively at the sell date.
+    expect(r.externalFlows).toEqual([{ date: "2024-03-01", amount: -200 }]);
+    // The expired 200 never shows as cash — only the consumed 800 was live.
+    expect(cashOn(r, "2024-03-05")).toBeCloseTo(800, 6);
+    expect(cashOn(r, "2024-03-10")).toBe(0);
+  });
+
+  it("a buy outside the window cannot consume stale proceeds (reads as new money)", () => {
+    const r = foldSettlementCash(
+      [
+        tx({ kind: "sell", units: 100, amount: 1000, tradeDate: "2024-03-01" }),
+        tx({ ticker: B, kind: "buy", units: 10, amount: -1000, tradeDate: "2024-05-01" }),
+      ],
+      TODAY,
+    );
+    expect(r.externalFlows).toEqual([
+      { date: "2024-03-01", amount: -1000 }, // proceeds expired (withdrawn)
+      { date: "2024-05-01", amount: 1000 }, // the late buy is fresh external money
+    ]);
+  });
+
+  it("consumes overlapping sells FIFO across multiple buys", () => {
+    const r = foldSettlementCash(
+      [
+        tx({ kind: "sell", amount: 600, units: 1, tradeDate: "2024-03-01" }),
+        tx({ ticker: B, kind: "sell", amount: 400, units: 1, tradeDate: "2024-03-03" }),
+        tx({ kind: "buy", amount: -500, units: 1, tradeDate: "2024-03-05" }),
+        tx({ ticker: B, kind: "buy", amount: -500, units: 1, tradeDate: "2024-03-09" }),
+      ],
+      TODAY,
+    );
+    expect(r.externalFlows).toEqual([]);
+    expect(cashOn(r, "2024-03-04")).toBeCloseTo(1000, 6);
+    expect(cashOn(r, "2024-03-05")).toBeCloseTo(500, 6);
+    expect(cashOn(r, "2024-03-09")).toBe(0);
+  });
+
+  it("keeps proceeds younger than the window as pending in-transit cash", () => {
+    const r = foldSettlementCash(
+      [tx({ kind: "sell", amount: 1000, units: 1, tradeDate: "2025-05-20" })],
+      TODAY, // 12 days later — the rebuy may still be coming
+    );
+    expect(r.externalFlows).toEqual([]);
+    expect(r.terminalCash).toBeCloseTo(1000, 6);
+    expect(cashOn(r, TODAY)).toBeCloseTo(1000, 6);
+  });
+
+  it("ignores dividends, fees, reinvests, and anchors", () => {
+    const r = foldSettlementCash(
+      [
+        tx({ kind: "opening", units: 100, amount: 0, tradeDate: "2024-01-01" }),
+        tx({ kind: "dividend", amount: 50, tradeDate: "2024-02-01" }),
+        tx({ kind: "fee", amount: 10, tradeDate: "2024-02-02" }),
+        tx({ kind: "reinvest", units: 2, amount: -50, tradeDate: "2024-02-03" }),
+      ],
+      TODAY,
+    );
+    expect(r.externalFlows).toEqual([]);
+    expect(r.cashTimeline).toEqual([]);
+    expect(r.terminalCash).toBe(0);
+  });
+
+  it("contribution stays flat across a grown switch (no proceeds-based phantom swing)", () => {
+    // buy 1000 → grows → sell 1500 → rebuy 1500: external money is 1000 throughout.
+    const r = foldSettlementCash(
+      [
+        tx({ kind: "buy", units: 100, amount: -1000, tradeDate: "2024-01-01" }),
+        tx({ kind: "sell", units: 100, amount: 1500, tradeDate: "2024-06-01" }),
+        tx({ ticker: B, kind: "buy", units: 5, amount: -1500, tradeDate: "2024-06-05" }),
+      ],
+      TODAY,
+    );
+    const total = r.externalFlows.reduce((s, f) => s + f.amount, 0);
+    expect(total).toBeCloseTo(1000, 6);
+    expect(r.externalFlows.every((f) => f.amount > 0)).toBe(true);
+  });
+
+  it("a profitable cash-out removes only COST BASIS — contribution floors at 0, never negative", () => {
+    // Buy 1000 (cost 1000), grows, sell 1500 at a 500 gain, never rebuy → withdrawn.
+    // Without the cost map the −1500 proceeds would push net contribution to −500.
+    const r = foldSettlementCash(
+      [
+        tx({ kind: "buy", units: 100, amount: -1000, tradeDate: "2024-01-01", id: 1 }),
+        tx({ kind: "sell", units: 100, amount: 1500, tradeDate: "2024-03-01", id: 2 }),
+      ],
+      TODAY,
+      undefined,
+      new Map([[2, 1000]]), // sell #2 returned 1000 of capital (the other 500 is gain)
+    );
+    // +1000 in (the buy), −1000 out (capital withdrawn), gain left out of contribution.
+    expect(r.externalFlows).toEqual([
+      { date: "2024-01-01", amount: 1000 },
+      { date: "2024-03-01", amount: -1000 },
+    ]);
+    expect(r.externalFlows.reduce((s, f) => s + f.amount, 0)).toBeCloseTo(0, 6);
+  });
+
+  it("splits a partly-reinvested profitable sale's capital proportionally", () => {
+    // Sell 1500 (cost 1000) → rebuy 900 within window (internal), 600 leftover expires.
+    // Leftover is 600/1500 of the proceeds → 0.4 × 1000 = 400 of capital withdrawn.
+    const r = foldSettlementCash(
+      [
+        tx({ kind: "sell", units: 100, amount: 1500, tradeDate: "2024-03-01", id: 1 }),
+        tx({ ticker: B, kind: "buy", units: 9, amount: -900, tradeDate: "2024-03-10", id: 2 }),
+      ],
+      TODAY,
+      undefined,
+      new Map([[1, 1000]]),
+    );
+    expect(r.externalFlows).toEqual([{ date: "2024-03-01", amount: -400 }]);
+  });
+});

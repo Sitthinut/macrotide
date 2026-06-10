@@ -96,6 +96,8 @@ export interface PositionState {
 
 /** One realized CAPITAL gain — produced only by `sell` rows on cost-known positions. */
 export interface RealizedEvent {
+  /** The originating sell txn's id (when present) — lets callers map a sell to its cost basis. */
+  id?: number;
   ticker: string;
   tradeDate: string;
   unitsSold: number;
@@ -133,6 +135,19 @@ export interface BasisPoint {
   netInvested: number;
 }
 
+/**
+ * One per-ticker position checkpoint, pushed after EVERY folded event (even a
+ * no-op dividend/fee) — the point-in-time replay the value-over-time chart walks.
+ * Same-date checkpoints are valid; the last one for a date is the end-of-day state.
+ */
+export interface PositionCheckpoint {
+  date: string;
+  /** Units held after the event. */
+  units: number;
+  /** Remaining cost basis in THB after the event, or null while cost is unknown. */
+  costBasis: number | null;
+}
+
 export interface LotEngineResult {
   method: CostBasisMethod;
   positions: PositionState[];
@@ -145,6 +160,8 @@ export interface LotEngineResult {
   warnings: LotWarning[];
   /** Aggregate cost-basis timeline, one point per event in date order. */
   basisTimeline: BasisPoint[];
+  /** Per-ticker point-in-time replay, one checkpoint per event in date order. */
+  positionTimeline: Map<string, PositionCheckpoint[]>;
 }
 
 // Units below this are treated as zero (float dust after a full exit).
@@ -185,6 +202,7 @@ export function reduceLots(
   const expenses: CashEvent[] = [];
   const warnings: LotWarning[] = [];
   const basisTimeline: BasisPoint[] = [];
+  const positionTimeline = new Map<string, PositionCheckpoint[]>();
 
   let netInvested = 0;
 
@@ -264,7 +282,10 @@ export function reduceLots(
         );
         // A full exit resets the position to a fresh, cost-known slate.
         if (positionUnits(method, avg, fifo, ticker) <= UNIT_EPSILON) costKnown.set(ticker, true);
-        if (ev) realized.push(ev);
+        if (ev) {
+          ev.id = txn.id;
+          realized.push(ev);
+        }
         netInvested -= magnitude;
         break;
       }
@@ -338,6 +359,19 @@ export function reduceLots(
     }
 
     basisTimeline.push({ date: tradeDate, costBasis: aggregateBasis(), netInvested });
+
+    // Point-in-time checkpoint from the same state the terminal fold reports —
+    // the replay can never disagree with `positions`.
+    let checkpoints = positionTimeline.get(ticker);
+    if (!checkpoints) {
+      checkpoints = [];
+      positionTimeline.set(ticker, checkpoints);
+    }
+    checkpoints.push({
+      date: tradeDate,
+      units: positionUnits(method, avg, fifo, ticker),
+      costBasis: isKnown(ticker) ? tickerBasis(ticker) : null,
+    });
   }
 
   const positions = collectPositions(method, avg, fifo, isKnown);
@@ -356,11 +390,12 @@ export function reduceLots(
     expenseTotal,
     warnings,
     basisTimeline,
+    positionTimeline,
   };
 }
 
 /** Stable chronological order: trade date, then createdAt, then id. */
-function compareTxns(a: LedgerTxn, b: LedgerTxn): number {
+export function compareTxns(a: LedgerTxn, b: LedgerTxn): number {
   if (a.tradeDate !== b.tradeDate) return a.tradeDate < b.tradeDate ? -1 : 1;
   const ac = a.createdAt ?? "";
   const bc = b.createdAt ?? "";
