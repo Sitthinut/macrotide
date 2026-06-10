@@ -113,10 +113,17 @@ function commit(
   // Connections list sorts the same way as the source, not by account code.
   if (names.size) setSetting(`broker_account_order:${sourceTag}`, Array.from(names.keys()));
 
-  // Keep only rows with a recognized ledger kind + ISO date (parser already
-  // dropped cancel/pending/unknown; guard the kind→column contract).
+  // Keep only rows with a recognized ledger kind + a DATE-ONLY ISO day (parser
+  // already dropped cancel/pending/unknown and trims datetimes to their date
+  // part; guard the kind→column and date-only contracts — this route bypasses
+  // the /api/transactions Zod boundary, and a stored datetime breaks every
+  // date-only fold downstream).
   const valid = rows.filter(
-    (r): r is ValidRow => !!r.tradeDate && !!r.kind && LEDGER_KIND_SET.has(r.kind),
+    (r): r is ValidRow =>
+      !!r.tradeDate &&
+      /^\d{4}-\d{2}-\d{2}$/.test(r.tradeDate) &&
+      !!r.kind &&
+      LEDGER_KIND_SET.has(r.kind),
   );
 
   // Group by broker account; rows with no account (bare-array shape) share `""`.

@@ -27,7 +27,9 @@ export const dynamic = "force-dynamic";
 // event) is rejected, never silently fixed.
 const txnInput = z
   .object({
-    tradeDate: z.string().regex(/^\d{4}-\d{2}-\d{2}/, "tradeDate must be ISO (YYYY-MM-DD)"),
+    // Anchored: a full datetime ("…T00:00:00+07:00") must be rejected, not
+    // prefix-matched — a stored datetime breaks every date-only fold downstream.
+    tradeDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "tradeDate must be ISO (YYYY-MM-DD)"),
     // The unified ledger accepts trade deltas AND position anchors
     // (opening = Starting balance, snapshot = Restatement) — see ADR 0004.
     kind: z.enum(LEDGER_KINDS),

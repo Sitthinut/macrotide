@@ -136,6 +136,26 @@ describe("parseBrokerExport (default shape)", () => {
     expect(div?.units).toBeUndefined();
   });
 
+  it("trims a full ISO datetime trade_date to its local calendar day", () => {
+    // Brokers commonly send "2017-04-07T00:00:00+07:00"; the ledger stores a
+    // date-only local day — a stored datetime breaks date-only folds downstream.
+    const r = parseBrokerExport({
+      history: [
+        {
+          ref: "dt1",
+          order_type: "buy",
+          fund_name: "AAA-EQ",
+          status: "SUCCESS",
+          trade_date: "2017-04-07T00:00:00+07:00",
+          net_transaction_amount: 100,
+          net_transaction_unit: 10,
+        },
+      ],
+    });
+    expect(r.rows).toHaveLength(1);
+    expect(r.rows[0].tradeDate).toBe("2017-04-07");
+  });
+
   it("returns rows oldest-first", () => {
     const dates = res.rows.map((r) => r.tradeDate);
     expect(dates).toEqual([...dates].sort((a, b) => (a ?? "").localeCompare(b ?? "")));

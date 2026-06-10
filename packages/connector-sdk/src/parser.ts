@@ -85,6 +85,15 @@ function num(v: unknown): number | undefined {
 function text(v: unknown): string {
   return typeof v === "string" ? v : v == null ? "" : String(v);
 }
+/** The ledger stores a DATE-ONLY local calendar day, but brokers commonly send
+ *  a full ISO datetime with a UTC offset ("2017-04-07T00:00:00+07:00"). The
+ *  date part of such a value IS the broker's local day — take it, drop the
+ *  time. Non-ISO shapes pass through untouched for the caller to validate. */
+function isoDay(v: unknown): string | undefined {
+  const s = text(v).trim();
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})(?:[T\s]|$)/);
+  return m ? m[1] : s || undefined;
+}
 function lc(list: string[]): string[] {
   return list.map((s) => s.toLowerCase());
 }
@@ -96,7 +105,7 @@ function orderToRows(
   vals: ValuesMap,
 ): { rows: ExtractedTxnRow[]; kind: string | "unknown" } {
   const ticker = text(get(o, ord.ticker)).trim();
-  const date = text(get(o, ord.tradeDate)).trim() || undefined;
+  const date = isoDay(get(o, ord.tradeDate));
   const raw = text(get(o, ord.type)).trim().toLowerCase();
   const units = () => num(get(o, ord.units));
   const amount = () => num(get(o, ord.amount));

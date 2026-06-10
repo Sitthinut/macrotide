@@ -19,7 +19,9 @@ export const dynamic = "force-dynamic";
 // amount-only or units-only trade) derives at the projection fold, never frozen here.
 const patchBody = z
   .object({
-    tradeDate: z.string().regex(/^\d{4}-\d{2}-\d{2}/, "tradeDate must be ISO (YYYY-MM-DD)"),
+    // Anchored: a full datetime ("…T00:00:00+07:00") must be rejected, not
+    // prefix-matched — a stored datetime breaks every date-only fold downstream.
+    tradeDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "tradeDate must be ISO (YYYY-MM-DD)"),
     kind: z.enum(LEDGER_KINDS),
     ticker: z.string().trim().min(1).max(64),
     englishName: z.string().trim().max(200).nullish(),

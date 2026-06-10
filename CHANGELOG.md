@@ -571,6 +571,14 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Fixed
 
+- **A broker sync can no longer blank the portfolio chart.** Broker order
+  history carries full timestamps ("2017-04-07T00:00:00+07:00"); the importer
+  stored them verbatim where the ledger expects a date-only day, which crashed
+  the history fold and left the main chart showing "NO HISTORY YET". The
+  connector parser now trims a datetime to its local calendar day, the broker
+  ingest endpoint rejects anything that isn't date-only, and the transaction
+  API's date validation is anchored so a datetime can't slip through as a
+  prefix match.
 - **Importing a transaction history no longer records every row as a Balance.**
   The image importer now auto-detects whether a screenshot is a holdings
   snapshot (current positions → Balances) or a transaction history (a dated
