@@ -8,6 +8,7 @@ import { clearDemoSession } from "@/lib/auth/clear-demo";
 import { authClient } from "@/lib/auth/client";
 import { isPlaceholderEmail } from "@/lib/auth/placeholder-email";
 import { useResource } from "@/lib/fetchers/swr";
+import { fmtTokens } from "@/lib/format";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,6 +40,8 @@ const OAUTH_PROVIDERS: { id: string; label: string }[] = [{ id: "google", label:
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// Local on purpose: takes a Date (a passkey-creation TIMESTAMP, rendered in the
+// device's locale + timezone), unlike lib/format's fmtDate for ISO calendar dates.
 function fmtDate(d: Date | null | undefined): string {
   if (!d) return "—";
   try {
@@ -46,12 +49,6 @@ function fmtDate(d: Date | null | undefined): string {
   } catch {
     return String(d);
   }
-}
-
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────

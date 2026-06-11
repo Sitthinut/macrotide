@@ -21,6 +21,7 @@ import type { Transaction } from "@/lib/db/queries/transactions";
 import { useHoldings } from "@/lib/fetchers/portfolio";
 import { cachedQuoteSource, resolveQuoteSources } from "@/lib/fetchers/quote-source";
 import { invalidate, useResource } from "@/lib/fetchers/swr";
+import { fmtRatioPct, fmtTHBClean, fmtTHBSigned } from "@/lib/format";
 import type { QuoteSource } from "@/lib/market/sources";
 import type { TxnKind } from "@/lib/portfolio/lots";
 import type { TransactionAnalytics } from "@/lib/portfolio/transaction-analytics";
@@ -51,10 +52,6 @@ function rowErrorMessage(reason: RowInvalidReason, anchor: boolean): string {
       return anchor ? "Add a date and a symbol." : "Add a date, a symbol, and an amount.";
   }
 }
-
-const baht = (n: number): string => `฿${Math.round(n).toLocaleString("en-US")}`;
-const signed = (n: number): string => `${n >= 0 ? "+" : "−"}${baht(Math.abs(n))}`;
-const pct = (r: number): string => `${r >= 0 ? "+" : ""}${(r * 100).toFixed(1)}%`;
 
 function monthLabel(ym: string): string {
   const [y, m] = ym.split("-").map(Number);
@@ -347,7 +344,7 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
               <div className="stat-cards">
                 <Stat
                   label="RETURN"
-                  value={irr != null ? pct(irr) : "—"}
+                  value={irr != null ? fmtRatioPct(irr) : "—"}
                   tone={irr == null ? "neutral" : irr >= 0 ? "up" : "down"}
                   caption={
                     irr != null
@@ -358,18 +355,18 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
                 />
                 <Stat
                   label="INVESTED"
-                  value={baht(analytics?.costBasisTotal ?? 0)}
+                  value={fmtTHBClean(analytics?.costBasisTotal ?? 0)}
                   caption="cost basis"
                 />
                 <Stat
                   label="REALIZED"
-                  value={signed(realized)}
+                  value={fmtTHBSigned(realized)}
                   tone={realized > 0 ? "up" : realized < 0 ? "down" : "neutral"}
                   caption="from sells"
                 />
                 <Stat
                   label="INCOME"
-                  value={baht(analytics?.incomeTotal ?? 0)}
+                  value={fmtTHBClean(analytics?.incomeTotal ?? 0)}
                   caption="dividends"
                 />
               </div>
@@ -394,7 +391,7 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
             <h3 style={{ fontSize: 13 }}>{monthLabel(ym)}</h3>
             {netByMonth.has(ym) && (
               <span className="num" style={{ fontSize: 11, color: "var(--muted)" }}>
-                net invested {signed(netByMonth.get(ym) ?? 0)}
+                net invested {fmtTHBSigned(netByMonth.get(ym) ?? 0)}
               </span>
             )}
           </div>

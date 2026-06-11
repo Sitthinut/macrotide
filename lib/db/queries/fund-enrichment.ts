@@ -5,6 +5,7 @@
 // Write side: upsert helpers called by the fund-catalog refresh job.
 // Read side: typed getters for API routes and the advisor tool.
 
+import "server-only";
 import { and, eq, ne, sql } from "drizzle-orm";
 import { getMarketDb } from "../context";
 import {
@@ -301,7 +302,10 @@ export function upsertFundDividendPolicy(projId: string, rows: FundDividendPolic
  * payment updates in place (heals corrections) keyed on
  * (projId, classAbbrName, bookCloseDate).
  */
-export function upsertFundDividendHistory(projId: string, rows: FundDividendHistoryInsert[]): void {
+export function upsertFundDividendHistory(
+  _projId: string,
+  rows: FundDividendHistoryInsert[],
+): void {
   if (rows.length === 0) return;
   const db = getMarketDb();
   db.transaction((tx) => {

@@ -28,6 +28,39 @@ export function fmtNum(n: number, d = 2): string {
   }).format(n);
 }
 
+/** ฿ gain/loss with an explicit sign — true minus (−), plus for gains. */
+export function fmtTHBSigned(n: number): string {
+  return `${n >= 0 ? "+" : "−"}${fmtTHBClean(Math.abs(n))}`;
+}
+
+/** Return RATIO (0.034 → "+3.4%"), fixed 1dp. For percentage-point inputs use fmtPct. */
+export function fmtRatioPct(r: number): string {
+  return `${r >= 0 ? "+" : ""}${(r * 100).toFixed(1)}%`;
+}
+
+/** Compact token counts for usage meters: 1234 → "1.2K", 2500000 → "2.5M". */
+export function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+/**
+ * Calendar date "2026-06-05" (or any ISO string) → "Jun 5, 2026". Parses the
+ * date part as UTC so a bare date never shifts a day in negative-offset
+ * timezones. Returns the input back if it isn't ISO-shaped.
+ */
+export function fmtDate(iso: string): string {
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 const DAY_MS = 86_400_000;
 
 export function fmtRelativeDate(iso: string, now: Date = new Date()): string {

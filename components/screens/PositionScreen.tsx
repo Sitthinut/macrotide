@@ -13,7 +13,7 @@ import { NavChart } from "@/components/InteractiveCharts";
 import { Stat } from "@/components/ui/Stat";
 import { type SeriesRange, useHoldingSeries, useHoldings } from "@/lib/fetchers/portfolio";
 import { useResource } from "@/lib/fetchers/swr";
-import { fmtPct } from "@/lib/format";
+import { fmtPct, fmtRatioPct, fmtTHBClean, fmtTHBSigned } from "@/lib/format";
 import type { TransactionAnalytics } from "@/lib/portfolio/transaction-analytics";
 import { usePrivacy } from "@/lib/stores/privacy";
 
@@ -28,9 +28,6 @@ const VALUE_RANGES: { lbl: string; range: SeriesRange }[] = [
   { lbl: "All", range: "max" },
 ];
 
-const baht = (n: number): string => `฿${Math.round(n).toLocaleString("en-US")}`;
-const signed = (n: number): string => `${n >= 0 ? "+" : "−"}${baht(Math.abs(n))}`;
-const pct = (r: number): string => `${r >= 0 ? "+" : ""}${(r * 100).toFixed(1)}%`;
 // Hero rounds units/avg-cost for legibility; full precision lives on History rows.
 const num = (n: number): string => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 
@@ -186,7 +183,7 @@ export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps
           <div className="stat-cards">
             <Stat
               label="RETURN"
-              value={irr != null ? pct(irr) : "—"}
+              value={irr != null ? fmtRatioPct(irr) : "—"}
               tone={irr == null ? "neutral" : irr >= 0 ? "up" : "down"}
               caption={
                 irr != null
@@ -194,10 +191,14 @@ export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps
                   : (a?.irrUnavailable ?? "Return appears after about a month of activity.")
               }
             />
-            <Stat label="INVESTED" value={baht(a?.costBasisTotal ?? 0)} caption="cost basis" />
+            <Stat
+              label="INVESTED"
+              value={fmtTHBClean(a?.costBasisTotal ?? 0)}
+              caption="cost basis"
+            />
             <Stat
               label="REALIZED"
-              value={signed(a?.realizedTotal ?? 0)}
+              value={fmtTHBSigned(a?.realizedTotal ?? 0)}
               tone={
                 (a?.realizedTotal ?? 0) > 0
                   ? "up"
@@ -207,7 +208,7 @@ export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps
               }
               caption="from sells"
             />
-            <Stat label="INCOME" value={baht(a?.incomeTotal ?? 0)} caption="dividends" />
+            <Stat label="INCOME" value={fmtTHBClean(a?.incomeTotal ?? 0)} caption="dividends" />
           </div>
         </div>
 

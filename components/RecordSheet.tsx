@@ -24,6 +24,7 @@ import { mergeSourceSuggestions } from "@/lib/data/sources";
 import { useBrokerConnectors, useBuckets, useHoldings } from "@/lib/fetchers/portfolio";
 import { cachedQuoteSource, resolveQuoteSources } from "@/lib/fetchers/quote-source";
 import { invalidate, useResource } from "@/lib/fetchers/swr";
+import { fmtDate, fmtTHBClean } from "@/lib/format";
 import { readExifCapture } from "@/lib/image-exif";
 import { normalizeImage } from "@/lib/image-normalize";
 import type { QuoteSource } from "@/lib/market/sources";
@@ -92,18 +93,6 @@ const NEEDS_NUDGE: Record<RowInvalidReason, string> = {
   "needs-price": "needs a price",
   "balance-needs-figure": "needs units or a ฿ total",
   "custom-needs-price": "needs a current price",
-};
-const baht = (n: number): string => `฿${Math.round(n).toLocaleString("en-US")}`;
-// "2026-06-05" → "Jun 5, 2026" (no leading zero). Raw string back if not ISO.
-const fmtDate = (iso: string): string => {
-  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
-  if (!y || !m || !d) return iso;
-  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  });
 };
 const numFmt = (s: string): string => {
   const n = Number(s);
@@ -924,9 +913,9 @@ function DraftRow({
   const amt = anchor
     ? ""
     : row.amount.trim()
-      ? baht(Math.abs(Number(row.amount)))
+      ? fmtTHBClean(Math.abs(Number(row.amount)))
       : !amountOnly && row.units.trim() && row.price.trim()
-        ? baht(Number(row.units) * Number(row.price))
+        ? fmtTHBClean(Number(row.units) * Number(row.price))
         : "";
   // What this row still NEEDS to be saveable — the SHARED gate's reason (the same
   // predicate valid() runs), mapped to a terse inline fragment. One source of truth,

@@ -44,16 +44,16 @@
         "noLabelWithoutControl": "off"
       },
       "suspicious": {
-        "noArrayIndexKey": "warn"
+        "noArrayIndexKey": "error"
       },
       "correctness": {
-        "useExhaustiveDependencies": "warn"
+        "useExhaustiveDependencies": "error"
       },
       "performance": {
-        "noImgElement": "warn"
+        "noImgElement": "error"
       },
       "style": {
-        "noDescendingSpecificity": "warn"
+        "noDescendingSpecificity": "off"
       }
     }
   },
