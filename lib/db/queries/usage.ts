@@ -20,6 +20,7 @@
 // trivially testable with the :memory: freshDb pattern. Callers in
 // single-owner / demo mode (`getUserId()` === null) must NOT call these — the
 // owner is never metered and demo is already isolated. See app/api/chat.
+import "server-only";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "../context";
 import { accountTier, usage } from "../schema";

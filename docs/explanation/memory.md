@@ -239,7 +239,8 @@ Resuming reactivates the thread (`idle → active`) so the next close extracts t
 new turns — incrementally, from the watermark. The extractor model is the cheap
 tier (`EXTRACT_MODEL` → `TITLE_MODEL` → `openrouter/free`), and a background
 `closeStaleSessions` sweep (`lib/jobs/close-stale-sessions.ts`) closes any
-session abandoned without a clean exit.
+session abandoned without a clean exit and hard-deletes trashed threads whose
+30-day restore window has expired.
 
 ### Demo mode
 

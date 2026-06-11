@@ -2,7 +2,7 @@ import "server-only";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getMarketDb } from "@/lib/db/context";
 import { fundQuotes, navHistory } from "@/lib/db/schema";
-import type { SeriesInterval, SeriesRange } from "./providers/types";
+import { rangeStartDate, type SeriesInterval, type SeriesRange } from "./providers/types";
 import { resolveProviderChain } from "./registry";
 import { quoteCacheKey } from "./sources";
 
@@ -156,7 +156,7 @@ function readCached(
   range: SeriesRange,
   cachedQuote: { nav: number; d1Pct: number | null; updatedAt: string },
 ): CachedSeries {
-  const sinceDate = rangeStart(range);
+  const sinceDate = rangeStartDate(range);
   const rows = db
     .select()
     .from(navHistory)
@@ -168,7 +168,12 @@ function readCached(
     series: rows.map((r) => ({ date: r.date, close: r.nav, netAsset: r.netAsset })),
     quote: {
       price: cachedQuote.nav,
-      previousClose: cachedQuote.nav - (cachedQuote.d1Pct ?? 0),
+      // d1Pct is a PERCENTAGE (×100 at persist time) — invert the day change,
+      // don't subtract percentage points from a price.
+      previousClose:
+        cachedQuote.d1Pct != null
+          ? cachedQuote.nav / (1 + cachedQuote.d1Pct / 100)
+          : cachedQuote.nav,
       asOf: cachedQuote.updatedAt,
     },
   };
@@ -243,25 +248,6 @@ function persistFresh(
       asOf: updatedAt,
     },
   };
-}
-
-function rangeStart(range: SeriesRange): string {
-  const now = new Date();
-  const days =
-    range === "1mo"
-      ? 31
-      : range === "3mo"
-        ? 92
-        : range === "6mo"
-          ? 183
-          : range === "1y"
-            ? 366
-            : range === "5y"
-              ? 5 * 366
-              : 365 * 50;
-  const d = new Date(now);
-  d.setUTCDate(d.getUTCDate() - days);
-  return d.toISOString().slice(0, 10);
 }
 
 function computeYtdPct(series: { close: number; t: number }[]): number | null {

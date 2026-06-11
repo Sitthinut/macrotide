@@ -13,6 +13,30 @@
 export type SeriesRange = "1mo" | "3mo" | "6mo" | "1y" | "5y" | "max";
 export type SeriesInterval = "1d" | "1wk" | "1mo";
 
+/**
+ * First UTC date (YYYY-MM-DD) covered by a range, counted back from today.
+ * Day counts lean generous (31/92/183/366) so a month boundary never clips
+ * the first point; "max" reaches back 50 years. Shared by the market cache
+ * and the holdings series fold so their windows can't drift apart.
+ */
+export function rangeStartDate(range: SeriesRange): string {
+  const days =
+    range === "1mo"
+      ? 31
+      : range === "3mo"
+        ? 92
+        : range === "6mo"
+          ? 183
+          : range === "1y"
+            ? 366
+            : range === "5y"
+              ? 5 * 366
+              : 365 * 50;
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
 export interface Quote {
   /** Ticker echoed back as the provider canonicalized it. */
   ticker: string;

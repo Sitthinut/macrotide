@@ -1,6 +1,7 @@
 // Long-term memory queries. Bitemporal: updates add a new row and
 // supersede; nothing is mutated in place. `valid_until IS NULL` is the
 // active set. See docs/explanation/memory.md for the full design.
+import "server-only";
 import { and, desc, eq, gt, isNull, like, or, sql } from "drizzle-orm";
 import { getDb } from "../context";
 import { userPreferences } from "../schema";

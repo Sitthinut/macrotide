@@ -1,3 +1,4 @@
+import "server-only";
 import { getDb } from "../context";
 import { plans } from "../schema";
 import { ownedBy, ownerId } from "./scope";

@@ -15,6 +15,7 @@
   "compilerOptions": {
     "paths": {
       "@/*": ["./*"],
+      "@macrotide/connector-sdk": ["./packages/connector-sdk/src/index.ts"],
       "server-only": ["./tests/shims/server-only.ts"]
     }
   }

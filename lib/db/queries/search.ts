@@ -5,6 +5,7 @@
 // plain LIKE rather than a second virtual table. A search returns one hit per
 // matching thread (newest activity first), preferring a message snippet when
 // the body matched, falling back to a title-only match.
+import "server-only";
 import { getDbContext, getUserId } from "../context";
 import type { ChatThread } from "./chat";
 
