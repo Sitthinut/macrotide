@@ -12,43 +12,10 @@ import type {
   FundPortfolioRow,
   FundTopHoldingRow,
 } from "@/lib/db/queries/fund-enrichment";
-
-// ─── helpers under test (inline replicas, not re-exported) ───────────────────
-// We test the logic, not the render. If the component logic changes the period
-// sort or label map, these tests will catch the regression.
-
-const PERIOD_ORDER = ["3M", "6M", "YTD", "1Y", "SI", "3Y", "5Y"];
-
-function periodSortKey(period: string): number {
-  const idx = PERIOD_ORDER.indexOf(period.toUpperCase());
-  return idx >= 0 ? idx : 99;
-}
-
-const PERF_TYPE_LABELS: Record<string, string> = {
-  ความผันผวนของกองทุนรวม: "Fund Volatility",
-  ความผันผวนของดัชนีชี้วัด: "Benchmark Volatility",
-  ผลการดำเนินงานของกองทุนรวม: "Fund Return",
-  ผลการดำเนินงานของดัชนีชี้วัด: "Benchmark Return",
-  ผลการดำเนินงานเฉลี่ยของกองทุนรวมในกลุ่ม: "Peer Avg Return",
-  ความผันผวนเฉลี่ยของกองทุนรวมในกลุ่ม: "Peer Avg Volatility",
-};
-
-function perfTypeLabel(raw: string): string {
-  return PERF_TYPE_LABELS[raw] ?? raw;
-}
-
-function fmtNavPct(val: number | null | undefined): string {
-  if (val == null) return "–";
-  return `${val.toFixed(2)}%`;
-}
-
-function fmtPct(val: string | number | null | undefined, showSign = true): string {
-  if (val == null) return "–";
-  const n = typeof val === "string" ? parseFloat(val) : val;
-  if (Number.isNaN(n)) return val as string;
-  const sign = showSign && n > 0 ? "+" : "";
-  return `${sign}${n.toFixed(2)}%`;
-}
+// Import the REAL helpers the component uses, so a change to the period sort,
+// label map, or formatters fails this test instead of silently passing a stale
+// replica.
+import { fmtNavPct, fmtPct, perfTypeLabel, periodSortKey } from "@/lib/fund-detail-format";
 
 // ─── mock enrichment data ─────────────────────────────────────────────────────
 
