@@ -169,7 +169,51 @@ describe("deriveFundFacets", () => {
       investRegion: "foreign",
     });
     expect(fromName.sectorFocus).toBe("healthcare");
-    expect(fromName.indexFamily).toBeNull(); // never claimed from a name
+    expect(fromName.indexFamily).toBeNull(); // never claimed from the fund's own name
+  });
+
+  it("claims the index family from the master fund's name — a feeder tracks its master", () => {
+    // SEC profile master-fund field.
+    const fromProfile = deriveFundFacets({
+      benchmarks: ["ผลการดำเนินงานของกองทุนรวมหลัก"],
+      englishName: "Example US Equity Index Fund", // own name names no index — by design
+      feederMasterFund: "iShares Core S&P 500 ETF",
+      investRegion: "foreign",
+    });
+    expect(fromProfile.indexFamily).toBe("S&P 500");
+
+    // Curated look-through mapping fills in when the profile field is empty.
+    const fromCurated = deriveFundFacets({
+      benchmarks: [],
+      englishName: "Example Nasdaq Tracker Fund",
+      curatedMasterName: "Invesco NASDAQ 100 UCITS ETF",
+      investRegion: "foreign",
+    });
+    expect(fromCurated.indexFamily).toBe("NASDAQ-100");
+
+    // A declared benchmark still outranks the master name.
+    const benchmarkWins = deriveFundFacets({
+      benchmarks: ["ดัชนี MSCI World Net Total Return"],
+      feederMasterFund: "iShares Core S&P 500 ETF",
+      investRegion: "foreign",
+    });
+    expect(benchmarkWins.indexFamily).toBe("MSCI World");
+
+    // The fund's OWN name still never claims a family, even with "S&P 500" in it.
+    const ownName = deriveFundFacets({
+      benchmarks: [],
+      englishName: "Example S&P 500 Opportunity Fund",
+      investRegion: "foreign",
+    });
+    expect(ownName.indexFamily).toBeNull();
+
+    // A master that names no index claims nothing.
+    const noSignal = deriveFundFacets({
+      benchmarks: [],
+      feederMasterFund: "Example Global Allocation Fund",
+      investRegion: "foreign",
+    });
+    expect(noSignal.indexFamily).toBeNull();
   });
 
   it("claims nothing when there is no signal", () => {

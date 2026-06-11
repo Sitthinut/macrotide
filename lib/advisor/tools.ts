@@ -896,6 +896,10 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
       "best-value option for any exposure. " +
       "Use indexOnly=true to restrict to passive/index-tracking funds (management " +
       "style PN or PM) — always prefer these when the user wants market-cap exposure. " +
+      "For 'cheapest fund tracking X' questions, prefer trackingIndex over a free-text " +
+      "query: it matches the normalized index family (catching feeder funds whose own " +
+      "name never mentions the index), restricts to index-style funds, and returns " +
+      "cheapest-first. " +
       "Use taxIncentive to find SSF/ThaiESG/RMF wrappers, which add tax deductibility " +
       "on top of the fee advantage. " +
       "IMPORTANT: Macrotide is an index-investing companion. When the user asks about " +
@@ -935,13 +939,26 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
           "Geographic mandate: 'foreign' for funds investing outside Thailand (feeder funds, " +
             "global index funds), 'domestic' for Thai-only exposure, 'mixed' for blended mandate.",
         ),
+      trackingIndex: z
+        .string()
+        .optional()
+        .describe(
+          "Normalized index family the fund must TRACK (index-style funds only — actively " +
+            "managed funds merely benchmarked against it are excluded). Use the canonical " +
+            "name: 'S&P 500', 'NASDAQ-100', 'SET50', 'SET100', 'MSCI World', 'MSCI ACWI', " +
+            "'MSCI EM', 'Nikkei 225', 'TOPIX', 'CSI 300', 'Hang Seng', 'Nifty 50', 'VN30', " +
+            "'FTSE All-World', 'Bloomberg Global Aggregate'. Prefer this over query for " +
+            "'cheapest fund tracking X' — results come back cheapest-first.",
+        ),
       query: z
         .string()
         .optional()
         .describe(
           "Free-text search against fund name and investment-policy text. Good for finding " +
-            "funds by index (e.g. 'S&P 500', 'MSCI World') or theme (e.g. 'gold', 'REIT'). " +
-            "Combine with assetClass for best results.",
+            "funds by theme (e.g. 'gold', 'REIT') or when no normalized index family fits. " +
+            "NOTE: with a query, results are ranked by match relevance, not fee — " +
+            "use trackingIndex for cheapest-index questions. Combine with assetClass for " +
+            "best results.",
         ),
       limit: z
         .number()
@@ -956,12 +973,21 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
       type: "text" as const,
       value: shapeForModel.funds(output as FundsOutput),
     }),
-    execute: async ({ assetClass, indexOnly, taxIncentive, region, query, limit }) => {
+    execute: async ({
+      assetClass,
+      indexOnly,
+      taxIncentive,
+      region,
+      trackingIndex,
+      query,
+      limit,
+    }) => {
       const funds = findFunds({
         assetClass,
         indexOnly,
         taxIncentive,
         region,
+        trackingIndex,
         query,
         activeOnly: true,
         excludeFixedTerm: true,
@@ -999,7 +1025,15 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
         feederMasterFund: f.feederMasterFund ?? null,
       }));
 
-      const cheapest = items[0];
+      // With a text query results arrive in RELEVANCE order, so items[0] is the
+      // best match, not the cheapest — name the true lowest-TER fund explicitly.
+      // Zero TER means "fee not actualized", not free — treat like null.
+      const effTer = (t: number | null) => (t != null && t > 0 ? t : null);
+      const cheapest = items.reduce((best, i) => {
+        const ti = effTer(i.terPct);
+        const tb = effTer(best.terPct);
+        return ti != null && (tb == null || ti < tb) ? i : best;
+      }, items[0]);
       const hasTer = items.filter((i) => i.terPct != null).length;
       const indexCount = items.filter((i) => i.isIndex).length;
 
@@ -1010,13 +1044,18 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
             ? `${indexCount} of ${items.length} are index/passive funds (marked isIndex=true). `
             : "";
 
+      const orderNote = query?.trim()
+        ? "sorted by match relevance (NOT by fee)"
+        : "sorted cheapest first";
+
       return {
         ok: true as const,
         count: funds.length,
         funds: items,
         cheapestAbbr: cheapest.abbr,
+        ordering: orderNote,
         message:
-          `Found ${funds.length} fund${funds.length === 1 ? "" : "s"} — sorted cheapest first. ` +
+          `Found ${funds.length} fund${funds.length === 1 ? "" : "s"} — ${orderNote}. ` +
           contextNote +
           (hasTer > 0
             ? `Lowest TER: ${cheapest.terLabel} (${cheapest.abbr}). ` +

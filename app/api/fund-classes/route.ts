@@ -9,8 +9,9 @@
 // activeOnly ('0' to include closed), indexType ('index'|'active'; indexOnly
 // '1' still accepted as a deprecated alias for indexType=index), taxIncentive
 // ('SSF'|'ThaiESG'|'RMF'), region ('foreign'|'domestic'|'mixed'),
-// excludeFixedTerm ('0' to include), includeNonRetail ('1' to show
-// institutional/insurance classes).
+// trackingIndex (normalized index family, e.g. 'S&P 500' — index-style funds
+// tracking it), excludeFixedTerm ('0' to include), includeNonRetail ('1' to
+// show institutional/insurance classes).
 
 import { NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
@@ -30,6 +31,7 @@ export async function GET(req: Request) {
   const indexOnlyParam = url.searchParams.get("indexOnly");
   const taxIncentiveParam = url.searchParams.get("taxIncentive");
   const regionParam = url.searchParams.get("region");
+  const trackingIndex = url.searchParams.get("trackingIndex") ?? undefined;
   const excludeFixedTermParam = url.searchParams.get("excludeFixedTerm");
   const includeNonRetail = url.searchParams.get("includeNonRetail") === "1";
 
@@ -60,6 +62,7 @@ export async function GET(req: Request) {
       indexOnly,
       taxIncentive,
       region,
+      trackingIndex,
       excludeFixedTerm,
       includeNonRetail,
     });

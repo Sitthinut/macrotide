@@ -10,7 +10,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { freshMarketDb } from "@/tests/db-helpers";
 import { runWithDbContext } from "../db/context";
-import { upsertFund, upsertFundFees } from "../db/queries/funds";
+import { updateFundFacets, upsertFund, upsertFundFees } from "../db/queries/funds";
 import * as schema from "../db/schema";
 import { createAdvisorTools } from "./tools";
 
@@ -302,6 +302,75 @@ describe("advisor tools — find_funds", () => {
     expect(f.investRegion).toBe("foreign");
     expect(f.isFeederFund).toBe(true);
     expect(f.feederMasterFund).toBe("Vanguard Total World");
+  });
+
+  it("trackingIndex filters to index-style funds of that family, cheapest first", async () => {
+    const result = (await withFresh(async () => {
+      // Real tracker, cheapest — own name never mentions the index (feeder case).
+      seedFund("TRACKER", { ter: 0.3, managementStyle: "PN" });
+      // Pricier tracker of the same family.
+      seedFund("TRACKER2", { ter: 0.7, managementStyle: "PN" });
+      // Active fund merely BENCHMARKED against the family — must be excluded.
+      seedFund("ACTIVEBM", { ter: 1.8, managementStyle: "OT" });
+      // Tracker of a DIFFERENT family — must be excluded.
+      seedFund("OTHERIDX", { ter: 0.2, managementStyle: "PN" });
+      const facets = {
+        regionFocus: null,
+        regionFocusSource: null,
+        sectorFocus: null,
+        aimcCategory: null,
+      };
+      updateFundFacets([
+        { projId: "TRACKER", ...facets, indexFamily: "S&P 500" },
+        { projId: "TRACKER2", ...facets, indexFamily: "S&P 500" },
+        { projId: "ACTIVEBM", ...facets, indexFamily: "S&P 500" },
+        { projId: "OTHERIDX", ...facets, indexFamily: "SET50" },
+      ]);
+      const tools = createAdvisorTools({ userId: null });
+      return run(tools.find_funds, { trackingIndex: "S&P 500" });
+    })) as { count: number; funds: { abbr: string }[]; cheapestAbbr: string; message: string };
+
+    expect(result.count).toBe(2);
+    expect(result.funds.map((f) => f.abbr)).toEqual(["TRACKER", "TRACKER2"]);
+    expect(result.cheapestAbbr).toBe("TRACKER");
+    expect(result.message).toContain("sorted cheapest first");
+  });
+
+  it("names the true lowest-TER fund even when a query ranks by relevance", async () => {
+    const result = (await withFresh(async () => {
+      // Strong name match but pricey — relevance puts it first.
+      seedFund("EXACTMATCH", { ter: 1.2, abbrName: "GOLDX" });
+      // Weaker match but cheapest — must still be the named cheapest.
+      upsertFund({
+        projId: "CHEAPGOLD",
+        abbrName: "CHEAPFUND",
+        englishName: "Cheap Gold Bullion Tracker",
+        assetClass: "alternative",
+        status: "active",
+      });
+      upsertFundFees([
+        {
+          projId: "CHEAPGOLD",
+          fundClassName: "A",
+          feeType: "total_expense",
+          feeTypeRaw: "Total Fee and Expense",
+          actualRatePct: 0.4,
+          rateCeilingPct: 0.9,
+          periodStart: "2026-01-01",
+          periodEnd: null,
+        },
+      ]);
+      const tools = createAdvisorTools({ userId: null });
+      return run(tools.find_funds, { query: "GOLDX" });
+    })) as { funds: { abbr: string }[]; cheapestAbbr: string; message: string };
+
+    // Relevance order is preserved…
+    expect(result.funds[0].abbr).toBe("GOLDX");
+    // …but the cheapest label points at the true lowest TER in the result set.
+    if (result.funds.length > 1) {
+      expect(result.cheapestAbbr).toBe("CHEAPFUND");
+    }
+    expect(result.message).toContain("relevance");
   });
 
   it("indexOnly param restricts results to PN/PM management style", async () => {

@@ -244,6 +244,8 @@ export interface FundFacetInput {
   englishName?: string | null;
   thaiName?: string | null;
   feederMasterFund?: string | null;
+  /** Curated master-fund name from feeder_master_map (look-through), when mapped. */
+  curatedMasterName?: string | null;
   /** Coarse SEC geographic mandate: 'foreign' | 'mixed' | 'domestic' | null. */
   investRegion?: string | null;
 }
@@ -262,7 +264,12 @@ export interface FundFacetInput {
  *   4. Name gazetteer over names + master-fund name — first specific match
  *      wins; used only when everything above said nothing.
  * Sector: benchmark first, then AIMC, then names. An index family is claimed
- * from a benchmark or the AIMC code, never inferred from a name.
+ * from a benchmark, the AIMC code, or the MASTER fund's name — never from the
+ * fund's own marketing names. The master-name exception is not inference: a
+ * feeder invests ≥80% in its single master fund (SEC rule), so a master named
+ * "iShares Core S&P 500 ETF" makes the feeder an S&P 500 fund as a matter of
+ * fact — and feeders rarely declare a classifiable benchmark of their own
+ * (they benchmark "the master fund's performance").
  */
 export function deriveFundFacets(input: FundFacetInput): FundFacets {
   const aimc = classifyAimcCategory(input.aimcCategory);
@@ -276,7 +283,14 @@ export function deriveFundFacets(input: FundFacetInput): FundFacets {
   // Sector: first benchmark that names one (blends across sectors are rare and
   // the first row is the dominant component by convention) → AIMC snapshot.
   let sectorFocus = signals.find((s) => s.sector)?.sector ?? aimc.sector ?? null;
-  const indexFamily = signals.find((s) => s.indexFamily)?.indexFamily ?? aimc.indexFamily ?? null;
+  let indexFamily = signals.find((s) => s.indexFamily)?.indexFamily ?? aimc.indexFamily ?? null;
+
+  // Master-name fallback: the master fund's name names the index a feeder
+  // tracks (see the function doc for why this isn't name inference).
+  const masterText = [input.feederMasterFund, input.curatedMasterName].filter(Boolean).join(" | ");
+  if (!indexFamily && masterText) {
+    indexFamily = classifyBenchmarkString(masterText).indexFamily ?? null;
+  }
 
   if (!regionFocus && input.investRegion === "domestic") {
     regionFocus = "thailand";
@@ -288,7 +302,12 @@ export function deriveFundFacets(input: FundFacetInput): FundFacets {
     regionFocusSource = "aimc";
   }
 
-  const nameText = [input.englishName, input.thaiName, input.feederMasterFund]
+  const nameText = [
+    input.englishName,
+    input.thaiName,
+    input.feederMasterFund,
+    input.curatedMasterName,
+  ]
     .filter(Boolean)
     .join(" | ");
 
