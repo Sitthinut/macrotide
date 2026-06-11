@@ -135,10 +135,16 @@ touching the portfolio "All" chart:
 - **FX is not a limiter.** THB↔USD conversion history rides on Frankfurter
   (keyless, ECB-backed, deep to 1999), so the currency leg of a blended "All"
   chart never bottlenecks it.
-- **Benchmark comparison is separate data.** Comparing the portfolio against an
-  index needs a purpose-built **total-return** series (SET TRI / tracking-ETF
-  adjusted close), not the display-only price indices above — tracked in
-  [#81](https://github.com/Sitthinut/macrotide/issues/81).
+- **Benchmark comparison → deep, total-return.** Comparing the portfolio against
+  an index needs a purpose-built **total-return** series, not the display-only
+  price indices above: a price index would understate the benchmark and flatter
+  the dividend-reinvesting portfolio line. A small curated set of tracking-ETF
+  proxies (global / US / developed-ex-US / EM, plus a Thai proxy) is warmed under
+  the dedicated **`benchmark_tr`** source as dividend-reinvested **adjusted
+  close** (Twelve Data `adjust=all`, ~20y deep) by `jobs:prewarm-benchmark`, so a
+  comparison overlay can render like-for-like across the full "All" range. The
+  source is deliberately not a holdable `quote_source` — it only namespaces the
+  cache rows (`benchmark_tr:ACWI`) and routes the adjusted provider.
 
 The demo is exempt from this gap: it ships a self-contained committed history
 fixture and never depends on the crawl. A real account must never be shown

@@ -448,6 +448,7 @@ timer fires; the app process itself schedules nothing. The roster, in run order:
 | `jobs:refresh-share-classes` | `refresh-share-classes.ts` | Priceable share classes (FK-after catalog) | 11:45 daily |
 | `jobs:refresh-market` | `refresh-tracked-market.ts` | **Freshness** — NAV for held positions + indicators | 12:30 daily |
 | `jobs:prewarm-nav` | `prewarm-nav.ts` | **Coverage** — NAV/AUM for the *whole* catalog | one-off backfill; optional daily append 02:00 |
+| `jobs:prewarm-benchmark` | `prewarm-benchmark.ts` | **Coverage** — total-return benchmark series (`benchmark_tr`) for the curated proxy set | one-off backfill; daily append 23:30 |
 | `jobs:close-stale` | `close-stale-sessions.ts` | Session-expiry backstop (real-time path is primary) | optional |
 
 `jobs:refresh-market` (freshness) and `jobs:prewarm-nav` (coverage) are a
@@ -699,6 +700,68 @@ EOF
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now macrotide-prewarm-nav.timer
+```
+
+### Benchmark total-return pre-warm
+
+Warm the curated total-return benchmark proxies (`benchmark_tr` source) so a
+portfolio-vs-benchmark overlay reads deep, like-for-like history with no cold
+first-open. This is `scripts/prewarm-benchmark.ts` (`npm run jobs:prewarm-benchmark`);
+it warms a handful of tracking-ETF symbols through the same `getCachedSeries`
+cache (Twelve Data `adjust=all`, ~20y deep). It needs `TWELVE_DATA_API_KEY`; a
+few calls total, so quota is a non-issue.
+
+**One-time backfill** (after deploy):
+
+```sh
+# Dockerized box:
+scripts/run-job.sh prewarm-benchmark
+# or directly:
+npx -y tsx --tsconfig tsconfig.scripts.json scripts/prewarm-benchmark.ts
+```
+
+Verify depth landed (≥1 global proxy back ~5.4y+):
+
+```sh
+sqlite3 data/market.db "SELECT ticker, MIN(date), MAX(date), COUNT(*) \
+  FROM nav_history WHERE ticker LIKE 'benchmark_tr:%' GROUP BY ticker;"
+```
+
+**Daily append** with `--range=1mo` (depth-aware cache keeps prior `max` depth).
+Run at **23:30 UTC** — after the US close so the day's EOD point has landed,
+before the 02:00 prewarm-nav slot:
+
+```sh
+sudo tee /etc/systemd/system/macrotide-prewarm-benchmark.service > /dev/null <<'EOF'
+[Unit]
+Description=Macrotide — benchmark total-return pre-warm (daily append)
+After=network.target macrotide.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/opt/macrotide
+EnvironmentFile=/opt/macrotide/.env.local
+ExecStart=npx -y tsx --tsconfig tsconfig.scripts.json scripts/prewarm-benchmark.ts --range=1mo
+StandardOutput=journal
+StandardError=journal
+EOF
+
+sudo tee /etc/systemd/system/macrotide-prewarm-benchmark.timer > /dev/null <<'EOF'
+[Unit]
+Description=Run Macrotide benchmark TR append daily at 23:30 UTC
+
+[Timer]
+OnCalendar=*-*-* 23:30:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now macrotide-prewarm-benchmark.timer
 ```
 
 ## Updating
