@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { listProviders, resolveProvider, resolveProviderChain } from "./registry";
+import { BENCHMARK_TR_SOURCE } from "./sources";
 
 describe("resolveProvider", () => {
   it("routes market source → yahoo provider", () => {
@@ -59,5 +60,23 @@ describe("resolveProviderChain — key gating / graceful fallback", () => {
     process.env.TWELVE_DATA_API_KEY = "k";
     const ids = resolveProviderChain("market", "^SET.BK").map((p) => p.id);
     expect(ids).toEqual(["eodhd", "twelvedata", "yahoo"]);
+  });
+
+  it("serves benchmark_tr solely via the adjusted Twelve Data provider", () => {
+    process.env.TWELVE_DATA_API_KEY = "k";
+    const ids = resolveProviderChain(BENCHMARK_TR_SOURCE, "ACWI").map((p) => p.id);
+    expect(ids).toEqual(["twelvedata-adjusted"]);
+  });
+
+  it("does not route the raw market chain to a benchmark ticker (no cross-match)", () => {
+    process.env.TWELVE_DATA_API_KEY = "k";
+    // The plain twelvedata provider must not match benchmark_tr, and the adjusted
+    // one must not match market — a benchmark series can never serve a holding.
+    const market = resolveProviderChain("market", "ACWI").map((p) => p.id);
+    expect(market).not.toContain("twelvedata-adjusted");
+  });
+
+  it("with no key, benchmark_tr has no provider (fails cleanly, never shallow)", () => {
+    expect(resolveProviderChain(BENCHMARK_TR_SOURCE, "ACWI")).toEqual([]);
   });
 });

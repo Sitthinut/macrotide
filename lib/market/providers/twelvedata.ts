@@ -10,7 +10,18 @@
 //
 // Endpoint: https://api.twelvedata.com/time_series?symbol=&interval=1day&apikey=
 // We request order=asc so values arrive oldest-first, matching SeriesPoint order.
+//
+// Two providers share one fetch core:
+//   - twelveDataProvider          → the `market` chain, raw close.
+//   - twelveDataAdjustedProvider  → the `benchmark_tr` chain, `adjust=all`
+//       (split + DIVIDEND adjusted close = a total-return proxy). Verified on the
+//       free tier: `adjust=all` reinvests dividends and serves ~20y depth (5000
+//       daily points back to 2006) — deep enough for the portfolio "All" range.
+//       This is the sole benchmark_tr provider: EODHD's adjusted_close is
+//       free-tier-capped to ~1y and Yahoo 429s from datacenters, so neither is a
+//       usable fallback for a deep TR backfill.
 
+import { BENCHMARK_TR_SOURCE } from "../sources";
 import {
   type Provider,
   ProviderError,
@@ -105,6 +116,69 @@ interface TwelveDataResponse {
   message?: string;
 }
 
+async function fetchTwelveDataSeries(
+  ticker: string,
+  range: SeriesRange,
+  interval: SeriesInterval,
+  opts: { adjusted: boolean },
+): Promise<{ quote: Quote; series: SeriesPoint[] }> {
+  const key = apiKey();
+  if (!key) throw new ProviderError("TWELVE_DATA_API_KEY not set", "twelvedata");
+
+  const symbol = toTwelveDataSymbol(ticker);
+  const url = new URL(BASE_URL);
+  url.searchParams.set("symbol", symbol);
+  url.searchParams.set("interval", INTERVAL_MAP[interval]);
+  url.searchParams.set("outputsize", String(outputSize(range)));
+  url.searchParams.set("order", "asc"); // oldest-first
+  // `adjust=all` reinvests dividends + applies splits — the total-return proxy
+  // the benchmark_tr source needs. Omitted for the raw `market` chain.
+  if (opts.adjusted) url.searchParams.set("adjust", "all");
+  url.searchParams.set("apikey", key);
+
+  const res = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" });
+  if (!res.ok) {
+    throw new ProviderError(
+      `Twelve Data returned ${res.status} for ${symbol}`,
+      "twelvedata",
+      res.status,
+    );
+  }
+  const json = (await res.json()) as TwelveDataResponse;
+  if (json.status === "error") {
+    // Includes "symbol not found" / plan-restricted symbols — let the chain
+    // fall through to the keyless fallback for this ticker.
+    throw new ProviderError(
+      json.message ?? `Twelve Data error for ${symbol}`,
+      "twelvedata",
+      json.code,
+    );
+  }
+  const values = json.values ?? [];
+  const series: SeriesPoint[] = [];
+  for (const v of values) {
+    const close = Number(v.close);
+    const t = Math.floor(new Date(`${v.datetime}T00:00:00Z`).getTime() / 1000);
+    if (!Number.isFinite(close) || !Number.isFinite(t)) continue;
+    series.push({ t, close });
+  }
+  if (series.length === 0) {
+    throw new ProviderError(`Twelve Data returned no data for ${symbol}`, "twelvedata");
+  }
+
+  const latest = series[series.length - 1];
+  const prev = series.length > 1 ? series[series.length - 2] : latest;
+  const quote: Quote = {
+    ticker: json.meta?.symbol ?? symbol,
+    name: json.meta?.symbol ?? symbol,
+    currency: json.meta?.currency ?? "",
+    price: latest.close,
+    previousClose: prev.close,
+    asOfUnix: latest.t,
+  };
+  return { quote, series };
+}
+
 export const twelveDataProvider: Provider = {
   id: "twelvedata",
   // Owns the same logical sources as Yahoo (indices / stocks / FX), but only
@@ -112,62 +186,20 @@ export const twelveDataProvider: Provider = {
   matches(source: string, _ticker: string): boolean {
     return source === "market" && apiKey() !== undefined;
   },
-  async fetchSeries(
-    ticker: string,
-    range: SeriesRange,
-    interval: SeriesInterval,
-  ): Promise<{ quote: Quote; series: SeriesPoint[] }> {
-    const key = apiKey();
-    if (!key) throw new ProviderError("TWELVE_DATA_API_KEY not set", "twelvedata");
+  fetchSeries(ticker, range, interval) {
+    return fetchTwelveDataSeries(ticker, range, interval, { adjusted: false });
+  },
+};
 
-    const symbol = toTwelveDataSymbol(ticker);
-    const url = new URL(BASE_URL);
-    url.searchParams.set("symbol", symbol);
-    url.searchParams.set("interval", INTERVAL_MAP[interval]);
-    url.searchParams.set("outputsize", String(outputSize(range)));
-    url.searchParams.set("order", "asc"); // oldest-first
-    url.searchParams.set("apikey", key);
-
-    const res = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" });
-    if (!res.ok) {
-      throw new ProviderError(
-        `Twelve Data returned ${res.status} for ${symbol}`,
-        "twelvedata",
-        res.status,
-      );
-    }
-    const json = (await res.json()) as TwelveDataResponse;
-    if (json.status === "error") {
-      // Includes "symbol not found" / plan-restricted symbols — let the chain
-      // fall through to the keyless fallback for this ticker.
-      throw new ProviderError(
-        json.message ?? `Twelve Data error for ${symbol}`,
-        "twelvedata",
-        json.code,
-      );
-    }
-    const values = json.values ?? [];
-    const series: SeriesPoint[] = [];
-    for (const v of values) {
-      const close = Number(v.close);
-      const t = Math.floor(new Date(`${v.datetime}T00:00:00Z`).getTime() / 1000);
-      if (!Number.isFinite(close) || !Number.isFinite(t)) continue;
-      series.push({ t, close });
-    }
-    if (series.length === 0) {
-      throw new ProviderError(`Twelve Data returned no data for ${symbol}`, "twelvedata");
-    }
-
-    const latest = series[series.length - 1];
-    const prev = series.length > 1 ? series[series.length - 2] : latest;
-    const quote: Quote = {
-      ticker: json.meta?.symbol ?? symbol,
-      name: json.meta?.symbol ?? symbol,
-      currency: json.meta?.currency ?? "",
-      price: latest.close,
-      previousClose: prev.close,
-      asOfUnix: latest.t,
-    };
-    return { quote, series };
+// Total-return benchmark provider: same endpoint, `adjust=all`. Matches only the
+// non-holdable `benchmark_tr` source, so it never competes with the raw `market`
+// chain and a benchmark ticker can't accidentally serve a holding's price.
+export const twelveDataAdjustedProvider: Provider = {
+  id: "twelvedata-adjusted",
+  matches(source: string, _ticker: string): boolean {
+    return source === BENCHMARK_TR_SOURCE && apiKey() !== undefined;
+  },
+  fetchSeries(ticker, range, interval) {
+    return fetchTwelveDataSeries(ticker, range, interval, { adjusted: true });
   },
 };

@@ -5,13 +5,27 @@ import { navHistory } from "@/lib/db/schema";
 import { demoIndexSeries } from "@/lib/mock/demo-history-read";
 import { findBenchmark } from "./benchmark-options";
 import { getCachedSeries } from "./cache";
+import { buildFxConverter } from "./fx";
 import type { SeriesRange } from "./providers/types";
 import { benchmarkRangeStart } from "./range";
-import { quoteCacheKey } from "./sources";
+import { BENCHMARK_TR_SOURCE, quoteCacheKey } from "./sources";
 
 // Re-export the client-safe catalog so server callers can keep importing
 // everything benchmark-related from this one module.
-export { BENCHMARK_OPTIONS, type BenchmarkOption, findBenchmark } from "./benchmark-options";
+export { BENCHMARK_TR_OPTIONS, type BenchmarkOption, findBenchmark } from "./benchmark-options";
+
+// Benchmark key → demo fixture index key (lib/mock/demo-history.ts). Every
+// featured benchmark maps to a real index proxy stored in the committed fixture,
+// so the demo overlay renders for all of them with no live fetch.
+const DEMO_BENCHMARK_INDEX: Record<string, string> = {
+  acwi_tr: "acwi",
+  us_tr: "sp500",
+  us_tech_tr: "nasdaq",
+  dev_exus_tr: "dev_exus",
+  em_tr: "em",
+  japan_tr: "nikkei",
+  thai_tr: "set",
+};
 
 export interface BenchmarkSeriesPoint {
   /** ISO YYYY-MM-DD */
@@ -34,12 +48,14 @@ export async function getBenchmarkSeries(
   const since = benchmarkRangeStart(range);
 
   // DEMO MODE: serve the benchmark overlay from the committed ~5y fixture instead
-  // of market.db. The benchmark `key` (set / sp500 / nasdaq / nikkei) is also the
-  // fixture index key, so the lookup is direct. demoIndexSeries seeds a carry-in
-  // on `since` so the overlay spans the full window. Owner mode reads the live
-  // cache (with the same carry-in below). See lib/mock/demo-history.ts.
+  // of market.db. The fixture is keyed by its own index keys (sp500/nasdaq/…), so
+  // map the benchmark key to its fixture index. demoIndexSeries seeds a carry-in
+  // on `since` so the overlay spans the full window. The fixture is already
+  // rebased/synthetic and shares the demo portfolio's indices, so it needs no FX
+  // conversion (owner mode does — below). See lib/mock/demo-history.ts.
   if (isDemoRequest()) {
-    return demoIndexSeries(key, since);
+    const indexKey = DEMO_BENCHMARK_INDEX[key];
+    return indexKey ? demoIndexSeries(indexKey, since) : [];
   }
 
   try {
@@ -62,10 +78,34 @@ export async function getBenchmarkSeries(
         .get();
       if (carry) series.unshift({ date: since, value: carry.nav });
     }
-    return series;
+    return await convertToBaseCurrency(b.source, series, range);
   } catch {
     return [];
   }
+}
+
+/**
+ * Convert a benchmark series into the base currency (฿). The `benchmark_tr`
+ * proxies are USD ETFs, so without this the overlay's % return would carry the
+ * USD/THB move over the window — flattering or punishing the comparison against
+ * the ฿ portfolio line. Reuses the keyless Frankfurter FX chain. A future
+ * ฿-native benchmark would skip conversion (other sources pass through).
+ */
+async function convertToBaseCurrency(
+  source: string,
+  series: BenchmarkSeriesPoint[],
+  range: SeriesRange,
+): Promise<BenchmarkSeriesPoint[]> {
+  if (source !== BENCHMARK_TR_SOURCE || series.length === 0) return series;
+  const fx = await buildFxConverter(
+    ["USD"],
+    range,
+    series.map((p) => p.date),
+  );
+  return series.map((p) => {
+    const rate = fx.rateOn("USD", p.date);
+    return rate == null ? p : { date: p.date, value: p.value * rate };
+  });
 }
 
 /**
