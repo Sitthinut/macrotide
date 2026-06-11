@@ -526,3 +526,165 @@ export async function getPortfolioSeries(
     unpriced: Array.from(unpriced).sort(),
   };
 }
+
+export interface HoldingValueSeriesResult {
+  /** Market value of the position per date (units × NAV × fx), THB. */
+  value: SeriesPoint[];
+  /** Remaining cost basis per date (what you've put in, net of sells), THB. */
+  costBasis: SeriesPoint[];
+  /** Most recent plotted date, or null when the holding never charts. */
+  asOf: string | null;
+  /**
+   * Latest plotted date valued from trade-implied prices / cost-carry rather
+   * than a cached NAV — history up to here is partly estimated. Null = every
+   * point is cache-priced. Drives the chart's disclosure caption.
+   */
+  estimatedThrough: string | null;
+  /** Currency that couldn't be FX-converted (value degraded on those dates). */
+  missingFx: string[];
+}
+
+const EMPTY_HOLDING_SERIES: HoldingValueSeriesResult = {
+  value: [],
+  costBasis: [],
+  asOf: null,
+  estimatedThrough: null,
+  missingFx: [],
+};
+
+/**
+ * Value-over-time for a SINGLE holding — the per-position slice of the same
+ * ledger replay `getPortfolioSeries` runs (ADR 0005), before it's summed into a
+ * bucket. The instrument is folded across every bucket it appears in (matching
+ * the ticker-scoped analytics endpoint), so the position screen shows the whole
+ * holding, not a per-bucket slice.
+ *
+ * On each chart date: `value = units(date) × NAV(date) × fx(date)` — 0 before
+ * the first event, exited positions still charted over the dates held, history
+ * before the fund's cached NAV coverage priced from the ledger's own
+ * trade-implied prices (carried at cost as a last resort), and the native
+ * currency converted to THB. The cost-basis line is the lot fold's remaining
+ * basis over the same axis, so the gap to the value line reads as unrealized
+ * gain. Reuses the same NAV/FX/forward-fill helpers as `getPortfolioSeries`.
+ */
+export async function getHoldingValueSeries(
+  ticker: string,
+  range: SeriesRange = "6mo",
+): Promise<HoldingValueSeriesResult> {
+  const marketDb = getMarketDb();
+  const since = rangeStartDate(range);
+  const today = new Date().toISOString().slice(0, 10);
+
+  const buckets = listBuckets();
+  const ledger = listTransactionsForBuckets(buckets.map((b) => b.id));
+  if (ledger.length === 0) return EMPTY_HOLDING_SERIES;
+
+  // One instrument across every bucket it appears in. `foldableEvents` is the
+  // same pre-pass holdings/analytics run, so the chart can't disagree with them.
+  const events = foldableEvents(ledger).filter((r) => r.ticker === ticker);
+  if (events.length === 0) return EMPTY_HOLDING_SERIES;
+
+  const ledgerTxns: LedgerTxn[] = events.map(toLedgerTxn);
+  const { positionTimeline, basisTimeline } = reduceLots(ledgerTxns);
+  const checkpoints = positionTimeline.get(ticker) ?? [];
+
+  // Routing key + currency (last event's quote_source wins, mirroring the
+  // holdings projection and getPortfolioSeries).
+  let quoteSource = events[0].quoteSource;
+  for (const r of events) quoteSource = r.quoteSource;
+  const key = quoteCacheKey(quoteSource, ticker);
+  const currency = inferHoldingCurrency(quoteSource, ticker);
+  const currencyByKey = new Map([[key, currency]]);
+
+  // NAV rows for this key only (demo fixture or market.db), merged with the
+  // ledger's trade-implied prices. Cached rows win on a date collision.
+  const navRows = (
+    isDemoRequest()
+      ? demoNavRows([{ quoteSource, ticker }], since)
+      : marketNavRows(marketDb, [key], since)
+  ).filter((r) => r.ticker === key);
+
+  const byDate = new Map<string, number>();
+  let firstCached: string | undefined;
+  for (const r of tradeImpliedRows(events, currencyByKey)) {
+    if (r.ticker === key) byDate.set(r.date, r.nav);
+  }
+  for (const r of navRows) {
+    byDate.set(r.date, r.nav);
+    if (firstCached === undefined || r.date < firstCached) firstCached = r.date;
+  }
+
+  // Shared axis: every in-window NAV date + every in-window ledger event date
+  // (cost-basis steps land on event dates, which need not be NAV dates).
+  const dateSet = new Set<string>();
+  for (const r of navRows) dateSet.add(r.date);
+  for (const r of events) {
+    if (r.tradeDate >= since && r.tradeDate <= today) dateSet.add(r.tradeDate);
+  }
+  const dates = Array.from(dateSet).sort();
+  if (dates.length === 0) return EMPTY_HOLDING_SERIES;
+
+  const fx = await buildFxConverter(new Set([currency]), range, dates);
+
+  // Forward-fill NAV over the shared dates (pre-window implied rows fold into
+  // the seed before the first axis date).
+  const sortedNav = Array.from(byDate.entries())
+    .map(([date, nav]) => ({ date, nav }))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const filled = new Map<string, number>();
+  {
+    let i = 0;
+    let last: number | null = null;
+    for (const d of dates) {
+      while (i < sortedNav.length && sortedNav[i].date <= d) {
+        last = sortedNav[i].nav;
+        i++;
+      }
+      if (last !== null) filled.set(d, last);
+    }
+  }
+  const isEstimated = (d: string): boolean => firstCached === undefined || d < firstCached;
+
+  const firstEvent = events.reduce(
+    (min, r) => (r.tradeDate < min ? r.tradeDate : min),
+    events[0].tradeDate,
+  );
+
+  const unitsAt = stepWalker(checkpoints);
+  const basisAt = stepWalker(basisTimeline);
+  const value: SeriesPoint[] = [];
+  const costBasis: SeriesPoint[] = [];
+  let estimatedThrough: string | null = null;
+
+  for (const d of dates) {
+    if (d < firstEvent) continue;
+    const cp = unitsAt(d);
+    let v = 0;
+    let estimated = false;
+    if (cp && cp.units > UNIT_EPSILON) {
+      const nav = filled.get(d);
+      if (nav !== undefined) {
+        const rate = fx.rateOn(currency, d);
+        if (rate !== null) {
+          v = cp.units * nav * rate;
+          estimated = isEstimated(d);
+        }
+      } else if (cp.costBasis !== null && cp.costBasis > 0) {
+        // Held but unpriceable on this date: carry at remaining cost.
+        v = cp.costBasis;
+        estimated = true;
+      }
+    }
+    if (estimated && v > 0) estimatedThrough = d;
+    value.push({ date: d, value: v });
+    costBasis.push({ date: d, value: basisAt(d)?.costBasis ?? 0 });
+  }
+
+  return {
+    value,
+    costBasis,
+    asOf: value[value.length - 1]?.date ?? null,
+    estimatedThrough,
+    missingFx: Array.from(fx.missing).sort(),
+  };
+}

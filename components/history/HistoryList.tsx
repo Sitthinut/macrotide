@@ -343,30 +343,36 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
         (() => {
           const realized = analytics?.realizedTotal ?? 0;
           return (
-            <div className="stat-cards">
-              <Stat
-                label="RETURN"
-                value={irr != null ? pct(irr) : "—"}
-                tone={irr == null ? "neutral" : irr >= 0 ? "up" : "down"}
-                caption={
-                  irr != null
-                    ? "money-weighted"
-                    : (analytics?.irrUnavailable ??
-                      "Return appears after about a month of activity.")
-                }
-              />
-              <Stat
-                label="INVESTED"
-                value={baht(analytics?.costBasisTotal ?? 0)}
-                caption="cost basis"
-              />
-              <Stat
-                label="REALIZED"
-                value={signed(realized)}
-                tone={realized > 0 ? "up" : realized < 0 ? "down" : "neutral"}
-                caption="from sells"
-              />
-              <Stat label="INCOME" value={baht(analytics?.incomeTotal ?? 0)} caption="dividends" />
+            <div className="stat-cards-cq">
+              <div className="stat-cards">
+                <Stat
+                  label="RETURN"
+                  value={irr != null ? pct(irr) : "—"}
+                  tone={irr == null ? "neutral" : irr >= 0 ? "up" : "down"}
+                  caption={
+                    irr != null
+                      ? "money-weighted"
+                      : (analytics?.irrUnavailable ??
+                        "Return appears after about a month of activity.")
+                  }
+                />
+                <Stat
+                  label="INVESTED"
+                  value={baht(analytics?.costBasisTotal ?? 0)}
+                  caption="cost basis"
+                />
+                <Stat
+                  label="REALIZED"
+                  value={signed(realized)}
+                  tone={realized > 0 ? "up" : realized < 0 ? "down" : "neutral"}
+                  caption="from sells"
+                />
+                <Stat
+                  label="INCOME"
+                  value={baht(analytics?.incomeTotal ?? 0)}
+                  caption="dividends"
+                />
+              </div>
             </div>
           );
         })()}

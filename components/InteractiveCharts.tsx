@@ -77,7 +77,7 @@ function AxisTick({
     <text
       x={Number(x)}
       y={Number(y)}
-      dy={12}
+      dy={9}
       textAnchor="middle"
       fontSize={10}
       fontFamily="var(--font-mono)"
@@ -88,6 +88,14 @@ function AxisTick({
     </text>
   );
 }
+
+// Reserved height for the x-axis band. recharts hands the tick a `y` already
+// offset ~6px below the axis line, then our label adds dy=9 + descent, so the
+// band must cover ~21px or the date clips at the SVG edge. 22 trims the old 30px
+// default (the plot gains the difference) while keeping a small margin. Both
+// NavChart return paths share it, and the two-line label/dot geometry derives the
+// plot bottom from it.
+const NAV_AXIS_H = 22;
 
 function EmptyState({ height, emptyHint }: { height: number; emptyHint?: string | null }) {
   return (
@@ -283,32 +291,61 @@ export function NavChart({
       );
     };
 
-    // Place the label on the side of the invested line AWAY from the value line
-    // (the open area): below when you're up, above when underwater. Then push it
-    // clear of the steppy tail — far enough to miss the lowest/highest line in
-    // the end region, but only as far as needed, so a flat tail keeps it hugging
-    // the line. ~90px plot area (130 height − 10 top − 30 x-axis).
     const last = merged.at(-1);
     const valueAbove = !last || last.v >= last.inv;
-    const tail = merged.slice(-Math.max(3, Math.ceil(merged.length * 0.1)));
-    const scale = yMax > yMin ? (height - 40) / (yMax - yMin) : 0;
-    const invEnd = last?.inv ?? 0;
-    // SVG text grows UP from its baseline, so a below-label needs more gap than
-    // an above-label to read the same distance from the line.
-    const labelDy = valueAbove
-      ? (invEnd - Math.min(...tail.map((p) => Math.min(p.v, p.inv)))) * scale + 12
-      : -((Math.max(...tail.map((p) => Math.max(p.v, p.inv))) - invEnd) * scale + 6);
+    const n = merged.length;
+
+    // Geometry of the plot area (top margin 10, x-axis band NAV_AXIS_H).
+    const plotTop = 10;
+    const plotH = height - plotTop - NAV_AXIS_H;
+    const range = yMax - yMin;
+    // Inset the y-domain by ~the active-dot radius (data units) so a line sitting
+    // on the extreme — a flat cost-basis floor, or a ceiling — isn't flush with
+    // the plot edge, where its hover dot would be clipped in half.
+    const pad = range > 0 ? (5 / plotH) * range : Math.max(1, Math.abs(yMax) * 0.02);
+    const domMin = yMin - pad;
+    const domMax = yMax + pad;
+    const yOf = (val: number) => plotTop + (domMax - val) * (plotH / (domMax - domMin));
+
+    // The end-label hugs the invested line's last point and stays clear of the
+    // line WITHIN THE LABEL'S OWN WIDTH — so a step-up under the text is avoided,
+    // but one further left (where no text sits) is ignored. The clearance window
+    // is the label's pixel width converted to data points, so it's the same
+    // physical width at every range (not a fraction of the series). It also flips
+    // to the side with room when the line is pinned to the floor or the ceiling.
+    // SVG text grows UP from its baseline → a below-label needs more gap.
+    const GAP_BELOW = 12;
+    const GAP_ABOVE = 7;
+    const LABEL_H = 9;
+    const LABEL_W = 55; // ~ "INVESTED" at 9px mono + letter-spacing
+    const BOTTOM_EDGE = height - NAV_AXIS_H;
     const investedEndLabel = (props: {
       x?: number | string;
       y?: number | string;
       index?: number;
     }) => {
-      if (props.index !== merged.length - 1 || props.x == null || props.y == null) return null;
-      // Keep the label on-canvas even if the tail pushes it toward an edge.
-      const y = Math.min(height - 14, Math.max(8, Number(props.y) + labelDy));
+      if (props.index !== n - 1 || props.x == null || props.y == null) return null;
+      const lastX = Number(props.x);
+      // px between category points → trailing points the label text spans.
+      const pxPerPoint = n > 1 ? (lastX - 4) / (n - 1) : 0;
+      const span = pxPerPoint > 0 ? Math.min(n, Math.max(2, Math.ceil(LABEL_W / pxPerPoint))) : n;
+      // Clear against the INVESTED line only — the label belongs to it and must
+      // hug it on whichever side, never jump across the wedge to the value line.
+      const windowPts = merged.slice(n - span);
+      const invLow = Math.min(...windowPts.map((p) => p.inv));
+      const invHigh = Math.max(...windowPts.map((p) => p.inv));
+      const yBelow = yOf(invLow) + GAP_BELOW;
+      const yAbove = yOf(invHigh) - GAP_ABOVE;
+      // Prefer the side away from the value line; flip only if it spills past an edge.
+      let below = valueAbove;
+      const belowFits = yBelow <= BOTTOM_EDGE;
+      const aboveFits = yAbove - LABEL_H >= plotTop;
+      if (below && !belowFits && aboveFits) below = false;
+      else if (!below && !aboveFits && belowFits) below = true;
+      const y = Math.min(height - 4, Math.max(LABEL_H, below ? yBelow : yAbove));
       return (
         <text
-          x={Number(props.x) - 4}
+          x={lastX - 4}
           y={y}
           textAnchor="end"
           fontSize={9}
@@ -328,6 +365,7 @@ export function NavChart({
             dataKey="d"
             ticks={axisTicks}
             interval={0}
+            height={NAV_AXIS_H}
             tickLine={false}
             axisLine={false}
             tick={(props) => <AxisTick {...props} ticks={axisTicks} />}
@@ -335,7 +373,7 @@ export function NavChart({
           {/* allowDataOverflow honors this explicit domain — the wedge's stacked
               helper areas would otherwise drag the auto-domain down to the 0
               stack baseline and squash both lines into the top of the plot. */}
-          <YAxis hide domain={[yMin, yMax]} allowDataOverflow />
+          <YAxis hide domain={[domMin, domMax]} allowDataOverflow />
           <Tooltip cursor={{ stroke: "var(--line)", strokeWidth: 1 }} content={renderTooltip} />
           {/* Signed gain wedge between the two lines (invisible base + |gap|). */}
           <Area
@@ -440,6 +478,7 @@ export function NavChart({
           dataKey="d"
           ticks={axisTicks}
           interval={0}
+          height={NAV_AXIS_H}
           tickLine={false}
           axisLine={false}
           tick={(props) => <AxisTick {...props} ticks={axisTicks} />}

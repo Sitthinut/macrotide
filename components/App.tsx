@@ -33,7 +33,7 @@ import { usePlan } from "@/lib/fetchers/portfolio";
 import { invalidate, useResource } from "@/lib/fetchers/swr";
 import type { AdvisorScreenContext } from "@/lib/portfolio/chat-suggestions";
 import type { ExtractedTxnRow } from "@/lib/portfolio/ocr";
-import { restoreScreenScroll, saveScreenScroll } from "@/lib/screenScroll";
+import { getScrollRoot, saveScreenScroll } from "@/lib/screenScroll";
 import type { Portfolio } from "@/lib/static/types";
 import { type ImportSeedRow, useImportSeed } from "@/lib/stores/import-seed";
 import { setActiveId, usePortfolioUi } from "@/lib/stores/portfolio-ui";
@@ -390,15 +390,35 @@ export function App({ isDemo }: { isDemo: boolean }) {
   }, []);
 
   // On entering a screen, restore its remembered position. Layout effect so the
-  // restore lands before paint — no flash of the scrolled position. On desktop
-  // the OverlayScrollbars viewport may not be measured yet at layout time, so we
-  // ALSO restore on the next animation frame; restoreScreenScroll is idempotent,
-  // so restoring the same value twice is harmless.
+  // restore lands before paint — no flash of the scrolled position.
+  //
+  // A screen's content can settle its height a few frames AFTER it mounts —
+  // returning to Portfolio, the value chart (recharts measures async) and the
+  // holdings list grow over the next frames. A one-shot restore against that
+  // momentarily-short page CLAMPS to the top. So we capture the target once and
+  // re-apply it each frame until it STICKS (content tall enough to reach it) or a
+  // budget elapses. Reading the target up front — not via the memory map — is
+  // deliberate: the capture-phase scroll listener above would otherwise overwrite
+  // the saved offset with the clamped value mid-catch-up.
   useLayoutEffect(() => {
-    restoreScreenScroll(scrollMemory.current, screen);
-    const rafId = window.requestAnimationFrame(() => {
-      restoreScreenScroll(scrollMemory.current, screen);
-    });
+    const target = scrollMemory.current.get(screen) ?? 0;
+    const apply = (): boolean => {
+      const root = getScrollRoot();
+      if (!root) return true;
+      root.set(target);
+      return target === 0 || Math.abs(root.get() - target) < 1;
+    };
+    if (apply()) return; // already stuck (e.g. top, or content already tall)
+    let rafId = 0;
+    let frames = 0;
+    const tick = () => {
+      frames += 1;
+      // ~30 frames (~0.5s) is ample for chart/list layout to settle; the cap stops
+      // us from fighting the user if the saved offset is no longer reachable.
+      if (apply() || frames >= 30) return;
+      rafId = window.requestAnimationFrame(tick);
+    };
+    rafId = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(rafId);
   }, [screen]);
 

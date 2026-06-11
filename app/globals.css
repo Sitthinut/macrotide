@@ -1717,11 +1717,28 @@ button.private-amt:focus-visible {
 /* KPI cards (components/ui/Stat) — the richer recap: a bordered card per metric
    with a label, a large tone-colored value, and an optional caption. Auto-fits
    so 2–4 cards wrap cleanly on any width. */
+/* Query container so the card grid responds to the CONTAINER's width, not the
+   viewport — a narrowed content area (desktop + sidebar) must still go 2×2 even
+   though the viewport is wide. */
+.stat-cards-cq {
+  container-type: inline-size;
+}
 .stat-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  /* 2 per row by default → four cards read as a tidy 2×2 (plain auto-fit squeezes
+     a 3+1 at in-between widths). Switches to one auto-fit row only once the
+     container is genuinely wide enough for four (≈4×120 + gaps). */
+  grid-template-columns: 1fr 1fr;
   gap: 10px;
   margin: 10px 4px 4px;
+}
+/* Hold 2×2 until the container can give each of four cards ~150px+ — enough for
+   an 8-digit baht value (e.g. ฿12,345,678) without wrapping. Below this, 4-up
+   cramps the INVESTED/REALIZED figures, so stay 2×2. */
+@container (min-width: 640px) {
+  .stat-cards {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
 }
 .stat-card {
   border: 1px solid var(--line-soft);

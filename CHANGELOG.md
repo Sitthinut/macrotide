@@ -51,6 +51,23 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   the master fund's domicile country for feeders, SEC registration and
   cancellation dates, and the maturity duration of fixed-term funds. No new
   API calls — a transform re-run over the landed raw data populates everything.
+
+- **Each holding's page now charts its value over time, not just cost basis.**
+  The Position screen replaces the cost-basis sparkline with an interactive
+  value line — your actual position worth (`units × NAV × fx`) per date — with
+  the cost-basis line beneath it, so the gap reads as unrealized gain, plus a
+  range selector (1M/3M/6M/1Y/All). It's the per-position slice of the same
+  ledger replay behind the portfolio chart: nothing before the holding's first
+  trade, history before the fund's price cache valued from the prices you
+  actually paid (flagged), and foreign holdings converted to baht.
+
+- **Tapping a holding now opens your position, not the fund sheet.** A holding
+  tap lands on the Position page (your value, return, and the chart above) —
+  answering "how is my money doing" first; the instrument's catalog detail moves
+  to a **"Fund details"** button there (and the holding row's menu). Fund facts
+  stay one tap away rather than being the default. (Holding-detail IA, first
+  step — see #159.)
+
 - **Explore filters index vs active funds.** The screener's "Index funds only"
   toggle became an **Index / Active** chip pair, so actively-managed funds are
   now a first-class filter too. The facet derives on read from the SEC
