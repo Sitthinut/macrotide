@@ -54,6 +54,7 @@ import { holdingColor } from "@/lib/portfolio/risk-palette";
 import type { AssetClass, Holding, Portfolio } from "@/lib/static/types";
 import { usePortfolioUi } from "@/lib/stores/portfolio-ui";
 import { usePrivacy } from "@/lib/stores/privacy";
+import { onActivate } from "@/lib/ui-events";
 
 function holdingToFormValues(h: Holding, fallbackBucketId: string): HoldingFormValues {
   return {
@@ -1101,9 +1102,9 @@ export function PortfolioScreen({
         <div className="section" style={{ marginTop: 8 }}>
           <div className="section-header" style={{ padding: "0 4px" }}>
             <h3>Health</h3>
-            <span className="link" onClick={onOpenModels} style={{ cursor: "pointer" }}>
+            <button type="button" className="link" onClick={onOpenModels}>
               {targetModel ? `Target: ${targetModel.name} →` : "Set a target →"}
-            </span>
+            </button>
           </div>
 
           {/* Level 0 — the one thing that matters now. */}
@@ -1313,9 +1314,9 @@ export function PortfolioScreen({
         <div className="section" style={{ marginTop: 8 }}>
           <div className="section-header" style={{ padding: "0 4px" }}>
             <h3>Suggested rebalance</h3>
-            <span className="link" onClick={onOpenModels} style={{ cursor: "pointer" }}>
+            <button type="button" className="link" onClick={onOpenModels}>
               Target: {targetModel.name} →
-            </span>
+            </button>
           </div>
 
           <div
@@ -1579,41 +1580,59 @@ export function PortfolioScreen({
         </div>
       </div>
       <div className="filter-chips">
-        <span className="chip" data-active={filter === "all"} onClick={() => setFilter("all")}>
+        <button
+          type="button"
+          className="chip"
+          data-active={filter === "all"}
+          onClick={() => setFilter("all")}
+        >
           All
-        </span>
-        <span
+        </button>
+        <button
+          type="button"
           className="chip"
           data-active={filter === "equity"}
           onClick={() => setFilter("equity")}
         >
           Stocks {byClass.equity.toFixed(0)}%
-        </span>
-        <span className="chip" data-active={filter === "bond"} onClick={() => setFilter("bond")}>
+        </button>
+        <button
+          type="button"
+          className="chip"
+          data-active={filter === "bond"}
+          onClick={() => setFilter("bond")}
+        >
           Bonds {byClass.bond.toFixed(0)}%
-        </span>
+        </button>
         {byClass.alternative > 0.5 && (
-          <span
+          <button
+            type="button"
             className="chip"
             data-active={filter === "alternative"}
             onClick={() => setFilter("alternative")}
           >
             Alt {byClass.alternative.toFixed(0)}%
-          </span>
+          </button>
         )}
         {byClass.cash > 0.5 && (
-          <span className="chip" data-active={filter === "cash"} onClick={() => setFilter("cash")}>
+          <button
+            type="button"
+            className="chip"
+            data-active={filter === "cash"}
+            onClick={() => setFilter("cash")}
+          >
             Cash {byClass.cash.toFixed(0)}%
-          </span>
+          </button>
         )}
         {byClass.unknown > 0.5 && (
-          <span
+          <button
+            type="button"
             className="chip"
             data-active={filter === "unknown"}
             onClick={() => setFilter("unknown")}
           >
             Unknown {byClass.unknown.toFixed(0)}%
-          </span>
+          </button>
         )}
       </div>
 
@@ -1730,7 +1749,11 @@ export function PortfolioScreen({
 
       {activePfId === "all" && targetModel && (
         <div className="section" style={{ marginTop: 14 }}>
-          <div className="card" style={{ padding: 14, cursor: "pointer" }} onClick={onOpenModels}>
+          <div
+            className="card"
+            style={{ padding: 14, cursor: "pointer" }}
+            {...onActivate(onOpenModels)}
+          >
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <ModelDonut mix={targetModel.mix} size={44} thickness={7} />
               <div style={{ flex: 1, minWidth: 0 }}>

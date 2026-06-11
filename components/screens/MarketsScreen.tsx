@@ -328,7 +328,7 @@ function MarketsLearn() {
         </div>
         <div className="filter-chips" style={{ padding: "0 4px" }}>
           {L.topics.map((t) => (
-            <span key={t.id} className="chip">
+            <span key={t.id} className="chip" data-static>
               {t.label} <span style={{ color: "var(--muted)", marginLeft: 4 }}>{t.count}</span>
             </span>
           ))}

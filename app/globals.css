@@ -621,24 +621,7 @@ body[data-topbar-hidden="true"] .portfolio-switch {
   border-color: transparent;
 }
 
-/* Responsive dialog (Material 3-inspired)
- * Desktop/tablet (≥600px): centered basic dialog, 560px max, 28px radius, scale-in.
- * Mobile (<600px):          full-screen edge-to-edge, slides up.
- */
-.sheet-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.32);
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  animation: fadeIn 0.2s ease-out;
-}
-[data-theme="dark"] .sheet-overlay {
-  background: rgba(0, 0, 0, 0.6);
-}
+/* Dialog open/close animations, shared by the Modal primitive below. */
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -646,17 +629,6 @@ body[data-topbar-hidden="true"] .portfolio-switch {
   to {
     opacity: 1;
   }
-}
-.sheet {
-  width: 100%;
-  max-width: 560px;
-  background: var(--paper);
-  border-radius: 28px;
-  padding: 24px;
-  max-height: calc(100vh - 48px);
-  overflow-y: auto;
-  animation: dialogIn 0.25s cubic-bezier(0.2, 0, 0, 1);
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.18);
 }
 @keyframes dialogIn {
   from {
@@ -668,20 +640,6 @@ body[data-topbar-hidden="true"] .portfolio-switch {
     transform: scale(1);
   }
 }
-@media (max-width: 599px) {
-  .sheet-overlay {
-    align-items: stretch;
-    padding: 0;
-  }
-  .sheet {
-    max-width: 100%;
-    max-height: 100dvh;
-    border-radius: 0;
-    padding: 16px 18px 28px;
-    box-shadow: none;
-    animation: slideUp 0.22s ease-out;
-  }
-}
 @keyframes slideUp {
   from {
     transform: translateY(100%);
@@ -690,58 +648,13 @@ body[data-topbar-hidden="true"] .portfolio-switch {
     transform: translateY(0);
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .sheet-overlay,
-  .sheet {
-    animation: none;
-  }
-}
-.sheet-handle {
-  display: none;
-}
+
+/* Section-heading utility (reused inside dialogs for sub-section labels). */
 .sheet-title {
   font-size: 18px;
   font-weight: 500;
   letter-spacing: -0.02em;
   margin-bottom: 4px;
-}
-.sheet-subtitle {
-  font-size: 12.5px;
-  color: var(--muted);
-  margin-bottom: 16px;
-}
-
-/* Import method tabs */
-.method-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 2px;
-  background: var(--chip-bg);
-  border-radius: 9px;
-  margin-bottom: 14px;
-}
-.method-tabs button {
-  flex: 1;
-  background: transparent;
-  border: 0;
-  color: var(--muted);
-  font-family: var(--font-sans);
-  font-size: 12.5px;
-  font-weight: 500;
-  padding: 7px;
-  border-radius: 7px;
-  cursor: pointer;
-}
-.method-tabs button[data-active="true"] {
-  background: var(--chip-active-bg);
-  color: var(--ink);
-  box-shadow: var(--chip-shadow);
-}
-/* The Holdings ↔ Activity mode toggle sits in the modal header, under the
-   subtitle — space it from the text above, no bottom margin (header pads it). */
-.add-mode-tabs {
-  margin-top: 12px;
-  margin-bottom: 0;
 }
 
 /* Unified sheet input styling so <input> and <textarea> match. Radius matches
@@ -831,32 +744,6 @@ textarea.sheet-input {
   text-align: center;
   color: var(--muted);
   font-size: 12.5px;
-}
-
-/* Drop zone */
-.drop-zone {
-  border: 1.5px dashed var(--line);
-  border-radius: 14px;
-  padding: 28px 16px;
-  text-align: center;
-  background: var(--card-soft);
-  cursor: pointer;
-}
-.drop-zone:hover {
-  border-color: var(--accent);
-}
-.drop-zone svg {
-  color: var(--muted);
-  margin-bottom: 8px;
-}
-.drop-zone .dz-title {
-  font-size: 13.5px;
-  font-weight: 500;
-  margin-bottom: 4px;
-}
-.drop-zone .dz-sub {
-  font-size: 11.5px;
-  color: var(--muted);
 }
 
 /* Add-holding row (manual) */
@@ -1092,10 +979,9 @@ textarea.sheet-input {
 }
 
 /* ─── Modal primitive ─────────────────────────────────────────────────────────
-   Standard dialog (components/Modal.tsx). A NEW class tree distinct from the
-   legacy `.sheet` rules above (the deferred inline-in-screen modals still use
-   `.sheet`). `.modal` is a flex column with a fixed max-height: header pinned on
-   top, body scrolls, footer pinned at the bottom. */
+   Standard dialog (components/Modal.tsx) — the one dialog class tree app-wide.
+   `.modal` is a flex column with a fixed max-height: header pinned on top, body
+   scrolls, footer pinned at the bottom. */
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -1381,6 +1267,23 @@ textarea.sheet-input {
   text-decoration: none;
   white-space: nowrap;
   font-weight: 400;
+}
+/* Strip the UA chrome a <button class="link"> carries so it renders identically
+   to the <span> it replaces — keyboard-reachable, same pixels. */
+.section-header button.link {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  line-height: inherit;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.section-header button.link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .card {
@@ -2231,8 +2134,33 @@ button.private-amt:focus-visible {
   cursor: pointer;
   white-space: nowrap;
 }
+/* Neutralize the UA chrome a <button class="chip"> carries so it renders
+   identically to a <span class="chip"> — keyboard-reachable, same pixels. */
+button.chip {
+  margin: 0;
+  text-align: inherit;
+  line-height: normal;
+  -webkit-appearance: none;
+  appearance: none;
+}
 .chip:hover {
   background: var(--card-soft);
+}
+.chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* A chip rendered as a static label (no handler): looks the part, doesn't lie
+   about being interactive — default cursor, no hover shift. The hover-reset
+   mirrors each base background (standalone .chip vs .filter-chips .chip). */
+.chip[data-static] {
+  cursor: default;
+}
+.chip[data-static]:hover {
+  background: var(--paper);
+}
+.filter-chips .chip[data-static]:hover {
+  background: var(--chip-bg);
 }
 .composer {
   position: relative;
