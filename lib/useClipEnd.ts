@@ -20,6 +20,7 @@ export function useClipEnd(ref: RefObject<HTMLInputElement | null>, value: strin
     setClipEnd(max > 1 && el.scrollLeft < max - 1);
   }, [ref]);
   // Recompute once the DOM reflects the new value's width.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `value` is an intentional re-run trigger — the effect measures the DOM, not the value
   useEffect(recompute, [value, recompute]);
   return { clipEnd, recompute };
 }

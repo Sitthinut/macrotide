@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useSWRConfig } from "swr";
 import { authClient } from "@/lib/auth/client";
 import { useResource } from "@/lib/fetchers/swr";
+import { fmtDate, fmtTokens } from "@/lib/format";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,26 +28,6 @@ export interface AdminScreenProps {
 }
 
 const USERS_KEY = "/api/admin/users";
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function fmtDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  } catch {
-    return iso;
-  }
-}
-
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
-}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 

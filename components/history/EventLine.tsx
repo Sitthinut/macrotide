@@ -8,6 +8,7 @@
 
 import { PrivateAmount } from "@/components/PrivateAmount";
 import type { Transaction } from "@/lib/db/queries/transactions";
+import { fmtDate, fmtTHBClean } from "@/lib/format";
 import type { TxnKind } from "@/lib/portfolio/lots";
 
 const VERB: Record<TxnKind, string> = {
@@ -50,20 +51,8 @@ function isAnchor(k: TxnKind): boolean {
   return k === "opening" || k === "snapshot";
 }
 
-const baht = (n: number): string => `฿${Math.round(n).toLocaleString("en-US")}`;
 const units = (n: number): string => n.toLocaleString("en-US", { maximumFractionDigits: 4 });
 const price = (n: number): string => n.toLocaleString("en-US", { maximumFractionDigits: 4 });
-
-function fmtDate(iso: string): string {
-  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
-  if (!y || !m || !d) return iso.slice(0, 10);
-  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  });
-}
 
 export interface EventLineProps {
   txn: Transaction;
@@ -128,7 +117,7 @@ export function EventLine({
 
   const costUnknown = anchor && txn.pricePerUnit == null;
   const amount =
-    kind === "split" ? "" : `${kind === "fee" ? "−" : ""}${baht(Math.abs(txn.amount))}`;
+    kind === "split" ? "" : `${kind === "fee" ? "−" : ""}${fmtTHBClean(Math.abs(txn.amount))}`;
 
   return (
     <button type="button" className="holding" style={ROW_STYLE} onClick={onOpen}>
@@ -151,7 +140,7 @@ export function EventLine({
         {kind === "sell" && realized != null && (
           <div className={`pct delta ${realized >= 0 ? "up" : "down"}`}>
             {realized >= 0 ? "+" : "−"}
-            <PrivateAmount>{baht(Math.abs(realized))}</PrivateAmount>
+            <PrivateAmount>{fmtTHBClean(Math.abs(realized))}</PrivateAmount>
           </div>
         )}
       </div>

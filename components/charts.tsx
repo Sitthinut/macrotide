@@ -363,6 +363,7 @@ export function MiniBars({
         const h = v === 0 ? 2 : (v / max) * (height - 4);
         return (
           <rect
+            // biome-ignore lint/suspicious/noArrayIndexKey: bare numbers have no identity; bars are positional and the list fully re-renders
             key={i}
             x={i * (barW + 4)}
             y={height - h - 1}
@@ -394,7 +395,7 @@ export function ModelDonut({
   let start = -Math.PI / 2;
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-      {mix.map((m, i) => {
+      {mix.map((m) => {
         const angle = (m.pct / 100) * Math.PI * 2;
         const end = start + angle;
         const large = angle > Math.PI ? 1 : 0;
@@ -405,7 +406,7 @@ export function ModelDonut({
         const path = `M${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2}`;
         const out = (
           <path
-            key={i}
+            key={m.label}
             d={path}
             fill="none"
             stroke={m.color}

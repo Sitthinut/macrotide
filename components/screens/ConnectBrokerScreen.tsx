@@ -155,6 +155,7 @@ export function ConnectBrokerScreen({ onBack, onOrganize }: ConnectBrokerScreenP
   // Poll the connections while on the final step so each broker row reflects its
   // live sync state. Polls every 3s for a 5-min window, then stops with a manual
   // "Check again"; `recheck` restarts a fresh window.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `recheck` is the manual restart trigger for a fresh polling window
   useEffect(() => {
     if (step !== 3) return;
     let alive = true;

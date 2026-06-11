@@ -411,6 +411,7 @@ function HoldingsImportCard({ data, onOpen }: { data: HoldingsImport; onOpen: ()
         </thead>
         <tbody>
           {data.rows.map((r, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: import-preview rows can share a ticker and never reorder
             <tr key={`${r.ticker}-${i}`}>
               <td data-label="Symbol">
                 <span className="t">{r.ticker.toUpperCase()}</span>
@@ -478,6 +479,7 @@ function TransactionsImportCard({
         </thead>
         <tbody>
           {data.rows.map((r, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: import-preview rows can share ticker+date and never reorder
             <tr key={`${r.ticker}-${r.tradeDate ?? ""}-${i}`}>
               <td data-label="Date">{r.tradeDate ?? "—"}</td>
               <td data-label="Symbol">
@@ -851,6 +853,7 @@ export function ChatScreen({
   // changes. We track the last message's text length so streamed deltas tick
   // the effect without re-rendering it on every keystroke in the composer.
   const lastText = messages[messages.length - 1]?.text ?? "";
+  // biome-ignore lint/correctness/useExhaustiveDependencies: both deps are intentional re-run triggers (new message / streamed delta); the effect only touches the DOM
   useEffect(() => {
     const host = streamRef.current;
     if (!host) return;
@@ -1231,14 +1234,14 @@ export function ChatScreen({
     });
   }, [aggregate, targetModel, activeScreen]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fire once per seed — `ask`/`onPromptConsumed` are intentionally unmemoized and must not retrigger the effect
   useEffect(() => {
     if (seedPrompt) {
       if (typeof seedPrompt === "string") ask(seedPrompt);
       else ask(seedPrompt.display, seedPrompt.send, seedPrompt.context);
       onPromptConsumed?.();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seedPrompt, onPromptConsumed, ask]);
+  }, [seedPrompt]);
 
   const applyProposal = async (idx: number, proposal: PlanProposal) => {
     // Optimistic: mark applied immediately, roll back on failure.
@@ -1486,6 +1489,7 @@ export function ChatScreen({
                 )}
                 {m.holdings?.map((h, hIdx) => (
                   <HoldingProposalCard
+                    // biome-ignore lint/suspicious/noArrayIndexKey: proposals are append-only within a message; hIdx also indexes holdingStatus
                     key={`${m.id}-holding-${hIdx}`}
                     holding={h}
                     status={m.holdingStatus?.[hIdx]}

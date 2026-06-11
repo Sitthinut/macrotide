@@ -21,6 +21,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { fmtTHBClean, fmtTHBSigned } from "@/lib/format";
 import {
   formatDay,
   formatMonthYear,
@@ -46,9 +47,6 @@ const TOOLTIP_LABEL: React.CSSProperties = {
   color: "var(--muted)",
   marginBottom: 4,
 };
-
-const fmtBaht = (n: number) => `฿${Math.round(n).toLocaleString("en-US")}`;
-const fmtK = (n: number) => `฿${Math.round(n / 1000).toLocaleString("en-US")}k`;
 
 // Grouped x-axis tick: the first tick of each month renders a brighter
 // "MMM 'yy"; in-between ticks render just a muted day number — so multi-month /
@@ -122,9 +120,6 @@ function EmptyState({ height, emptyHint }: { height: number; emptyHint?: string 
 
 // ===== NAV / performance chart (interactive line + optional benchmark) =====
 
-const fmtSignedBaht = (n: number) =>
-  `${n < 0 ? "−" : "+"}฿${Math.abs(Math.round(n)).toLocaleString("en-US")}`;
-
 interface TwoLinePoint {
   d: string;
   v: number;
@@ -143,7 +138,7 @@ export function NavChart({
   benchmarkData = null,
   benchmarkLabel = null,
   emptyHint = null,
-  valueFormatter = fmtBaht,
+  valueFormatter = fmtTHBClean,
   seriesLabel = "Portfolio",
   showReturnInTooltip = false,
   investedData = null,
@@ -265,13 +260,14 @@ export function NavChart({
           {!valuesHidden &&
             row(
               windowed ? "Change" : "Value",
-              windowed ? fmtSignedBaht(p.v) : fmtBaht(p.v),
+              windowed ? fmtTHBSigned(p.v) : fmtTHBClean(p.v),
               accent,
             )}
-          {!valuesHidden && row("Net invested", windowed ? fmtSignedBaht(p.inv) : fmtBaht(p.inv))}
+          {!valuesHidden &&
+            row("Net invested", windowed ? fmtTHBSigned(p.inv) : fmtTHBClean(p.inv))}
           {row(
             "Gain",
-            `${valuesHidden ? "" : `${fmtSignedBaht(gain)}${pct === null ? "" : " · "}`}${
+            `${valuesHidden ? "" : `${fmtTHBSigned(gain)}${pct === null ? "" : " · "}`}${
               pct === null ? (valuesHidden ? "—" : "") : `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`
             }`,
             gain >= 0 ? "var(--gain)" : "var(--loss)",
@@ -280,12 +276,12 @@ export function NavChart({
             !valuesHidden &&
             row(
               benchmarkLabel ?? "Benchmark",
-              windowed ? fmtSignedBaht(p.bench) : fmtBaht(p.bench),
+              windowed ? fmtTHBSigned(p.bench) : fmtTHBClean(p.bench),
               "var(--benchmark)",
             )}
           {p.cash > 0 && !valuesHidden && (
             <div style={{ color: "var(--muted)", marginTop: 3, fontSize: 11 }}>
-              incl. {fmtBaht(p.cash)} awaiting reinvestment
+              incl. {fmtTHBClean(p.cash)} awaiting reinvestment
             </div>
           )}
         </div>
@@ -492,7 +488,8 @@ export function NavChart({
           labelStyle={TOOLTIP_LABEL}
           labelFormatter={(label) => formatTooltipDate(String(label))}
           formatter={(value, name) => {
-            if (name === "bench") return [fmtBaht(Number(value)), benchmarkLabel ?? "Benchmark"];
+            if (name === "bench")
+              return [fmtTHBClean(Number(value)), benchmarkLabel ?? "Benchmark"];
             const v = Number(value);
             let text = valueFormatter(v);
             if (showReturnInTooltip && baseline) {
@@ -567,7 +564,10 @@ export function AllocationDonut({
           labelStyle={TOOLTIP_LABEL}
           formatter={(value, _name, item) => {
             const slice = item?.payload as AllocationSlice | undefined;
-            return [`${fmtBaht(Number(value))} · ${(slice?.pct ?? 0).toFixed(1)}%`, slice?.label];
+            return [
+              `${fmtTHBClean(Number(value))} · ${(slice?.pct ?? 0).toFixed(1)}%`,
+              slice?.label,
+            ];
           }}
         />
       </PieChart>
@@ -633,5 +633,3 @@ export function DriftBars({
     </ResponsiveContainer>
   );
 }
-
-export { fmtBaht as fmtBahtChart, fmtK as fmtKChart };
