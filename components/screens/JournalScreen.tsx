@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ModelDonut } from "@/components/charts";
 import { Icon } from "@/components/Icon";
+import { Modal } from "@/components/Modal";
 import { SkeletonRows } from "@/components/ui/Skeleton";
 import { authClient } from "@/lib/auth/client";
 import { useJournalView, useModelPortfoliosView, useSelectedModelId } from "@/lib/fetchers/legacy";
@@ -16,6 +17,7 @@ import {
   parseQuestions,
 } from "@/lib/portfolio/plan-parser";
 import type { FeedbackItem, ModelPortfolio, Note, ReadingItem } from "@/lib/static/types";
+import { onActivate } from "@/lib/ui-events";
 
 type Tab = "plan" | "notes" | "models" | "reading" | "feedback";
 
@@ -96,18 +98,22 @@ function JournalPlan({
   const parsed = useMemo(() => parsePlan(markdown), [markdown]);
   const targetModel = models?.find((m) => m.id === planSelectedModelId);
 
-  const savePlan = async (md: string) => {
+  // Returns success so the editor can stay open (draft intact) on failure.
+  const savePlan = async (md: string): Promise<boolean> => {
     try {
-      await fetch("/api/plan", {
+      const res = await fetch("/api/plan", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ markdown: md, selectedModelId: plan?.selectedModelId ?? null }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       invalidate("/api/plan");
+      setEditorOpen(false);
+      return true;
     } catch (err) {
       console.error("Failed to save plan:", err);
+      return false;
     }
-    setEditorOpen(false);
   };
 
   if (planLoading) {
@@ -160,13 +166,12 @@ function JournalPlan({
           </div>
         </div>
 
-        {editorOpen && (
-          <PlanEditorSheet
-            initial={markdown}
-            onClose={() => setEditorOpen(false)}
-            onSave={savePlan}
-          />
-        )}
+        <PlanEditorSheet
+          open={editorOpen}
+          initial={markdown}
+          onClose={() => setEditorOpen(false)}
+          onSave={savePlan}
+        />
       </div>
     );
   }
@@ -224,17 +229,17 @@ function JournalPlan({
         />
 
         {parsed.extras.map((ext, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: markdown-parsed sections — titles can repeat, list fully re-renders on edit
           <PlanExtraCard key={i} title={ext.title} body={ext.body} />
         ))}
       </div>
 
-      {editorOpen && (
-        <PlanEditorSheet
-          initial={markdown}
-          onClose={() => setEditorOpen(false)}
-          onSave={savePlan}
-        />
-      )}
+      <PlanEditorSheet
+        open={editorOpen}
+        initial={markdown}
+        onClose={() => setEditorOpen(false)}
+        onSave={savePlan}
+      />
     </div>
   );
 }
@@ -257,7 +262,7 @@ function PlanSpineCard({
   if (!body?.trim()) {
     return (
       <div
-        onClick={onAdd}
+        {...onActivate(onAdd)}
         style={{
           background: "transparent",
           border: "1.5px dashed var(--line)",
@@ -299,6 +304,7 @@ function PlanSpineCard({
       <SpineCardShell label={label}>
         <div className="stack-sm">
           {items.map((c, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: markdown-parsed lines — content can repeat, list fully re-renders on edit
             <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
               <span
                 style={{
@@ -337,6 +343,7 @@ function PlanSpineCard({
           <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
             {items.map((b, i) => (
               <li
+                // biome-ignore lint/suspicious/noArrayIndexKey: markdown-parsed lines — content can repeat, list fully re-renders on edit
                 key={i}
                 style={{
                   fontSize: 13,
@@ -470,8 +477,11 @@ function PlanExtraCard({ title, body }: { title: string; body: string }) {
         <div className="stack-sm">
           {qs.map((q, i) => (
             <div
+              // biome-ignore lint/suspicious/noArrayIndexKey: markdown-parsed lines — content can repeat, list fully re-renders on edit
               key={i}
-              onClick={() => window.dispatchEvent(new CustomEvent("ai-prompt", { detail: q }))}
+              {...onActivate(() =>
+                window.dispatchEvent(new CustomEvent("ai-prompt", { detail: q })),
+              )}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -529,15 +539,38 @@ function PlanExtraCard({ title, body }: { title: string; body: string }) {
 }
 
 function PlanEditorSheet({
+  open,
   initial,
   onClose,
   onSave,
 }: {
+  open: boolean;
   initial: string;
   onClose: () => void;
-  onSave: (md: string) => void;
+  onSave: (md: string) => Promise<boolean>;
 }) {
   const [text, setText] = useState(initial || "");
+  const [saveFailed, setSaveFailed] = useState(false);
+
+  // Re-sync the draft when (re)opening so the editor reflects the latest plan.
+  // Deliberately NOT keyed on `initial`: an SWR revalidation while the editor
+  // is open must not clobber the user's unsaved draft.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only on the open transition
+  useEffect(() => {
+    if (open) {
+      setText(initial || "");
+      setSaveFailed(false);
+    }
+  }, [open]);
+
+  // A failed save keeps the editor open with the draft intact — closing it
+  // would silently discard the user's edits.
+  const handleSave = async () => {
+    setSaveFailed(false);
+    const ok = await onSave(text);
+    if (!ok) setSaveFailed(true);
+  };
+
   const placeholder = `## Target
 Bogleheads 3-Fund: 50% US, 30% International, 20% Bonds.
 
@@ -558,11 +591,17 @@ Comfortable with 20% drawdowns. Won't sell.
   };
 
   return (
-    <div className="sheet-overlay" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()} style={{ maxHeight: "92vh" }}>
-        <div className="sheet-handle"></div>
-        <div className="row between" style={{ marginBottom: 4 }}>
-          <div className="sheet-title">Edit your plan</div>
+    <Modal open={open} onClose={onClose} variant="form" labelledBy="plan-editor-title">
+      <Modal.Header
+        title="Edit your plan"
+        subtitle={
+          <>
+            Free-form. Use <code>## Heading</code> for sections. The advisor reads this before every
+            conversation.
+          </>
+        }
+        id="plan-editor-title"
+        action={
           <span
             style={{
               fontSize: 11,
@@ -572,12 +611,9 @@ Comfortable with 20% drawdowns. Won't sell.
           >
             MARKDOWN
           </span>
-        </div>
-        <div className="sheet-subtitle">
-          Free-form. Use <code>## Heading</code> for sections. The advisor reads this before every
-          conversation.
-        </div>
-
+        }
+      />
+      <Modal.Body gap={10}>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -591,37 +627,45 @@ Comfortable with 20% drawdowns. Won't sell.
           }}
         />
 
-        <div
-          style={{
-            marginTop: 10,
-            fontSize: 11,
-            color: "var(--muted)",
-            fontFamily: "var(--font-mono)",
-            letterSpacing: "0.04em",
-          }}
-        >
-          SUGGESTED HEADINGS
+        <div>
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--muted)",
+              fontFamily: "var(--font-mono)",
+              letterSpacing: "0.04em",
+            }}
+          >
+            SUGGESTED HEADINGS
+          </div>
+          <div className="filter-chips" style={{ padding: "6px 0 0" }}>
+            {["Target", "Principles", "Risk", "Commitments", "Open questions", "Contributions"].map(
+              (h) => (
+                <button type="button" key={h} className="chip" onClick={() => insertSection(h)}>
+                  + {h}
+                </button>
+              ),
+            )}
+          </div>
         </div>
-        <div className="filter-chips" style={{ padding: "6px 0 0" }}>
-          {["Target", "Principles", "Risk", "Commitments", "Open questions", "Contributions"].map(
-            (h) => (
-              <span key={h} className="chip" onClick={() => insertSection(h)}>
-                + {h}
-              </span>
-            ),
-          )}
-        </div>
-
-        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-          <button className="btn ghost" style={{ flex: 1 }} onClick={onClose}>
-            Cancel
-          </button>
-          <button className="btn primary" style={{ flex: 2 }} onClick={() => onSave(text)}>
-            Save plan <Icon name="check" size={13} />
-          </button>
-        </div>
-      </div>
-    </div>
+      </Modal.Body>
+      <Modal.Footer
+        start={
+          saveFailed ? (
+            <span style={{ fontSize: 12, color: "var(--loss)" }}>
+              Couldn&apos;t save your plan. Try again.
+            </span>
+          ) : undefined
+        }
+      >
+        <button className="btn ghost" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="btn primary" onClick={handleSave}>
+          Save plan <Icon name="check" size={13} />
+        </button>
+      </Modal.Footer>
+    </Modal>
   );
 }
 
@@ -766,7 +810,7 @@ function JournalModels({ saved, onOpenModels }: { saved: string[]; onOpenModels:
             key={m.id}
             className="card"
             style={{ marginBottom: 8, cursor: "pointer", padding: 14 }}
-            onClick={onOpenModels}
+            {...onActivate(onOpenModels)}
           >
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
               <ModelDonut mix={m.mix} size={48} thickness={7} />

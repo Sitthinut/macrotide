@@ -1,15 +1,16 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useState } from "react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ModelDonut } from "@/components/charts";
 import { Icon } from "@/components/Icon";
+import { Modal } from "@/components/Modal";
 import { SkeletonRows } from "@/components/ui/Skeleton";
 import { useModelPortfoliosView } from "@/lib/fetchers/legacy";
 import { invalidate } from "@/lib/fetchers/swr";
 import { modelPortfolioToInsert } from "@/lib/portfolio/adapter";
 import type { ModelPortfolio } from "@/lib/static/types";
+import { onActivate } from "@/lib/ui-events";
 
 export interface ModelPortfoliosScreenProps {
   selectedId: string;
@@ -22,7 +23,7 @@ export function ModelPortfoliosScreen({
   onSelect,
   onBack,
 }: ModelPortfoliosScreenProps) {
-  const { models, isLoading } = useModelPortfoliosView();
+  const { models, isLoading, error } = useModelPortfoliosView();
   const [openId, setOpenId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [filter, setFilter] = useState<"all" | "curated" | "custom">("all");
@@ -36,19 +37,6 @@ export function ModelPortfoliosScreen({
       : filter === "curated"
         ? list.filter((m) => !m.isCustom)
         : list;
-
-  const addModel = async (m: ModelPortfolio) => {
-    try {
-      await fetch("/api/models", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(modelPortfolioToInsert(m)),
-      });
-      invalidate("/api/models");
-    } catch (err) {
-      console.error("Failed to save custom model:", err);
-    }
-  };
 
   // Duplicate-to-customize: fork a (built-in or any) model into a user-owned,
   // editable copy. The POST path stamps the current user via ownerId(), so the
@@ -95,6 +83,25 @@ export function ModelPortfoliosScreen({
         onDuplicate={() => duplicateModel(open)}
         onDelete={() => deleteModel(open.id)}
       />
+    );
+  }
+
+  // Check error FIRST: the view's isLoading is `!data`, so a failed fetch
+  // would otherwise show the skeleton forever instead of saying anything.
+  if (error && !models) {
+    return (
+      <div className="screen">
+        <div className="topbar">
+          <div className="brand" style={{ flex: 1 }}>
+            <span>Templates</span>
+          </div>
+        </div>
+        <div style={{ padding: "0 14px" }}>
+          <div className="card" style={{ fontSize: 12.5, color: "var(--loss)", padding: 14 }}>
+            Failed to load templates. Check your connection and reload.
+          </div>
+        </div>
+      </div>
     );
   }
 
@@ -162,29 +169,36 @@ export function ModelPortfoliosScreen({
           }}
         >
           Time-tested index-investing strategies. Pick one as your{" "}
-          <strong style={{ fontWeight: 500 }}>target allocation</strong>, or add your own from a
-          URL, image, or by chatting with the advisor.
+          <strong style={{ fontWeight: 500 }}>target allocation</strong>, duplicate one to make it
+          yours, or design your own with the advisor.
         </p>
       </div>
 
       <div className="filter-chips" style={{ padding: "0 16px 12px" }}>
-        <span className="chip" data-active={filter === "all"} onClick={() => setFilter("all")}>
+        <button
+          type="button"
+          className="chip"
+          data-active={filter === "all"}
+          onClick={() => setFilter("all")}
+        >
           All · {list.length}
-        </span>
-        <span
+        </button>
+        <button
+          type="button"
           className="chip"
           data-active={filter === "curated"}
           onClick={() => setFilter("curated")}
         >
           Curated · {list.filter((m) => !m.isCustom).length}
-        </span>
-        <span
+        </button>
+        <button
+          type="button"
           className="chip"
           data-active={filter === "custom"}
           onClick={() => setFilter("custom")}
         >
           Yours · {list.filter((m) => m.isCustom).length}
-        </span>
+        </button>
       </div>
 
       <div
@@ -205,7 +219,7 @@ export function ModelPortfoliosScreen({
               borderWidth: selectedId === m.id ? 2 : 1,
               padding: 14,
             }}
-            onClick={() => setOpenId(m.id)}
+            {...onActivate(() => setOpenId(m.id))}
           >
             <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
               <ModelDonut mix={m.mix} size={56} />
@@ -293,7 +307,7 @@ export function ModelPortfoliosScreen({
             alignItems: "center",
             gap: 12,
           }}
-          onClick={() => setAddOpen(true)}
+          {...onActivate(() => setAddOpen(true))}
         >
           <div
             style={{
@@ -351,7 +365,7 @@ export function ModelPortfoliosScreen({
         </div>
       </div>
 
-      <AddCustomModelSheet open={addOpen} onClose={() => setAddOpen(false)} onAdd={addModel} />
+      <AddCustomModelSheet open={addOpen} onClose={() => setAddOpen(false)} />
     </div>
   );
 }
@@ -651,121 +665,12 @@ function ModelDetail({
   );
 }
 
-interface PendingModel {
-  name: string;
-  tagline: string;
-  blurb: string;
-  mix: { label: string; pct: number; color: string }[];
-  expectedReturn: number;
-  expectedVol: number;
-  ter: number;
-  source: string;
-}
-
-function AddCustomModelSheet({
-  open,
-  onClose,
-  onAdd,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onAdd: (model: ModelPortfolio) => void;
-}) {
-  const [method, setMethod] = useState<"url" | "text" | "image" | "chat">("url");
-  const [url, setUrl] = useState("");
-  const [pasteText, setPasteText] = useState("");
-  const [name, setName] = useState("");
-  const [imgPreview, setImgPreview] = useState<string | null>(null);
-  const [processing, setProcessing] = useState(false);
-  const [extracted, setExtracted] = useState<PendingModel | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  if (!open) return null;
-
-  const ingestUrl = () => {
-    setProcessing(true);
-    setTimeout(() => {
-      setProcessing(false);
-      setExtracted({
-        name: name || "Permanent Portfolio (HB)",
-        tagline: "Harry Browne · imported from blog post",
-        blurb:
-          "Equal weights across stocks, bonds, gold, and cash. Imported from " +
-          (url || "the URL you shared") +
-          ".",
-        mix: [
-          { label: "US Stocks", pct: 25, color: "var(--accent)" },
-          { label: "Long Bonds", pct: 25, color: "#F4A434" },
-          { label: "Gold", pct: 25, color: "#D4AE5C" },
-          { label: "Cash", pct: 25, color: "#9E9EA8" },
-        ],
-        expectedReturn: 5.0,
-        expectedVol: 7.5,
-        ter: 0.4,
-        source: url || "Imported URL",
-      });
-    }, 1500);
-  };
-
-  const handleImage = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      setImgPreview((ev.target?.result as string) ?? null);
-      setProcessing(true);
-      setTimeout(() => {
-        setProcessing(false);
-        setExtracted({
-          name: name || "From screenshot",
-          tagline: "Extracted from image · review and confirm",
-          blurb: "AI parsed allocation chart from your image. Verify the breakdown looks right.",
-          mix: [
-            { label: "Equity", pct: 60, color: "var(--accent)" },
-            { label: "Bonds", pct: 30, color: "#F4A434" },
-            { label: "Alternatives", pct: 10, color: "#7C7CFF" },
-          ],
-          expectedReturn: 6.5,
-          expectedVol: 10.5,
-          ter: 0.55,
-          source: "Imported image",
-        });
-      }, 1800);
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const ingestText = () => {
-    setProcessing(true);
-    setTimeout(() => {
-      setProcessing(false);
-      const matches = [
-        ...pasteText.matchAll(/(\d+)\s*%?\s*([A-Za-z][A-Za-z\s\-/]+?)(?:[,.\n]|$)/g),
-      ].slice(0, 6);
-      const colors = ["var(--accent)", "#F4A434", "#7C7CFF", "#C76A8F", "#5BA7B5", "#9E9EA8"];
-      const mix = matches.map((m, i) => ({
-        label: m[2].trim(),
-        pct: Number(m[1]),
-        color: colors[i] || "#9E9EA8",
-      }));
-      setExtracted({
-        name: name || "From text",
-        tagline: "Built from your pasted allocation",
-        blurb: "Mock-parsed from text. Verify the breakdown is correct.",
-        mix: mix.length
-          ? mix
-          : [
-              { label: "Stocks", pct: 60, color: "var(--accent)" },
-              { label: "Bonds", pct: 40, color: "#F4A434" },
-            ],
-        expectedReturn: 6.0,
-        expectedVol: 10.0,
-        ter: 0.5,
-        source: "Pasted text",
-      });
-    }, 800);
-  };
-
+function AddCustomModelSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  // The one real path: hand off to the Advisor, which asks a few questions and
+  // proposes an allocation (propose_plan_edit cards) the user can apply to
+  // their plan. The former URL/Text/Image methods were setTimeout stubs that
+  // returned a canned mix for any input — removed rather than shipped as fake
+  // "AI parsed" UX; real ingestion is tracked as a follow-up issue.
   const startChat = () => {
     window.dispatchEvent(
       new CustomEvent("ai-prompt", {
@@ -776,377 +681,61 @@ function AddCustomModelSheet({
     onClose();
   };
 
-  const confirm = () => {
-    if (!extracted) return;
-    onAdd({
-      id: `custom_${Date.now()}`,
-      name: extracted.name,
-      tagline: extracted.tagline,
-      blurb: extracted.blurb,
-      mix: extracted.mix,
-      expectedReturn: extracted.expectedReturn,
-      expectedVol: extracted.expectedVol,
-      ter: extracted.ter,
-      horizon: "Any",
-      risk: "balanced",
-      pros: [],
-      cons: [],
-      source: extracted.source,
-      isCustom: true,
-    });
-    setExtracted(null);
-    setUrl("");
-    setPasteText("");
-    setName("");
-    setImgPreview(null);
-    onClose();
-  };
-
-  if (extracted) {
-    // Portal to <body>: the sheet is `position:fixed` but rendered inside
-    // `.ra-main`, whose OverlayScrollbars wrapper establishes a z-index:0
-    // stacking context — that traps the overlay below the docked panel/rail.
-    // Escaping to <body> puts it in the root stacking context (matches Modal).
-    return createPortal(
-      <div className="sheet-overlay" onClick={onClose}>
-        <div className="sheet" onClick={(e) => e.stopPropagation()}>
-          <div className="sheet-handle"></div>
-          <div className="sheet-title">Review & confirm</div>
-          <div className="sheet-subtitle">
-            AI parsed this model. Tweak the name or accept as-is.
-          </div>
-
+  return (
+    <Modal open={open} onClose={onClose} variant="form" labelledBy="acm-title">
+      <Modal.Header
+        title="Add a custom template"
+        subtitle="Design an allocation with the advisor, or duplicate any template and tweak the copy."
+        id="acm-title"
+      />
+      <Modal.Body>
+        <div
+          className="card"
+          style={{
+            background: "var(--accent-soft)",
+            borderColor: "transparent",
+            padding: 14,
+          }}
+        >
           <div
             style={{
-              background: "var(--card-soft)",
-              borderRadius: 12,
-              padding: 12,
-              marginBottom: 12,
+              fontSize: 14,
+              fontWeight: 500,
+              marginBottom: 6,
+              color: "var(--accent-ink)",
+              letterSpacing: "-0.01em",
             }}
           >
-            <input
-              value={extracted.name}
-              onChange={(e) => setExtracted({ ...extracted, name: e.target.value })}
-              style={{
-                fontSize: 16,
-                fontWeight: 500,
-                letterSpacing: "-0.02em",
-                width: "100%",
-                background: "transparent",
-                border: 0,
-                outline: 0,
-                color: "var(--ink)",
-                marginBottom: 4,
-                fontFamily: "var(--font-sans)",
-              }}
-            />
-            <div style={{ fontSize: 12, color: "var(--muted)" }}>{extracted.tagline}</div>
+            Build with the advisor
           </div>
-
-          <div className="card" style={{ marginBottom: 12 }}>
-            <div
-              style={{
-                display: "flex",
-                gap: 12,
-                alignItems: "center",
-                marginBottom: 10,
-              }}
-            >
-              <ModelDonut mix={extracted.mix} size={56} thickness={8} />
-              <div style={{ flex: 1 }}>
-                {extracted.mix.map((m, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      fontSize: 12,
-                      padding: "2px 0",
-                    }}
-                  >
-                    <span
-                      style={{
-                        width: 7,
-                        height: 7,
-                        borderRadius: "50%",
-                        background: m.color,
-                      }}
-                    ></span>
-                    <span style={{ flex: 1 }}>{m.label}</span>
-                    <span className="num" style={{ color: "var(--muted)" }}>
-                      {m.pct.toFixed(0)}%
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
           <div
             style={{
-              fontSize: 11,
-              color: "var(--muted)",
+              fontSize: 12.5,
+              color: "var(--accent-ink)",
               lineHeight: 1.5,
               marginBottom: 12,
+              opacity: 0.85,
             }}
           >
-            <strong style={{ fontWeight: 500, color: "var(--ink-soft)" }}>Source:</strong>{" "}
-            {extracted.source}
+            The advisor asks a few questions about what you want, proposes an allocation, and can
+            apply it to your plan once you confirm.
           </div>
-
-          <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn ghost" style={{ flex: 1 }} onClick={() => setExtracted(null)}>
-              Back
-            </button>
-            <button className="btn primary" style={{ flex: 2 }} onClick={confirm}>
-              Save template <Icon name="check" size={13} />
-            </button>
-          </div>
-        </div>
-      </div>,
-      document.body,
-    );
-  }
-
-  return createPortal(
-    <div className="sheet-overlay" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="sheet-handle"></div>
-        <div className="sheet-title">Add a custom template</div>
-        <div className="sheet-subtitle">
-          Bring any allocation from outside Macrotide. The AI parses, you confirm, and it&apos;s
-          saved to your Journal.
-        </div>
-
-        <div style={{ marginBottom: 14 }}>
-          <label
-            style={{
-              fontSize: 11,
-              fontFamily: "var(--font-mono)",
-              color: "var(--muted)",
-              letterSpacing: "0.04em",
-              marginBottom: 4,
-              display: "block",
-            }}
-          >
-            NAME (OPTIONAL)
-          </label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. My EM-tilt mix"
-            style={{
-              width: "100%",
-              padding: "8px 10px",
-              background: "var(--card-soft)",
-              border: "1px solid var(--line-soft)",
-              borderRadius: 8,
-              fontFamily: "var(--font-sans)",
-              fontSize: 13,
-              color: "var(--ink)",
-              outline: "none",
-            }}
-          />
-        </div>
-
-        <div className="method-tabs">
-          <button data-active={method === "url"} onClick={() => setMethod("url")}>
-            🔗 URL
-          </button>
-          <button data-active={method === "text"} onClick={() => setMethod("text")}>
-            📋 Text
-          </button>
-          <button data-active={method === "image"} onClick={() => setMethod("image")}>
-            📷 Image
-          </button>
-          <button data-active={method === "chat"} onClick={() => setMethod("chat")}>
-            💬 Chat
+          <button className="btn sm primary" onClick={startChat}>
+            <Icon name="chat" size={12} /> Start conversation
           </button>
         </div>
-
-        {method === "url" && (
-          <div>
-            <input
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://bogleheads.org/wiki/Three-fund_portfolio"
-              style={{
-                width: "100%",
-                padding: "12px 14px",
-                background: "var(--card-soft)",
-                border: "1px solid var(--line-soft)",
-                borderRadius: 12,
-                fontFamily: "var(--font-mono)",
-                fontSize: 12.5,
-                color: "var(--ink)",
-                outline: "none",
-              }}
-            />
-            <div
-              style={{
-                fontSize: 11,
-                color: "var(--muted)",
-                marginTop: 6,
-                lineHeight: 1.5,
-                fontFamily: "var(--font-mono)",
-              }}
-            >
-              ⓘ The advisor reads the article and extracts the allocation.
-            </div>
-          </div>
-        )}
-
-        {method === "text" && (
-          <textarea
-            className="sheet-input"
-            placeholder={"e.g.\n50% US Total Market\n30% International\n20% Bonds"}
-            value={pasteText}
-            onChange={(e) => setPasteText(e.target.value)}
-          />
-        )}
-
-        {method === "image" && !imgPreview && (
-          <>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              style={{ display: "none" }}
-              onChange={handleImage}
-            />
-            <div className="drop-zone" onClick={() => fileRef.current?.click()}>
-              <svg
-                width="32"
-                height="32"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.3"
-              >
-                <rect x="3" y="3" width="18" height="18" rx="2" />
-                <circle cx="9" cy="9" r="2" />
-                <path d="M21 15l-5-5L5 21" />
-              </svg>
-              <div className="dz-title">Drop an allocation chart</div>
-              <div className="dz-sub">or tap to browse · AI will read the breakdown</div>
-            </div>
-          </>
-        )}
-        {method === "image" && imgPreview && (
-          <div>
-            <div
-              style={{
-                borderRadius: 12,
-                overflow: "hidden",
-                border: "1px solid var(--line-soft)",
-                marginBottom: 12,
-                position: "relative",
-              }}
-            >
-              <img
-                src={imgPreview}
-                alt="preview"
-                style={{
-                  width: "100%",
-                  display: "block",
-                  maxHeight: 200,
-                  objectFit: "cover",
-                }}
-              />
-              {processing && (
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    background: "rgba(0,0,0,0.5)",
-                    display: "grid",
-                    placeItems: "center",
-                    color: "white",
-                  }}
-                >
-                  <div className="typing">
-                    <span style={{ background: "white" }}></span>
-                    <span style={{ background: "white" }}></span>
-                    <span style={{ background: "white" }}></span>
-                  </div>
-                </div>
-              )}
-            </div>
-            <button className="btn ghost sm full" onClick={() => setImgPreview(null)}>
-              Use a different image
-            </button>
-          </div>
-        )}
-
-        {method === "chat" && (
-          <div
-            className="card"
-            style={{
-              background: "var(--accent-soft)",
-              borderColor: "transparent",
-              padding: 14,
-            }}
-          >
-            <div
-              style={{
-                fontSize: 14,
-                fontWeight: 500,
-                marginBottom: 6,
-                color: "var(--accent-ink)",
-                letterSpacing: "-0.01em",
-              }}
-            >
-              Build with the advisor
-            </div>
-            <div
-              style={{
-                fontSize: 12.5,
-                color: "var(--accent-ink)",
-                lineHeight: 1.5,
-                marginBottom: 12,
-                opacity: 0.85,
-              }}
-            >
-              The advisor will ask 3–5 questions and propose an allocation. You confirm and
-              it&apos;s saved.
-            </div>
-            <button className="btn sm primary" onClick={startChat}>
-              <Icon name="chat" size={12} /> Start conversation
-            </button>
-          </div>
-        )}
-
-        {method !== "chat" && (
-          <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-            <button
-              className="btn ghost"
-              style={{ flex: 1 }}
-              onClick={onClose}
-              disabled={processing}
-            >
-              Cancel
-            </button>
-            <button
-              className="btn primary"
-              style={{ flex: 2 }}
-              disabled={
-                processing ||
-                (method === "url" && !url) ||
-                (method === "text" && !pasteText) ||
-                (method === "image" && !imgPreview)
-              }
-              onClick={() => {
-                if (method === "url") ingestUrl();
-                if (method === "text") ingestText();
-              }}
-            >
-              {processing ? "Reading…" : "Parse"} <Icon name="arrowRight" size={13} />
-            </button>
-          </div>
-        )}
-      </div>
-    </div>,
-    document.body,
+        <div
+          style={{
+            fontSize: 11.5,
+            color: "var(--muted)",
+            lineHeight: 1.5,
+            marginTop: 12,
+          }}
+        >
+          Prefer a starting point? Open any template and choose Duplicate — the copy is yours to
+          edit.
+        </div>
+      </Modal.Body>
+    </Modal>
   );
 }
