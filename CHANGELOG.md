@@ -129,6 +129,17 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   curve. Fixes false ~18% steps caused by NAV-coverage changes
   ([ADR 0005](./docs/explanation/decisions/0005-value-over-time-ledger-replay.md)).
 
+- **The portfolio headline return now matches the chart, and explains itself.**
+  The hero "all-time" figure is total return on the money you've contributed
+  (value − net contributions), the same money-weighted number as the chart's
+  "All" pill — they no longer disagree. Tapping it opens a **returns breakdown**:
+  total value, money invested, total return and annualized (money-weighted)
+  return, then where the gain comes from — cost basis, unrealized gain (the older
+  return-on-current-holdings figure, now labeled), realized gain, dividends, and
+  fees. Resolves the confusing case where a small "unrealized" headline sat above
+  a much larger chart return because every fund switch banks realized gain into
+  the new holding's cost basis.
+
 - **Chat history is now a faithful, durable record.** The assistant's full reply
   is persisted (every generation step, not just the final one), so prose written
   before a tool call survives reload. Advisor-generated cards — import tables,

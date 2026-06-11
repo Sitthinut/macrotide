@@ -11,6 +11,7 @@ import { Icon } from "@/components/Icon";
 import { AllocationDonut, DriftBars, NavChart } from "@/components/InteractiveChartsLazy";
 import { Modal } from "@/components/Modal";
 import { PrivateAmount } from "@/components/PrivateAmount";
+import { ReturnsBreakdownSheet } from "@/components/ReturnsBreakdownSheet";
 import { SyncedIcon } from "@/components/SyncedBadge";
 import { KebabMenu } from "@/components/ui/KebabMenu";
 import { Skeleton, SkeletonRows } from "@/components/ui/Skeleton";
@@ -47,6 +48,7 @@ import {
 } from "@/lib/portfolio/fee-creep-presentation";
 import { computeHealth, rebalanceHint, summarizeHealth } from "@/lib/portfolio/health";
 import { performanceDisclaimer } from "@/lib/portfolio/performance-disclaimer";
+import { heroReturn } from "@/lib/portfolio/returns-breakdown";
 import { holdingColor } from "@/lib/portfolio/risk-palette";
 import type { AssetClass, Holding, Portfolio } from "@/lib/static/types";
 import { usePortfolioUi } from "@/lib/stores/portfolio-ui";
@@ -516,6 +518,10 @@ export function PortfolioScreen({
   // Hidden-checks (N) restore list. The Portfolio tab's inline section is
   // info-only; all management lives on this page.
   const [feeDetailsOpen, setFeeDetailsOpen] = useState(false);
+  // Whether the returns-breakdown sheet is open — decomposes the hero's total
+  // return into cost basis / unrealized / realized / dividends / fees so the
+  // headline and the chart pill stop reading as a contradiction (#152).
+  const [breakdownOpen, setBreakdownOpen] = useState(false);
 
   // App owns the create/edit sheet; request it through the shared store.
   const openNewPortfolio = () => requestNew();
@@ -831,8 +837,19 @@ export function PortfolioScreen({
     );
   }
 
-  const pnl = view.totalValue - view.initialInvestment;
-  const pnlPct = view.initialInvestment > 0 ? (pnl / view.initialInvestment) * 100 : 0;
+  // Hero "all-time" = total return on the money actually contributed from outside
+  // (value − net contributions), matching the chart's "All" pill. The older
+  // cost-basis return understated lifetime return for switching-heavy books (each
+  // switch banks realized gain into the new position's basis); that number now
+  // lives in the returns breakdown, labeled "unrealized". One shared helper drives
+  // both so they can't drift apart. Falls back to cost basis when there's no
+  // ledger-derived contribution series (static placeholder).
+  const netContributed = view.netInvested.at(-1)?.v ?? null;
+  const { pnl, pnlPct, usesContribution } = heroReturn(
+    view.totalValue,
+    netContributed,
+    view.initialInvestment,
+  );
 
   // Window rebase for the chart: a CLIPPED range (the series starts exactly on
   // the window boundary, carrying pre-window state) draws change-from-window-
@@ -957,17 +974,28 @@ export function PortfolioScreen({
           </PrivateAmount>
         </div>
         <div className="hero-sub">
-          <span className={`delta-pill${pnl < 0 ? " down" : ""}`}>
-            <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
-              <path
-                d={pnl >= 0 ? "M6 2L10 7H2L6 2Z" : "M6 10L2 5H10L6 10Z"}
-                fill="currentColor"
-              ></path>
-            </svg>
-            <PrivateAmount>฿{Math.abs(Math.round(pnl)).toLocaleString("en-US")}</PrivateAmount> ·{" "}
-            {fmtPct(pnlPct)}
-          </span>
-          <span className="muted">all-time</span>
+          <button
+            type="button"
+            className="hero-return-btn"
+            onClick={() => setBreakdownOpen(true)}
+            aria-label="See how this return breaks down"
+            title="See how this return breaks down"
+          >
+            <span className={`delta-pill${pnl < 0 ? " down" : ""}`}>
+              <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                <path
+                  d={pnl >= 0 ? "M6 2L10 7H2L6 2Z" : "M6 10L2 5H10L6 10Z"}
+                  fill="currentColor"
+                ></path>
+              </svg>
+              <PrivateAmount>฿{Math.abs(Math.round(pnl)).toLocaleString("en-US")}</PrivateAmount> ·{" "}
+              {fmtPct(pnlPct)}
+            </span>
+            <span className="muted">
+              {usesContribution ? "total return" : "all-time"}
+              <Icon name="chevron-right" size={11} />
+            </span>
+          </button>
         </div>
       </div>
 
@@ -1775,6 +1803,15 @@ export function PortfolioScreen({
         onArchive={archiveFeeCreep}
         onReject={rejectFeeCreep}
         onRestore={restoreHidden}
+      />
+
+      <ReturnsBreakdownSheet
+        open={breakdownOpen}
+        onClose={() => setBreakdownOpen(false)}
+        bucketId={activePfId}
+        portfolioName={activePfId === "all" ? "All portfolios" : view.name}
+        totalValue={view.totalValue}
+        netContributed={netContributed}
       />
 
       <FundDetailSheet
