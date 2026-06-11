@@ -88,16 +88,14 @@ export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps
             <path d="M15 18l-6-6 6-6" />
           </svg>
         </button>
-        <div className="brand" style={{ flex: 1 }}>
-          <span>{ticker}</span>
-        </div>
+        {/* The ticker used to live here, but squeezed between the back arrow and
+            the two buttons a long hyphenated code (ONE-ALLCHINA-ASSF) broke onto
+            2–3 lines. It now headlines the hero block below at full width; keep a
+            spacer so the buttons stay right-aligned. */}
+        <div style={{ flex: 1 }} />
         {holding && (
-          <button
-            className="btn ghost sm"
-            onClick={() => setFundOpen(true)}
-            style={{ gap: 4, marginRight: 8 }}
-          >
-            <Icon name="info" size={12} /> Fund details
+          <button className="btn ghost sm" onClick={() => setFundOpen(true)}>
+            Fund details
           </button>
         )}
         <button
@@ -114,14 +112,25 @@ export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps
             adds its own 16px, double-indenting the hero past the 4px-margin boxes
             below. Drop the horizontal padding here so the 3 rows line up with them. */}
         <div className="hero-block" style={{ padding: "6px 4px 4px" }}>
-          {/* Fund name as a proper title (13px ink — the app's name size, vs the
-              shared 10.5px muted caption used for "Combined balance" on Portfolio). */}
+          {/* Ticker headlines the position at full width (it no longer fits in the
+              topbar), with the fund's full name muted beneath it. */}
           <div
-            className="hero-label"
-            style={{ fontSize: 13, fontWeight: 500, color: "var(--ink)" }}
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 15,
+              fontWeight: 700,
+              letterSpacing: "0.02em",
+              color: "var(--ink)",
+              lineHeight: 1.2,
+            }}
           >
-            {holding?.englishName || ticker}
+            {ticker}
           </div>
+          {holding?.englishName && holding.englishName !== ticker && (
+            <div style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 2, marginBottom: 4 }}>
+              {holding.englishName}
+            </div>
+          )}
           <div className="hero-value">
             {value != null ? (
               <>
