@@ -3688,6 +3688,25 @@ button.private-amt:focus-visible {
 .combobox__option:focus-visible {
   background: var(--card-soft);
 }
+/* Facet dropdown menus (Explore): taller than the symbol combobox, and the
+   scrollbar stays VISIBLE — macOS overlay scrollbars hide until scrolled, which
+   made a long menu read as clipped at the bottom. */
+.facet-menu {
+  max-height: min(320px, 45vh);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.facet-menu::-webkit-scrollbar {
+  width: 8px;
+}
+.facet-menu::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 4px;
+  border: 2px solid var(--paper);
+}
+.facet-menu::-webkit-scrollbar-track {
+  background: transparent;
+}
 .combobox__option-ticker {
   font-family: var(--font-mono);
   font-size: 12px;

@@ -15,6 +15,28 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Explore can screen by tracked index, cheapest first.** A "Tracks" dropdown
+  lists every index family with at least one active index-style tracker (live
+  from the catalog, with tracker counts) and shows the funds tracking the
+  chosen index ranked by fee — including feeder funds whose own name never
+  mentions it (the index family is now also derived from the master fund's
+  name, so e.g. all S&P 500 feeders classify correctly). Typing an index name
+  into search offers the facet as a one-tap suggestion, and the list legend
+  says how results are ordered (best match vs cheapest first). The Advisor's
+  fund finder gained the same `trackingIndex` filter and now always names the
+  true lowest-fee fund in a result set, even when results are relevance-ranked.
+- **Explore's filters fit one row on a phone.** Every facet (asset class,
+  index/active style, region, tax wrapper, tracked index) is now a compact
+  dropdown pill instead of a row of chips — five pills replace ~14
+  always-visible options, the pill shows the chosen value when set, and menus
+  align to stay on-screen at the viewport edge. A ✕ button at the end of the
+  row resets all filters and the search in one tap, facet menus keep their
+  scrollbar visible so a long list never reads as cut off, and the panel keeps
+  its height when a search finds nothing (no collapsing under an open menu).
+  Tapping TER ⓘ in the legend expands a one-line fee explainer on demand,
+  replacing the always-on footer note — so the explanation now works on touch,
+  where the TER badges' hover tooltips never show.
+
 - **Custom dropdowns are keyboard-navigable and stay on-screen.** The fund class
   switcher and the portfolio benchmark picker now support arrow keys, Home/End,
   Enter, and Esc, and flip open upward when there isn't room below — via one
