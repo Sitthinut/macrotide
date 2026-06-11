@@ -8,7 +8,7 @@ themselves are the source of truth for exact request/response shapes.
 > `withDb`, which routes the query to the owner DB or the per-session demo DB
 > based on the `macrotide_demo` cookie. See
 > [architecture § owner vs demo databases](../explanation/architecture.md#owner-vs-demo-databases)
-> and [AGENTS.md § DB routing](../../AGENTS.md#db-routing--read-this-before-touching-any-route-handler).
+> and [AGENTS.md § DB routing](../../AGENTS.md#db-routing--read-before-touching-a-route-handler).
 
 ## Portfolio data
 
@@ -29,7 +29,13 @@ themselves are the source of truth for exact request/response shapes.
 | `/api/models` | GET, POST | List / create model portfolios |
 | `/api/models/[id]` | GET, PATCH, DELETE | Read / update / delete a model portfolio |
 | `/api/analysis` | GET | Portfolio health / composite score |
+| `/api/analysis/look-through` | GET | Underlying-exposure look-through for the caller's holdings — aggregated across all buckets or scoped to one (`?bucket=<id>`); needs market.db (per-fund underlying data), so it is computed server-side and injected into the Portfolio health check for accurate diversification scoring |
+| `/api/portfolio/fee-creep` | GET | Identifies held funds that have a cheaper active peer with the same asset-class and region exposure; each finding includes the held fund's current TER, up to three cheaper alternatives sorted cheapest-first, and a deterministic suppression key; returns an empty array when no savings opportunities exist; archived/rejected findings are hidden via the resurface ratchet |
+| `/api/portfolio/action-items` | GET, POST, DELETE | Persist user actions on generated portfolio advice items (Archive / "Not for me"); GET returns the caller's current hidden set; POST records an action by deterministic `itemKey` with an optional reason chip or free text (a "Not for me" also writes a Journal feedback entry in the same transaction so the rejection is reviewable by Advisor); DELETE restores a hidden item |
 | `/api/portfolios/series` | GET | Portfolio value time series (for charts) |
+| `/api/portfolios/reorder` | PATCH | Persist a manual display ordering for the caller's portfolios — accepts `{ orderedIds: string[] }` and writes a `position` index for each; ids the caller does not own are silently skipped |
+| `/api/holdings/propose` | POST | Accept side of the Advisor holding-proposal flow — commits a `propose_holding` tool-call result to the ledger once the user clicks Accept in the chat card; the proposal can only attach a holding to a bucket the caller owns; rejecting a proposal is client-only and never reaches this route |
+| `/api/holdings/source` | POST | Rename a `source` label across all of the caller's holdings — `{ from, to }` body; empty `to` clears the label; scoped to the user's own buckets so it cannot touch another user's rows |
 | `/api/settings` | GET, PUT | Read / write key-value settings |
 
 ## Market data
@@ -39,7 +45,12 @@ themselves are the source of truth for exact request/response shapes.
 | `/api/quotes` | GET | Latest NAV / price quotes for tickers; `refresh=1` re-fetches through the provider chain, `refresh=1&mine=1` derives the refs from the caller's holdings server-side |
 | `/api/market/indices` | GET | SET + global index levels and deltas |
 | `/api/market/news` | GET | Market news (RSS) |
+| `/api/market/benchmark` | GET | Total-return index series for a named benchmark (`?key=`, `?range=`); used by the Portfolio "VS" overlay to draw the benchmark line; returns an empty series when the market cache is cold (client treats that as unavailable, never as zero) |
+| `/api/market/indicators` | GET, PUT | GET returns the caller's selected market-indicator symbols plus the full addable catalog (label / group / tier metadata); PUT `{ symbols: string[] }` replaces the selection (order preserved; unknown symbols dropped; empty list resets to defaults) |
 | `/api/admin/refresh-market` | GET, POST | Trigger a market data refresh (admin) |
+| `/api/admin/status` | GET | Returns `{ isOwner: boolean }` for the current session; used by the UI to decide whether to show the Admin entry point — not a security boundary (each admin action enforces authorization independently); always 200 |
+| `/api/admin/users` | GET | Owner-only — lists every user with id, email, name, tier, and today's token usage; returns 403 for non-owners |
+| `/api/admin/users/[id]/tier` | POST | Owner-only — sets a user's account tier (`{ tier: "free" \| "trusted" }`); returns 403 for non-owners; the owner cannot demote their own account to `free` (409 lockout guard) |
 
 ## Funds & screener
 
@@ -58,13 +69,21 @@ themselves are the source of truth for exact request/response shapes.
 | Route | Methods | Purpose |
 |---|---|---|
 | `/api/chat` | POST | Streaming chat; injects memory, runs Advisor tool-calls |
+| `/api/chat/capabilities` | GET | Reports which optional chat features are available for this session (e.g. `imageUpload`); computed server-side because the relevant config and the demo cookie are not visible to the client; purely informational — the chat route enforces the actual capability gates |
 | `/api/chat/threads` | GET, POST | List / create chat threads |
 | `/api/chat/threads/[id]` | GET, PATCH, DELETE | Read / rename / soft-delete a thread |
 | `/api/chat/threads/[id]/title` | POST | Auto-title a thread after its first exchange |
 | `/api/chat/threads/[id]/close` | POST | Close a session → extract memory + mark idle |
 | `/api/chat/search` | GET | Full-text search across the user's chats |
+| `/api/chat/transcribe` | POST | OCR a chat image attachment into plain text once; the Advisor carries the transcript in the conversation so follow-up turns can reference it without re-sending image bytes; image is never persisted; rate-limited (10 requests / 60 s per IP); needs `OPENROUTER_API_KEY` (503 without) |
 | `/api/import/image` | POST | OCR an import screenshot. Auto-classifies holdings-snapshot vs transaction-history, then runs the matching extractor; returns `{ docType, confidence, holdings? \| transactions? }` so the client can confirm a low-confidence guess. An optional `as=holdings\|transactions` form field skips detection (used when the user picks). Needs `OPENROUTER_API_KEY` (503 without) |
 | `/api/import/transactions-image` | POST | OCR a transaction-history image into ledger rows directly (same key + rate limit + 5 MB cap as `/api/import/image`) |
+| `/api/import/broker/connectors` | GET | Lists every configured broker connector (display name, host, login / open links, and install URL) for the Connect-a-broker picker; data-only — no token or secrets; 404 in a demo session |
+| `/api/import/broker/token` | GET, POST | GET mints (or returns the existing) per-user broker import token together with the connector's display name, install URL, and broker-history URL; POST rotates the token, invalidating any installed userscript; 404 when no broker is configured or in a demo session |
+| `/api/import/broker/userscript/[name]` | GET | Serves the install-ready userscript (`.user.js`) for the configured brokers; `[name]` exists only so the URL ends in `.user.js` for one-click install in userscript managers; the user's import token is baked in; broker endpoints stay server-side (env only); 404 when no broker is configured or in a demo session |
+| `/api/import/broker/runtime` | GET | Returns the runtime connector config for the installed userscript (`?c=` or `?host=` selects a connector); authenticated by the import token (no cookies); drives the gather so broker endpoints can change without a reinstall; a protocol-version bump in the response tells the loader when it must reinstall |
+| `/api/import/broker/ingest` | POST | Commit-and-deduplicate a broker export into the ledger; accepts the raw broker export JSON (authenticated by either a session cookie or the `x-import-token` header); routes each broker account's orders to its own portfolio (created on first import, then follows the user's mapping in Settings → Connections); skips orders already in the ledger by `external_id` so re-syncs are idempotent |
+| `/api/import/broker/connections` | GET, PATCH, DELETE | Manage broker-import connections (Settings → Connections): GET lists each known account with its mapped portfolio and last-sync status; PATCH remaps or merges an account to a portfolio (existing or newly-named); DELETE unlinks an account or an entire broker connector, with an optional `mode=purge` to also remove that account's imported transaction history |
 
 ## Memory
 

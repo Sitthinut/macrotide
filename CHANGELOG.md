@@ -620,6 +620,22 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Changed
 
+- **Custom templates are designed with the advisor (or duplicated), not "imported".**
+  The Add-template dialog's URL / Text / Image methods were placeholders that
+  returned a canned allocation for any input while claiming "AI parsed this
+  model" — they're removed rather than shipped as false behavior. The dialog
+  now hands off to the advisor conversation, and any template can still be
+  duplicated into an editable copy. Real URL/image ingestion is tracked as
+  future work.
+- **Filter chips, template cards, and journal cards work from the keyboard.**
+  Every clickable chip, card, and inline link is now focusable and operable
+  with Enter/Space, with a visible focus ring; market-topic chips that never
+  did anything no longer look clickable.
+- **The plan editor and custom-template dialogs now behave like every other
+  dialog.** The journal plan editor and the "Add a custom template" / "Review &
+  confirm" model-import dialogs moved onto the standard dialog component, so they
+  gain Escape-to-close, focus trapping, a focus-restoring close, scroll lock, and
+  an inert background — the same accessibility the rest of the app's dialogs have.
 - **Fund asset class (including Cash) is now driven by the SEC risk-spectrum, not
   name-matching.** Each fund's regulatory risk code from the SEC factsheet
   (RS1/RS2 → money market, RS3/RS4 → bond, RS6/RS7 → equity, RS8 → alternative)
@@ -640,6 +656,24 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Fixed
 
+- **One account can no longer see another's holdings through shared surfaces.**
+  Holdings reads are now bucket-ownership-scoped at the query layer, closing
+  the places that read the whole table: fee-creep action items no longer
+  include funds only another account holds, a quotes refresh spends provider
+  quota only on the caller's own symbols (and stops returning everyone's
+  held tickers), and the dividend-disclaimer flag derives from your funds only.
+- **Background sweeps now cover every account.** The stale-session close,
+  fact extraction, and the 30-day trash purge previously only saw the original
+  single-owner rows; the sweep now runs once per registered user with per-user
+  scoping intact.
+- **A failed plan save no longer silently discards your edits.** The plan
+  editor now reports "Couldn't save your plan" and stays open with the draft
+  intact (previously it closed as if saved, even on a server error). The
+  Templates screen likewise says when it couldn't load instead of showing a
+  skeleton forever.
+- **Deleted chats are now actually removed after their 30-day window.** The
+  trash promised a 30-day restore window then hard removal, but nothing
+  performed the removal; the stale-session sweep now does.
 - **A broker sync can no longer blank the portfolio chart.** Broker order
   history carries full timestamps ("2017-04-07T00:00:00+07:00"); the importer
   stored them verbatim where the ledger expects a date-only day, which crashed
@@ -759,8 +793,6 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   weighted over holdings with a known TER only, and the fee component notes "fee
   data incomplete for N holdings" when any are missing — missing data neither
   helps nor hurts the score.
-
-### Added
 
 - **Advisor eval harness — a committed benchmark for the chat loop.**
   `scripts/eval/` promotes the throwaway model-trial script into a repeatable

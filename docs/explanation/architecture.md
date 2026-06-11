@@ -95,7 +95,7 @@ returns, so the chat route captures the context and re-enters it with
 `runWithDbContext`. This pattern is mandatory for any deferred write — the
 canonical example is [app/api/chat/route.ts](../../app/api/chat/route.ts), and
 the rule is spelled out in
-[AGENTS.md](../../AGENTS.md#streaming--callbacks--re-enter-the-context).
+[AGENTS.md](../../AGENTS.md#db-routing--read-before-touching-a-route-handler).
 
 ## Request lifecycle (a typical read)
 
@@ -124,7 +124,7 @@ Writes follow the same path with POST/PATCH/DELETE and revalidation.
    on session close — extract durable facts into memory.
 
 The full memory + session-lifecycle design is its own document:
-[features/memory.md](./memory.md).
+[memory.md](./memory.md).
 
 ## Market data
 

@@ -29,8 +29,9 @@ If you just want to share the app with people on the public internet, follow the
 Two supported modes, both first-class:
 
 - **Mode A — localhost (single user):** `npm install && npm run dev`. SQLite at
-  `data/app.db`, backups in `data/backups/`. No auth, no env beyond
-  `OPENROUTER_API_KEY`.
+  `data/app.db`, backups in `data/backups/`. Auth required by default; set
+  `AUTH_DISABLED=1` in `.env.local` to skip the passkey gate for trusted local
+  dev. Only `OPENROUTER_API_KEY` is needed beyond that for live AI.
 - **Mode B — single-owner self-host:** one Linux VM, Caddy reverse proxy
   (automatic HTTPS), systemd to keep Node alive, SQLite on disk with daily
   backups mirrored off-VM (e.g. Cloudflare R2 via `rclone`). Owner signs in with
@@ -190,7 +191,9 @@ firewall tailnet-only — the tunnel needs only outbound 443.
 ### 5. Fund-catalog refresh (containerized)
 
 Run the daily SEC refresh *inside* the container (it shares the DB + env) via a
-host timer that `docker exec`s the `tsx` job:
+host timer that invokes `scripts/run-job.sh`, which spins an ephemeral
+`docker compose run --rm --no-deps` container so an app redeploy can never
+kill an in-flight job:
 
 ```sh
 sudo tee /etc/systemd/system/macrotide-fund-catalog.service > /dev/null <<'EOF'
