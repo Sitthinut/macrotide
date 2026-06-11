@@ -19,7 +19,7 @@ import { getPlan } from "../db/queries/plan";
 import { listFundQuotes } from "../db/queries/quotes";
 import { getPortfolioSeries } from "../db/queries/series";
 import { listTransactionsForBuckets } from "../db/queries/transactions";
-import { BENCHMARK_OPTIONS, getBenchmarkReturnPct } from "../market/benchmarks";
+import { BENCHMARK_TR_OPTIONS, getBenchmarkReturnPct } from "../market/benchmarks";
 import { QUOTE_SOURCES } from "../market/sources";
 import { adaptModelPortfolio, adaptPortfolios } from "../portfolio/adapter";
 import { deriveRowsWithNav } from "../portfolio/derive-rows";
@@ -266,12 +266,13 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
         ? round(((last.value - first.value) / first.value) * 100)
         : null;
 
-      // Compare against the SET (the core "match your index" reference) and the
-      // S&P 500, over the SAME window (aligned to the portfolio's first date).
+      // Compare against the Thai market and US, total-return and ฿-converted,
+      // over the SAME window (aligned to the portfolio's first date) — a
+      // like-for-like comparison with the ฿ portfolio line.
       const benchmarks = await Promise.all(
-        (["set", "sp500"] as const).map(async (key) => {
+        (["thai_tr", "us_tr"] as const).map(async (key) => {
           const ret = await getBenchmarkReturnPct(key, r, first.date);
-          const opt = BENCHMARK_OPTIONS.find((b) => b.key === key);
+          const opt = BENCHMARK_TR_OPTIONS.find((b) => b.key === key);
           return {
             key,
             label: opt?.label ?? key,

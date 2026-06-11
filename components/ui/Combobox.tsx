@@ -9,6 +9,7 @@
 
 import { type CSSProperties, type ReactNode, useId, useRef, useState } from "react";
 import { useClipEnd } from "@/lib/useClipEnd";
+import { useFlipUp } from "@/lib/useFlipUp";
 
 export interface ComboboxProps<T> {
   value: string;
@@ -63,50 +64,17 @@ export function Combobox<T>({
   // modal body, whose bottom edge is exactly where the sticky footer begins) —
   // not the viewport — so the list never hides under a sticky footer. `openUp`
   // forces it; otherwise we measure on focus.
-  const [flipUp, setFlipUp] = useState(false);
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const show = open && items.length > 0;
+  const { up: flipUp, measure: measureFlip } = useFlipUp(inputRef);
   const up = openUp || flipUp;
 
   // A trailing fade (the symbol field's `.field-fade`) cues "there's more to the
   // right", so it shows only while the value is clipped and not scrolled to its
   // end — tracked by the shared hook and surfaced as `data-clip-end`.
   const { clipEnd, recompute: updateClipEnd } = useClipEnd(inputRef, value);
-
-  const measureFlip = () => {
-    const el = inputRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    // The floor the list must stay above. Inside a modal the most reliable bound
-    // is the sticky FOOTER's top (the scroll area uses OverlayScrollbars, which
-    // re-parents content so an overflow:auto walk misses it). Fall back to the
-    // nearest scrollable ancestor, then the viewport.
-    let bottomBound = window.innerHeight;
-    let topBound = 0;
-    const modal = el.closest(".modal");
-    const footer = modal?.querySelector(".modal-footer");
-    const header = modal?.querySelector(".modal-header");
-    if (footer) bottomBound = footer.getBoundingClientRect().top;
-    if (header) topBound = header.getBoundingClientRect().bottom;
-    if (!footer) {
-      for (let node = el.parentElement; node; node = node.parentElement) {
-        const oy = getComputedStyle(node).overflowY;
-        if (oy === "auto" || oy === "scroll") {
-          const r = node.getBoundingClientRect();
-          bottomBound = r.bottom;
-          topBound = r.top;
-          break;
-        }
-      }
-    }
-    const spaceBelow = bottomBound - rect.bottom;
-    const spaceAbove = rect.top - topBound;
-    // ~240px ≈ the list's max-height plus a little headroom. Flip up only when
-    // below is too tight AND above has more room.
-    setFlipUp(spaceBelow < 240 && spaceAbove > spaceBelow);
-  };
 
   return (
     <div className="combobox" data-clip-end={clipEnd || undefined}>

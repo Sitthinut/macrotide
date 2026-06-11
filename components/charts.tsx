@@ -176,12 +176,11 @@ export function PerfChart({
         <path
           d={benchPath}
           fill="none"
-          stroke="var(--muted)"
+          stroke="var(--benchmark)"
           strokeWidth="1.5"
           strokeDasharray="4 3"
           strokeLinejoin="round"
           strokeLinecap="round"
-          opacity="0.7"
         ></path>
       )}
       <circle cx={pts[pts.length - 1][0]} cy={pts[pts.length - 1][1]} r="4" fill={accent}></circle>

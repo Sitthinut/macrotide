@@ -1,27 +1,27 @@
 // Pure copy helper for the caveat under the Portfolio total-balance graph.
 //
-// The portfolio line and (optional) benchmark overlay both plot PRICE return,
-// not total return — neither reinvests dividends. So the disclaimer's wording
-// depends on which of the two sources actually drops dividends:
-//   - a benchmark is selected (the index series excludes dividends), and/or
-//   - the user holds a dividend-paying fund (its payouts leave the balance).
+// The benchmark overlay is now TOTAL RETURN (the `benchmark_tr` series reinvests
+// dividends), in the base currency — matched to the portfolio line for an
+// accumulating portfolio. The only remaining gap is the portfolio's own
+// distributing funds: their payouts LEAVE the balance, so the line slightly
+// understates total return. So the disclaimer depends on:
+//   - the user holds a dividend-paying fund (its payouts leave the balance), and
+//   - whether a benchmark is selected (frames the gap as "vs the benchmark").
+// A benchmark selected with no distributing fund means both lines are total
+// return → nothing to disclaim.
 //
-// Returns the exact sentence for the active combination, or null when neither
-// applies (nothing to disclaim → render nothing). Copy is verbatim per the
-// product spec; do not paraphrase.
+// Returns the exact sentence for the active combination, or null when nothing
+// applies. Copy is verbatim per the product spec; do not paraphrase.
 
 export function performanceDisclaimer(
   benchmarkSelected: boolean,
   hasDividendFund: boolean,
 ): string | null {
   if (benchmarkSelected && hasDividendFund) {
-    return "Dividends are excluded from both the benchmark and your dividend-paying funds, so actual returns are slightly higher than the lines shown.";
-  }
-  if (benchmarkSelected) {
-    return "The benchmark excludes dividends, so the index's real return is slightly higher than the line shown.";
+    return "Your funds pay dividends as cash, so your line may run slightly below this total-return benchmark.";
   }
   if (hasDividendFund) {
-    return "Your balance does not include dividends paid out by dividend-paying funds, so your actual total return is slightly higher.";
+    return "Some of your funds pay dividends as cash. Your total return is a little higher than this line shows.";
   }
   return null;
 }

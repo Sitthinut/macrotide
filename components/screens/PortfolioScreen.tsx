@@ -11,6 +11,7 @@ import { Icon } from "@/components/Icon";
 import { AllocationDonut, DriftBars, NavChart } from "@/components/InteractiveChartsLazy";
 import { Modal } from "@/components/Modal";
 import { PrivateAmount } from "@/components/PrivateAmount";
+import { BenchmarkPicker } from "@/components/portfolio/BenchmarkPicker";
 import { ReturnsBreakdownSheet } from "@/components/ReturnsBreakdownSheet";
 import { SyncedIcon } from "@/components/SyncedBadge";
 import { KebabMenu } from "@/components/ui/KebabMenu";
@@ -33,7 +34,7 @@ import {
 } from "@/lib/fetchers/portfolio";
 import { invalidate } from "@/lib/fetchers/swr";
 import { fmtPct } from "@/lib/format";
-import { BENCHMARK_OPTIONS } from "@/lib/market/benchmark-options";
+import { BENCHMARK_TR_OPTIONS } from "@/lib/market/benchmark-options";
 import { DEFAULT_QUOTE_SOURCE, isQuoteSource } from "@/lib/market/sources";
 import { feeCreepKey } from "@/lib/portfolio/action-item-key";
 import { REASON_CHIPS, type ReasonChip } from "@/lib/portfolio/action-item-resurface";
@@ -1046,7 +1047,11 @@ export function PortfolioScreen({
           baselineValue={baselineValue}
           baselineInvested={baselineInvested}
           benchmarkData={benchmark !== "none" ? benchmarkSeries : null}
-          benchmarkLabel={benchmark !== "none" ? (benchmarkResp?.label ?? null) : null}
+          benchmarkLabel={
+            benchmark !== "none"
+              ? (BENCHMARK_TR_OPTIONS.find((b) => b.key === benchmark)?.short ?? null)
+              : null
+          }
           height={130}
           accent="var(--accent)"
           emptyHint={
@@ -1055,29 +1060,7 @@ export function PortfolioScreen({
               : "We're still fetching NAV history. Pull-to-refresh or wait a moment."
           }
         />
-        <div className="filter-chips" style={{ padding: "8px 0 0", marginLeft: -8 }}>
-          <span
-            style={{
-              fontSize: 11,
-              color: "var(--muted)",
-              padding: "5px 4px 0",
-              letterSpacing: "0.04em",
-              fontFamily: "var(--font-mono)",
-            }}
-          >
-            VS
-          </span>
-          {[{ key: "none", label: "None" }, ...BENCHMARK_OPTIONS].map((b) => (
-            <span
-              key={b.key}
-              className="chip"
-              data-active={benchmark === b.key}
-              onClick={() => setBenchmark(b.key)}
-            >
-              {b.label}
-            </span>
-          ))}
-        </div>
+        <BenchmarkPicker value={benchmark} onChange={setBenchmark} />
         {(() => {
           // Caveat copy depends on which sources drop dividends: the benchmark
           // overlay (when one is selected) and/or any held dividend-paying fund.
@@ -1087,8 +1070,8 @@ export function PortfolioScreen({
               style={{
                 fontSize: 11,
                 color: "var(--muted)",
-                lineHeight: 1.5,
-                padding: "8px 4px 0",
+                lineHeight: 1.45,
+                margin: "3px 4px 0",
               }}
             >
               {disclaimer}

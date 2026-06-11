@@ -7,9 +7,10 @@
 // up the right fixture series for a holding).
 //
 // `indexKey` values are the keys under which series are stored in the fixture
-// (lib/mock/demo-history.ts → indices). Benchmark-overlay keys (set / sp500 /
-// nasdaq / nikkei) double as both holding sources AND the Portfolio "VS"
-// overlay, so they appear here and in BENCHMARK_OPTIONS.
+// (lib/mock/demo-history.ts → indices). They serve as both holding sources AND
+// the Portfolio "VS" overlay in demo mode: lib/market/benchmarks.ts maps each
+// mapped benchmark key (e.g. us_tr → sp500, acwi_tr → acwi) onto one of these
+// fixture indices, so the demo overlay needs no separate data.
 
 /** A real index the fixture pulls and stores a monthly series for. */
 export interface DemoIndexDef {
@@ -50,6 +51,8 @@ export const DEMO_INDICES: DemoIndexDef[] = [
     label: "SET (Stock Exchange of Thailand)",
   },
   { indexKey: "acwi", source: "market", ticker: "ACWI", label: "MSCI ACWI (global equity)" },
+  { indexKey: "dev_exus", source: "market", ticker: "VEA", label: "Developed ex-US (FTSE proxy)" },
+  { indexKey: "em", source: "market", ticker: "VWO", label: "Emerging markets (FTSE proxy)" },
   { indexKey: "gold", source: "market", ticker: "GC=F", label: "Gold (XAU/USD)" },
   {
     indexKey: "thai_bond",
