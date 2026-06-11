@@ -26,9 +26,9 @@ plan, and journal — including plan edits it proposes as accept/reject cards.
 
 **Portfolio, ledger & analytics**
 
-- **Unified ledger** — your holdings are a projection of one buy/sell + balance ledger; full-screen History and per-fund Position pages (with a value-vs-cost chart over time), in-place edits, custom self-priced assets, and graceful handling of unknown cost basis
-- **Performance** — a headline total return on contributed capital (matching the chart) that taps open into a full breakdown: realized gains, unrealized gain, money-weighted return (XIRR) per-fund and whole-portfolio, cost-basis timeline, contributions and income
-- **Wealth-over-time chart** — replays the ledger so value tracks the position you actually held (exited funds included, no back-projection), with a net-invested line whose gap to value reads as gain; fund-switch cash stays in the line and short ranges rebase to "this period"
+- **Unified ledger** — your holdings are a projection of one buy/sell + balance ledger; full-screen History and per-fund Position pages, in-place edits, custom self-priced assets, and graceful handling of unknown cost basis
+- **Performance** — headline total return on contributed capital, with a full breakdown: realized and unrealized gains, money-weighted return (XIRR) per-fund and whole-portfolio, cost-basis timeline, contributions and income
+- **Wealth-over-time chart** — portfolio value vs. net invested over time, replayed from your ledger so it shows what you actually held (exited funds included)
 - **Plain-language health checks** — allocation drift, blended fees, cash drag, and look-through diversification (underlying single-name concentration, feeder-aware); fee-creep alerts you can dismiss or snooze
 - **Flexible import** — paste, a screenshot, CSV, or typed rows, all reviewed in one editable list before saving; symbol autocomplete; enter by units or baht value
 - **Broker auto-sync** — connect a broker once and it imports your full order history and keeps it in sync, each account as its own portfolio
@@ -43,7 +43,7 @@ plan, and journal — including plan edits it proposes as accept/reject cards.
 
 **Funds & markets**
 
-- **Fund finder & screener** — fuzzy, feeder-aware search over priceable **share classes** with per-class fee, tax wrapper, and 1-year return; screen by tracked index (S&P 500, SET50…) for the cheapest trackers, feeders included via their master fund; retail-availability gating and TER ranking
+- **Fund finder & screener** — fuzzy, feeder-aware search over priceable **share classes** with per-class fee, tax wrapper, and 1-year return; screen by tracked index (S&P 500, SET50…) for the cheapest trackers; retail-availability gating and TER ranking
 - **Fund detail** — per-share-class price and fund-size (AUM) history, holdings by asset type, and feeder look-through to underlying holdings
 - **Market data** — live index levels (FMP / EODHD with ETF-proxy + Yahoo fallback) + FX, Thai fund NAVs and history (Thai SEC), and RSS news, over a resilient stale-on-error cache
 - **Benchmarks & models** — match-or-beat the market on a total-return basis (global, US, regional, and Thai indices), and model portfolios you can browse, fork, and set as a target that drives drift + health checks

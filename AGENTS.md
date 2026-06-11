@@ -23,7 +23,15 @@ anything user-visible:
    [README.md](./README.md#features) Features list (shipped-only — no status
    column, so skip minor or in-progress work), and close the matching
    [board](https://github.com/users/Sitthinut/projects/2) issue if it was listed
-   as planned.
+   as planned. **The Features list is the visitor pitch** — key capabilities
+   in one read, not an inventory of changes:
+   - **New bullet only for a genuinely new capability** (e.g. broker
+     auto-sync); an enhancement folds a short clause into its existing bullet.
+   - **One benefit-oriented line per bullet** — implementation mechanics,
+     internal guarantees, and UI behaviors ("replays the ledger", "taps open",
+     "rebases to this period") stay out of the README.
+   - **Mention each capability once** — no cross-references from other
+     bullets.
 3. If you change env vars, update [deploy.md](./docs/how-to/deploy.md),
    [auth-and-providers.md](./docs/reference/auth-and-providers.md), and `.env.example` together. Never one without the
    others.
