@@ -1,3 +1,4 @@
+import "server-only";
 import { and, asc, desc, eq, gt, isNotNull, isNull, lt, lte, ne } from "drizzle-orm";
 import type { TurnCards } from "../../advisor/turn-persist";
 import { getDb } from "../context";
@@ -150,19 +151,15 @@ export function purgeThread(id: string): void {
 }
 
 /**
- * @deprecated Prefer {@link softDeleteThread} for user-initiated deletes or
- * {@link purgeThread} for hard removal from the trash.
+ * Purge any soft-deleted threads older than `daysAgo` (default 30) — the
+ * hard-delete half of the trash's "30-day restore window" promise. Runs from
+ * the stale-session sweep job. Returns the number of threads removed.
  */
-export function deleteThread(id: string): void {
-  purgeThread(id);
-}
-
-/** Purge any soft-deleted threads older than `daysAgo` (default 30). */
 export function purgeExpiredDeletedThreads(daysAgo = 30): number {
   const cutoff = new Date(Date.now() - daysAgo * 24 * 60 * 60_000).toISOString();
-  const rows = getDb()
-    .select({ id: chatThreads.id })
-    .from(chatThreads)
+  // chat_messages cascade-delete via foreign key.
+  const result = getDb()
+    .delete(chatThreads)
     .where(
       and(
         ownedBy(chatThreads.userId),
@@ -170,14 +167,8 @@ export function purgeExpiredDeletedThreads(daysAgo = 30): number {
         lt(chatThreads.deletedAt, cutoff),
       ),
     )
-    .all();
-  for (const row of rows) {
-    getDb()
-      .delete(chatThreads)
-      .where(and(eq(chatThreads.id, row.id), ownedBy(chatThreads.userId)))
-      .run();
-  }
-  return rows.length;
+    .run();
+  return result.changes;
 }
 
 // ───────────────────────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@
 // with a JSON `payload`. Adding an endpoint is a new SEC_ENDPOINT value + a
 // transform step — never a schema change. See lib/db/schema/market.ts.
 
+import "server-only";
 import { and, eq, sql } from "drizzle-orm";
 import { getMarketDb } from "../context";
 import { secRaw } from "../schema";

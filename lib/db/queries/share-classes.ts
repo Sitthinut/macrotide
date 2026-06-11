@@ -4,6 +4,7 @@
 // fund detail resolves a ticker to its parent + sibling classes, and add-holding
 // validates a typed ticker against them.
 
+import "server-only";
 import { and, eq, sql } from "drizzle-orm";
 import { getMarketDb } from "../context";
 import { fundCatalog, fundShareClasses } from "../schema";

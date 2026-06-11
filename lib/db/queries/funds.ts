@@ -9,6 +9,7 @@
 // after a per-fund fetch rather than in SQL — catalog scale is a few thousand
 // funds on a single-VM SQLite, so clarity beats a window-function query here.
 
+import "server-only";
 import { and, eq, inArray, isNotNull, isNull, not, or, sql } from "drizzle-orm";
 import { indexTypeFromManagementStyle, isIndexStyle } from "../../market/fund-classify";
 import { type FeeType, TER_FEE_TYPE } from "../../market/fund-fees";

@@ -1,3 +1,4 @@
+import "server-only";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "../context";
 import { buckets } from "../schema";

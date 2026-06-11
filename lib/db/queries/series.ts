@@ -1,3 +1,4 @@
+import "server-only";
 import { and, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { BASE_CURRENCY, inferHoldingCurrency } from "@/lib/market/currency";
 import { buildFxConverter } from "@/lib/market/fx";
@@ -14,7 +15,10 @@ import { listHoldings } from "./holdings";
 import { foldableEvents } from "./resolve-derived-units";
 import { listTransactionsForBuckets, type Transaction } from "./transactions";
 
-export type SeriesRange = "1mo" | "3mo" | "6mo" | "1y" | "5y" | "max";
+// One range vocabulary + window math app-wide (shared with the market cache).
+export type { SeriesRange } from "@/lib/market/providers/types";
+
+import { rangeStartDate, type SeriesRange } from "@/lib/market/providers/types";
 
 export interface SeriesPoint {
   /** ISO YYYY-MM-DD */
@@ -88,24 +92,6 @@ const EMPTY_RESULT: Omit<PortfolioSeriesResult, "hasDistributingHolding"> = {
 };
 
 const UNIT_EPSILON = 1e-9;
-
-function rangeStartDate(range: SeriesRange): string {
-  const days =
-    range === "1mo"
-      ? 31
-      : range === "3mo"
-        ? 92
-        : range === "6mo"
-          ? 183
-          : range === "1y"
-            ? 366
-            : range === "5y"
-              ? 5 * 366
-              : 365 * 50;
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - days);
-  return d.toISOString().slice(0, 10);
-}
 
 /**
  * Demo-mode replacement for the market.db `nav_history` read. Builds the same

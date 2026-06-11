@@ -5,6 +5,7 @@
 //   EXTERNAL_INGEST_FEEDER_HOLDINGS=1 is set.
 // Read side: typed getters for the API route and FundDetailSheet.
 
+import "server-only";
 import { eq } from "drizzle-orm";
 import { getMarketDb } from "../context";
 import { feederLookThroughHoldings, feederMasterMap } from "../schema";

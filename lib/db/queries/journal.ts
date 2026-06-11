@@ -1,3 +1,4 @@
+import "server-only";
 import { and, desc, eq, gte, isNull, type SQL } from "drizzle-orm";
 import { getDb } from "../context";
 import { journalEntries } from "../schema";

@@ -17,6 +17,7 @@
 // purpose) opt in explicitly via the `alsoWhere` predicate — e.g. the
 // model-portfolio read passes `eq(modelPortfolios.builtIn, true)`. There is
 // deliberately no general `IS NULL` fallback for logged-in users.
+import "server-only";
 import { eq, isNull, or, type SQL } from "drizzle-orm";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { getUserId } from "../context";

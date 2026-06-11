@@ -1,3 +1,4 @@
+import "server-only";
 import { and, inArray, lte, sql } from "drizzle-orm";
 import { getMarketDb } from "../context";
 import { fundQuotes, navHistory } from "../schema";

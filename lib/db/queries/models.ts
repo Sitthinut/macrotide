@@ -1,3 +1,4 @@
+import "server-only";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "../context";
 import { modelPortfolios } from "../schema";
