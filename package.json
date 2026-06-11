@@ -29,6 +29,7 @@
     "jobs:refresh-share-classes": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/refresh-share-classes.ts",
     "jobs:refresh-market": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/refresh-tracked-market.ts",
     "jobs:prewarm-nav": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/prewarm-nav.ts",
+    "jobs:prewarm-benchmark": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/prewarm-benchmark.ts",
     "refresh:demo-history": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/refresh-demo-history.ts",
     "eval:advisor": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/eval/run.ts",
     "eval:diff": "tsx --tsconfig tsconfig.scripts.json scripts/eval/diff.ts",
