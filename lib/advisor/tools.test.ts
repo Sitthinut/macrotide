@@ -193,6 +193,123 @@ describe("advisor tools — read_portfolio", () => {
   });
 });
 
+describe("advisor tools — read_portfolio per-portfolio (Wave 1)", () => {
+  const TAX = { ...BUCKET, id: "tax", name: "Tax", typeLabel: "SSF" };
+
+  async function seedTwoBuckets() {
+    createBucket(BUCKET);
+    createBucket(TAX);
+    // Core: 600 of US equity.
+    createHoldingViaLedger({
+      bucketId: "core",
+      ticker: "VOO",
+      englishName: "S&P 500",
+      quoteSource: "market",
+      units: 100,
+      avgCost: 6,
+      assetClass: "equity",
+      region: "US",
+      ter: 0.03,
+    });
+    // Tax: 400 of a Thai bond fund.
+    createHoldingViaLedger({
+      bucketId: "tax",
+      ticker: "K-TAX",
+      englishName: "Tax fund",
+      quoteSource: "market",
+      units: 100,
+      avgCost: 4,
+      assetClass: "bond",
+      region: "TH",
+      ter: 0.5,
+    });
+  }
+
+  type Agg = {
+    totalValue: number;
+    byBucket?: { name: string; totalValue: number; pctOfTotal: number; blendedTer: number }[];
+    scope?: { name: string } | null;
+  };
+
+  it("aggregate returns a per-portfolio byBucket breakdown", async () => {
+    const out = (await withFresh(async () => {
+      await seedTwoBuckets();
+      const tools = createAdvisorTools({ userId: null });
+      return run(tools.read_portfolio, {});
+    })) as Agg;
+    expect(out.totalValue).toBe(1000);
+    expect(out.byBucket).toBeDefined();
+    expect(out.byBucket).toHaveLength(2);
+    const tax = out.byBucket?.find((b) => b.name === "Tax");
+    expect(tax?.totalValue).toBe(400);
+    expect(tax?.pctOfTotal).toBe(40);
+    // Per-bucket blended fee uses only that bucket's holdings (Tax = 0.5%).
+    expect(tax?.blendedTer).toBeCloseTo(0.5, 3);
+  });
+
+  it("scopes to one portfolio by name — its own holdings, no byBucket", async () => {
+    const out = (await withFresh(async () => {
+      await seedTwoBuckets();
+      const tools = createAdvisorTools({ userId: null });
+      return run(tools.read_portfolio, { portfolio: "Tax" });
+    })) as Agg & { concentration: { top: { ticker: string } | null } };
+    expect(out.totalValue).toBe(400);
+    expect(out.scope?.name).toBe("Tax");
+    expect(out.byBucket).toBeUndefined();
+    expect(out.concentration.top?.ticker).toBe("K-TAX");
+  });
+
+  it("matches a portfolio by partial name", async () => {
+    const out = (await withFresh(async () => {
+      await seedTwoBuckets();
+      const tools = createAdvisorTools({ userId: null });
+      return run(tools.read_portfolio, { portfolio: "ta" });
+    })) as Agg;
+    expect(out.scope?.name).toBe("Tax");
+  });
+
+  it("returns a helpful not-found message listing the user's portfolios", async () => {
+    const out = (await withFresh(async () => {
+      await seedTwoBuckets();
+      const tools = createAdvisorTools({ userId: null });
+      return run(tools.read_portfolio, { portfolio: "crypto" });
+    })) as { hasHoldings: boolean; message: string };
+    expect(out.hasHoldings).toBe(false);
+    expect(out.message).toMatch(/No portfolio matching/i);
+    expect(out.message).toMatch(/Tax/);
+  });
+
+  it("a single-portfolio user gets no byBucket (the aggregate IS that portfolio)", async () => {
+    const out = (await withFresh(async () => {
+      createBucket(BUCKET);
+      createHoldingViaLedger({
+        bucketId: "core",
+        ticker: "VOO",
+        englishName: "S&P 500",
+        quoteSource: "market",
+        units: 100,
+        avgCost: 6,
+        assetClass: "equity",
+      });
+      const tools = createAdvisorTools({ userId: null });
+      return run(tools.read_portfolio, {});
+    })) as Agg;
+    expect(out.byBucket).toBeUndefined();
+  });
+});
+
+describe("advisor tools — read_performance per-portfolio (Wave 1)", () => {
+  it("an unknown portfolio returns hasData=false with a matching message", async () => {
+    const out = (await withFresh(async () => {
+      createBucket(BUCKET);
+      const tools = createAdvisorTools({ userId: null });
+      return run(tools.read_performance, { portfolio: "nope" });
+    })) as { hasData: boolean; message: string };
+    expect(out.hasData).toBe(false);
+    expect(out.message).toMatch(/No portfolio matching/i);
+  });
+});
+
 describe("advisor tools — read_plan", () => {
   it("returns markdown plus parsed spine sections", async () => {
     const out = (await withFresh(async () => {

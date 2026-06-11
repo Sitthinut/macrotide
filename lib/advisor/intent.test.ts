@@ -30,6 +30,12 @@ describe("classifyReasoningIntent — multi-step judgment raises effort (medium)
     "Given the THB has been weak, should I overweight US stocks?",
     "Compare hedged versus unhedged exposure for me.",
     "Is it worth tilting toward gold as a hedge?",
+    // Holistic review + planning (Wave 2) — incl. the two motivating questions.
+    "What do you think of all of my portfolios?",
+    "I feel like my Tax portfolio has low return. Help me plan the next step for that portfolio.",
+    "Can you review my portfolio and tell me what to improve?",
+    "What should I do next with my retirement money?",
+    "My Global fund is lagging its benchmark — what now?",
   ];
   for (const text of analytical) {
     it(`medium: ${text.slice(0, 40)}`, () => {
@@ -48,16 +54,18 @@ describe("classifyReasoningIntent — EntryContext intent", () => {
     expect(d.signals).toContain("intent:rebalance");
   });
 
-  it("retrieve-then-explain intents stay none", () => {
-    for (const intent of [
-      "health_review",
-      "score_review",
-      "fund_lookup",
-      "fee_switch",
-      "strategy_explain",
-    ]) {
+  it("pure-lookup intents stay none", () => {
+    for (const intent of ["fund_lookup", "fee_switch", "strategy_explain"]) {
       const d = classifyReasoningIntent("what does this mean?", { intent });
       expect(d.effort, intent).toBe("none");
+    }
+  });
+
+  it("the Discuss/review headline intents are analytical (structured review)", () => {
+    for (const intent of ["health_review", "score_review", "review", "plan"]) {
+      const d = classifyReasoningIntent("help", { intent });
+      expect(d.effort, intent).toBe("medium");
+      expect(d.signals).toContain(`intent:${intent}`);
     }
   });
 

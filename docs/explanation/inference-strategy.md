@@ -139,6 +139,8 @@ pre-compute**:
 | "Step-by-step rebalance plan" | **Yes (medium)** | Compute trades across N holdings to close the gap within constraints, then sequence them. |
 | "Should I tilt to gold given THB weakness?" | **Yes** | Weighs several factors against the plan. |
 | "SSF vs RMF for my situation"; tracking-error / hedging comparisons | **Yes** | Rules interplay + the user's numbers → a real multi-step weighing. |
+| "What do you think of all my portfolios?" / "review my portfolio" | **Yes (medium)** | A holistic review synthesizes return, fees, build, and tax into a judgment — not a single retrieval. The `review` / `health_review` / `score_review` (Discuss) intents map here. |
+| "My Tax portfolio's return is low — what should I do next?" | **Yes** | Diagnose *why* it lags, then plan a prioritized next step. The `plan` intent + the diagnose-return / next-step phrase patterns map here. |
 
 The rule of thumb: **reason when the answer requires combining several facts into
 a judgment the tools didn't already calculate — not just because the topic is

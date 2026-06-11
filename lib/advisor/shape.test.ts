@@ -147,6 +147,57 @@ describe("portfolioModelText", () => {
     expect(t).toContain("realized −฿2,000");
     expect(t).toContain("value ฿500,000 (1234.5 units)");
   });
+
+  it("renders a per-portfolio breakdown, leading with money-weighted return", () => {
+    const t = portfolioModelText({
+      ...PORTFOLIO,
+      byBucket: [
+        {
+          bucketId: "core",
+          name: "Core",
+          typeLabel: "Free",
+          totalValue: 600_000,
+          pctOfTotal: 60,
+          targetModel: "Bogle 3-Fund (Global)",
+          topClass: { label: "Equity", pct: 90 },
+          trackingGapPp: 2.1,
+          blendedTer: 0.2,
+          topHolding: { ticker: "EXAMPLE-FUND-A", pct: 50 },
+          cashPct: 3,
+          realized: 5_000,
+          irrPct: 9.2,
+          irrUnavailable: null,
+        },
+        {
+          bucketId: "tax",
+          name: "Tax",
+          typeLabel: "SSF",
+          totalValue: 400_000,
+          pctOfTotal: 40,
+          targetModel: null,
+          topClass: { label: "Bond", pct: 80 },
+          trackingGapPp: null,
+          blendedTer: 0.5,
+          topHolding: { ticker: "EXAMPLE-FUND-C", pct: 80 },
+          cashPct: 1,
+          realized: -1_000,
+          irrPct: 1.3,
+          irrUnavailable: null,
+        },
+      ],
+    });
+    expect(t).toContain("Per-portfolio breakdown:");
+    expect(t).toContain("Core (Free): ฿600,000 (60% of total), +9.2% money-weighted");
+    expect(t).toContain("Tax (SSF): ฿400,000 (40% of total), +1.3% money-weighted");
+  });
+
+  it("names the portfolio in the head when scoped to one", () => {
+    const t = portfolioModelText({
+      ...PORTFOLIO,
+      scope: { bucketId: "tax", name: "Tax", typeLabel: "SSF" },
+    });
+    expect(t).toContain('"Tax" portfolio ฿1,000,000');
+  });
 });
 
 describe("performanceModelText", () => {
@@ -174,6 +225,11 @@ describe("performanceModelText", () => {
     expect(
       performanceModelText({ hasData: false, range: "6mo", message: "Not enough NAV history." }),
     ).toBe("Not enough NAV history.");
+  });
+
+  it("names the portfolio in the head when the return is scoped to one", () => {
+    const t = performanceModelText({ ...perf, scope: { bucketId: "tax", name: "Tax" } });
+    expect(t).toContain('"Tax" portfolio +7.1%');
   });
 });
 

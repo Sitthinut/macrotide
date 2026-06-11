@@ -10,7 +10,7 @@
 // automatically per-user scoped (ownedBy/ownerId) — never bypass it.
 import { tool } from "ai";
 import { z } from "zod";
-import { listBuckets } from "../db/queries/buckets";
+import { type Bucket, listBuckets } from "../db/queries/buckets";
 import { findFunds, getCheaperAlternatives, getFundsByAbbr } from "../db/queries/funds";
 import { listHeldQuoteKeys, listHoldings } from "../db/queries/holdings";
 import { createJournalEntry, type JournalKind, listJournalEntries } from "../db/queries/journal";
@@ -18,7 +18,7 @@ import { getModelPortfolio } from "../db/queries/models";
 import { getPlan } from "../db/queries/plan";
 import { listFundQuotes } from "../db/queries/quotes";
 import { getPortfolioSeries } from "../db/queries/series";
-import { listTransactionsForBuckets } from "../db/queries/transactions";
+import { listTransactionsForBuckets, type Transaction } from "../db/queries/transactions";
 import { BENCHMARK_TR_OPTIONS, getBenchmarkReturnPct } from "../market/benchmarks";
 import { QUOTE_SOURCES } from "../market/sources";
 import { adaptModelPortfolio, adaptPortfolios } from "../portfolio/adapter";
@@ -28,7 +28,9 @@ import { computeLookThrough } from "../portfolio/look-through";
 import type { ExtractedRow } from "../portfolio/ocr";
 import { parsePlan } from "../portfolio/plan-parser";
 import { computeTransactionAnalytics } from "../portfolio/transaction-analytics";
+import type { Holding as AdapterHolding, ModelPortfolio } from "../static/types";
 import {
+  type BucketSummary,
   type CheaperOutput,
   type FundsOutput,
   type PerformanceOutput,
@@ -51,6 +53,222 @@ function round(n: number, dp = 2): number {
   return Math.round(n * f) / f;
 }
 
+// ─── per-portfolio scoping helpers (Wave 1) ─────────────────────────────────
+//
+// The Advisor's portfolios are `buckets`. read_portfolio used to flatten every
+// bucket into one aggregate, so it could not answer "what about my Tax
+// portfolio?" or "review each of my portfolios". These helpers let one readout
+// be computed for the WHOLE book (aggregate) OR scoped to a single bucket —
+// each scored against THAT bucket's own target model — and a compact per-bucket
+// summary for the aggregate's `byBucket` list.
+
+/**
+ * Resolve a free-text portfolio reference (what the user said — "Tax", a bucket
+ * id, a partial name) to a bucket. Tries id, then case-insensitive exact name,
+ * then a contains-match, then the type label. Null when nothing matches.
+ */
+function resolveBucket(buckets: Bucket[], ref: string): Bucket | null {
+  const q = ref.trim().toLowerCase();
+  if (!q) return null;
+  return (
+    buckets.find((b) => b.id.toLowerCase() === q) ??
+    buckets.find((b) => b.name.toLowerCase() === q) ??
+    buckets.find((b) => b.name.toLowerCase().includes(q)) ??
+    buckets.find((b) => (b.typeLabel ?? "").toLowerCase().includes(q)) ??
+    null
+  );
+}
+
+/** A bucket's OWN target model (per-bucket honesty — no fallback to a global). */
+function bucketTarget(b: Bucket): ModelPortfolio | null {
+  if (!b.targetModelId) return null;
+  const m = getModelPortfolio(b.targetModelId);
+  return m ? adaptModelPortfolio(m) : null;
+}
+
+interface ReadoutArgs {
+  holdings: AdapterHolding[];
+  target: ModelPortfolio | null;
+  txns: Transaction[];
+  asOf: string;
+  /** Tail of the `message` (e.g. how many buckets); the count prefix is shared. */
+  scopeLabel: string;
+  /** Optional held symbol → also return that one fund's ledger analytics. */
+  ticker?: string;
+}
+
+/**
+ * Compute the full portfolio readout (allocation, drift vs `target`, blended
+ * fee, concentration + look-through, lifetime ledger analytics, optional
+ * single-fund position) for a given set of holdings + ledger events. Used for
+ * the aggregate (all holdings, global target) and for a single scoped bucket
+ * (its holdings, its own target). The returned shape is the model-facing
+ * PortfolioOutput body minus `byBucket`/`scope`, which the tool adds.
+ */
+async function buildReadout(
+  args: ReadoutArgs,
+): Promise<Omit<PortfolioOutput, "byBucket" | "scope"> & { ok: true }> {
+  const { holdings: allHoldings, target, txns: allTxns, asOf, scopeLabel, ticker } = args;
+  const totalValue = allHoldings.reduce((s, h) => s + h.value, 0);
+
+  const lookThrough = computeLookThrough(allHoldings);
+  const health = computeHealth(
+    allHoldings,
+    totalValue,
+    target?.mix ?? null,
+    target?.ter ?? null,
+    lookThrough,
+  );
+  const headline = summarizeHealth(health, target?.name ?? null);
+  const concAssessment = assessConcentration(health.concentration);
+
+  const toLedger = (a: Awaited<ReturnType<typeof computeTransactionAnalytics>>) => ({
+    invested: round(a.costBasisTotal),
+    realized: round(a.realizedTotal),
+    income: round(a.incomeTotal),
+    irrPct: a.irr == null ? null : round(a.irr * 100, 1),
+    irrUnavailable: a.irrUnavailable,
+  });
+
+  const ledger =
+    allHoldings.length > 0
+      ? toLedger(await computeTransactionAnalytics(allTxns, { method: "average", asOf }))
+      : null;
+
+  const customHoldings =
+    totalValue > 0
+      ? allHoldings
+          .filter((h) => h.quoteSource === "manual")
+          .map((h) => ({
+            ticker: h.ticker,
+            label: h.name,
+            pct: round((h.value / totalValue) * 100, 1),
+          }))
+      : [];
+
+  let position: PortfolioOutput["position"] = null;
+  let tickerNote = "";
+  if (ticker) {
+    const want = ticker.trim().toUpperCase();
+    const fundTxns = allTxns.filter((t) => t.ticker.toUpperCase() === want);
+    if (fundTxns.length > 0) {
+      const a = await computeTransactionAnalytics(fundTxns, { method: "average", asOf });
+      const units = a.positions.reduce((s, p) => s + (p.units > 0 ? p.units : 0), 0);
+      position = {
+        ticker: want,
+        ...toLedger(a),
+        marketValue: a.marketValue == null ? null : round(a.marketValue),
+        units: round(units, 4),
+      };
+    } else {
+      tickerNote = ` No ledger events for "${want}" — the user may not hold it.`;
+    }
+  }
+
+  return {
+    ok: true as const,
+    hasHoldings: allHoldings.length > 0,
+    totalValue: round(totalValue),
+    baseCurrency: "THB",
+    targetModel: target?.name ?? null,
+    byClass: health.byClass.map((s) => ({ label: s.label, pct: round(s.pct, 1) })),
+    byRegion: health.byRegion.map((s) => ({ label: s.label, pct: round(s.pct, 1) })),
+    drift: health.drift.map((d) => ({
+      ticker: d.ticker,
+      label: d.label,
+      current: round(d.current, 1),
+      target: round(d.target, 1),
+      drift: round(d.drift, 1),
+    })),
+    trackingGapPp: health.trackingGapPp,
+    blendedTer: round(health.blendedTer, 3),
+    targetTer: health.targetTer,
+    concentration: {
+      top: health.concentration.top
+        ? {
+            ticker: health.concentration.top.ticker,
+            label: health.concentration.top.label,
+            pct: round(health.concentration.top.pct, 1),
+          }
+        : null,
+      top3Pct: round(health.concentration.top3Pct, 1),
+      hhi: round(health.concentration.hhi, 3),
+      holdingCount: health.concentration.holdingCount,
+      status: concAssessment.status,
+      reason: concAssessment.reason,
+      lookThrough: health.concentration.lookThrough
+        ? {
+            topName: health.concentration.lookThrough.maxName
+              ? {
+                  label: health.concentration.lookThrough.maxName.label,
+                  atLeastPct: round(health.concentration.lookThrough.maxName.pct, 1),
+                  fundCount: health.concentration.lookThrough.maxName.fundCount,
+                }
+              : null,
+            redundantPairs: health.concentration.lookThrough.redundantPairs,
+            equityCoverage: round(health.concentration.lookThrough.equityCoverage, 2),
+          }
+        : null,
+    },
+    cashPct: round(health.cashPct, 1),
+    ledger,
+    customHoldings,
+    position,
+    headline: { tone: headline.tone, title: headline.title, body: headline.body },
+    message: allHoldings.length
+      ? `Read ${allHoldings.length} holding(s) ${scopeLabel}; total ฿${round(totalValue).toLocaleString()}.${tickerNote}`
+      : "The user has no holdings yet — suggest adding some before analysis.",
+  };
+}
+
+/**
+ * Compact per-bucket summary for the aggregate readout's `byBucket` list — the
+ * few figures a "review all my portfolios" answer turns on, scored against each
+ * bucket's OWN target. Lighter than a full readout (no look-through detail) so N
+ * buckets stay cheap; the model drills into one with read_portfolio({portfolio}).
+ */
+async function buildBucketSummary(
+  bucket: Bucket,
+  holdings: AdapterHolding[],
+  txns: Transaction[],
+  grandTotal: number,
+  asOf: string,
+): Promise<BucketSummary> {
+  const totalValue = holdings.reduce((s, h) => s + h.value, 0);
+  const target = bucketTarget(bucket);
+  const health = computeHealth(
+    holdings,
+    totalValue,
+    target?.mix ?? null,
+    target?.ter ?? null,
+    null,
+  );
+  const a =
+    holdings.length > 0
+      ? await computeTransactionAnalytics(txns, { method: "average", asOf })
+      : null;
+  return {
+    bucketId: bucket.id,
+    name: bucket.name,
+    typeLabel: bucket.typeLabel ?? null,
+    totalValue: round(totalValue),
+    pctOfTotal: grandTotal > 0 ? round((totalValue / grandTotal) * 100, 1) : 0,
+    targetModel: target?.name ?? null,
+    topClass: health.byClass[0]
+      ? { label: health.byClass[0].label, pct: round(health.byClass[0].pct, 1) }
+      : null,
+    trackingGapPp: health.trackingGapPp,
+    blendedTer: round(health.blendedTer, 3),
+    topHolding: health.concentration.top
+      ? { ticker: health.concentration.top.ticker, pct: round(health.concentration.top.pct, 1) }
+      : null,
+    cashPct: round(health.cashPct, 1),
+    realized: a ? round(a.realizedTotal) : null,
+    irrPct: a?.irr == null ? null : round(a.irr * 100, 1),
+    irrUnavailable: a?.irrUnavailable ?? null,
+  };
+}
+
 export function createAdvisorTools({ userId }: AdvisorToolOptions) {
   void userId; // scoping is enforced by the DB context, not this argument.
 
@@ -62,12 +280,28 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
       "and cash drag. ALSO returns lifetime ledger analytics — money invested " +
       "(contributions), realized gains/losses, income (dividends), and the " +
       "money-weighted (annualized) return — plus a flag for any custom, " +
-      "self-priced holdings. Pass `ticker` to additionally get one fund's own " +
-      "realized P/L and money-weighted return. Use this before answering " +
-      "anything about how they're doing, their mix, fees, concentration, " +
-      "realized/unrealized gains, or rebalancing. Numbers are computed " +
-      "deterministically from the ledger — never invent figures.",
+      "self-priced holdings. Use this before answering anything about how " +
+      "they're doing, their mix, fees, concentration, realized/unrealized " +
+      "gains, or rebalancing. Numbers are computed deterministically from the " +
+      "ledger — never invent figures.\n" +
+      "The user keeps SEPARATE portfolios (e.g. 'Tax', 'Retirement'). By default " +
+      "this returns the WHOLE-BOOK aggregate PLUS a per-portfolio breakdown " +
+      "(`byBucket`: each portfolio's value, mix, drift, fee, and money-weighted " +
+      "return) — call it with NO arguments to review ALL portfolios at once. " +
+      "To focus ONE portfolio (e.g. 'how is my Tax portfolio doing?'), pass " +
+      "`portfolio` with its name or id; the readout is then scoped to just that " +
+      "portfolio and scored against ITS OWN target model.",
     inputSchema: z.object({
+      portfolio: z
+        .string()
+        .trim()
+        .min(1)
+        .optional()
+        .describe(
+          "Optional: focus a SINGLE portfolio by its name (what the user calls " +
+            "it, e.g. 'Tax', 'Retirement') or its bucket id. A partial name " +
+            "matches. Omit to get the aggregate + the per-portfolio breakdown.",
+        ),
       ticker: z
         .string()
         .trim()
@@ -76,7 +310,7 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
         .describe(
           "Optional: a held fund/ETF/stock symbol (exactly as it appears in the " +
             "portfolio) to ALSO return that one fund's realized P/L, income, " +
-            "invested, and money-weighted return. Omit for the whole-portfolio view.",
+            "invested, and money-weighted return.",
         ),
     }),
     // Model sees a compact text view (#60); the UI still gets the full object.
@@ -84,149 +318,84 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
       type: "text" as const,
       value: shapeForModel.portfolio(output as PortfolioOutput),
     }),
-    execute: async ({ ticker }) => {
+    execute: async ({ portfolio, ticker }) => {
       const buckets = listBuckets();
       const holdings = listHoldings();
       const quotes = listFundQuotes(listHeldQuoteKeys());
       const portfolios = adaptPortfolios(buckets, holdings, quotes);
+
+      // Lifetime ledger analytics mirror the History/Position screens' KPI cards
+      // so a spoken answer matches what the user sees (computeTransactionAnalytics
+      // is the same orchestrator /api/transactions/analytics uses).
+      const asOf = new Date().toISOString().slice(0, 10);
+      const bucketIds = buckets.map((b) => b.id);
+      const allTxns = bucketIds.length > 0 ? listTransactionsForBuckets(bucketIds) : [];
+
+      // ── Single-portfolio scope ──────────────────────────────────────────
+      if (portfolio) {
+        const bucket = resolveBucket(buckets, portfolio);
+        if (!bucket) {
+          const known = buckets.map((b) => b.name).join(", ") || "none yet";
+          const empty = await buildReadout({
+            holdings: [],
+            target: null,
+            txns: [],
+            asOf,
+            scopeLabel: "",
+          });
+          return {
+            ...empty,
+            message: `No portfolio matching "${portfolio}". The user's portfolios are: ${known}.`,
+          };
+        }
+        const scoped = portfolios.find((p) => p.id === bucket.id);
+        const scopedHoldings = scoped?.holdings ?? [];
+        const scopedTxns = allTxns.filter((t) => t.bucketId === bucket.id);
+        const readout = await buildReadout({
+          holdings: scopedHoldings,
+          target: bucketTarget(bucket),
+          txns: scopedTxns,
+          asOf,
+          ticker,
+          scopeLabel: `in the "${bucket.name}" portfolio`,
+        });
+        return {
+          ...readout,
+          scope: { bucketId: bucket.id, name: bucket.name, typeLabel: bucket.typeLabel ?? null },
+        };
+      }
+
+      // ── Aggregate + per-portfolio breakdown ─────────────────────────────
       const allHoldings = portfolios.flatMap((p) => p.holdings);
-      const totalValue = allHoldings.reduce((s, h) => s + h.value, 0);
+      const grandTotal = allHoldings.reduce((s, h) => s + h.value, 0);
 
       const plan = getPlan();
       const model = plan?.selectedModelId ? getModelPortfolio(plan.selectedModelId) : undefined;
       const target = model ? adaptModelPortfolio(model) : null;
 
-      const lookThrough = computeLookThrough(allHoldings);
-      const health = computeHealth(
-        allHoldings,
-        totalValue,
-        target?.mix ?? null,
-        target?.ter ?? null,
-        lookThrough,
-      );
-      const headline = summarizeHealth(health, target?.name ?? null);
-      const concAssessment = assessConcentration(health.concentration);
-
-      // Lifetime ledger analytics — capital still invested (cost basis of held
-      // units), realized gains, income, and the money-weighted (annualized)
-      // return. These mirror the History/Position screens' KPI cards so a spoken
-      // answer matches what the user sees (computeTransactionAnalytics is the
-      // same orchestrator /api/transactions/analytics uses).
-      const asOf = new Date().toISOString().slice(0, 10);
-      const bucketIds = buckets.map((b) => b.id);
-      const allTxns = bucketIds.length > 0 ? listTransactionsForBuckets(bucketIds) : [];
-
-      const toLedger = (a: Awaited<ReturnType<typeof computeTransactionAnalytics>>) => ({
-        invested: round(a.costBasisTotal),
-        realized: round(a.realizedTotal),
-        income: round(a.incomeTotal),
-        irrPct: a.irr == null ? null : round(a.irr * 100, 1),
-        irrUnavailable: a.irrUnavailable,
+      const readout = await buildReadout({
+        holdings: allHoldings,
+        target,
+        txns: allTxns,
+        asOf,
+        ticker,
+        scopeLabel: `across ${buckets.length} portfolio(s)`,
       });
 
-      const ledger =
-        allHoldings.length > 0
-          ? toLedger(await computeTransactionAnalytics(allTxns, { method: "average", asOf }))
-          : null;
+      // Per-portfolio breakdown — only when there's more than one portfolio (a
+      // single-portfolio user's aggregate already IS that portfolio).
+      const byBucket =
+        buckets.length > 1
+          ? await Promise.all(
+              portfolios.map((p) => {
+                const b = buckets.find((x) => x.id === p.id) as Bucket;
+                const txns = allTxns.filter((t) => t.bucketId === p.id);
+                return buildBucketSummary(b, p.holdings, txns, grandTotal, asOf);
+              }),
+            )
+          : undefined;
 
-      // Custom ("manual") holdings are valued from the user's last-entered price,
-      // not a live feed — the model must flag them as user-supplied.
-      const customHoldings =
-        totalValue > 0
-          ? allHoldings
-              .filter((h) => h.quoteSource === "manual")
-              .map((h) => ({
-                ticker: h.ticker,
-                label: h.name,
-                pct: round((h.value / totalValue) * 100, 1),
-              }))
-          : [];
-
-      // Optional single-fund analytics (the Position screen's per-fund figures).
-      let position: {
-        ticker: string;
-        invested: number;
-        realized: number;
-        income: number;
-        irrPct: number | null;
-        irrUnavailable: string | null;
-        marketValue: number | null;
-        units: number;
-      } | null = null;
-      let tickerNote = "";
-      if (ticker) {
-        const want = ticker.trim().toUpperCase();
-        const fundTxns = allTxns.filter((t) => t.ticker.toUpperCase() === want);
-        if (fundTxns.length > 0) {
-          const a = await computeTransactionAnalytics(fundTxns, { method: "average", asOf });
-          const units = a.positions.reduce((s, p) => s + (p.units > 0 ? p.units : 0), 0);
-          position = {
-            ticker: want,
-            ...toLedger(a),
-            marketValue: a.marketValue == null ? null : round(a.marketValue),
-            units: round(units, 4),
-          };
-        } else {
-          tickerNote = ` No ledger events for "${want}" — the user may not hold it.`;
-        }
-      }
-
-      return {
-        ok: true as const,
-        hasHoldings: allHoldings.length > 0,
-        totalValue: round(totalValue),
-        baseCurrency: "THB",
-        targetModel: target?.name ?? null,
-        byClass: health.byClass.map((s) => ({ label: s.label, pct: round(s.pct, 1) })),
-        byRegion: health.byRegion.map((s) => ({ label: s.label, pct: round(s.pct, 1) })),
-        drift: health.drift.map((d) => ({
-          ticker: d.ticker,
-          label: d.label,
-          current: round(d.current, 1),
-          target: round(d.target, 1),
-          drift: round(d.drift, 1),
-        })),
-        trackingGapPp: health.trackingGapPp,
-        blendedTer: round(health.blendedTer, 3),
-        targetTer: health.targetTer,
-        concentration: {
-          top: health.concentration.top
-            ? {
-                ticker: health.concentration.top.ticker,
-                label: health.concentration.top.label,
-                pct: round(health.concentration.top.pct, 1),
-              }
-            : null,
-          top3Pct: round(health.concentration.top3Pct, 1),
-          hhi: round(health.concentration.hhi, 3),
-          holdingCount: health.concentration.holdingCount,
-          // Named-check verdict + underlying look-through (lower bounds). Absence
-          // of a finding never certifies diversification — see portfolio-health.md.
-          status: concAssessment.status,
-          reason: concAssessment.reason,
-          lookThrough: health.concentration.lookThrough
-            ? {
-                topName: health.concentration.lookThrough.maxName
-                  ? {
-                      label: health.concentration.lookThrough.maxName.label,
-                      atLeastPct: round(health.concentration.lookThrough.maxName.pct, 1),
-                      fundCount: health.concentration.lookThrough.maxName.fundCount,
-                    }
-                  : null,
-                redundantPairs: health.concentration.lookThrough.redundantPairs,
-                equityCoverage: round(health.concentration.lookThrough.equityCoverage, 2),
-              }
-            : null,
-        },
-        cashPct: round(health.cashPct, 1),
-        ledger,
-        customHoldings,
-        position,
-        headline: { tone: headline.tone, title: headline.title, body: headline.body },
-        message: allHoldings.length
-          ? `Read ${allHoldings.length} holding(s) across ${buckets.length} bucket(s); total ฿${round(totalValue).toLocaleString()}.${tickerNote}`
-          : "The user has no holdings yet — suggest adding some before analysis.",
-      };
+      return { ...readout, byBucket };
     },
   });
 
@@ -239,29 +408,63 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
       "question about returns, performance, or keeping up with an index. " +
       "Computed from the user's real NAV history; never invent performance " +
       "figures. Benchmark returns are best-effort — if an index is temporarily " +
-      "unavailable its return comes back null; say so rather than guessing.",
+      "unavailable its return comes back null; say so rather than guessing.\n" +
+      "Defaults to the WHOLE book. To check ONE portfolio's return (e.g. 'is my " +
+      "Tax portfolio lagging?'), pass `portfolio` with its name or id — the " +
+      "period return is then scoped to just that portfolio, still compared to " +
+      "the same indices.",
     inputSchema: z.object({
       range: z.enum(PERF_RANGES).optional().describe("Look-back window; default 6mo."),
+      portfolio: z
+        .string()
+        .trim()
+        .min(1)
+        .optional()
+        .describe(
+          "Optional: scope the return to a SINGLE portfolio by name (e.g. 'Tax') " +
+            "or bucket id. A partial name matches. Omit for the whole-book return.",
+        ),
     }),
     // Model sees a compact text view (#60); the UI still gets the full object.
     toModelOutput: ({ output }) => ({
       type: "text" as const,
       value: shapeForModel.performance(output as PerformanceOutput),
     }),
-    execute: async ({ range }) => {
+    execute: async ({ range, portfolio }) => {
       const r = range ?? "6mo";
-      const { aggregate, asOf } = await getPortfolioSeries(r);
-      if (aggregate.length < 2) {
+      const { aggregate, perBucket, asOf } = await getPortfolioSeries(r);
+
+      // Resolve scope: a named portfolio uses its own per-bucket series; absent,
+      // the whole-book aggregate.
+      let series = aggregate;
+      let scope: { bucketId: string; name: string } | null = null;
+      if (portfolio) {
+        const bucket = resolveBucket(listBuckets(), portfolio);
+        if (!bucket) {
+          return {
+            ok: true as const,
+            hasData: false,
+            range: r,
+            message: `No portfolio matching "${portfolio}".`,
+          };
+        }
+        series = perBucket[bucket.id] ?? [];
+        scope = { bucketId: bucket.id, name: bucket.name };
+      }
+
+      if (series.length < 2) {
         return {
           ok: true as const,
           hasData: false,
           range: r,
-          message:
-            "Not enough NAV history to compute a return yet — needs at least two priced dates.",
+          scope,
+          message: scope
+            ? `Not enough NAV history for the "${scope.name}" portfolio over ${r} yet — needs at least two priced dates.`
+            : "Not enough NAV history to compute a return yet — needs at least two priced dates.",
         };
       }
-      const first = aggregate[0];
-      const last = aggregate[aggregate.length - 1];
+      const first = series[0];
+      const last = series[series.length - 1];
       const periodReturnPct = first.value
         ? round(((last.value - first.value) / first.value) * 100)
         : null;
@@ -294,8 +497,10 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
         periodReturnPct,
         asOf,
         benchmarks,
+        scope,
         message:
-          `Portfolio ${fmt(periodReturnPct)} over ${r} (${first.date}→${last.date}). ` +
+          `${scope ? `"${scope.name}" portfolio` : "Portfolio"} ${fmt(periodReturnPct)} over ${r} ` +
+          `(${first.date}→${last.date}). ` +
           `Benchmarks: ${benchmarks.map((b) => `${b.label} ${fmt(b.returnPct)}`).join(", ")}.`,
       };
     },
@@ -902,6 +1107,9 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
       "cheapest-first. " +
       "Use taxIncentive to find SSF/ThaiESG/RMF wrappers, which add tax deductibility " +
       "on top of the fee advantage. " +
+      "Use regionFocus (e.g. 'us', 'china', 'emerging') or sectorFocus (e.g. 'gold', " +
+      "'technology') to target a PRECISE exposure — preferred over a free-text query " +
+      "when you know the region/theme. " +
       "IMPORTANT: Macrotide is an index-investing companion. When the user asks about " +
       "an individual stock or hot theme (e.g. 'should I buy NVIDIA'), do NOT use this " +
       "tool to find that stock — instead call find_funds for the closest low-fee " +
@@ -950,15 +1158,32 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
             "'FTSE All-World', 'Bloomberg Global Aggregate'. Prefer this over query for " +
             "'cheapest fund tracking X' — results come back cheapest-first.",
         ),
+      regionFocus: z
+        .string()
+        .optional()
+        .describe(
+          "Specific geographic focus, FINER than `region` — match a precise exposure. Common " +
+            "values: 'us', 'global', 'emerging', 'asia', 'japan', 'china', 'india', 'europe', " +
+            "'vietnam', 'korea', 'asean', 'thailand'. Use this for 'cheapest US fund', 'a China " +
+            "fund', etc. (preferred over a free-text query when you know the region).",
+        ),
+      sectorFocus: z
+        .string()
+        .optional()
+        .describe(
+          "Specific sector/theme focus. Common values: 'technology', 'healthcare', 'financials', " +
+            "'energy', 'property' (REIT), 'gold', 'commodities'. Use for 'a tech fund', 'a gold " +
+            "fund', etc.",
+        ),
       query: z
         .string()
         .optional()
         .describe(
           "Free-text search against fund name and investment-policy text. Good for finding " +
             "funds by theme (e.g. 'gold', 'REIT') or when no normalized index family fits. " +
-            "NOTE: with a query, results are ranked by match relevance, not fee — " +
-            "use trackingIndex for cheapest-index questions. Combine with assetClass for " +
-            "best results.",
+            "NOTE: with a query, results are ranked by match relevance, not fee — use " +
+            "trackingIndex for cheapest-index questions, and regionFocus/sectorFocus when you " +
+            "know the region/theme. Combine with assetClass for best results.",
         ),
       limit: z
         .number()
@@ -979,6 +1204,8 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
       taxIncentive,
       region,
       trackingIndex,
+      regionFocus,
+      sectorFocus,
       query,
       limit,
     }) => {
@@ -988,6 +1215,8 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
         taxIncentive,
         region,
         trackingIndex,
+        regionFocus: regionFocus?.trim().toLowerCase(),
+        sectorFocus: sectorFocus?.trim().toLowerCase(),
         query,
         activeOnly: true,
         excludeFixedTerm: true,
