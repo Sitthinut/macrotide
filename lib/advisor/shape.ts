@@ -28,6 +28,30 @@ const num = (
 };
 
 // ─── read_portfolio ─────────────────────────────────────────────────────────
+
+/**
+ * Compact per-portfolio (per-bucket) summary in the aggregate readout's
+ * `byBucket` list — the few figures a "review all my portfolios" answer turns
+ * on, each scored against that portfolio's OWN target model. `irrPct` is the
+ * money-weighted (annualized) return; null with `irrUnavailable` saying why.
+ */
+export interface BucketSummary {
+  bucketId: string;
+  name: string;
+  typeLabel: string | null;
+  totalValue: number;
+  pctOfTotal: number;
+  targetModel: string | null;
+  topClass: { label: string; pct: number } | null;
+  trackingGapPp: number | null;
+  blendedTer: number;
+  topHolding: { ticker: string; pct: number } | null;
+  cashPct: number;
+  realized: number | null;
+  irrPct: number | null;
+  irrUnavailable: string | null;
+}
+
 export interface PortfolioOutput {
   hasHoldings: boolean;
   totalValue: number;
@@ -80,6 +104,12 @@ export interface PortfolioOutput {
     units: number;
   } | null;
   headline: { tone: string; title: string; body: string };
+  // Per-portfolio breakdown — present on the aggregate readout when the user has
+  // more than one portfolio. Each entry is scored against its own target.
+  byBucket?: BucketSummary[];
+  // Present when read_portfolio was scoped to a single portfolio by name/id —
+  // the readout above is just that one portfolio.
+  scope?: { bucketId: string; name: string; typeLabel: string | null };
   message: string;
 }
 
@@ -91,8 +121,10 @@ export function portfolioModelText(o: PortfolioOutput): string {
       .map((d) => `${d.ticker ?? d.label} ${num(d.drift, { sign: true })}pp`)
       .join(", ") || "all sleeves on target";
   const top = o.concentration.top;
+  // A scoped readout names the one portfolio; the aggregate stays "Portfolio".
+  const head = o.scope ? `"${o.scope.name}" portfolio` : "Portfolio";
   return [
-    `Portfolio ฿${o.totalValue.toLocaleString()} (${o.baseCurrency}); target model: ${o.targetModel ?? "none set"}.`,
+    `${head} ฿${o.totalValue.toLocaleString()} (${o.baseCurrency}); target model: ${o.targetModel ?? "none set"}.`,
     `By class: ${o.byClass.map((c) => `${c.label} ${c.pct}%`).join(", ")}.`,
     `By region: ${o.byRegion.map((c) => `${c.label} ${c.pct}%`).join(", ")}.`,
     `Drift vs target: ${drift}.`,
@@ -104,10 +136,31 @@ export function portfolioModelText(o: PortfolioOutput): string {
     ledgerLine(o.ledger),
     customLine(o.customHoldings),
     positionLine(o.position),
+    byBucketLines(o.byBucket),
     `${o.headline.title} — ${o.headline.body}`,
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+/**
+ * The per-portfolio breakdown for a "review all my portfolios" turn — one tight
+ * line per portfolio so the model can compare them and spot the laggard without
+ * a separate tool call each. Money-weighted return leads (it's what "low return"
+ * questions turn on); drift/fee follow. Omitted when there's a single portfolio.
+ */
+function byBucketLines(rows: BucketSummary[] | undefined): string | null {
+  if (!rows || rows.length === 0) return null;
+  const lines = rows.map((b) => {
+    const ret =
+      b.irrPct != null
+        ? `${num(b.irrPct, { pct: true, sign: true })} money-weighted`
+        : "return n/a";
+    const cls = b.topClass ? `${b.topClass.label} ${b.topClass.pct}%` : "no allocation";
+    const gap = b.trackingGapPp != null ? `, gap ${b.trackingGapPp}pp` : "";
+    return `- ${b.name}${b.typeLabel ? ` (${b.typeLabel})` : ""}: ฿${b.totalValue.toLocaleString()} (${b.pctOfTotal}% of total), ${ret}; ${cls}${gap}, fee ${b.blendedTer}%, cash ${b.cashPct}%.`;
+  });
+  return `Per-portfolio breakdown:\n${lines.join("\n")}`;
 }
 
 const baht = (n: number) => `฿${n.toLocaleString()}`;
@@ -162,7 +215,7 @@ function concentrationLine(c: PortfolioOutput["concentration"]): string | null {
 
 // ─── read_performance ───────────────────────────────────────────────────────
 export type PerformanceOutput =
-  | { hasData: false; range: string; message: string }
+  | { hasData: false; range: string; message: string; scope?: { name: string } | null }
   | {
       hasData: true;
       range: string;
@@ -170,6 +223,8 @@ export type PerformanceOutput =
       endDate: string;
       periodReturnPct: number | null;
       benchmarks: { label: string; returnPct: number | null; beating: boolean | null }[];
+      // Present when the return was scoped to a single portfolio by name/id.
+      scope?: { bucketId: string; name: string } | null;
       message: string;
     };
 
@@ -181,7 +236,8 @@ export function performanceModelText(o: PerformanceOutput): string {
       return `${b.label} ${num(b.returnPct, { pct: true, sign: true })}${dir}`;
     })
     .join(", ");
-  return `Portfolio ${num(o.periodReturnPct, { pct: true, sign: true })} over ${o.range} (${o.startDate}→${o.endDate}). Benchmarks: ${benches}.`;
+  const head = o.scope ? `"${o.scope.name}" portfolio` : "Portfolio";
+  return `${head} ${num(o.periodReturnPct, { pct: true, sign: true })} over ${o.range} (${o.startDate}→${o.endDate}). Benchmarks: ${benches}.`;
 }
 
 // ─── find_funds ─────────────────────────────────────────────────────────────

@@ -68,6 +68,8 @@ function seedFund(
     managementStyle,
     taxIncentiveType,
     investRegion,
+    regionFocus,
+    sectorFocus,
   }: {
     assetClass?: string;
     ter?: number;
@@ -75,6 +77,8 @@ function seedFund(
     managementStyle?: string;
     taxIncentiveType?: string;
     investRegion?: string;
+    regionFocus?: string;
+    sectorFocus?: string;
   } = {},
 ) {
   upsertFund({
@@ -86,6 +90,8 @@ function seedFund(
     managementStyle: managementStyle ?? null,
     taxIncentiveType: taxIncentiveType ?? null,
     investRegion: investRegion ?? null,
+    regionFocus: regionFocus ?? null,
+    sectorFocus: sectorFocus ?? null,
     isFixedTerm: false,
     status: "active",
   });
@@ -413,6 +419,31 @@ describe("advisor tools — find_funds", () => {
     expect(result.count).toBe(1);
     expect(result.funds[0].abbr).toBe("FOREIGN_FUND");
     expect(result.funds[0].investRegion).toBe("foreign");
+  });
+
+  it("regionFocus filters to a specific geography (finer than region)", async () => {
+    const result = (await withFresh(async () => {
+      seedFund("US_FUND", { regionFocus: "us", ter: 0.5 });
+      seedFund("CHINA_FUND", { regionFocus: "china", ter: 0.4 });
+      const tools = createAdvisorTools({ userId: null });
+      // The model passes what the user said; the tool lower-cases it.
+      return run(tools.find_funds, { regionFocus: "US" });
+    })) as { count: number; funds: { abbr: string }[] };
+
+    expect(result.count).toBe(1);
+    expect(result.funds[0].abbr).toBe("US_FUND");
+  });
+
+  it("sectorFocus filters to a specific theme", async () => {
+    const result = (await withFresh(async () => {
+      seedFund("GOLD_FUND", { assetClass: "alternative", sectorFocus: "gold", ter: 0.6 });
+      seedFund("TECH_FUND", { sectorFocus: "technology", ter: 0.7 });
+      const tools = createAdvisorTools({ userId: null });
+      return run(tools.find_funds, { sectorFocus: "gold" });
+    })) as { count: number; funds: { abbr: string }[] };
+
+    expect(result.count).toBe(1);
+    expect(result.funds[0].abbr).toBe("GOLD_FUND");
   });
 });
 

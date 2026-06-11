@@ -29,11 +29,24 @@ export interface ReasoningDecision {
 }
 
 // EntryContext.intent values (set by the Ask-Advisor buttons) that are
-// inherently multi-step. The retrieve-then-explain intents — health_review,
-// score_review, fund_lookup, fee_switch, strategy_explain — are deliberately
-// absent: a tool returns their answer. `fee_switch` is a lookup
-// (find_cheaper_alternatives computes the delta), not a deduction.
-const ANALYTICAL_INTENTS = new Set(["rebalance", "tax", "tilt", "tradeoff", "compare_funds"]);
+// inherently multi-step. `review` (a holistic "what do you think of my
+// portfolios") and `plan` ("what should I do next") synthesize across return,
+// fees, build, and tax into a judgment — exactly what reasoning buys. The
+// "Discuss" headline buttons (health_review / score_review) open that same
+// structured review, so they're analytical too. Pure lookups stay absent —
+// `fund_lookup`, `fee_switch` (find_cheaper_alternatives computes the delta),
+// `strategy_explain`: a tool returns their answer.
+const ANALYTICAL_INTENTS = new Set([
+  "rebalance",
+  "tax",
+  "tilt",
+  "tradeoff",
+  "compare_funds",
+  "review",
+  "plan",
+  "health_review",
+  "score_review",
+]);
 
 // Phrase patterns signalling multi-step deduction. Each is a STRONG signal — a
 // turn that combines several facts into a judgment, not a single retrieval.
@@ -51,6 +64,20 @@ const ANALYTICAL_PATTERNS: { re: RegExp; tag: string }[] = [
   { re: /\bhedg(e|ing)\b|tracking error|currency risk/i, tag: "multi-factor" },
   // "given X, should I Y" — an explicit conditional weighing.
   { re: /given [\s\S]{0,80}?\b(should|would|do you think|is it worth)\b/i, tag: "conditional" },
+  // Holistic review — an opinion/judgment over the whole picture, not a lookup.
+  { re: /what do you think/i, tag: "opinion-review" },
+  { re: /\breview my\b|portfolio review|review of my|take a look at my/i, tag: "review" },
+  {
+    re: /all (of )?my portfolio|each (of my )?portfolio|across my portfolio/i,
+    tag: "all-portfolios",
+  },
+  // Planning — "what should I do next" synthesizes a recommendation.
+  { re: /\b(next step|next move)\b|help me plan|what should i do/i, tag: "plan" },
+  // Diagnose underperformance — weighs WHY a return lags before advising.
+  {
+    re: /low return|under[-\s]?perform|lagging|trailing (the|my|behind)|behind (my )?(plan|target|benchmark|index)/i,
+    tag: "diagnose-return",
+  },
 ];
 
 /**

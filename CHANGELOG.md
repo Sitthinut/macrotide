@@ -15,6 +15,32 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **The Advisor can review each portfolio on its own, not just the whole book.**
+  `read_portfolio` now returns a per-portfolio breakdown (each portfolio's value,
+  asset mix, drift, blended fee, and money-weighted return) by default, and
+  accepts a portfolio name (e.g. "Tax") to scope the full readout — allocation,
+  drift, fees, concentration, lifetime returns — to a single portfolio, scored
+  against *that* portfolio's own target model. `read_performance` takes the same
+  name to report one portfolio's period return vs its index. So "what do you
+  think of all my portfolios?" and "is my Tax portfolio lagging?" answer with
+  real per-portfolio numbers.
+- **The Advisor reasons like a real advisor on reviews and planning.** Instead of
+  defaulting to short answers, it now matches depth to the question: quick facts
+  stay a sentence, while a review or "what should I do next?" gets a structured
+  pass over the aspects that decide whether you're doing well — return vs your
+  index/plan, fees, allocation/concentration, tax wrappers/contributions — and
+  ends with one or two concrete, prioritized next steps. It also adapts to the
+  reader, defining terms for a beginner and staying concise for an expert. Those
+  review and planning turns now get reasoning effort on the owner/trusted paths.
+  It now leans into being genuinely helpful — giving the comprehensive, specific
+  picture rather than deflecting to "a professional" — and weaves a brief "your
+  decision" note into an answer naturally only when it adds value, instead of
+  stamping a fixed disclaimer onto every message or every new chat.
+- **The Advisor can find funds by precise region or sector.** `find_funds` now
+  takes a `regionFocus` (e.g. "us", "china", "emerging") or `sectorFocus` (e.g.
+  "gold", "technology") filter — finer than the broad foreign/domestic mandate —
+  so "the cheapest US index fund" or "a gold fund" maps straight to the catalog's
+  derived facets instead of a fuzzy text search.
 - **Adding, editing, or deleting a holding is atomic.** Each write to the
   precious ledger now commits its ledger event, projection rebuild, and
   instrument metadata as one transaction (rolling back together on any error),

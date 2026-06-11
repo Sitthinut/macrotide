@@ -39,7 +39,11 @@ The first two are well-modelled. The memory block is bounded and visible
 (`read_portfolio` returns allocation, drift, blended TER, concentration, cash
 drag, the lifetime ledger figures — money invested, realized gains, income,
 money-weighted return — and a flag for self-priced custom holdings; pass a
-`ticker` for one fund's own realized P/L and return — see `lib/advisor/tools.ts`).
+`ticker` for one fund's own realized P/L and return. It is **per-portfolio
+aware**: by default it adds a compact breakdown of each portfolio (bucket),
+scored against that portfolio's own target model, and a `portfolio` name/id
+scopes the whole readout to one; `read_performance` takes the same `portfolio`
+to scope a period return — see `lib/advisor/tools.ts`).
 **The third channel used to be the weak one**
 — entry-point facts travelled as prose — which is what the
 [context envelope](#the-context-envelope) below now fixes.
