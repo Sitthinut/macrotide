@@ -1526,7 +1526,7 @@ export interface FundDetailSheetProps {
    * the holding edit flow. Omit for the read-only Explore usage.
    */
   onEdit?: () => void;
-  /** When set (holding view), the kebab offers "View history" → the position page. */
+  /** When set (holding view), the kebab offers "Position" → the position page. */
   onHistory?: () => void;
   /**
    * When set, the sheet shows an "Ask Advisor" action that hands the shown class
@@ -1597,7 +1597,7 @@ export function FundDetailSheet({
                     size={18}
                     triggerClassName="icon-btn"
                     items={[
-                      ...(onHistory ? [{ label: "View history", onClick: onHistory }] : []),
+                      ...(onHistory ? [{ label: "Position", onClick: onHistory }] : []),
                       { label: "Edit holding", onClick: onEdit },
                     ]}
                   />

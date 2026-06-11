@@ -1,25 +1,38 @@
 "use client";
 
 // PositionScreen — one fund's record: the app-native per-position summary
-// (`.hero-block` value + unrealised, a per-fund `.stats-strip`, a cost-basis
-// sparkline) sitting directly above the history that produced it (the
-// ticker-scoped HistoryList). Reached by tapping a holding; back is a chevron.
+// (`.hero-block` value + unrealised, a per-fund `.stats-strip`, a value-vs-cost
+// chart) sitting directly above the history that produced it (the ticker-scoped
+// HistoryList). Reached by tapping a holding; back is a chevron.
 
-import { Sparkline } from "@/components/charts";
+import { useState } from "react";
+import { FundDetailSheet } from "@/components/FundDetailSheet";
 import { HistoryList } from "@/components/history/HistoryList";
 import { Icon } from "@/components/Icon";
+import { NavChart } from "@/components/InteractiveCharts";
 import { Stat } from "@/components/ui/Stat";
-import { useHoldings } from "@/lib/fetchers/portfolio";
+import { type SeriesRange, useHoldingSeries, useHoldings } from "@/lib/fetchers/portfolio";
 import { useResource } from "@/lib/fetchers/swr";
 import { fmtPct } from "@/lib/format";
 import type { TransactionAnalytics } from "@/lib/portfolio/transaction-analytics";
+import { usePrivacy } from "@/lib/stores/privacy";
 
 type AnalyticsResponse = TransactionAnalytics & { transactionCount: number };
+
+// Range pills for the value chart, mapping a short UI label to a SeriesRange.
+const VALUE_RANGES: { lbl: string; range: SeriesRange }[] = [
+  { lbl: "1M", range: "1mo" },
+  { lbl: "3M", range: "3mo" },
+  { lbl: "6M", range: "6mo" },
+  { lbl: "1Y", range: "1y" },
+  { lbl: "All", range: "max" },
+];
 
 const baht = (n: number): string => `฿${Math.round(n).toLocaleString("en-US")}`;
 const signed = (n: number): string => `${n >= 0 ? "+" : "−"}${baht(Math.abs(n))}`;
 const pct = (r: number): string => `${r >= 0 ? "+" : ""}${(r * 100).toFixed(1)}%`;
-const num = (n: number): string => n.toLocaleString("en-US", { maximumFractionDigits: 4 });
+// Hero rounds units/avg-cost for legibility; full precision lives on History rows.
+const num = (n: number): string => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 
 export interface PositionScreenProps {
   ticker: string;
@@ -28,10 +41,14 @@ export interface PositionScreenProps {
 }
 
 export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps) {
+  const { hidden: valuesHidden } = usePrivacy();
+  const [range, setRange] = useState<SeriesRange>("6mo");
+  const [fundOpen, setFundOpen] = useState(false);
   const { data: holdings } = useHoldings();
   const { data: a } = useResource<AnalyticsResponse>(
     `/api/transactions/analytics?ticker=${encodeURIComponent(ticker)}`,
   );
+  const { data: vs } = useHoldingSeries(ticker, range);
 
   const holding = (holdings ?? []).find((h) => h.ticker === ticker);
   const pos = a?.positions.find((p) => p.ticker === ticker) ?? a?.positions[0];
@@ -41,8 +58,13 @@ export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps
   const avgCost = pos?.avgCost ?? null;
   const unrealised = value != null && costBasis != null ? value - costBasis : null;
   const unrealisedPct = unrealised != null && costBasis ? unrealised / costBasis : null;
-  const basisSeries = (a?.basisTimeline ?? []).map((p) => p.costBasis);
+  const navPerUnit = value != null && units > 0 ? value / units : null;
   const irr = a?.irr;
+
+  // Value-over-time (units × NAV × fx) with the cost-basis line beneath it, so
+  // the gap reads as unrealized gain. Mapped to NavChart's {d,v} shape.
+  const valueData = (vs?.value ?? []).map((p) => ({ d: p.date, v: p.value }));
+  const costData = (vs?.costBasis ?? []).map((p) => ({ d: p.date, v: p.value }));
 
   return (
     <div className="screen">
@@ -69,6 +91,15 @@ export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps
         <div className="brand" style={{ flex: 1 }}>
           <span>{ticker}</span>
         </div>
+        {holding && (
+          <button
+            className="btn ghost sm"
+            onClick={() => setFundOpen(true)}
+            style={{ gap: 4, marginRight: 8 }}
+          >
+            <Icon name="info" size={12} /> Fund details
+          </button>
+        )}
         <button
           className="btn ghost sm"
           onClick={onRecord}
@@ -79,8 +110,18 @@ export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps
       </div>
 
       <div style={{ padding: "4px 16px 40px", maxWidth: 760, margin: "0 auto" }}>
-        <div className="hero-block">
-          <div className="hero-label">{holding?.englishName || ticker}</div>
+        {/* The screen content already has 16px side padding; the shared .hero-block
+            adds its own 16px, double-indenting the hero past the 4px-margin boxes
+            below. Drop the horizontal padding here so the 3 rows line up with them. */}
+        <div className="hero-block" style={{ padding: "6px 4px 4px" }}>
+          {/* Fund name as a proper title (13px ink — the app's name size, vs the
+              shared 10.5px muted caption used for "Combined balance" on Portfolio). */}
+          <div
+            className="hero-label"
+            style={{ fontSize: 13, fontWeight: 500, color: "var(--ink)" }}
+          >
+            {holding?.englishName || ticker}
+          </div>
           <div className="hero-value">
             {value != null ? (
               <>
@@ -106,47 +147,96 @@ export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps
             ) : value == null ? (
               <span className="muted">price unavailable</span>
             ) : null}
-            <span className="muted">
-              {num(units)} units
-              {avgCost != null ? ` · avg ฿${num(avgCost)}` : " · cost not recorded"}
-            </span>
           </div>
         </div>
 
-        <div className="stat-cards">
-          <Stat
-            label="RETURN"
-            value={irr != null ? pct(irr) : "—"}
-            tone={irr == null ? "neutral" : irr >= 0 ? "up" : "down"}
-            caption={
-              irr != null
-                ? "money-weighted"
-                : (a?.irrUnavailable ?? "Return appears after about a month of activity.")
-            }
-          />
-          <Stat label="INVESTED" value={baht(a?.costBasisTotal ?? 0)} caption="cost basis" />
-          <Stat
-            label="REALIZED"
-            value={signed(a?.realizedTotal ?? 0)}
-            tone={
-              (a?.realizedTotal ?? 0) > 0 ? "up" : (a?.realizedTotal ?? 0) < 0 ? "down" : "neutral"
-            }
-            caption="from sells"
-          />
-          <Stat label="INCOME" value={baht(a?.incomeTotal ?? 0)} caption="dividends" />
+        {/* Composition — what you hold, near the value. A soft stats-strip (the
+            app's boxed pattern for grouped small numbers), visually distinct from
+            the bordered performance cards below. units × avg ≈ cost basis and
+            units × NAV ≈ value, so the trio is self-checking. Rounded here; full
+            precision lives on the History rows. */}
+        <div
+          className="stats-strip"
+          style={{ gridTemplateColumns: "1fr 1fr 1fr", margin: "12px 4px 6px" }}
+        >
+          <div>
+            <div className="lbl">UNITS</div>
+            <div className="val">{num(units)}</div>
+          </div>
+          <div>
+            <div className="lbl">AVG COST</div>
+            <div className="val">{avgCost != null ? `฿${num(avgCost)}` : "—"}</div>
+          </div>
+          <div>
+            <div className="lbl">NAV</div>
+            <div className="val">{navPerUnit != null ? `฿${num(navPerUnit)}` : "—"}</div>
+          </div>
         </div>
 
-        {basisSeries.length > 1 && (
+        <div className="stat-cards-cq">
+          <div className="stat-cards">
+            <Stat
+              label="RETURN"
+              value={irr != null ? pct(irr) : "—"}
+              tone={irr == null ? "neutral" : irr >= 0 ? "up" : "down"}
+              caption={
+                irr != null
+                  ? "money-weighted"
+                  : (a?.irrUnavailable ?? "Return appears after about a month of activity.")
+              }
+            />
+            <Stat label="INVESTED" value={baht(a?.costBasisTotal ?? 0)} caption="cost basis" />
+            <Stat
+              label="REALIZED"
+              value={signed(a?.realizedTotal ?? 0)}
+              tone={
+                (a?.realizedTotal ?? 0) > 0
+                  ? "up"
+                  : (a?.realizedTotal ?? 0) < 0
+                    ? "down"
+                    : "neutral"
+              }
+              caption="from sells"
+            />
+            <Stat label="INCOME" value={baht(a?.incomeTotal ?? 0)} caption="dividends" />
+          </div>
+        </div>
+
+        {valueData.length > 1 && (
           <div style={{ marginTop: 16 }}>
             <div className="section-header" style={{ padding: "0 4px", marginBottom: 6 }}>
-              <h3 style={{ fontSize: 13 }}>Cost basis over time</h3>
-              <span className="num" style={{ fontSize: 11, color: "var(--muted)" }}>
-                what you’ve put in, net of sells
-              </span>
+              <h3 style={{ fontSize: 13 }}>Value over time</h3>
+              <div className="range-pills">
+                {VALUE_RANGES.map((r) => (
+                  <button
+                    key={r.lbl}
+                    type="button"
+                    data-active={range === r.range}
+                    onClick={() => setRange(r.range)}
+                  >
+                    {r.lbl}
+                  </button>
+                ))}
+              </div>
             </div>
             <div style={{ padding: "0 4px" }}>
-              <Sparkline data={basisSeries} color="var(--accent)" width={300} height={60} />
+              <NavChart
+                data={valueData}
+                investedData={costData}
+                height={150}
+                seriesLabel="Value"
+                valuesHidden={valuesHidden}
+              />
             </div>
+            {vs?.estimatedThrough && (
+              <p
+                className="muted"
+                style={{ fontSize: 11, lineHeight: 1.5, padding: "6px 4px 0", margin: 0 }}
+              >
+                Values up to {vs.estimatedThrough} are estimated from your recorded prices — exact
+                fund prices weren’t available that far back.
+              </p>
+            )}
           </div>
         )}
 
@@ -158,6 +248,8 @@ export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps
         </div>
         <HistoryList ticker={ticker} showRecap={false} onAddEntry={onRecord} />
       </div>
+
+      <FundDetailSheet projId={fundOpen ? ticker : null} onClose={() => setFundOpen(false)} />
     </div>
   );
 }

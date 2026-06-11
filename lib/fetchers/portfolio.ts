@@ -144,6 +144,37 @@ export function useFundSeries(projId: string | null, range: SeriesRange = "1y") 
   );
 }
 
+export interface HoldingSeriesPoint {
+  /** ISO date. */
+  date: string;
+  /** THB. */
+  value: number;
+}
+
+export interface HoldingSeriesResponse {
+  /** Position market value per date (units × NAV × fx). */
+  value: HoldingSeriesPoint[];
+  /** Remaining cost basis per date (what you've put in, net of sells). */
+  costBasis: HoldingSeriesPoint[];
+  asOf: string | null;
+  /** Latest date valued from trade-implied prices / cost-carry, or null. */
+  estimatedThrough: string | null;
+  missingFx: string[];
+}
+
+/**
+ * Value-over-time for one holding (the user's actual position value + its
+ * cost-basis line), powering the position-detail chart. `ticker` is null while
+ * unresolved. Re-fetches when the range changes.
+ */
+export function useHoldingSeries(ticker: string | null, range: SeriesRange = "6mo") {
+  return useResource<HoldingSeriesResponse>(
+    ticker
+      ? `/api/holdings/series?ticker=${encodeURIComponent(ticker)}&range=${encodeURIComponent(range)}`
+      : null,
+  );
+}
+
 export interface LookThroughResponse {
   lookThrough: LookThrough | null;
 }

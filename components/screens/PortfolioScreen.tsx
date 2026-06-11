@@ -986,7 +986,7 @@ export function PortfolioScreen({
           <div key={s.lbl}>
             <div className="lbl">{s.lbl}</div>
             <div className="val" style={{ color: s.val >= 0 ? "var(--gain)" : "var(--loss)" }}>
-              {fmtPct(s.val, s.val < 1 && s.val > -1 ? 2 : 1)}
+              {fmtPct(s.val)}
             </div>
           </div>
         ))}
@@ -1006,7 +1006,7 @@ export function PortfolioScreen({
               className={`delta-pill${periodReturn < 0 ? " down" : ""}`}
               style={{ fontSize: 13 }}
             >
-              {fmtPct(periodReturn, 2)}
+              {fmtPct(periodReturn)}
             </span>
           )}
         </div>
@@ -1657,8 +1657,8 @@ export function PortfolioScreen({
                   FundSelect row pattern. */}
               <button
                 type="button"
-                aria-label={`View details for ${h.ticker}`}
-                onClick={() => setDetailHolding(h)}
+                aria-label={`Open ${h.ticker} position`}
+                onClick={() => (onOpenPosition ? onOpenPosition(h.ticker) : setDetailHolding(h))}
                 style={{
                   display: "grid",
                   gridTemplateColumns: "32px 1fr auto",
@@ -1695,6 +1695,8 @@ export function PortfolioScreen({
                     <PrivateAmount>฿{Math.round(h.value).toLocaleString("en-US")}</PrivateAmount>
                   </div>
                   <div className={`pct ${h.d1 >= 0 ? "delta up" : "delta down"}`}>
+                    {/* Pinned to 2dp (not adaptive): this is an aligned column,
+                        so a fixed decimal count keeps the values lined up. */}
                     {fmtPct(h.d1, 2)}
                   </div>
                 </div>
@@ -1704,9 +1706,7 @@ export function PortfolioScreen({
                   <KebabMenu
                     label={`${h.ticker} actions`}
                     items={[
-                      ...(onOpenPosition
-                        ? [{ label: "View history", onClick: () => onOpenPosition(h.ticker) }]
-                        : []),
+                      { label: "Fund details", onClick: () => setDetailHolding(h) },
                       { label: "Edit holding", onClick: () => setHoldingSheet(h) },
                     ]}
                   />

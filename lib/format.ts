@@ -8,8 +8,17 @@ export function fmtTHBClean(n: number, decimals = 0): string {
   return `${n < 0 ? "-" : ""}฿${v}`;
 }
 
-export function fmtPct(n: number, decimals = 1): string {
-  return `${(n >= 0 ? "+" : "") + n.toFixed(decimals)}%`;
+/**
+ * Format a percentage with a leading sign. Precision is ADAPTIVE by magnitude
+ * unless the caller pins `decimals`: values under 1% keep 2dp (a 0.2% gain reads
+ * as 0.24%, not a rounded 0.2%), 1–100% keep 1dp, and 100%+ drop to 0dp (no
+ * false precision on a +240% return). One rule, applied everywhere, keeps the
+ * app's percentages consistent without forcing a uniform digit count.
+ */
+export function fmtPct(n: number, decimals?: number): string {
+  const abs = Math.abs(n);
+  const d = decimals ?? (abs < 1 ? 2 : abs < 100 ? 1 : 0);
+  return `${(n >= 0 ? "+" : "") + n.toFixed(d)}%`;
 }
 
 export function fmtNum(n: number, d = 2): string {
