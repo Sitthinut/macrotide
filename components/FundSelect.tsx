@@ -16,8 +16,11 @@ import { useEffect, useRef, useState } from "react";
 import { FundDetailSheet } from "@/components/FundDetailSheet";
 import { Icon } from "@/components/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
-import type { ShareClassListItem } from "@/lib/db/queries/funds";
+import type { ShareClassListItem, TrackedIndexFamily } from "@/lib/db/queries/funds";
 import { prefetchResource, useResource } from "@/lib/fetchers/swr";
+import { matchIndexFamily } from "@/lib/search/index-alias";
+import { useFlipUp } from "@/lib/useFlipUp";
+import { useListboxKeyboard } from "@/lib/useListboxKeyboard";
 
 // ─── filter state ────────────────────────────────────────────────────────────
 
@@ -79,6 +82,7 @@ function buildUrl(
   indexType: IndexTypeFilter,
   taxIncentive: TaxIncentiveFilter,
   region: RegionFilter,
+  trackingIndex: string,
 ): string {
   const params = new URLSearchParams();
   if (assetClass) params.set("assetClass", assetClass);
@@ -86,6 +90,7 @@ function buildUrl(
   if (indexType) params.set("indexType", indexType);
   if (taxIncentive) params.set("taxIncentive", taxIncentive);
   if (region) params.set("region", region);
+  if (trackingIndex) params.set("trackingIndex", trackingIndex);
   params.set("limit", "30");
   const qs = params.toString();
   return qs ? `/api/fund-classes?${qs}` : "/api/fund-classes";
@@ -97,8 +102,9 @@ function useFunds(
   indexType: IndexTypeFilter,
   taxIncentive: TaxIncentiveFilter,
   region: RegionFilter,
+  trackingIndex: string,
 ) {
-  const url = buildUrl(assetClass, query, indexType, taxIncentive, region);
+  const url = buildUrl(assetClass, query, indexType, taxIncentive, region, trackingIndex);
   // keepPreviousData: typing or toggling a filter keeps the previous results
   // on screen while the narrowed list loads, instead of flashing to empty.
   return useResource<ShareClassListItem[]>(url, { keepPreviousData: true });
@@ -504,87 +510,280 @@ function EmptyState({ query, isLoading }: { query: string; isLoading: boolean })
 
 // ─── fee legend ──────────────────────────────────────────────────────────────
 
-function FeeLegend() {
+function FeeLegend({ ordering }: { ordering: string }) {
+  // Tap "TER ⓘ" to toggle the one-line explainer — works on touch, where the
+  // TER badges' hover tooltips never show.
+  const [explain, setExplain] = useState(false);
   return (
     <div
       style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "6px 14px",
         borderTop: "1px solid var(--line-soft)",
         borderBottom: "1px solid var(--line-soft)",
         background: "var(--surface)",
       }}
     >
-      <span
-        style={{
-          fontSize: 10,
-          color: "var(--muted)",
-          fontFamily: "var(--font-mono)",
-          letterSpacing: "0.04em",
-        }}
-      >
-        TER
-      </span>
-      {[
-        { label: "≤ 0.5%", color: "var(--gain)" },
-        { label: "≤ 1.5%", color: "var(--amber, #f59e0b)" },
-        { label: "> 1.5%", color: "var(--loss)" },
-      ].map((s) => (
-        <span key={s.label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <span
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: 4,
-              background: s.color,
-              display: "inline-block",
-            }}
-          />
-          <span style={{ fontSize: 10.5, color: "var(--muted)" }}>{s.label}</span>
-        </span>
-      ))}
-      <span style={{ flex: 1 }} />
-      <span style={{ fontSize: 10, color: "var(--muted)" }}>cheapest first</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 14px" }}>
+        <button
+          type="button"
+          onClick={() => setExplain((v) => !v)}
+          aria-expanded={explain}
+          title="What is TER?"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 3,
+            background: "none",
+            border: "none",
+            padding: 0,
+            cursor: "pointer",
+            fontSize: 11,
+            color: "var(--muted)",
+            fontFamily: "var(--font-mono)",
+            letterSpacing: "0.04em",
+          }}
+        >
+          TER
+          {/* Accent ⓘ = the one interactive thing in the legend row. */}
+          <span style={{ color: "var(--accent)", display: "inline-flex" }}>
+            <Icon name="info" size={12} />
+          </span>
+        </button>
+        {[
+          { label: "≤ 0.5%", color: "var(--gain)" },
+          { label: "≤ 1.5%", color: "var(--amber, #f59e0b)" },
+          { label: "> 1.5%", color: "var(--loss)" },
+        ].map((s) => (
+          <span key={s.label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 4,
+                background: s.color,
+                display: "inline-block",
+              }}
+            />
+            <span style={{ fontSize: 11.5, color: "var(--muted)" }}>{s.label}</span>
+          </span>
+        ))}
+        <span style={{ flex: 1 }} />
+        <span style={{ fontSize: 11, color: "var(--muted)" }}>{ordering}</span>
+      </div>
+      {explain && (
+        <div
+          style={{ padding: "0 14px 7px", fontSize: 11.5, color: "var(--muted)", lineHeight: 1.45 }}
+        >
+          TER (Total Expense Ratio) is the all-in annual fee published by the SEC. Lower is better —
+          it compounds against you every year.
+        </div>
+      )}
     </div>
   );
 }
 
-// ─── chip button helper ───────────────────────────────────────────────────────
+// ─── facet dropdowns ──────────────────────────────────────────────────────────
 
-function ChipButton({
-  label,
-  active,
-  onClick,
-  title,
-  size = "sm",
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
+/** One choice in a facet dropdown. */
+interface FacetOption {
+  value: string;
+  /** Menu row content. */
+  label: React.ReactNode;
+  /** Short trigger-pill text when selected (defaults to `value`). */
+  pill?: string;
   title?: string;
-  size?: "sm" | "xs";
+}
+
+// One facet as a compact dropdown pill — the mobile-calm alternative to a chip
+// per option (five pills replace ~14 always-visible chips). Unset, the pill
+// shows the facet NAME ("Class", "Tracks"); set, it shows the chosen value in
+// the accent style, so state stays glanceable. Reuses the app's shared
+// dropdown behavior (.combobox__list + useFlipUp + useListboxKeyboard), same
+// as the benchmark picker.
+function FacetDropdown({
+  name,
+  clearLabel,
+  menuLabel,
+  title,
+  value,
+  onChange,
+  options,
+}: {
+  /** Facet name shown on the unset pill ("Class", "Region", …). */
+  name: string;
+  /** First menu option, clearing the facet ("All classes", "Any index", …). */
+  clearLabel: string;
+  /** aria-label for the listbox. */
+  menuLabel: string;
+  /** Trigger tooltip. */
+  title?: string;
+  /** Selected option value, or "" for no filter. */
+  value: string;
+  onChange: (value: string) => void;
+  options: FacetOption[];
 }) {
+  const [open, setOpen] = useState(false);
+  // Anchor the menu's RIGHT edge to the pill when the pill sits in the right
+  // half of the viewport — a left-anchored menu (width up to 340px) would run
+  // off-screen on a phone for the rightmost pills.
+  const [alignRight, setAlignRight] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const { up, measure } = useFlipUp(ref);
+
+  // Measure placement BEFORE the list renders so it never flips or slides
+  // after opening.
+  const prepare = () => {
+    measure();
+    const r = ref.current?.getBoundingClientRect();
+    setAlignRight(!!r && r.left > window.innerWidth / 2);
+  };
+  function toggle() {
+    if (!open) prepare();
+    setOpen((o) => !o);
+  }
+
+  // Close on outside click.
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  // On open, move focus into the list (the selected option, or the first).
+  useEffect(() => {
+    if (!open) return;
+    const opts = Array.from(
+      listRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [],
+    );
+    const selected = opts.find((o) => o.getAttribute("aria-selected") === "true");
+    (selected ?? opts[0])?.focus();
+  }, [open]);
+
+  const onKeyDown = useListboxKeyboard({
+    open,
+    setOpen,
+    listRef,
+    triggerRef,
+    onBeforeOpen: prepare,
+  });
+
+  const pick = (v: string) => {
+    onChange(v);
+    setOpen(false);
+  };
+  const active = !!value;
+  const pillText = active ? (options.find((o) => o.value === value)?.pill ?? value) : name;
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      style={{
-        padding: size === "xs" ? "3px 8px" : "4px 10px",
-        borderRadius: size === "xs" ? 6 : 8,
-        border: "1px solid",
-        borderColor: active ? "var(--accent)" : "var(--line-soft)",
-        background: active ? "var(--accent-soft)" : "var(--paper)",
-        fontSize: size === "xs" ? 10.5 : 11.5,
-        cursor: "pointer",
-        color: active ? "var(--accent-ink)" : "var(--muted)",
-        fontWeight: active ? 600 : 400,
-      }}
-    >
-      {label}
-    </button>
+    <div ref={ref} onKeyDown={onKeyDown} style={{ position: "relative", display: "inline-flex" }}>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`${menuLabel}: ${active ? pillText : "any"}`}
+        onClick={toggle}
+        title={title}
+        style={{
+          // Compact chip-styled trigger (xs chip look + a caret). Fixed height
+          // so every pill and the clear button share one baseline.
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 4,
+          height: 24,
+          boxSizing: "border-box",
+          padding: "0 8px",
+          borderRadius: 6,
+          border: "1px solid",
+          borderColor: active ? "var(--accent)" : "var(--line-soft)",
+          background: active ? "var(--accent-soft)" : "var(--paper)",
+          fontSize: 11.5,
+          cursor: "pointer",
+          color: active ? "var(--accent-ink)" : "var(--muted)",
+          fontWeight: active ? 600 : 400,
+          whiteSpace: "nowrap",
+          flexShrink: 0,
+        }}
+      >
+        {pillText}
+        <span aria-hidden="true" style={{ fontSize: 9, lineHeight: 1 }}>
+          ▾
+        </span>
+      </button>
+      {open && (
+        <div
+          ref={listRef}
+          role="listbox"
+          aria-label={menuLabel}
+          className="combobox__list facet-menu"
+          data-up={up || undefined}
+          style={alignRight ? { left: "auto", right: 0 } : undefined}
+        >
+          <button
+            type="button"
+            role="option"
+            aria-selected={!value}
+            className="combobox__option"
+            onClick={() => pick("")}
+          >
+            {clearLabel}
+          </button>
+          {options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              role="option"
+              aria-selected={o.value === value}
+              className="combobox__option"
+              title={o.title}
+              style={
+                o.value === value
+                  ? { background: "var(--accent-soft)", display: "flex", gap: 8 }
+                  : { display: "flex", gap: 8 }
+              }
+              onClick={() => pick(o.value)}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// The "Tracks" facet: every index family with at least one active index-style
+// tracker (live from /api/funds/index-families — most-tracked first, each row
+// showing its tracker count).
+function TracksFacet({ value, onChange }: { value: string; onChange: (family: string) => void }) {
+  const { data: families } = useResource<TrackedIndexFamily[]>("/api/funds/index-families");
+  return (
+    <FacetDropdown
+      name="Tracking"
+      clearLabel="Any index"
+      menuLabel="Tracked index"
+      title="Index funds tracking the chosen index, ranked cheapest first"
+      value={value}
+      onChange={onChange}
+      options={(families ?? []).map((f) => ({
+        value: f.indexFamily,
+        label: (
+          <>
+            <span style={{ flex: 1 }}>{f.indexFamily}</span>
+            <span
+              style={{ color: "var(--muted)", fontSize: 10.5, fontFamily: "var(--font-mono)" }}
+              title={`${f.trackers} index fund${f.trackers === 1 ? "" : "s"} tracking it`}
+            >
+              {f.trackers}
+            </span>
+          </>
+        ),
+      }))}
+    />
   );
 }
 
@@ -600,6 +799,9 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
   const [indexType, setIndexType] = useState<IndexTypeFilter>("");
   const [taxIncentive, setTaxIncentive] = useState<TaxIncentiveFilter>("");
   const [region, setRegion] = useState<RegionFilter>("");
+  // "Tracks" facet: canonical index family ("S&P 500") — index-style funds
+  // tracking it, ranked cheapest-first by the browse ordering. "" = off.
+  const [trackingIndex, setTrackingIndex] = useState("");
   const [queryInput, setQueryInput] = useState("");
   // Debounce the search query so we don't fire on every keystroke.
   const [query, setQuery] = useState("");
@@ -612,7 +814,39 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
     return () => clearTimeout(timer);
   }, [queryInput]);
 
-  const { data: funds, isLoading } = useFunds(assetClass, query, indexType, taxIncentive, region);
+  const { data: funds, isLoading } = useFunds(
+    assetClass,
+    query,
+    indexType,
+    taxIncentive,
+    region,
+    trackingIndex,
+  );
+
+  // When the search text IS an index name ("sp500", "S&P 500"…), offer the
+  // precise facet: text search ranks by relevance and misses feeders whose own
+  // name never mentions the index — the facet catches them all, cheapest first.
+  const suggestedFamily = matchIndexFamily(query);
+  const showTrackSuggestion = !!suggestedFamily && suggestedFamily !== trackingIndex;
+  const applyTrackSuggestion = () => {
+    if (!suggestedFamily) return;
+    setTrackingIndex(suggestedFamily);
+    setQueryInput("");
+    setQuery("");
+  };
+
+  // One-tap reset of everything (facets + search text).
+  const anyFilterActive =
+    !!assetClass || !!indexType || !!region || !!taxIncentive || !!trackingIndex || !!queryInput;
+  const clearAllFilters = () => {
+    setAssetClass("");
+    setIndexType("");
+    setRegion("");
+    setTaxIncentive("");
+    setTrackingIndex("");
+    setQueryInput("");
+    setQuery("");
+  };
 
   // Warm the top rows' detail + 1y NAV series in the SWR cache so the first
   // detail-sheet open paints instantly instead of paying a cold fetch. The
@@ -686,89 +920,121 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
             />
           </div>
 
-          {/* Asset class chips */}
-          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 6 }}>
-            {ASSET_CLASS_OPTIONS.map((opt) => (
-              <ChipButton
-                key={opt.value}
-                label={opt.label}
-                active={assetClass === opt.value}
-                onClick={() => setAssetClass(opt.value)}
-              />
-            ))}
-          </div>
-
-          {/* Index/active chips + region chips on one row */}
-          <div
-            style={{
-              display: "flex",
-              gap: 5,
-              flexWrap: "wrap",
-              marginBottom: 6,
-              alignItems: "center",
-            }}
-          >
-            {/* Index/active facet — the star filter for passive investors. Same
-                toggle-off-on-second-click pattern as the region chips. */}
-            {INDEX_TYPE_OPTIONS.map((opt) => (
-              <ChipButton
-                key={opt.value}
-                label={opt.label}
-                active={indexType === opt.value}
-                onClick={() => setIndexType((v) => (v === opt.value ? "" : opt.value))}
-                title={opt.title}
-                size="xs"
-              />
-            ))}
-            <span
+          {/* Tracked-index suggestion — one tap from a fuzzy text search to the
+              exact facet (clears the text; browse ordering = cheapest first). */}
+          {showTrackSuggestion && (
+            <button
+              type="button"
+              onClick={applyTrackSuggestion}
               style={{
-                width: 1,
-                height: 14,
-                background: "var(--line-soft)",
-                margin: "0 2px",
-                display: "inline-block",
-                alignSelf: "center",
-              }}
-            />
-            {REGION_OPTIONS.map((opt) => (
-              <ChipButton
-                key={opt.value}
-                label={opt.label}
-                active={region === opt.value}
-                onClick={() => setRegion((v) => (v === opt.value ? "" : opt.value))}
-                size="xs"
-              />
-            ))}
-          </div>
-
-          {/* Tax wrapper chips */}
-          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
-            <span
-              style={{
-                fontSize: 10,
-                color: "var(--muted)",
-                fontFamily: "var(--font-mono)",
-                letterSpacing: "0.04em",
-                marginRight: 2,
+                display: "block",
+                width: "100%",
+                marginBottom: 8,
+                padding: "6px 10px",
+                borderRadius: 8,
+                border: "1px solid var(--accent)",
+                background: "var(--accent-soft)",
+                color: "var(--accent-ink)",
+                fontSize: 11.5,
+                textAlign: "left",
+                cursor: "pointer",
               }}
             >
-              Tax
-            </span>
-            {TAX_INCENTIVE_OPTIONS.map((opt) => (
-              <ChipButton
-                key={opt.value}
-                label={opt.label}
-                active={taxIncentive === opt.value}
-                onClick={() => setTaxIncentive((v) => (v === opt.value ? "" : opt.value))}
-                title={opt.title}
-                size="xs"
-              />
-            ))}
+              Show every fund tracking <strong>{suggestedFamily}</strong>, cheapest first →
+            </button>
+          )}
+
+          {/* One pill per facet — every option lives in its dropdown, so the
+              block stays a single slim row even on a phone. flexWrap as the
+              rare-overflow fallback (long pill values): a scroll container
+              would clip the popups. */}
+          <div style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
+            <FacetDropdown
+              name="Class"
+              clearLabel="All classes"
+              menuLabel="Asset class"
+              value={assetClass}
+              onChange={(v) => setAssetClass(v as AssetClassFilter)}
+              options={ASSET_CLASS_OPTIONS.filter((o) => o.value).map((o) => ({
+                value: o.value,
+                label: o.label,
+                pill: o.label,
+              }))}
+            />
+            {/* Index/active — the star facet for passive investors. */}
+            <FacetDropdown
+              name="Style"
+              clearLabel="Any style"
+              menuLabel="Management style"
+              value={indexType}
+              onChange={(v) => setIndexType(v as IndexTypeFilter)}
+              options={INDEX_TYPE_OPTIONS.map((o) => ({
+                value: o.value,
+                label: o.label,
+                pill: o.label,
+                title: o.title,
+              }))}
+            />
+            <FacetDropdown
+              name="Region"
+              clearLabel="Any region"
+              menuLabel="Region"
+              value={region}
+              onChange={(v) => setRegion(v as RegionFilter)}
+              options={REGION_OPTIONS.map((o) => ({
+                value: o.value,
+                label: o.label,
+                pill: o.label,
+              }))}
+            />
+            <FacetDropdown
+              name="Tax"
+              clearLabel="Any tax saving"
+              menuLabel="Tax wrapper"
+              value={taxIncentive}
+              onChange={(v) => setTaxIncentive(v as TaxIncentiveFilter)}
+              options={TAX_INCENTIVE_OPTIONS.map((o) => ({
+                value: o.value,
+                label: o.label,
+                pill: o.label,
+                title: o.title,
+              }))}
+            />
+            {/* Tracking restricts to index-style funds by itself, so it
+                composes with (and doesn't need) the Style facet. */}
+            <TracksFacet value={trackingIndex} onChange={setTrackingIndex} />
+            {anyFilterActive && (
+              // Clear-all as an icon pill — the app's dismiss affordance is the
+              // close icon in a small bordered button, sized here to match the
+              // facet pills.
+              <button
+                type="button"
+                onClick={clearAllFilters}
+                aria-label="Clear all filters"
+                title="Reset all filters and the search text"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  height: 24,
+                  boxSizing: "border-box",
+                  padding: "0 7px",
+                  borderRadius: 6,
+                  border: "1px solid var(--line-soft)",
+                  background: "var(--paper)",
+                  color: "var(--muted)",
+                  cursor: "pointer",
+                  flexShrink: 0,
+                }}
+              >
+                <Icon name="close" size={11} />
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Legend bar */}
-        <FeeLegend />
+        {/* Legend bar — search results are relevance-ranked, browse is fee-ranked */}
+        <FeeLegend ordering={query.trim() ? "best match first" : "cheapest first"} />
 
         {/* Results count */}
         {hasResults && (
@@ -790,8 +1056,12 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
           </div>
         )}
 
-        {/* Fund list */}
-        <div style={{ flex: 1, overflowY: "auto" }}>
+        {/* Fund list. minHeight ≥ the facet menu (320px + breathing room): on
+            desktop the panel is content-height, so an empty result would
+            otherwise collapse the container and clip an open dropdown at its
+            overflow boundary (and the panel would jump between empty and
+            non-empty states). */}
+        <div style={{ flex: 1, overflowY: "auto", minHeight: 360 }}>
           {!hasResults ? (
             <EmptyState query={query} isLoading={isLoading} />
           ) : (
@@ -799,20 +1069,6 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
               <FundRow key={cls.ticker} cls={cls} rank={i + 1} onSelect={setDetailTicker} />
             ))
           )}
-        </div>
-
-        {/* Footer hint */}
-        <div
-          style={{
-            padding: "8px 14px",
-            fontSize: 11,
-            color: "var(--muted)",
-            lineHeight: 1.45,
-            borderTop: "1px solid var(--line-soft)",
-          }}
-        >
-          TER (Total Expense Ratio) is the all-in annual fee published by the SEC. Lower is better —
-          it compounds against you every year.
         </div>
       </div>
     </>

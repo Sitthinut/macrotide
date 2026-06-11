@@ -43,7 +43,7 @@ plan, and journal — including plan edits it proposes as accept/reject cards.
 
 **Funds & markets**
 
-- **Fund finder & screener** — fuzzy, feeder-aware search over priceable **share classes** with per-class fee, tax wrapper, and 1-year return; retail-availability gating and TER ranking
+- **Fund finder & screener** — fuzzy, feeder-aware search over priceable **share classes** with per-class fee, tax wrapper, and 1-year return; screen by tracked index (S&P 500, SET50…) for the cheapest trackers, feeders included via their master fund; retail-availability gating and TER ranking
 - **Fund detail** — per-share-class price and fund-size (AUM) history, holdings by asset type, and feeder look-through to underlying holdings
 - **Market data** — live index levels (FMP / EODHD with ETF-proxy + Yahoo fallback) + FX, Thai fund NAVs and history (Thai SEC), and RSS news, over a resilient stale-on-error cache
 - **Benchmarks & models** — match-or-beat the market on a total-return basis (global, US, regional, and Thai indices), and model portfolios you can browse, fork, and set as a target that drives drift + health checks
