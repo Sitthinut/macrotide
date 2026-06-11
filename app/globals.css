@@ -1682,6 +1682,145 @@ button.private-amt:focus-visible {
   background: color-mix(in oklab, var(--loss) 12%, transparent);
   color: var(--loss);
 }
+/* Hero return — tap to open the returns breakdown. Reset the button to look
+   like the inline pill + label it wraps; the chevron is the only added chrome. */
+.hero-return-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  color: inherit;
+}
+.hero-return-btn .muted {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+/* Optical nudge: box-centered against the full line, the chevron reads high next
+   to lowercase text — drop it ~1px to sit with the x-height. */
+.hero-return-btn .muted svg {
+  position: relative;
+  top: 1px;
+}
+.hero-return-btn:hover .muted,
+.hero-return-btn:focus-visible .muted {
+  color: var(--ink);
+}
+.hero-return-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--r-sm);
+}
+
+/* Returns breakdown sheet (#152) — narrower than the default detail modal, to
+   match the form/edit-holding width. */
+.modal.rb-sheet {
+  max-width: 560px;
+}
+/* The breakdown ends in a short note, so the detail variant's 24px bottom
+   breathing room reads as too much here — trim it (scoped to this sheet). */
+.modal.rb-sheet .modal-body {
+  padding-bottom: 8px;
+}
+.returns-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+/* Hero — the headline total return, free to be large because it's above the
+   aligned row grid (not a row that would break the number column). */
+.rb-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rb-hero-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.rb-hero-value {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.rb-hero-pct {
+  font-size: 15px;
+  font-weight: 500;
+}
+.rb-hero-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+.rb-group {
+  display: flex;
+  flex-direction: column;
+}
+.rb-group-title {
+  margin: 0 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.rb-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.rb-row:last-child {
+  border-bottom: 0;
+}
+.rb-label {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  color: var(--ink);
+  font-size: 13.5px;
+}
+.rb-hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+/* The value column: ฿ amount (one size, tabular, right-aligned) with an optional
+   % on a smaller line directly under it — kept off the amount's right edge so the
+   amounts line up cleanly down the column. */
+.rb-value {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  white-space: nowrap;
+}
+.rb-amount {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.rb-pct {
+  margin-top: 1px;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.rb-note {
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 4px 0 0;
+}
 
 /* Stats strip */
 .stats-strip {
