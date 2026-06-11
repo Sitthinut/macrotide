@@ -197,6 +197,27 @@ value is converted to the base currency (THB) at each date's USD/THB — or cros
 — rate ([lib/market/fx.ts](../../lib/market/fx.ts)) before holdings in different
 currencies are summed.
 
+### Benchmark total-return series (`benchmark_tr`)
+
+Portfolio-vs-benchmark comparison reads a separate **total-return** chain under
+its own source value, `benchmark_tr` — deliberately *not* in `QUOTE_SOURCES`, so
+it can never become a holdable asset class. It only namespaces the cache rows
+(`benchmark_tr:ACWI`) and routes one provider:
+
+| Provider | Env var | Free tier | Serves |
+| --- | --- | --- | --- |
+| Twelve Data (adjusted) | `TWELVE_DATA_API_KEY` | ≈ 800 req/day | Tracking-ETF **adjusted close** via `adjust=all` (dividends + splits) — the total-return proxy, ~20y deep (5000 daily points back to ~2006) |
+
+It is the **sole** `benchmark_tr` provider: EODHD's `adjusted_close` works but its
+free tier caps history at ~1 year (a shallow series the depth-aware cache would
+wrongly record as `max`), and keyless Yahoo 429s the datacenter IP — neither is a
+usable fallback for a *deep* backfill. With no Twelve Data key the chain is empty
+and `getCachedSeries` fails cleanly rather than caching a shallow series. The
+curated proxy set (global / US / developed-ex-US / EM, plus a Thai proxy) lives in
+[lib/market/benchmark-options.ts](../../lib/market/benchmark-options.ts) and is
+warmed by `jobs:prewarm-benchmark`. All proxies are USD ETFs, so consumers compare
+on **% return** (rebased), never absolute level.
+
 ### Cache freshness
 
 `getCachedSeries` ([lib/market/cache.ts](../../lib/market/cache.ts)) serves a

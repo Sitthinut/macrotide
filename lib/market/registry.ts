@@ -14,7 +14,7 @@ import { eodhdProvider } from "./providers/eodhd";
 import { fmpProvider } from "./providers/fmp";
 import { frankfurterProvider } from "./providers/frankfurter";
 import { secThailandProvider } from "./providers/sec-thailand";
-import { twelveDataProvider } from "./providers/twelvedata";
+import { twelveDataAdjustedProvider, twelveDataProvider } from "./providers/twelvedata";
 import type { Provider } from "./providers/types";
 import { yahooProvider } from "./providers/yahoo";
 
@@ -33,11 +33,16 @@ import { yahooProvider } from "./providers/yahoo";
 // FX pairs (USD/THB) fall back to ECB-backed Frankfurter (which, unlike Yahoo,
 // doesn't block datacenter IPs); MSCI ACWI has no free real index and stays a
 // Twelve Data ETF proxy (ACWI); Gold stays the XAU/USD commodity (GC=F).
+//
+// The `benchmark_tr` source is served solely by twelveDataAdjustedProvider
+// (`adjust=all` total-return close); no other provider matches it, so its
+// position in this list relative to the `market` providers is irrelevant.
 const providers: Provider[] = [
   secThailandProvider,
   fmpProvider,
   eodhdProvider,
   twelveDataProvider,
+  twelveDataAdjustedProvider,
   frankfurterProvider,
   yahooProvider,
 ];

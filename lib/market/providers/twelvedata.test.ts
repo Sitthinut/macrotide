@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { toTwelveDataSymbol, twelveDataProvider } from "./twelvedata";
+import { BENCHMARK_TR_SOURCE } from "../sources";
+import { toTwelveDataSymbol, twelveDataAdjustedProvider, twelveDataProvider } from "./twelvedata";
 import { ProviderError } from "./types";
 
 // All symbols/data here are synthetic shapes — no live API is hit.
@@ -106,5 +107,71 @@ describe("twelveDataProvider", () => {
     await expect(twelveDataProvider.fetchSeries("^GSPC", "6mo", "1d")).rejects.toBeInstanceOf(
       ProviderError,
     );
+  });
+
+  it("does NOT match the benchmark_tr source (that is the adjusted provider's)", () => {
+    expect(twelveDataProvider.matches(BENCHMARK_TR_SOURCE, "ACWI")).toBe(false);
+  });
+
+  it("requests raw close — no adjust param on the market chain", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          meta: { symbol: "SPY", currency: "USD" },
+          status: "ok",
+          values: [{ datetime: "2026-05-23", close: "110.0" }],
+        }),
+        { status: 200 },
+      ),
+    );
+    await twelveDataProvider.fetchSeries("^GSPC", "6mo", "1d");
+    const url = new URL((fetchSpy.mock.calls[0][0] as URL).toString());
+    expect(url.searchParams.get("adjust")).toBeNull();
+  });
+});
+
+describe("twelveDataAdjustedProvider", () => {
+  const KEY = "test-key";
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    process.env.TWELVE_DATA_API_KEY = KEY;
+    fetchSpy = vi.spyOn(globalThis, "fetch");
+  });
+  afterEach(() => {
+    process.env.TWELVE_DATA_API_KEY = undefined;
+    fetchSpy.mockRestore();
+  });
+
+  it("matches only benchmark_tr, and only with a key configured", () => {
+    expect(twelveDataAdjustedProvider.matches(BENCHMARK_TR_SOURCE, "ACWI")).toBe(true);
+    expect(twelveDataAdjustedProvider.matches("market", "ACWI")).toBe(false);
+    process.env.TWELVE_DATA_API_KEY = "  ";
+    expect(twelveDataAdjustedProvider.matches(BENCHMARK_TR_SOURCE, "ACWI")).toBe(false);
+  });
+
+  it("requests dividend-reinvested close via adjust=all", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          meta: { symbol: "ACWI", currency: "USD" },
+          status: "ok",
+          values: [
+            { datetime: "2026-05-22", close: "88.5" },
+            { datetime: "2026-05-23", close: "90.0" },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const { quote, series } = await twelveDataAdjustedProvider.fetchSeries("ACWI", "max", "1d");
+
+    expect(series).toHaveLength(2);
+    expect(quote.price).toBe(90);
+    const url = new URL((fetchSpy.mock.calls[0][0] as URL).toString());
+    expect(url.searchParams.get("symbol")).toBe("ACWI"); // bare ETF passthrough
+    expect(url.searchParams.get("adjust")).toBe("all");
+    expect(url.searchParams.get("outputsize")).toBe("5000"); // max depth
   });
 });

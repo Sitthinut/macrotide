@@ -28,6 +28,16 @@ export function isQuoteSource(value: unknown): value is QuoteSource {
   return typeof value === "string" && (QUOTE_SOURCES as readonly string[]).includes(value);
 }
 
+// Benchmark total-return series live under their OWN source value, deliberately
+// kept out of QUOTE_SOURCES: it routes provider matching (the adjusted-close
+// Twelve Data provider) and namespaces the `nav_history` / `fund_quotes` cache
+// rows (`benchmark_tr:ACWI`), but it is NOT a holdable asset class — leaving it
+// out of QUOTE_SOURCES keeps it from leaking into the HoldingSheet selector, the
+// advisor tool enums, and proposal validation. The series is a tracking ETF's
+// adjusted close (dividends reinvested) as a total-return proxy, so it can be
+// overlaid like-for-like against the dividend-reinvesting portfolio line.
+export const BENCHMARK_TR_SOURCE = "benchmark_tr";
+
 /**
  * The composite cache key for the `fund_quotes` / `nav_history` tables:
  * `${source}:${TICKER}`. The ticker is normalized to trimmed UPPER case so the

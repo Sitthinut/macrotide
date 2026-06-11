@@ -160,14 +160,15 @@ describe("getPortfolioSeries — demo mode (fixture-backed)", () => {
 
 describe("getBenchmarkSeries — demo mode (fixture-backed)", () => {
   it("serves a dense multi-year index series for a known benchmark", async () => {
-    const series = await runDemo(() => getBenchmarkSeries("sp500", "max"));
+    // us_tr is the featured S&P 500 TR benchmark → maps to the fixture's "sp500".
+    const series = await runDemo(() => getBenchmarkSeries("us_tr", "max"));
     expect(series.length).toBeGreaterThanOrEqual(300);
-    // Matches the decoded fixture series exactly.
+    // Matches the decoded fixture series for the mapped index exactly.
     expect(series).toEqual(demoIndexSeries("sp500"));
   });
 
   it("the benchmark recent window is daily (1-month ≈ 20+ points)", async () => {
-    const series = await runDemo(() => getBenchmarkSeries("sp500", "1mo"));
+    const series = await runDemo(() => getBenchmarkSeries("us_tr", "1mo"));
     expect(series.length).toBeGreaterThanOrEqual(18);
   });
 
@@ -177,15 +178,15 @@ describe("getBenchmarkSeries — demo mode (fixture-backed)", () => {
       d.setUTCDate(d.getUTCDate() - 31); // matches the "1mo" window
       return d.toISOString().slice(0, 10);
     })();
-    const series = await runDemo(() => getBenchmarkSeries("sp500", "1mo"));
+    const series = await runDemo(() => getBenchmarkSeries("us_tr", "1mo"));
     // First point seeds the left edge: dated at/before `since`, so the overlay
     // spans the full window (the client rebases from the same start).
     expect(series[0].date <= since).toBe(true);
   });
 
   it("respects the range window", async () => {
-    const all = await runDemo(() => getBenchmarkSeries("set", "max"));
-    const oneYear = await runDemo(() => getBenchmarkSeries("set", "1y"));
+    const all = await runDemo(() => getBenchmarkSeries("thai_tr", "max"));
+    const oneYear = await runDemo(() => getBenchmarkSeries("thai_tr", "1y"));
     expect(oneYear.length).toBeLessThan(all.length);
     expect(oneYear.length).toBeGreaterThan(0);
   });

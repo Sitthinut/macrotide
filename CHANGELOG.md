@@ -15,6 +15,17 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Portfolio benchmark comparison is now total-return.** The Portfolio chart's
+  "VS" benchmark picker compares your return against a curated, global-first set
+  of market benchmarks (global, US, US tech, developed-ex-US, emerging markets,
+  Japan, Thai) measured as **total return** in ฿ — dividends reinvested,
+  currency-matched — so the comparison is like-for-like instead of against a
+  dividend-dropping price index that flatters the benchmark. The Advisor's
+  performance answers use the same total-return benchmarks.
+- **Deep total-return benchmark series.** Each benchmark is a tracking-ETF proxy
+  cached as dividend-reinvested adjusted close (~20 years deep) under a dedicated
+  `benchmark_tr` data source, warmed by a `prewarm-benchmark` job, labeled by the
+  index it tracks (MSCI ACWI, S&P 500, Nasdaq-100, MSCI Japan, MSCI Thailand…).
 - **Accumulating vs dividend classification now uses the formal factsheet
   code.** The catalog and share classes previously parsed Thai class-detail
   text, which only caught explicit wording; the formal dividend-policy code

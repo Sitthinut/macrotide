@@ -281,6 +281,7 @@ export function NavChart({
             row(
               benchmarkLabel ?? "Benchmark",
               windowed ? fmtSignedBaht(p.bench) : fmtBaht(p.bench),
+              "var(--benchmark)",
             )}
           {p.cash > 0 && !valuesHidden && (
             <div style={{ color: "var(--muted)", marginTop: 3, fontSize: 11 }}>
@@ -392,7 +393,7 @@ export function NavChart({
             stackId="up"
             stroke="none"
             fill={accent}
-            fillOpacity={0.16}
+            fillOpacity={benchmarkData ? 0.07 : 0.16}
             isAnimationActive={false}
             tooltipType="none"
             activeDot={false}
@@ -413,7 +414,7 @@ export function NavChart({
             stackId="down"
             stroke="none"
             fill="var(--loss)"
-            fillOpacity={0.14}
+            fillOpacity={benchmarkData ? 0.06 : 0.14}
             isAnimationActive={false}
             tooltipType="none"
             activeDot={false}
@@ -446,10 +447,11 @@ export function NavChart({
             <Line
               type="monotone"
               dataKey="bench"
-              stroke="var(--muted)"
+              stroke="var(--benchmark)"
               strokeWidth={1.5}
               strokeDasharray="4 3"
               dot={false}
+              activeDot={{ r: 3.5, fill: "var(--benchmark)" }}
               isAnimationActive={false}
             />
           )}
@@ -514,10 +516,11 @@ export function NavChart({
           <Line
             type="monotone"
             dataKey="bench"
-            stroke="var(--muted)"
+            stroke="var(--benchmark)"
             strokeWidth={1.5}
             strokeDasharray="4 3"
             dot={false}
+            activeDot={{ r: 3.5, fill: "var(--benchmark)" }}
             isAnimationActive={false}
           />
         )}
