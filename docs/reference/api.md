@@ -2,7 +2,11 @@
 
 Catalog of the Next.js App Router route handlers under
 [`app/api/`](../../app/api). This is a hand-maintained map; the route files
-themselves are the source of truth for exact request/response shapes.
+themselves are the source of truth for exact request/response shapes. A test
+(`tests/api-doc-catalog.test.ts`) gates it against drift — it fails CI if a route
+is undocumented, a documented route no longer exists, or an exported HTTP method
+is missing from the Methods column. Keep this table in step when you add, remove,
+or rename a route.
 
 > **Convention.** Every handler that reads or writes the database runs inside
 > `withDb`, which routes the query to the owner DB or the per-session demo DB
