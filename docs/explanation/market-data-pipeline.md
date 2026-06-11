@@ -125,13 +125,15 @@ touching the portfolio "All" chart:
   universe to **SEC's depth cap of ~5.4 years** (~1,310 daily points; this is
   the SEC daily-NAV floor, not fund inception). For funds, ~5.4y is effectively
   the ceiling without another source.
-- **Held non-fund positions → shallow until opened.** A `market`-sourced
-  holding (a foreign ETF, gold, an index held as a position) resolves through
-  the `market` providers and isn't proactively warmed — the prewarm job is
-  Thai-fund-only. The depth-aware fetch deepens such a symbol to `max` on the
-  first "All" open (bounded by that provider's free-tier history), so it largely
-  **self-heals on demand**; proactively warming held positions is tracked in
-  [#141](https://github.com/Sitthinut/macrotide/issues/141).
+- **Held non-fund positions → deep, proactively.** A `market`-sourced holding
+  (a foreign ETF, gold, an index held as a position) has no coverage job of its
+  own (prewarm is Thai-fund-only), so the **freshness** job (`refresh-market`)
+  warms *held* `market` refs to `max` — distinct from indicators and held funds,
+  which stay shallow. The portfolio "All" chart is then deep on first open with
+  no cold on-demand backfill, bounded only by that provider's free-tier history.
+  This doesn't breach the freshness/coverage boundary: the boundary is *scope*
+  (never enumerate the catalog), not depth — held refs are still only what's
+  tracked.
 - **FX is not a limiter.** THB↔USD conversion history rides on Frankfurter
   (keyless, ECB-backed, deep to 1999), so the currency leg of a blended "All"
   chart never bottlenecks it.
