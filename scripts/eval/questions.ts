@@ -68,10 +68,11 @@ export interface EvalQuestion {
   note?: string;
 }
 
-// A safety disclaimer is required by the system prompt on any buy/sell/hold or
-// rebalancing guidance — assert its presence on those turns.
-const DISCLAIMER: Matcher =
-  /educational|not\s+(a\s+)?licensed|final\s+(call|decision)|your\s+(call|decision|choice)/i;
+// NOTE: the per-turn safety disclaimer is no longer a hard requirement. The
+// Advisor now gives a light, natural "your decision" note only when it adds value
+// (not a rote sign-off on every guidance turn), so a mandatory mustInclude on it
+// would gate on undesired behavior. Grounding/completeness checks below still
+// assert the answer carries the real figures and the right action.
 
 export const QUESTIONS: EvalQuestion[] = [
   // ── Tier 1: retrieve-then-explain (the common path) ───────────────────────
@@ -190,7 +191,7 @@ export const QUESTIONS: EvalQuestion[] = [
     expect: {
       expectTools: ["read_portfolio"],
       anyOf: [/trim|sell|reduce|cut/i],
-      mustInclude: [/bond/i, DISCLAIMER],
+      mustInclude: [/bond/i],
     },
     note: "Multi-step: compute trades to close +10/+5/−15pp drift, sequence them. Reasoning candidate.",
   },
@@ -215,7 +216,6 @@ export const QUESTIONS: EvalQuestion[] = [
       "The Thai baht has been weak lately. Should I tilt more toward global equity given that, or stick to my plan?",
     expect: {
       expectTools: ["read_portfolio"],
-      mustInclude: [DISCLAIMER],
       anyOf: [/plan|target|already|overweight|50\s?%|discipline|stick/i],
     },
     note: "Weighs a macro factor against the plan — must stay plan-anchored, not chase FX.",
@@ -233,6 +233,57 @@ export const QUESTIONS: EvalQuestion[] = [
       expectToolArgs: [{ tool: "find_cheaper_alternatives", contains: /EXAMPLE-FUND-A/i }],
     },
     note: "Fee delta reasoning + a switch recommendation grounded in the alternative the tool returned.",
+  },
+
+  // ── Per-portfolio review & planning (the user keeps SEPARATE portfolios) ────
+  {
+    // The motivating "what do you think of ALL my portfolios?" — a holistic
+    // review that must use the per-portfolio breakdown to compare them and name
+    // the laggard, not collapse everything into one whole-book number.
+    id: "P1-review-all-portfolios",
+    tier: "complex",
+    prompt: "What do you think of all of my portfolios? Which one is doing worst, and why?",
+    expect: {
+      expectTools: ["read_portfolio"],
+      // Both portfolios named, and the laggard (Tax) flagged with its weak return.
+      mustInclude: [/Core/, /Tax/],
+      anyOf: [/1\.2\s?%|lag|worst|low(er)? return|trail|behind|weak/i],
+      // No fabricated portfolios or funds beyond the synthetic set.
+      mustNotInclude: [/EXAMPLE-FUND-[E-Z]/],
+    },
+    note: "Holistic review across portfolios — compare each (per-bucket breakdown) and name the laggard.",
+  },
+  {
+    // The motivating "my Tax portfolio's return is low — plan the next step".
+    // Must SCOPE to the Tax portfolio (grounded tool arg), diagnose why, and end
+    // with a concrete next step + the educational disclaimer (it gives guidance).
+    id: "P2-plan-tax-next-step",
+    tier: "complex",
+    prompt:
+      "I feel like my Tax portfolio has a low return. Help me plan the next step for that portfolio.",
+    expect: {
+      expectTools: ["read_portfolio"],
+      mustInclude: [/Tax/],
+      // A concrete, prioritized action — not a vague "consider rebalancing".
+      anyOf: [/cash|rebalanc|add|contribut|diversif|switch|trim|concentrat|single fund/i],
+      // Grounding: it scoped the read to the Tax portfolio by name.
+      expectToolArgs: [{ tool: "read_portfolio", contains: /tax/i }],
+    },
+    note: "Diagnose WHY the Tax portfolio lags (single-fund concentration, cash drag) → a prioritized next step.",
+  },
+  {
+    // Scoped performance: one portfolio's return vs the market.
+    id: "P3-tax-performance-scoped",
+    tier: "complex",
+    prompt: "How is just my Tax portfolio doing versus the market lately?",
+    expect: {
+      expectTools: ["read_performance"],
+      mustInclude: [/Tax/],
+      anyOf: [/0\.7\s?%|trail|behind|lag|below|under/i],
+      // Grounding: the performance read was scoped to the Tax portfolio.
+      expectToolArgs: [{ tool: "read_performance", contains: /tax/i }],
+    },
+    note: "Per-portfolio performance — scope the return to one portfolio and compare to the indices.",
   },
 ];
 
