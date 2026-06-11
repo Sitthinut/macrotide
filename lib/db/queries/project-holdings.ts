@@ -215,43 +215,48 @@ function numChanged(next: number | null | undefined, prev: number | null): boole
  */
 export function createHoldingViaLedger(input: CreateHoldingInput): Holding | undefined {
   const db = getDb();
-  const avgCost = input.avgCost ?? null;
-  db.insert(transactions)
-    .values({
-      bucketId: input.bucketId,
-      ticker: input.ticker,
-      englishName: input.englishName,
-      quoteSource: input.quoteSource,
-      kind: "opening",
-      tradeDate: input.acquiredOn ?? today(),
-      units: input.units,
-      pricePerUnit: avgCost,
-      amount: avgCost != null ? -(input.units * avgCost) : 0,
-      fee: null,
-      tradeCurrency: "THB",
-      fxToThb: 1,
-      source: input.source ?? null,
-      importBatchId: "add-holding",
-    })
-    .run();
-  rebuildHoldingsForBucket(input.bucketId);
-
-  const meta = pickMetadata(input as unknown as Record<string, unknown>);
-  const row = db
-    .select()
-    .from(holdings)
-    .where(and(eq(holdings.bucketId, input.bucketId), eq(holdings.ticker, input.ticker)))
-    .get();
-  if (row && Object.keys(meta).length > 0) {
-    db.update(holdings)
-      .set({ ...meta, updatedAt: new Date().toISOString() })
-      .where(eq(holdings.id, row.id))
+  // Atomic: ledger write + projection rebuild + metadata stamp commit or roll back
+  // together — a torn write into the precious app.db is not regenerable. The inner
+  // rebuild nests as a savepoint (better-sqlite3 native transaction).
+  return db.transaction(() => {
+    const avgCost = input.avgCost ?? null;
+    db.insert(transactions)
+      .values({
+        bucketId: input.bucketId,
+        ticker: input.ticker,
+        englishName: input.englishName,
+        quoteSource: input.quoteSource,
+        kind: "opening",
+        tradeDate: input.acquiredOn ?? today(),
+        units: input.units,
+        pricePerUnit: avgCost,
+        amount: avgCost != null ? -(input.units * avgCost) : 0,
+        fee: null,
+        tradeCurrency: "THB",
+        fxToThb: 1,
+        source: input.source ?? null,
+        importBatchId: "add-holding",
+      })
       .run();
-  }
-  if (!row) return undefined;
-  // Re-read AFTER the metadata update; the position is folded on read (no stored units).
-  const fresh = db.select().from(holdings).where(eq(holdings.id, row.id)).get();
-  return fresh ? withFoldedPosition(fresh) : undefined;
+    rebuildHoldingsForBucket(input.bucketId);
+
+    const meta = pickMetadata(input as unknown as Record<string, unknown>);
+    const row = db
+      .select()
+      .from(holdings)
+      .where(and(eq(holdings.bucketId, input.bucketId), eq(holdings.ticker, input.ticker)))
+      .get();
+    if (row && Object.keys(meta).length > 0) {
+      db.update(holdings)
+        .set({ ...meta, updatedAt: new Date().toISOString() })
+        .where(eq(holdings.id, row.id))
+        .run();
+    }
+    if (!row) return undefined;
+    // Re-read AFTER the metadata update; the position is folded on read (no stored units).
+    const fresh = db.select().from(holdings).where(eq(holdings.id, row.id)).get();
+    return fresh ? withFoldedPosition(fresh) : undefined;
+  });
 }
 
 /**
@@ -268,90 +273,94 @@ export function editHoldingViaLedger(id: number, patch: EditHoldingPatch): Holdi
   const db = getDb();
   const h = db.select().from(holdings).where(eq(holdings.id, id)).get();
   if (!h) return undefined;
-  const bucketId = h.bucketId;
-  const oldTicker = h.ticker;
-  const newTicker = (patch.ticker ?? oldTicker).trim() || oldTicker;
-  const now = new Date().toISOString();
-  // Current position folded from the ledger — units/avgCost aren't stored on the row.
-  const cur = projectBucketPositions(bucketId).find((p) => p.ticker === oldTicker);
-  const curUnits = cur?.units ?? 0;
-  const curAvg = cur?.avgCost ?? null;
+  // Atomic: identity/position/metadata writes + rebuild commit or roll back together
+  // (precious app.db). The inner rebuild nests as a savepoint.
+  return db.transaction(() => {
+    const bucketId = h.bucketId;
+    const oldTicker = h.ticker;
+    const newTicker = (patch.ticker ?? oldTicker).trim() || oldTicker;
+    const now = new Date().toISOString();
+    // Current position folded from the ledger — units/avgCost aren't stored on the row.
+    const cur = projectBucketPositions(bucketId).find((p) => p.ticker === oldTicker);
+    const curUnits = cur?.units ?? 0;
+    const curAvg = cur?.avgCost ?? null;
 
-  // 1. Identity onto the ledger (ticker / quoteSource / englishName / source).
-  const idSet: Record<string, unknown> = {};
-  if (newTicker !== oldTicker) idSet.ticker = newTicker;
-  if (patch.quoteSource) idSet.quoteSource = patch.quoteSource;
-  if (patch.englishName !== undefined) idSet.englishName = patch.englishName;
-  if (patch.source !== undefined) idSet.source = patch.source;
-  if (Object.keys(idSet).length > 0) {
-    db.update(transactions)
-      .set(idSet)
-      .where(and(eq(transactions.bucketId, bucketId), eq(transactions.ticker, oldTicker)))
-      .run();
-  }
-
-  // 2. Position change → edit the single backing event, else append a snapshot.
-  if (numChanged(patch.units, curUnits) || numChanged(patch.avgCost, curAvg)) {
-    const newUnits = patch.units ?? curUnits;
-    const newAvg = patch.avgCost !== undefined ? patch.avgCost : curAvg;
-    const events = db
-      .select()
-      .from(transactions)
-      .where(and(eq(transactions.bucketId, bucketId), eq(transactions.ticker, newTicker)))
-      .orderBy(transactions.tradeDate, transactions.id)
-      .all();
-    if (events.length === 1) {
-      const e = events[0];
-      const isSnapshot = e.kind === "snapshot";
+    // 1. Identity onto the ledger (ticker / quoteSource / englishName / source).
+    const idSet: Record<string, unknown> = {};
+    if (newTicker !== oldTicker) idSet.ticker = newTicker;
+    if (patch.quoteSource) idSet.quoteSource = patch.quoteSource;
+    if (patch.englishName !== undefined) idSet.englishName = patch.englishName;
+    if (patch.source !== undefined) idSet.source = patch.source;
+    if (Object.keys(idSet).length > 0) {
       db.update(transactions)
-        .set({
-          units: newUnits,
-          pricePerUnit: newAvg,
-          // A snapshot moves no cash; a single opening/buy carries the cost out.
-          amount: isSnapshot ? 0 : newAvg != null ? -(newUnits * newAvg) : 0,
-          updatedAt: now,
-        })
-        .where(eq(transactions.id, e.id))
-        .run();
-    } else {
-      db.insert(transactions)
-        .values({
-          bucketId,
-          ticker: newTicker,
-          englishName: patch.englishName ?? h.englishName,
-          quoteSource: patch.quoteSource ?? h.quoteSource,
-          kind: "snapshot",
-          tradeDate: today(),
-          units: newUnits,
-          pricePerUnit: newAvg,
-          amount: 0,
-          fee: null,
-          tradeCurrency: "THB",
-          fxToThb: 1,
-          importBatchId: "edit-snapshot",
-        })
+        .set(idSet)
+        .where(and(eq(transactions.bucketId, bucketId), eq(transactions.ticker, oldTicker)))
         .run();
     }
-  }
 
-  // 3. Rename the row BEFORE rebuild so the projection matches it (keeps id + metadata).
-  if (newTicker !== oldTicker) {
-    db.update(holdings).set({ ticker: newTicker }).where(eq(holdings.id, id)).run();
-  }
+    // 2. Position change → edit the single backing event, else append a snapshot.
+    if (numChanged(patch.units, curUnits) || numChanged(patch.avgCost, curAvg)) {
+      const newUnits = patch.units ?? curUnits;
+      const newAvg = patch.avgCost !== undefined ? patch.avgCost : curAvg;
+      const events = db
+        .select()
+        .from(transactions)
+        .where(and(eq(transactions.bucketId, bucketId), eq(transactions.ticker, newTicker)))
+        .orderBy(transactions.tradeDate, transactions.id)
+        .all();
+      if (events.length === 1) {
+        const e = events[0];
+        const isSnapshot = e.kind === "snapshot";
+        db.update(transactions)
+          .set({
+            units: newUnits,
+            pricePerUnit: newAvg,
+            // A snapshot moves no cash; a single opening/buy carries the cost out.
+            amount: isSnapshot ? 0 : newAvg != null ? -(newUnits * newAvg) : 0,
+            updatedAt: now,
+          })
+          .where(eq(transactions.id, e.id))
+          .run();
+      } else {
+        db.insert(transactions)
+          .values({
+            bucketId,
+            ticker: newTicker,
+            englishName: patch.englishName ?? h.englishName,
+            quoteSource: patch.quoteSource ?? h.quoteSource,
+            kind: "snapshot",
+            tradeDate: today(),
+            units: newUnits,
+            pricePerUnit: newAvg,
+            amount: 0,
+            fee: null,
+            tradeCurrency: "THB",
+            fxToThb: 1,
+            importBatchId: "edit-snapshot",
+          })
+          .run();
+      }
+    }
 
-  // 4. Metadata onto the row.
-  const meta = pickMetadata(patch as unknown as Record<string, unknown>);
-  if (Object.keys(meta).length > 0) {
-    db.update(holdings)
-      .set({ ...meta, updatedAt: now })
-      .where(eq(holdings.id, id))
-      .run();
-  }
+    // 3. Rename the row BEFORE rebuild so the projection matches it (keeps id + metadata).
+    if (newTicker !== oldTicker) {
+      db.update(holdings).set({ ticker: newTicker }).where(eq(holdings.id, id)).run();
+    }
 
-  // 5. One rebuild reconciles the row set; the position is folded on read.
-  rebuildHoldingsForBucket(bucketId);
-  const updated = db.select().from(holdings).where(eq(holdings.id, id)).get();
-  return updated ? withFoldedPosition(updated) : undefined;
+    // 4. Metadata onto the row.
+    const meta = pickMetadata(patch as unknown as Record<string, unknown>);
+    if (Object.keys(meta).length > 0) {
+      db.update(holdings)
+        .set({ ...meta, updatedAt: now })
+        .where(eq(holdings.id, id))
+        .run();
+    }
+
+    // 5. One rebuild reconciles the row set; the position is folded on read.
+    rebuildHoldingsForBucket(bucketId);
+    const updated = db.select().from(holdings).where(eq(holdings.id, id)).get();
+    return updated ? withFoldedPosition(updated) : undefined;
+  });
 }
 
 /**
@@ -362,13 +371,17 @@ export function deleteHoldingViaLedger(id: number): boolean {
   const db = getDb();
   const h = db.select().from(holdings).where(eq(holdings.id, id)).get();
   if (!h) return false;
-  db.delete(transactions)
-    .where(and(eq(transactions.bucketId, h.bucketId), eq(transactions.ticker, h.ticker)))
-    .run();
-  rebuildHoldingsForBucket(h.bucketId);
-  // Defensive: if the holding had no ledger events at all (legacy row), drop it.
-  db.delete(holdings).where(eq(holdings.id, id)).run();
-  return true;
+  // Atomic: ledger delete + rebuild + defensive row drop commit or roll back together
+  // (precious app.db). The inner rebuild nests as a savepoint.
+  return db.transaction(() => {
+    db.delete(transactions)
+      .where(and(eq(transactions.bucketId, h.bucketId), eq(transactions.ticker, h.ticker)))
+      .run();
+    rebuildHoldingsForBucket(h.bucketId);
+    // Defensive: if the holding had no ledger events at all (legacy row), drop it.
+    db.delete(holdings).where(eq(holdings.id, id)).run();
+    return true;
+  });
 }
 
 /**

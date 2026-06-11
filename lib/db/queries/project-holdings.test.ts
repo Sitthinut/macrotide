@@ -282,6 +282,92 @@ describe("holdings write paths route through the ledger", () => {
   });
 });
 
+describe("holdings write paths are atomic (rollback on mid-function throw)", () => {
+  // The three ViaLedger functions write multiple statements into the precious
+  // app.db (ledger event → projection rebuild → metadata). A throw between steps
+  // must roll the whole thing back — never leave a torn ledger/projection. We force
+  // the throw with a RAISE(ABORT) trigger on a LATE statement (a `holdings`
+  // update/delete that runs only after the ledger write + rebuild).
+  it("create: a throw after the ledger write rolls back the whole thing", () => {
+    const ctx = freshCtx();
+    runWithDbContext(ctx, () => {
+      createBucket({ ...BUCKET, id: "b1" });
+      // Trips on the metadata-stamp UPDATE — which runs after the opening insert +
+      // rebuild have already written rows.
+      ctx.appSqlite.exec(
+        "CREATE TRIGGER boom BEFORE UPDATE ON holdings BEGIN SELECT RAISE(ABORT, 'boom'); END;",
+      );
+      expect(() =>
+        createHoldingViaLedger({
+          bucketId: "b1",
+          ticker: A,
+          englishName: "Fund A",
+          quoteSource: "market",
+          units: 100,
+          avgCost: 12,
+          category: "Equity", // ensures the metadata UPDATE runs and trips the trigger
+        }),
+      ).toThrow();
+      // Atomic: the opening insert + the rebuilt projection row rolled back too.
+      expect(listTransactionsByBucket("b1")).toHaveLength(0);
+      expect(listHoldings("b1")).toHaveLength(0);
+    });
+  });
+
+  it("edit: a throw after the ledger edit rolls back the position change", () => {
+    const ctx = freshCtx();
+    runWithDbContext(ctx, () => {
+      createBucket({ ...BUCKET, id: "b1" });
+      const h = createHoldingViaLedger({
+        bucketId: "b1",
+        ticker: A,
+        englishName: "Fund A",
+        quoteSource: "market",
+        units: 100,
+        avgCost: 12,
+      });
+      // Trips on the metadata-stamp UPDATE (step 4), after the in-place ledger edit (step 2).
+      ctx.appSqlite.exec(
+        "CREATE TRIGGER boom BEFORE UPDATE ON holdings BEGIN SELECT RAISE(ABORT, 'boom'); END;",
+      );
+      expect(() =>
+        editHoldingViaLedger(h?.id as number, { units: 200, category: "Bond" }),
+      ).toThrow();
+      // Atomic: the position edit rolled back — still the original 100 units, no metadata.
+      const ledger = listTransactionsByBucket("b1");
+      expect(ledger).toHaveLength(1);
+      expect(ledger[0].units).toBeCloseTo(100, 6);
+      const after = listHoldings("b1");
+      expect(after[0].units).toBeCloseTo(100, 6);
+      expect(after[0].category).toBeNull();
+    });
+  });
+
+  it("delete: a throw after the ledger delete keeps the holding intact", () => {
+    const ctx = freshCtx();
+    runWithDbContext(ctx, () => {
+      createBucket({ ...BUCKET, id: "b1" });
+      const h = createHoldingViaLedger({
+        bucketId: "b1",
+        ticker: A,
+        englishName: "Fund A",
+        quoteSource: "market",
+        units: 100,
+        avgCost: 12,
+      });
+      // The rebuild drops the now-empty holdings row (a DELETE) after the ledger
+      // events were removed — trip on that DELETE.
+      ctx.appSqlite.exec(
+        "CREATE TRIGGER boom BEFORE DELETE ON holdings BEGIN SELECT RAISE(ABORT, 'boom'); END;",
+      );
+      expect(() => deleteHoldingViaLedger(h?.id as number)).toThrow();
+      // Atomic: the ledger delete rolled back — the holding and its event survive.
+      expect(listTransactionsByBucket("b1")).toHaveLength(1);
+      expect(listHoldings("b1")).toHaveLength(1);
+    });
+  });
+});
+
 describe("holdings projection — backfill equivalence", () => {
   it("holding → opening anchor → rebuild reproduces the same position", () => {
     runWithDbContext(freshCtx(), () => {

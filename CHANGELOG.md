@@ -15,6 +15,10 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Adding, editing, or deleting a holding is atomic.** Each write to the
+  precious ledger now commits its ledger event, projection rebuild, and
+  instrument metadata as one transaction (rolling back together on any error),
+  so a mid-write failure can never leave a torn ledger/projection.
 - **Explore can screen by tracked index, cheapest first.** A "Tracks" dropdown
   lists every index family with at least one active index-style tracker (live
   from the catalog, with tracker counts) and shows the funds tracking the
