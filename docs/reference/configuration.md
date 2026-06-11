@@ -132,7 +132,7 @@ and run a priced model, only the token cap bites. Cost is an *estimate*
 
 Points the "Connect your broker" feature at a broker. The broker's identity and
 API shape live in a **connector manifest** (DATA only — the collector/parser code
-stays brand-free in `@macrotide/connector-sdk`), supplied one of three ways below
+stays broker-agnostic in `@macrotide/connector-sdk`), supplied one of three ways below
 (checked in order). All unset → the feature hides itself (paste / screenshot
 import still work). Authoring guide: [add-a-broker-connector.md](../how-to/add-a-broker-connector.md).
 

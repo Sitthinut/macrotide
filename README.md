@@ -129,7 +129,7 @@ macrotide/
 │   │                        and placeholder analytics
 │   ├── format.ts, useViewport.ts, useScrollHide.ts
 ├── packages/
-│   └── connector-sdk/       @macrotide/connector-sdk — brand-free broker
+│   └── connector-sdk/       @macrotide/connector-sdk — broker-agnostic
 │                            connector contract + parser/collector builder
 ├── data/                    SQLite + daily backups (gitignored)
 ├── tests/                   Vitest

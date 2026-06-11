@@ -1,4 +1,4 @@
-// The import-format + connector-manifest types — the brand-free contract shared
+// The import-format + connector-manifest types — the broker-agnostic contract shared
 // by the parser, the collector builders, and the host app.
 
 /**

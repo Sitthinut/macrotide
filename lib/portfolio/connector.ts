@@ -5,7 +5,7 @@ import type { Connector } from "@macrotide/connector-sdk";
 
 // The server-only LOADER for a connector manifest — DATA only (no executable
 // code; the generic collector/parser live in @macrotide/connector-sdk and stay
-// brand-free). Brand specifics never live in committed code: they come from a
+// broker-agnostic). Broker specifics never live in committed code: they come from a
 // connector manifest supplied at deploy time, so this repo carries no broker
 // identity and a different broker is a config change.
 //

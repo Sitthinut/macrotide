@@ -1,4 +1,4 @@
-// @macrotide/connector-sdk — the brand-free contract + generic, config-driven
+// @macrotide/connector-sdk — the broker-agnostic contract + generic, config-driven
 // collector/parser for Macrotide broker-import connectors.
 //
 // A connector is DATA (a manifest: host, endpoints, display name, and a `shape`
