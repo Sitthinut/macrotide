@@ -10,6 +10,7 @@ import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { DbContext } from "@/lib/db/context";
+import { runWithDbContext } from "@/lib/db/context";
 import * as appSchema from "@/lib/db/schema/app";
 import * as marketSchema from "@/lib/db/schema/market";
 
@@ -28,11 +29,21 @@ function applyMigrations(sqlite: Database.Database, dir: string): void {
   sqlite.exec(sql);
 }
 
-/** Fresh in-memory app.db (system of record) migrated from the app baseline. */
-export function freshAppDb() {
+/**
+ * Fresh in-memory app.db (system of record) migrated from the app baseline.
+ *
+ * @param options.foreignKeys - Whether to enforce FK constraints (default: true).
+ *   Pass `false` when the test needs to use arbitrary userId values without
+ *   seeding the users table — the migrations may re-enable the pragma, so this
+ *   flag applies the pragma AFTER migrations run.
+ */
+export function freshAppDb(options: { foreignKeys?: boolean } = {}) {
+  const { foreignKeys = true } = options;
   const sqlite = new Database(":memory:");
   sqlite.pragma("foreign_keys = ON");
   applyMigrations(sqlite, APP_MIGRATIONS_DIR);
+  // Apply after migrations in case any migration re-enables the pragma.
+  if (!foreignKeys) sqlite.pragma("foreign_keys = OFF");
   return { sqlite, db: drizzle(sqlite, { schema: appSchema }) };
 }
 
@@ -62,4 +73,22 @@ export function makeTestDbContext(
     sessionId: overrides.sessionId ?? "test",
     userId: overrides.userId ?? null,
   };
+}
+
+/**
+ * Run `fn` inside a fresh isolated DbContext (isDemo: true, sessionId: "test").
+ *
+ * Replaces the common hand-rolled pattern:
+ * ```ts
+ * function freshDb() { ... }
+ * function withFresh<T>(fn: () => T): T {
+ *   const { sqlite, db, marketDb, marketSqlite } = freshDb();
+ *   return runWithDbContext({ appDb: db, appSqlite: sqlite, ... }, fn) as T;
+ * }
+ * ```
+ * across test files that need a self-contained app.db + market.db per call.
+ */
+export function withFreshContext<T>(fn: () => T): T {
+  const ctx = makeTestDbContext({ isDemo: true });
+  return runWithDbContext(ctx, fn) as T;
 }

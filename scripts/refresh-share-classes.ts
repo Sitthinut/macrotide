@@ -14,14 +14,37 @@
 import { fileURLToPath } from "node:url";
 import { refreshShareClasses } from "../lib/jobs/refresh-share-classes";
 
+export interface CliArgs {
+  /** Process at most N classes; 0 = no limit. */
+  limit: number;
+}
+
+/**
+ * Parse CLI argv into typed options for the share-class refresh.
+ * Pure function — no I/O; safe to unit-test in isolation.
+ *
+ * Supported flags:
+ *   --limit=N   positive integer, default 0 (all classes)
+ */
+export function parseArgs(argv: string[]): CliArgs {
+  let limit = 0;
+  for (const arg of argv) {
+    const match = arg.match(/^--limit=(\d+)$/);
+    if (match) {
+      const n = Number.parseInt(match[1], 10);
+      if (n > 0) limit = n;
+    }
+  }
+  return { limit };
+}
+
 async function main() {
   if (process.env.DISABLE_JOBS === "1") {
     console.log("DISABLE_JOBS=1 — skipping share-class refresh.");
     return;
   }
 
-  const limitArg = process.argv.slice(2).find((a) => a.startsWith("--limit="));
-  const limit = limitArg ? Number.parseInt(limitArg.split("=")[1], 10) : 0;
+  const { limit } = parseArgs(process.argv.slice(2));
 
   console.log(`Running share-class refresh (${limit > 0 ? `limit=${limit}` : "all classes"})…`);
   const r = await refreshShareClasses({ limit });

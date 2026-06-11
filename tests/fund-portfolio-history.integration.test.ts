@@ -6,14 +6,10 @@
 //   - the read side shows only the LATEST period and drops the 903 grand-total
 //     summary row.
 
-import { readdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import Database from "better-sqlite3";
 import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/better-sqlite3";
 import { describe, expect, it } from "vitest";
-import { freshMarketDb } from "@/tests/db-helpers";
-import { getMarketDb, runWithDbContext } from "../lib/db/context";
+import { withFreshContext } from "@/tests/db-helpers";
+import { getMarketDb } from "../lib/db/context";
 import {
   getFundPortfolio,
   getFundPortfolioAssetType,
@@ -21,36 +17,9 @@ import {
   upsertFundPortfolio,
   upsertFundPortfolioAssetType,
 } from "../lib/db/queries/fund-enrichment";
-import * as schema from "../lib/db/schema";
 import { fundCatalog, fundPortfolio } from "../lib/db/schema";
 
-function freshDb() {
-  const sqlite = new Database(":memory:");
-  sqlite.pragma("foreign_keys = ON");
-  const dir = resolve("lib/db/migrations/app");
-  const sql = readdirSync(dir)
-    .filter((f) => f.endsWith(".sql"))
-    .sort()
-    .map((f) => readFileSync(join(dir, f), "utf8"))
-    .join("\n")
-    .replace(/--> statement-breakpoint/g, ";");
-  sqlite.exec(sql);
-  const market = freshMarketDb();
-  return {
-    sqlite,
-    db: drizzle(sqlite, { schema }),
-    marketDb: market.db,
-    marketSqlite: market.sqlite,
-  };
-}
-
-function withFresh<T>(fn: () => T): T {
-  const { sqlite, db, marketDb, marketSqlite } = freshDb();
-  return runWithDbContext(
-    { appDb: db, appSqlite: sqlite, marketDb, marketSqlite, isDemo: true, sessionId: "test" },
-    fn,
-  ) as T;
-}
+const withFresh = withFreshContext;
 
 describe("fund portfolio history (incremental ingest + latest-period display)", () => {
   it("adds new periods, preserves and never rewrites existing ones", () => {

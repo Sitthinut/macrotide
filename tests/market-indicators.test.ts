@@ -2,38 +2,24 @@
 // list: default fallback, ordered set/get, sanitization, and fail-closed
 // per-user scoping (one user's list never leaks to another).
 
-import { readdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
 import { describe, expect, it } from "vitest";
-import { freshMarketDb } from "@/tests/db-helpers";
+import { freshAppDb, freshMarketDb } from "@/tests/db-helpers";
 import { runWithDbContext } from "../lib/db/context";
 import {
   getUserIndicatorSymbols,
   setUserIndicatorSymbols,
 } from "../lib/db/queries/market-indicators";
-import * as schema from "../lib/db/schema";
 import { DEFAULT_INDICATOR_SYMBOLS } from "../lib/market/indicators";
 
 function freshDb() {
-  const sqlite = new Database(":memory:");
-  const dir = resolve("lib/db/migrations/app");
-  const sql = readdirSync(dir)
-    .filter((f) => f.endsWith(".sql"))
-    .sort()
-    .map((f) => readFileSync(join(dir, f), "utf8"))
-    .join("\n")
-    .replace(/--> statement-breakpoint/g, ";");
-  sqlite.exec(sql);
   // FK off AFTER migrations (some migrations re-enable the pragma) so the test
   // can use arbitrary user ids without seeding the user table — we're exercising
   // the scoping query logic, not FK enforcement.
-  sqlite.pragma("foreign_keys = OFF");
+  const app = freshAppDb({ foreignKeys: false });
   const market = freshMarketDb();
   return {
-    sqlite,
-    db: drizzle(sqlite, { schema }),
+    sqlite: app.sqlite,
+    db: app.db,
     marketDb: market.db,
     marketSqlite: market.sqlite,
   };

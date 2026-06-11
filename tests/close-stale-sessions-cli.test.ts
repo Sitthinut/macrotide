@@ -10,46 +10,18 @@
 // The real closeStaleSessions sweep (actual closes + extraction) is already
 // covered in lib/db/queries/chat.test.ts; this file focuses on the CLI layer.
 
-import { readdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import Database from "better-sqlite3";
 import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/better-sqlite3";
 import { describe, expect, it } from "vitest";
-import { freshMarketDb } from "@/tests/db-helpers";
-import { getDb, runWithDbContext } from "../lib/db/context";
+import { withFreshContext } from "@/tests/db-helpers";
+import { getDb } from "../lib/db/context";
 import { createThread, findIdleThreads } from "../lib/db/queries/chat";
-import * as schema from "../lib/db/schema";
 import { chatThreads } from "../lib/db/schema";
 import { DEFAULT_IDLE_DAYS } from "../lib/jobs/close-stale-sessions";
 import { parseArgs } from "../scripts/close-stale-sessions";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-function freshDb() {
-  const sqlite = new Database(":memory:");
-  sqlite.pragma("foreign_keys = ON");
-  const migrationsDir = resolve("lib/db/migrations/app");
-  const files = readdirSync(migrationsDir)
-    .filter((f) => f.endsWith(".sql"))
-    .sort();
-  const sql = files
-    .map((f) => readFileSync(join(migrationsDir, f), "utf8"))
-    .join("\n")
-    .replace(/--> statement-breakpoint/g, ";");
-  sqlite.exec(sql);
-  const db = drizzle(sqlite, { schema });
-  const market = freshMarketDb();
-  return { sqlite, db, marketDb: market.db, marketSqlite: market.sqlite };
-}
-
-function withFresh<T>(fn: () => T): T {
-  const { sqlite, db, marketDb, marketSqlite } = freshDb();
-  return runWithDbContext(
-    { appDb: db, appSqlite: sqlite, marketDb, marketSqlite, isDemo: true, sessionId: "test" },
-    fn,
-  ) as T;
-}
+const withFresh = withFreshContext;
 
 /** ISO timestamp `days` days before now. */
 function daysAgo(days: number): string {
