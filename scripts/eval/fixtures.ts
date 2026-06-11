@@ -102,6 +102,110 @@ export const PERFORMANCE = {
     "Portfolio +7.1% over 6mo (2025-11-30→2026-05-30). Benchmarks: SET Index +4.3%, S&P 500 +9.8%.",
 };
 
+// ─── Per-portfolio breakdown (the user keeps SEPARATE portfolios) ───────────
+// The ฿1,000,000 book splits into two portfolios: a healthy global "Core" and a
+// lagging Thai-equity-heavy "Tax" (SSF), each scored against its OWN target. The
+// split lets a review spot the laggard and a "my Tax portfolio's return is low"
+// question have a real diagnosis. Sums match the aggregate PORTFOLIO above.
+export const BY_BUCKET = [
+  {
+    bucketId: "core",
+    name: "Core",
+    typeLabel: "Free",
+    totalValue: 700_000,
+    pctOfTotal: 70,
+    targetModel: "Bogle 3-Fund (Global)",
+    topClass: { label: "Equity", pct: 71 },
+    trackingGapPp: 4.0,
+    blendedTer: 0.5,
+    topHolding: { ticker: "EXAMPLE-FUND-A", pct: 71 },
+    cashPct: 8,
+    realized: 12_000,
+    irrPct: 9.4,
+    irrUnavailable: null,
+  },
+  {
+    bucketId: "tax",
+    name: "Tax",
+    typeLabel: "SSF",
+    totalValue: 300_000,
+    pctOfTotal: 30,
+    targetModel: "Thai Equity Index",
+    topClass: { label: "Equity", pct: 83 },
+    trackingGapPp: 2.0,
+    blendedTer: 0.75,
+    topHolding: { ticker: "EXAMPLE-FUND-B", pct: 83 },
+    cashPct: 17,
+    realized: -1_500,
+    irrPct: 1.2,
+    irrUnavailable: null,
+  },
+];
+
+// read_portfolio scoped to the "Tax" portfolio (portfolio:"Tax"): the lagging
+// one — heavy in a single Thai-equity fund, high cash drag, weak money-weighted
+// return. Scored against its OWN target ("Thai Equity Index"), and `scope` names
+// it so the answer is unmistakably about that one portfolio.
+export const TAX_PORTFOLIO = {
+  ok: true as const,
+  hasHoldings: true,
+  totalValue: 300_000,
+  baseCurrency: "THB",
+  targetModel: "Thai Equity Index",
+  byClass: [
+    { label: "Equity", pct: 83 },
+    { label: "Cash", pct: 17 },
+  ],
+  byRegion: [
+    { label: "Thailand", pct: 83 },
+    { label: "Cash", pct: 17 },
+  ],
+  drift: [
+    { ticker: "EXAMPLE-FUND-B", label: "Thai Equity", current: 83, target: 85, drift: -2 },
+    { ticker: "CASH", label: "Cash", current: 17, target: 15, drift: 2 },
+  ],
+  trackingGapPp: 2.0,
+  blendedTer: 0.75,
+  targetTer: 0.3,
+  concentration: {
+    top: { ticker: "EXAMPLE-FUND-B", label: "Thai Equity", pct: 83 },
+    top3Pct: 83,
+    hhi: 0.71,
+    holdingCount: 1,
+  },
+  cashPct: 17,
+  ledger: { invested: 295_000, realized: -1_500, income: 800, irrPct: 1.2, irrUnavailable: null },
+  customHoldings: [],
+  position: null,
+  headline: {
+    tone: "warn" as const,
+    title: "Tax portfolio lagging",
+    body: "A single Thai-equity fund has trailed, and 17% cash is a drag on the return.",
+  },
+  scope: { bucketId: "tax", name: "Tax", typeLabel: "SSF" },
+  message: 'Read 1 holding(s) in the "Tax" portfolio; total ฿300,000.',
+};
+
+// read_performance scoped to "Tax": low period return, trailing BOTH indices.
+export const TAX_PERFORMANCE = {
+  ok: true as const,
+  hasData: true,
+  range: "6mo" as const,
+  startDate: "2025-11-30",
+  endDate: "2026-05-30",
+  startValue: 298_000,
+  endValue: 300_000,
+  periodReturnPct: 0.7,
+  asOf: "2026-05-30",
+  benchmarks: [
+    { key: "set", label: "SET Index", returnPct: 4.3, beating: false },
+    { key: "sp500", label: "S&P 500", returnPct: 9.8, beating: false },
+  ],
+  scope: { bucketId: "tax", name: "Tax" },
+  message:
+    '"Tax" portfolio +0.7% over 6mo (2025-11-30→2026-05-30). Benchmarks: SET Index +4.3%, S&P 500 +9.8%.',
+};
+
 // ─── Synthetic fund catalog (for find_funds / find_cheaper_alternatives) ─────
 // A cheaper global-equity index alternative to EXAMPLE-FUND-A, plus an SSF and
 // an RMF wrapper so the "SSF vs RMF" question has real options to weigh.
@@ -237,20 +341,35 @@ export function buildEvalTools(opts: BuildEvalToolsOptions = {}) {
         "Read the user's REAL portfolio: total value, allocation by asset class and region, " +
         "per-sleeve drift from their target model, blended (value-weighted) expense ratio, " +
         "concentration (largest holding, top-3, HHI), and cash drag. Use before answering " +
-        "anything about how they're doing, their mix, fees, concentration, or rebalancing.",
-      inputSchema: z.object({}),
-      execute: async () => (opts.empty ? EMPTY_PORTFOLIO : PORTFOLIO),
+        "anything about how they're doing, their mix, fees, concentration, or rebalancing. " +
+        "The user keeps SEPARATE portfolios: with no arguments it adds a per-portfolio " +
+        "breakdown; pass `portfolio` with a name (e.g. 'Tax') to scope the readout to one.",
+      inputSchema: z.object({
+        portfolio: z.string().optional(),
+        ticker: z.string().optional(),
+      }),
+      execute: async ({ portfolio }) => {
+        if (opts.empty) return EMPTY_PORTFOLIO;
+        if (portfolio && /tax/i.test(portfolio)) return TAX_PORTFOLIO;
+        return { ...PORTFOLIO, byBucket: BY_BUCKET };
+      },
       ...shaped("portfolio"),
     }),
     read_performance: tool({
       description:
         "Read how the portfolio PERFORMED over a period: total return % AND the same-period " +
         "return of reference indices (SET, S&P 500) so you can answer 'am I matching / beating " +
-        "my index?' with real numbers. Call for any question about returns or keeping up with an index.",
+        "my index?' with real numbers. Call for any question about returns or keeping up with an index. " +
+        "Pass `portfolio` with a name to scope the return to a single portfolio (e.g. 'Tax').",
       inputSchema: z.object({
         range: z.enum(["1mo", "3mo", "6mo", "1y", "5y", "max"]).optional(),
+        portfolio: z.string().optional(),
       }),
-      execute: async () => (opts.empty ? EMPTY_PERFORMANCE : PERFORMANCE),
+      execute: async ({ portfolio }) => {
+        if (opts.empty) return EMPTY_PERFORMANCE;
+        if (portfolio && /tax/i.test(portfolio)) return TAX_PERFORMANCE;
+        return PERFORMANCE;
+      },
       ...shaped("performance"),
     }),
     read_plan: tool({
@@ -354,6 +473,8 @@ export function buildEvalTools(opts: BuildEvalToolsOptions = {}) {
         indexOnly: z.boolean().optional(),
         taxIncentive: z.enum(["SSF", "ThaiESG", "RMF"]).optional(),
         region: z.enum(["foreign", "domestic", "mixed"]).optional(),
+        regionFocus: z.string().optional(),
+        sectorFocus: z.string().optional(),
         query: z.string().optional(),
         limit: z.number().int().positive().max(30).optional(),
       }),
