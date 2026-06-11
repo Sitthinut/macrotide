@@ -36,6 +36,8 @@ import {
   type PortfolioGroup,
 } from "@/lib/portfolio/portfolio-display";
 import type { Holding } from "@/lib/static/types";
+import { useFlipUp } from "@/lib/useFlipUp";
+import { useListboxKeyboard } from "@/lib/useListboxKeyboard";
 import { useScrollFadeX } from "@/lib/useScrollFadeX";
 
 // ─── API response type ────────────────────────────────────────────────────────
@@ -1053,6 +1055,16 @@ function ClassPicker({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const { up, measure } = useFlipUp(ref);
+  const onKeyDown = useListboxKeyboard({
+    open,
+    setOpen,
+    listRef,
+    triggerRef,
+    onBeforeOpen: measure,
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -1063,14 +1075,28 @@ function ClassPicker({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
 
+  // Move focus into the list on open (the selected option, or the first).
+  useEffect(() => {
+    if (!open) return;
+    const opts = Array.from(
+      listRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [],
+    );
+    const selected = opts.find((o) => o.getAttribute("aria-selected") === "true");
+    (selected ?? opts[0])?.focus();
+  }, [open]);
+
   return (
-    <div ref={ref} style={{ position: "relative" }}>
+    <div ref={ref} onKeyDown={onKeyDown} style={{ position: "relative" }}>
       <button
+        ref={triggerRef}
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`Share class — ${headlineTicker}, change`}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          if (!open) measure();
+          setOpen((o) => !o);
+        }}
         style={{
           ...headlineFont,
           display: "inline-flex",
@@ -1102,10 +1128,12 @@ function ClassPicker({
       </button>
       {open && (
         <div
+          ref={listRef}
           role="listbox"
           style={{
             position: "absolute",
-            top: "calc(100% + 4px)",
+            top: up ? "auto" : "calc(100% + 4px)",
+            bottom: up ? "calc(100% + 4px)" : "auto",
             left: 0,
             zIndex: 20,
             minWidth: 200,

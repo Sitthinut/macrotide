@@ -13,9 +13,10 @@
 // (the same logic the symbol Combobox uses) so it sizes, flips, and looks like
 // every other dropdown in the app.
 
-import { type CSSProperties, type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { BENCHMARK_TR_OPTIONS } from "@/lib/market/benchmark-options";
 import { useFlipUp } from "@/lib/useFlipUp";
+import { useListboxKeyboard } from "@/lib/useListboxKeyboard";
 
 // Fixed height so the off chip and the active pill (which has an extra ✕ child)
 // are exactly the same height — no jump on select.
@@ -63,46 +64,13 @@ export function BenchmarkPicker({
     (selected ?? opts[0])?.focus();
   }, [open]);
 
-  function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
-    if (!open) {
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        e.preventDefault();
-        measure();
-        setOpen(true);
-      }
-      return;
-    }
-    const opts = Array.from(
-      listRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [],
-    );
-    const idx = opts.indexOf(document.activeElement as HTMLButtonElement);
-    switch (e.key) {
-      case "Escape":
-        e.preventDefault();
-        setOpen(false);
-        triggerRef.current?.focus();
-        break;
-      case "ArrowDown":
-        e.preventDefault();
-        opts[Math.min(idx + 1, opts.length - 1)]?.focus();
-        break;
-      case "ArrowUp":
-        e.preventDefault();
-        opts[Math.max(idx - 1, 0)]?.focus();
-        break;
-      case "Home":
-        e.preventDefault();
-        opts[0]?.focus();
-        break;
-      case "End":
-        e.preventDefault();
-        opts[opts.length - 1]?.focus();
-        break;
-      case "Tab":
-        setOpen(false);
-        break;
-    }
-  }
+  const onKeyDown = useListboxKeyboard({
+    open,
+    setOpen,
+    listRef,
+    triggerRef,
+    onBeforeOpen: measure,
+  });
 
   return (
     // inline-flex so the wrapper hugs its content — a click to the right of the

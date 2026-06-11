@@ -15,6 +15,10 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Custom dropdowns are keyboard-navigable and stay on-screen.** The fund class
+  switcher and the portfolio benchmark picker now support arrow keys, Home/End,
+  Enter, and Esc, and flip open upward when there isn't room below — via one
+  shared dropdown behavior (`useFlipUp` + `useListboxKeyboard`).
 - **Portfolio benchmark comparison is now total-return.** The Portfolio chart's
   "VS" benchmark picker compares your return against a curated, global-first set
   of market benchmarks (global, US, US tech, developed-ex-US, emerging markets,
