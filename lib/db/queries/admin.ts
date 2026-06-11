@@ -1,6 +1,7 @@
 // Owner-only admin queries: list every user with their tier + today's usage,
 // and set a user's tier. These bypass per-user row scoping on purpose — the
 // caller MUST have already verified owner status (see app/api/admin/users).
+import "server-only";
 import { eq, sql } from "drizzle-orm";
 import { getDb } from "../context";
 import { accountTier, usage, user } from "../schema";
@@ -46,6 +47,21 @@ export function listUsers(date: string = utcDate()): AdminUserRow[] {
       r.createdAt instanceof Date ? r.createdAt.toISOString() : new Date(r.createdAt).toISOString(),
     usageToday: (r.inputTokens ?? 0) + (r.outputTokens ?? 0),
   }));
+}
+
+/**
+ * Every registered user id, oldest first. For TRUSTED batch jobs that must
+ * sweep each user's rows in turn (e.g. the stale-session close + trash purge) —
+ * pair each id with `runWithUserScope` so per-user `ownedBy` scoping stays
+ * intact inside the sweep. Never call from a user-facing request path.
+ */
+export function listUserIds(): string[] {
+  return getDb()
+    .select({ id: user.id })
+    .from(user)
+    .orderBy(user.createdAt)
+    .all()
+    .map((r) => r.id);
 }
 
 /**

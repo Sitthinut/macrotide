@@ -45,6 +45,21 @@ export function runWithDbContext<T>(ctx: DbContext, fn: () => T | Promise<T>): T
 }
 
 /**
+ * Run `fn` with the CURRENT context's DB handles but a specific user id, so
+ * `ownedBy` scoping inside resolves to that user's rows (`null` → the
+ * single-owner NULL set). This is how trusted batch jobs sweep per user
+ * without bypassing row scoping: enumerate ids (admin's `listUserIds`), then
+ * re-enter once per user. Inherits the ambient handles, so a test's in-memory
+ * context or a job's owner singletons both pass through unchanged.
+ */
+export function runWithUserScope<T>(
+  userId: string | null,
+  fn: () => T | Promise<T>,
+): T | Promise<T> {
+  return storage.run({ ...getDbContext(), userId }, fn);
+}
+
+/**
  * Resolve the current request's DB context. Outside a route handler (background
  * jobs, scripts, dev-server boot) we fall back to the owner singletons (the real
  * app.db + market.db).

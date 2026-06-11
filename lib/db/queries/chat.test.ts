@@ -1,14 +1,9 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import Database from "better-sqlite3";
 import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/better-sqlite3";
 import { describe, expect, it } from "vitest";
-import { freshMarketDb } from "@/tests/db-helpers";
+import { withFreshContext } from "@/tests/db-helpers";
 import { closeStaleSessions } from "../../jobs/close-stale-sessions";
-import { getDb, runWithDbContext } from "../context";
-import * as schema from "../schema";
-import { chatThreads } from "../schema";
+import { getDb, runWithUserScope } from "../context";
+import { chatThreads, user } from "../schema";
 import {
   appendMessage,
   archiveThread,
@@ -18,32 +13,10 @@ import {
   listByStatus,
   listMessages,
   markIdle,
+  softDeleteThread,
 } from "./chat";
 
-function freshDb() {
-  const sqlite = new Database(":memory:");
-  sqlite.pragma("foreign_keys = ON");
-  const migrationsDir = resolve("lib/db/migrations/app");
-  const files = readdirSync(migrationsDir)
-    .filter((f) => f.endsWith(".sql"))
-    .sort();
-  const sql = files
-    .map((f) => readFileSync(join(migrationsDir, f), "utf8"))
-    .join("\n")
-    .replace(/--> statement-breakpoint/g, ";");
-  sqlite.exec(sql);
-  const db = drizzle(sqlite, { schema });
-  const market = freshMarketDb();
-  return { sqlite, db, marketDb: market.db, marketSqlite: market.sqlite };
-}
-
-function withFresh<T>(fn: () => T): T {
-  const { sqlite, db, marketDb, marketSqlite } = freshDb();
-  return runWithDbContext(
-    { appDb: db, appSqlite: sqlite, marketDb, marketSqlite, isDemo: true, sessionId: "test" },
-    fn,
-  ) as T;
-}
+const withFresh = withFreshContext;
 
 /** ISO timestamp `days` days before now. */
 function daysAgo(days: number): string {
@@ -207,6 +180,82 @@ describe("closeStaleSessions backstop", () => {
       const result = await closeStaleSessions({ close: closeStub(2) });
       expect(result.closedCount).toBe(2);
       expect(result.extractedCount).toBe(4);
+    });
+  });
+
+  it("hard-deletes trash past the 30-day restore window, keeping fresher trash", async () => {
+    await withFresh(async () => {
+      // Soft-delete two threads; age one past the window, keep one inside it.
+      const expired = createThread().id;
+      const fresh = createThread().id;
+      softDeleteThread(expired);
+      softDeleteThread(fresh);
+      getDb()
+        .update(chatThreads)
+        .set({ deletedAt: daysAgo(31) })
+        .where(eq(chatThreads.id, expired))
+        .run();
+
+      const result = await closeStaleSessions({ close: closeStub() });
+      expect(result.purgedCount).toBe(1);
+      expect(getThread(expired)).toBeUndefined();
+      expect(getThread(fresh)?.deletedAt).not.toBeNull();
+    });
+  });
+
+  it("sweeps every registered user's scope, not just the NULL single-owner set", async () => {
+    await withFresh(async () => {
+      const now = new Date();
+      for (const id of ["alice", "bob"]) {
+        getDb()
+          .insert(user)
+          .values({
+            id,
+            name: id,
+            email: `${id}@example.test`,
+            emailVerified: true,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .run();
+      }
+      // One stale thread per scope (owner + both users), plus alice's expired trash.
+      const ownerThread = threadAged(10);
+      let aliceThread = "";
+      let aliceTrash = "";
+      let bobThread = "";
+      await runWithUserScope("alice", () => {
+        aliceThread = threadAged(10);
+        aliceTrash = createThread().id;
+        softDeleteThread(aliceTrash);
+        getDb()
+          .update(chatThreads)
+          .set({ deletedAt: daysAgo(31) })
+          .where(eq(chatThreads.id, aliceTrash))
+          .run();
+      });
+      await runWithUserScope("bob", () => {
+        bobThread = threadAged(10);
+      });
+
+      const seenScopes: (string | null)[] = [];
+      const result = await closeStaleSessions({
+        close: async (threadId, userId) => {
+          seenScopes.push(userId);
+          return closeStub()(threadId);
+        },
+      });
+
+      // Default scopes = NULL + every registered user; each scope's stale
+      // thread closed under its own user id (provenance), trash purged.
+      expect(result.scopesSwept).toEqual([null, "alice", "bob"]);
+      expect(result.closedThreadIds.sort()).toEqual([ownerThread, aliceThread, bobThread].sort());
+      expect(seenScopes).toEqual([null, "alice", "bob"]);
+      expect(result.purgedCount).toBe(1);
+      await runWithUserScope("alice", () => {
+        expect(getThread(aliceTrash)).toBeUndefined();
+        expect(getThread(aliceThread)?.status).toBe("idle");
+      });
     });
   });
 });

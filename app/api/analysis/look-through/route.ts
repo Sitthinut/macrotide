@@ -10,7 +10,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
 import { listBuckets } from "@/lib/db/queries/buckets";
-import { listHoldings } from "@/lib/db/queries/holdings";
+import { listHeldQuoteKeys, listHoldings } from "@/lib/db/queries/holdings";
 import { listFundQuotes } from "@/lib/db/queries/quotes";
 import { adaptAggregate, adaptPortfolios } from "@/lib/portfolio/adapter";
 import { computeLookThrough } from "@/lib/portfolio/look-through";
@@ -18,7 +18,11 @@ import { computeLookThrough } from "@/lib/portfolio/look-through";
 export async function GET(req: NextRequest) {
   const bucket = req.nextUrl.searchParams.get("bucket");
   return withDb(() => {
-    const portfolios = adaptPortfolios(listBuckets(), listHoldings(), listFundQuotes());
+    const portfolios = adaptPortfolios(
+      listBuckets(),
+      listHoldings(),
+      listFundQuotes(listHeldQuoteKeys()),
+    );
     const scoped =
       bucket && bucket !== "all" ? portfolios.filter((p) => p.id === bucket) : portfolios;
     const holdings = adaptAggregate(scoped).holdings;
