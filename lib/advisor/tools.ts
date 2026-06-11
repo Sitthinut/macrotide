@@ -12,7 +12,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { listBuckets } from "../db/queries/buckets";
 import { findFunds, getCheaperAlternatives, getFundsByAbbr } from "../db/queries/funds";
-import { listHoldings } from "../db/queries/holdings";
+import { listHeldQuoteKeys, listHoldings } from "../db/queries/holdings";
 import { createJournalEntry, type JournalKind, listJournalEntries } from "../db/queries/journal";
 import { getModelPortfolio } from "../db/queries/models";
 import { getPlan } from "../db/queries/plan";
@@ -87,7 +87,7 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
     execute: async ({ ticker }) => {
       const buckets = listBuckets();
       const holdings = listHoldings();
-      const quotes = listFundQuotes();
+      const quotes = listFundQuotes(listHeldQuoteKeys());
       const portfolios = adaptPortfolios(buckets, holdings, quotes);
       const allHoldings = portfolios.flatMap((p) => p.holdings);
       const totalValue = allHoldings.reduce((s, h) => s + h.value, 0);

@@ -9,6 +9,8 @@
 // Loads .env.local via tsx's --env-file flag (configured in package.json).
 
 import { fileURLToPath } from "node:url";
+import { runWithUserScope } from "../lib/db/context";
+import { listUserIds } from "../lib/db/queries/admin";
 import { findIdleThreads } from "../lib/db/queries/chat";
 import { closeStaleSessions, DEFAULT_IDLE_DAYS } from "../lib/jobs/close-stale-sessions";
 
@@ -45,19 +47,29 @@ export function parseArgs(argv: string[]): CliArgs {
 }
 
 async function main() {
+  if (process.env.DISABLE_JOBS === "1") {
+    console.log("DISABLE_JOBS=1 — skipping stale-session sweep.");
+    return;
+  }
+
   const { idleDays, dryRun } = parseArgs(process.argv.slice(2));
 
   if (dryRun) {
-    const candidates = findIdleThreads(idleDays);
-    console.log(`[dry-run] idle-days=${idleDays}`);
-    if (candidates.length === 0) {
-      console.log("[dry-run] No stale sessions found — nothing to close.");
-    } else {
-      console.log(`[dry-run] Would close ${candidates.length} thread(s):`);
-      for (const t of candidates) {
-        console.log(`  - ${t.id}  (last activity: ${t.updatedAt})`);
-      }
+    // Mirror the real sweep's scope iteration: NULL single-owner set + every user.
+    const scopes: (string | null)[] = [null, ...listUserIds()];
+    console.log(`[dry-run] idle-days=${idleDays} scopes=${scopes.length}`);
+    let total = 0;
+    for (const userId of scopes) {
+      await runWithUserScope(userId, () => {
+        const candidates = findIdleThreads(idleDays);
+        total += candidates.length;
+        for (const t of candidates) {
+          console.log(`  - ${t.id}  (scope: ${userId ?? "owner"}, last activity: ${t.updatedAt})`);
+        }
+      });
     }
+    if (total === 0) console.log("[dry-run] No stale sessions found — nothing to close.");
+    else console.log(`[dry-run] Would close ${total} thread(s).`);
     console.log("[dry-run] No changes made.");
     return;
   }
@@ -66,8 +78,10 @@ async function main() {
   const result = await closeStaleSessions({ idleDays });
 
   console.log("\nDone.");
+  console.log(`  Scopes:    ${result.scopesSwept.length} (owner + registered users)`);
   console.log(`  Closed:    ${result.closedCount}`);
   console.log(`  Extracted: ${result.extractedCount} durable fact(s)`);
+  console.log(`  Purged:    ${result.purgedCount} expired deleted thread(s)`);
   if (result.closedThreadIds.length > 0) {
     console.log("  Thread IDs:");
     for (const id of result.closedThreadIds) {

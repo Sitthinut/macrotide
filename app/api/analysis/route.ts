@@ -9,7 +9,7 @@
 import { NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
 import { listBuckets } from "@/lib/db/queries/buckets";
-import { listHoldings } from "@/lib/db/queries/holdings";
+import { listHeldQuoteKeys, listHoldings } from "@/lib/db/queries/holdings";
 import { listModelPortfolios } from "@/lib/db/queries/models";
 import { getPlan } from "@/lib/db/queries/plan";
 import { listFundQuotes } from "@/lib/db/queries/quotes";
@@ -23,7 +23,7 @@ export async function GET() {
     // ── 1. Resolve all user data from the DB ─────────────────────────────
     const buckets = listBuckets();
     const dbHoldings = listHoldings();
-    const quotes = listFundQuotes();
+    const quotes = listFundQuotes(listHeldQuoteKeys());
     const dbModels = listModelPortfolios();
     const plan = getPlan();
 

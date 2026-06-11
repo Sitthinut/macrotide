@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
-import { getBucket, listBuckets } from "@/lib/db/queries/buckets";
+import { getBucket } from "@/lib/db/queries/buckets";
 import { getHolding, listHoldings } from "@/lib/db/queries/holdings";
 import { createHoldingViaLedger } from "@/lib/db/queries/project-holdings";
 
@@ -14,10 +14,9 @@ export async function GET(req: Request) {
       if (!getBucket(bucket)) return NextResponse.json([]);
       return NextResponse.json(listHoldings(bucket));
     }
-    // No bucket filter: scope to the caller's own buckets (listBuckets is
-    // user-scoped) so an unfiltered list can't span other users' holdings.
-    const mine = new Set(listBuckets().map((b) => b.id));
-    return NextResponse.json(listHoldings().filter((h) => mine.has(h.bucketId)));
+    // No bucket filter: listHoldings is bucket-ownership-scoped at the query
+    // layer, so an unfiltered list is already only the caller's holdings.
+    return NextResponse.json(listHoldings());
   });
 }
 

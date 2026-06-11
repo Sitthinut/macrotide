@@ -1,9 +1,12 @@
+import "server-only";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { quoteCacheKey } from "@/lib/market/sources";
 import type { ProjectedPosition } from "@/lib/portfolio/project-positions";
 import { getDb } from "../context";
-import { holdings, transactions } from "../schema";
+import { buckets, holdings, transactions } from "../schema";
 import { enrichHoldingsWithCatalog } from "./holding-enrichment";
 import { projectBucketPositions } from "./project-holdings";
+import { ownedBy } from "./scope";
 
 /** The stored holdings row: instrument metadata + identity only — NO position. */
 export type HoldingRow = typeof holdings.$inferSelect;
@@ -92,15 +95,30 @@ function overlayLive(rows: HoldingRow[]): Holding[] {
 }
 
 /**
- * The distinct `{source, ticker}` quote refs of every held instrument —
- * metadata rows only, no ledger fold. Cheap enough for a hot request path:
- * the quotes-refresh route uses it to derive the user's refs server-side so
- * the client doesn't have to fetch holdings first (request waterfall).
+ * Subquery: ids of the buckets the current context may see (ownedBy semantics —
+ * the caller's buckets in a request, the NULL-owned single-owner set in jobs).
+ * Holdings carry no user_id of their own; every holdings read scopes through
+ * this so one user's instrument list can never reach another's request. Jobs
+ * that genuinely need every user's refs read the table directly with their own
+ * loudly-documented query (see lib/jobs/refresh-tracked-market.ts).
+ */
+function ownedBucketIds() {
+  return getDb().select({ id: buckets.id }).from(buckets).where(ownedBy(buckets.userId));
+}
+
+/**
+ * The distinct `{source, ticker}` quote refs of the CURRENT USER's held
+ * instruments — metadata rows only, no ledger fold. Cheap enough for a hot
+ * request path: the quotes-refresh route uses it to derive the user's refs
+ * server-side so the client doesn't have to fetch holdings first (request
+ * waterfall). User-scoped: a refresh spends provider quota only on the
+ * caller's own symbols and never reveals what other accounts hold.
  */
 export function listHeldQuoteRefs(): { source: string; ticker: string }[] {
   const rows = getDb()
     .select({ ticker: holdings.ticker, source: holdings.quoteSource })
     .from(holdings)
+    .where(inArray(holdings.bucketId, ownedBucketIds()))
     .all();
   const seen = new Set<string>();
   const out: { source: string; ticker: string }[] = [];
@@ -113,14 +131,42 @@ export function listHeldQuoteRefs(): { source: string; ticker: string }[] {
   return out;
 }
 
+/**
+ * The combined `${source}:${ticker}` quote cache keys for the current user's
+ * held instruments — the exact `fund_quotes.ticker`/`nav_history.ticker` keys
+ * (built through `quoteCacheKey`, so case matches the cache). Pass these to
+ * `listFundQuotes(keys)` instead of loading the whole table: the analysis and
+ * advisor paths only ever read quotes for funds the user holds, so an unfiltered
+ * scan grows with the global catalog, not the caller's portfolio.
+ */
+export function listHeldQuoteKeys(): string[] {
+  return listHeldQuoteRefs().map((r) => quoteCacheKey(r.source, r.ticker));
+}
+
+/**
+ * Holdings visible to the current context, optionally narrowed to one bucket.
+ * Always bucket-ownership-scoped — even with an explicit `bucketId`, a foreign
+ * bucket folds to an empty list rather than another user's rows (defense in
+ * depth under the route-level getBucket guards).
+ */
 export function listHoldings(bucketId?: string): Holding[] {
-  const q = getDb().select().from(holdings);
-  const rows = (bucketId ? q.where(eq(holdings.bucketId, bucketId)) : q).all();
+  const scope = inArray(holdings.bucketId, ownedBucketIds());
+  const rows = getDb()
+    .select()
+    .from(holdings)
+    .where(bucketId ? and(eq(holdings.bucketId, bucketId), scope) : scope)
+    .all();
   return enrichHoldingsWithCatalog(overlayLive(rows));
 }
 
 export function getHolding(id: number): Holding | undefined {
-  const row = getDb().select().from(holdings).where(eq(holdings.id, id)).get();
+  // Bucket-ownership-scoped like every holdings read: a foreign id resolves to
+  // undefined (ids are sequential integers — don't rely on them being secret).
+  const row = getDb()
+    .select()
+    .from(holdings)
+    .where(and(eq(holdings.id, id), inArray(holdings.bucketId, ownedBucketIds())))
+    .get();
   if (!row) return undefined;
   // Load by id even when the ledger folds to no position (units 0) — the metadata
   // row exists and may need editing.
