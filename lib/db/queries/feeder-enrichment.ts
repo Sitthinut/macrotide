@@ -59,6 +59,12 @@ export function upsertFeederLookThroughHoldings(
 
 // ─── Read side ────────────────────────────────────────────────────────────────
 
+/** Every feeder → master mapping. Used by the catalog transform to fold
+ * curated master names into facet derivation (index family). */
+export function listFeederMasterMap(): FeederMasterMapRow[] {
+  return getMarketDb().select().from(feederMasterMap).all();
+}
+
 /** Feeder → master mapping for one fund. Returns null if not mapped. */
 export function getFeederMasterMap(projId: string): FeederMasterMapRow | null {
   return (

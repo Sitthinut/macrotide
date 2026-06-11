@@ -20,6 +20,7 @@ import {
   getCheaperAlternatives,
   getCurrentFees,
   getCurrentTer,
+  listTrackedIndexFamilies,
   updateFundFacets,
   upsertFund,
   upsertFundFees,
@@ -857,6 +858,73 @@ describe("retail-availability gate + zero-TER sort (#117)", () => {
           "thai_mutual_fund",
         );
       });
+    });
+  });
+});
+
+describe("trackingIndex facet", () => {
+  // Seed one family with a cheap tracker, a pricier tracker, an active fund
+  // merely BENCHMARKED against it, and a tracker of a different family.
+  function seedTrackers() {
+    upsertFund(fund("TRACK-CHEAP", { managementStyle: "PN" }));
+    upsertFund(fund("TRACK-PRICEY", { managementStyle: "PM" }));
+    upsertFund(fund("BENCHMARKED-ACTIVE", { managementStyle: "AN" }));
+    upsertFund(fund("OTHER-FAMILY", { managementStyle: "PN" }));
+    upsertFundFees([
+      ter("TRACK-CHEAP", 0.3),
+      ter("TRACK-PRICEY", 0.9),
+      ter("BENCHMARKED-ACTIVE", 1.8),
+      ter("OTHER-FAMILY", 0.1),
+    ]);
+    const facets = {
+      regionFocus: null,
+      regionFocusSource: null,
+      sectorFocus: null,
+      aimcCategory: null,
+    };
+    updateFundFacets([
+      { projId: "TRACK-CHEAP", ...facets, indexFamily: "S&P 500" },
+      { projId: "TRACK-PRICEY", ...facets, indexFamily: "S&P 500" },
+      { projId: "BENCHMARKED-ACTIVE", ...facets, indexFamily: "S&P 500" },
+      { projId: "OTHER-FAMILY", ...facets, indexFamily: "SET50" },
+    ]);
+  }
+
+  it("filters to index-style funds of the family, cheapest first", () => {
+    withDb(() => {
+      seedTrackers();
+      const got = findFunds({ trackingIndex: "S&P 500" }).map((f) => f.projId);
+      // Benchmarked-active excluded (style gate), other family excluded.
+      expect(got).toEqual(["TRACK-CHEAP", "TRACK-PRICEY"]);
+    });
+  });
+
+  it("composes with indexType='active' to an empty (not contradictory) result", () => {
+    withDb(() => {
+      seedTrackers();
+      expect(findFunds({ trackingIndex: "S&P 500", indexType: "active" })).toEqual([]);
+    });
+  });
+
+  it("listTrackedIndexFamilies counts active PN/PM trackers per family, most-tracked first", () => {
+    withDb(() => {
+      seedTrackers();
+      // An inactive tracker must not count toward (or surface) its family.
+      upsertFund(fund("DEAD-TRACKER", { status: "inactive", managementStyle: "PN" }));
+      updateFundFacets([
+        {
+          projId: "DEAD-TRACKER",
+          regionFocus: null,
+          regionFocusSource: null,
+          sectorFocus: null,
+          indexFamily: "TOPIX",
+          aimcCategory: null,
+        },
+      ]);
+      expect(listTrackedIndexFamilies()).toEqual([
+        { indexFamily: "S&P 500", trackers: 2 },
+        { indexFamily: "SET50", trackers: 1 },
+      ]);
     });
   });
 });

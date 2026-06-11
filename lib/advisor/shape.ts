@@ -196,6 +196,8 @@ export interface FundsOutput {
     isFeederFund: boolean;
   }[];
   cheapestAbbr?: string | null;
+  /** How the list is ordered — relevance when a text query was used. */
+  ordering?: string;
   message: string;
 }
 
@@ -213,7 +215,7 @@ function fundLine(f: FundsOutput["funds"][number]): string {
 
 export function fundsModelText(o: FundsOutput): string {
   if (!o.count) return o.message;
-  const head = `${o.count} fund(s), cheapest first${o.cheapestAbbr ? ` (lowest TER: ${o.cheapestAbbr})` : ""}:`;
+  const head = `${o.count} fund(s), ${o.ordering ?? "cheapest first"}${o.cheapestAbbr ? ` (lowest TER: ${o.cheapestAbbr})` : ""}:`;
   return `${head}\n${o.funds.map(fundLine).join("\n")}`;
 }
 

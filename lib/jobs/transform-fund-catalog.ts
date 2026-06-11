@@ -10,6 +10,7 @@
 // Scope: catalog + fees. Share classes (fund_share_classes) remain their own job
 // (refresh-share-classes) — it reads the fund_fees this transform writes.
 
+import { listFeederMasterMap } from "../db/queries/feeder-enrichment";
 import {
   type FundBenchmarkInsert,
   type FundDividendHistoryInsert,
@@ -494,6 +495,13 @@ export function transformFundCatalog(): TransformFundCatalogResult {
 
   const facetUpdates: Array<{ projId: string } & FundFacetsUpdate> = [];
   let fundsWithRegionFocus = 0;
+  // Curated look-through master names (feeder_master_map) — covers feeders the
+  // SEC profile's master-fund field misses, so facet derivation sees both.
+  const curatedMasterByProj = new Map(
+    listFeederMasterMap()
+      .filter((m) => m.masterName)
+      .map((m) => [m.projId, m.masterName as string]),
+  );
   for (const projId of profileIds) {
     const p = readSecRawItemFor<SecFundProfile>(SEC_ENDPOINTS.profiles, projId);
     if (!p?.proj_id) continue;
@@ -507,6 +515,7 @@ export function transformFundCatalog(): TransformFundCatalogResult {
       englishName: p.proj_name_en,
       thaiName: p.proj_name_th,
       feederMasterFund: p.feederfund_master_fund,
+      curatedMasterName: curatedMasterByProj.get(p.proj_id) ?? null,
       investRegion: classifyInvestRegion(p.invest_country_flag),
     });
     if (facets.regionFocus) fundsWithRegionFocus++;

@@ -9,7 +9,7 @@
 // after a per-fund fetch rather than in SQL — catalog scale is a few thousand
 // funds on a single-VM SQLite, so clarity beats a window-function query here.
 
-import { and, eq, inArray, isNull, not, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, not, or, sql } from "drizzle-orm";
 import { indexTypeFromManagementStyle, isIndexStyle } from "../../market/fund-classify";
 import { type FeeType, TER_FEE_TYPE } from "../../market/fund-fees";
 import { compareClassesForList } from "../../market/share-class-select";
@@ -293,6 +293,14 @@ export type FindFundsFilter = {
   /** Restrict to a derived sector/theme focus ('technology', 'gold', …). */
   sectorFocus?: string;
   /**
+   * Restrict to funds that TRACK a normalized index family ("S&P 500", "SET50",
+   * "NASDAQ-100", … — fund_catalog.index_family): the family must match AND the
+   * fund must be index-style (managementStyle PN/PM). Active funds merely
+   * BENCHMARKED against the index keep the family on their catalog row but are
+   * excluded here — "tracks" is family + style, by design.
+   */
+  trackingIndex?: string;
+  /**
    * Exclude fixed-term funds — they stop accepting new subscriptions once
    * closed and aren't suitable for ongoing investing. Defaults to true.
    */
@@ -329,6 +337,7 @@ export function findFunds(filter: FindFundsFilter = {}): FundWithTer[] {
     region,
     regionFocus,
     sectorFocus,
+    trackingIndex,
     excludeFixedTerm = true,
   } = filter;
   const conds = [];
@@ -354,6 +363,13 @@ export function findFunds(filter: FindFundsFilter = {}): FundWithTer[] {
       isNull(fundCatalog.managementStyle),
     );
     if (activeCond) conds.push(activeCond);
+  }
+
+  // "Tracks X" = family + index style (see the filter doc). Composes with the
+  // facet above: combined with indexType 'active' it correctly yields nothing.
+  if (trackingIndex) {
+    conds.push(eq(fundCatalog.indexFamily, trackingIndex));
+    conds.push(inArray(fundCatalog.managementStyle, INDEX_STYLES));
   }
 
   // Relevance rank by projId when a text query is present (0 = best match).
@@ -406,6 +422,38 @@ export function findFunds(filter: FindFundsFilter = {}): FundWithTer[] {
   }
 
   return withTer.slice(0, limit);
+}
+
+/** One entry of the live "Tracks" facet menu. */
+export interface TrackedIndexFamily {
+  /** Canonical fund_catalog.index_family value ("S&P 500", "SET50", …). */
+  indexFamily: string;
+  /** Active index-style (PN/PM) funds tracking it — never 0 by construction. */
+  trackers: number;
+}
+
+/**
+ * Every index family with at least one active index-style tracker, most-tracked
+ * first. Backs the Explore "Tracks" dropdown — derived live from the catalog so
+ * the menu follows the nightly refresh and can never offer an empty result.
+ */
+export function listTrackedIndexFamilies(): TrackedIndexFamily[] {
+  return getMarketDb()
+    .select({
+      indexFamily: fundCatalog.indexFamily,
+      trackers: sql<number>`count(*)`,
+    })
+    .from(fundCatalog)
+    .where(
+      and(
+        isNotNull(fundCatalog.indexFamily),
+        eq(fundCatalog.status, "active"),
+        inArray(fundCatalog.managementStyle, ["PN", "PM"]),
+      ),
+    )
+    .groupBy(fundCatalog.indexFamily)
+    .orderBy(sql`count(*) DESC`, fundCatalog.indexFamily)
+    .all() as TrackedIndexFamily[];
 }
 
 /** A priceable share class for the Explore screener — class facts + parent metadata + NAV. */
