@@ -63,7 +63,7 @@ user + developer guide.
 
 - [Next.js 16](https://nextjs.org/) (App Router) + React 19 + TypeScript
 - Hand-rolled CSS — design tokens, light/dark/system themes (no Tailwind)
-- Hand-rolled SVG charts
+- Hand-rolled SVG sparklines + recharts interactive charts
 - [Biome](https://biomejs.dev/) for lint and format; [simple-git-hooks](https://github.com/toplenboren/simple-git-hooks)
   with [lint-staged](https://github.com/lint-staged/lint-staged) for pre-commit
 - SQLite + [Drizzle ORM](https://orm.drizzle.team/) for persistence; per-session

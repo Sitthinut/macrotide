@@ -38,6 +38,7 @@ app.db but share the real market.db read-write (same warm cache as real users).
 | `model_portfolios` | Built-in + custom model allocations | `built_in`, `allocation` (JSON slices), risk/return metadata, `user_id` |
 | `action_item_states` | Archive / "Not for me" suppression for generated Portfolio action items (fee-creep flags today) | one row per (`user_id`, `item_key`); `state` ∈ archived / not_for_me, optional `reason` (chip key or free text), `snapshot_savings_pp` (magnitude baseline for the resurface check), `item_type`. Keyed by a deterministic `item_key` (`lib/portfolio/action-item-key.ts`) since the items carry no row of their own. (`snooze_until` is a dormant legacy column — Snooze is dropped.) |
 | `settings` | Generic key-value app settings | `key` → `value` (JSON) |
+| `user_market_indicators` | Per-user Markets-screen indicator list — which symbols a user pins and in what order | `user_id` (nullable), `symbol` (canonical ticker from the indicator catalog), `position` (display order, ascending); unique on (`user_id`, `symbol`). No rows → app falls back to the curated default set. Despite the `market_` name this is a user preference (lives in app.db, not market.db) |
 
 ### Market data (market.db — written by the market layer + the SEC crawl)
 
@@ -120,7 +121,7 @@ portfolio-owned fields such as source and color.
 | Table | Holds | Key columns / notes |
 |---|---|---|
 | `chat_threads` | One row per conversation | `status` (`active`/`idle`/`archived`), `archived_at`, `deleted_at` (30-day trash), `extracted_through_id` (extraction watermark) |
-| `chat_messages` | Turns within a thread | `thread_id` (FK, cascade), `role`, `content`, `tool_call_id`, `feedback` |
+| `chat_messages` | Turns within a thread | `thread_id` (FK, cascade), `role`, `content`, `tool_call_id`, `feedback`, `model` (provider model id that served this response; NULL for user/tool rows), `cards` (JSON-encoded `propose_*` tool payloads — the durable proposal store; NULL when absent) |
 | `user_preferences` | Long-term memory | **Bitemporal** — see below |
 
 The `user_preferences` table is bitemporal: an update inserts a new row and
@@ -129,7 +130,7 @@ is `WHERE valid_until IS NULL`. Columns include `category` (enum:
 `profile`/`finance_context`/`response_style`/`fact`), `source`
 (`user_tool`/`advisor_tool`/`extracted`), `confidence`, and provenance
 (`source_session_id`, `source_turn_ids`). Full design:
-[features/memory.md](../explanation/memory.md).
+[memory.md](../explanation/memory.md).
 
 ### Auth (better-auth)
 

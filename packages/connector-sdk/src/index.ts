@@ -9,6 +9,7 @@
 export const CONNECTOR_SDK_VERSION = "0.1.0";
 
 export { buildUserscript, COLLECTOR_PROTOCOL_VERSION, resolveCollectorShape } from "./collector";
+export { EXAMPLE_CONNECTOR } from "./example.connector";
 export { looksLikeBrokerExport, parseBrokerExport } from "./parser";
 export type {
   BrokerAccount,

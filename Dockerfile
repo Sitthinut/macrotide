@@ -9,7 +9,7 @@
 #   - migrate() reads the SQL files in lib/db/migrations/ from disk at startup
 #     (resolved relative to WORKDIR), and
 #   - the fund-catalog refresh job runs the TypeScript in scripts/ + lib/ via
-#     `tsx` (a devDependency) through `docker exec`.
+#     `tsx` (a devDependency) through `docker compose run --rm --no-deps`.
 # A standalone trace would drop both. Image size is a non-issue on the target.
 
 FROM node:24-bookworm-slim AS builder
@@ -36,7 +36,8 @@ FROM node:24-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000 \
-    DB_PATH=/app/data/app.db
+    DB_PATH=/app/data/app.db \
+    MARKET_DB_PATH=/app/data/market.db
 
 # Everything from the builder: compiled node_modules (better-sqlite3 .node built
 # for this arch), the .next build, source (migrations + job scripts), configs.

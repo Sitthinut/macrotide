@@ -102,7 +102,7 @@ Requirements and behavior:
 - Uses a vision model by default (`OCR_MODEL`, `google/gemini-2.5-flash`) with an
   automatic fallback on provider/rate-limit errors. Not tier-gated — the same
   model serves every user. Both are configurable — see the
-  [env-var table](../../AGENTS.md#ai--model-selection).
+  [env-var table](../reference/configuration.md#ai--model-selection).
 - The screenshot is read once and never stored.
 
 > **A note on data hygiene.** This is a personal investing app. When testing or

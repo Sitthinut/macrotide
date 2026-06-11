@@ -35,8 +35,8 @@ and the code that reads each one — is the env-var table in
 | `npm run test:watch` | Vitest in watch mode |
 | `npm run db:seed` | Seed `data/app.db` with mock data |
 | `npm run db:generate` | Generate a Drizzle migration from schema changes |
-| `npm run db:drop` | Drop a migration (dev: prefer drop + reseed over editing past migrations) |
-| `npm run db:studio` | Drizzle Studio — browse the DB |
+| `npm run db:drop:app` / `db:drop:market` | Drop a migration (dev: prefer drop + reseed over editing past migrations) |
+| `npm run db:studio:app` / `db:studio:market` | Drizzle Studio — browse app.db or market.db |
 | `npm run jobs:close-stale` | Run the stale-session close job (e.g. `-- --dry-run`) |
 | `npm run smoke:sec -- <FUND-CODE>` | Smoke-test the Thai SEC provider (needs `SEC_API_KEY`) |
 | `npm run market:refresh` | POST the local admin market-refresh endpoint |
@@ -74,7 +74,7 @@ hook is installed by `npm install` (via the `prepare` script).
 
 For the "where do I put X?" question — editorial content, pure helpers, user
 state, mock seeds, shared types — see the table in
-[AGENTS.md § Where things live](../../AGENTS.md#where-things-live-avoid-common-mistakes)
+[AGENTS.md § Where things live](../../AGENTS.md#where-things-live)
 and the layer map in [architecture](../explanation/architecture.md#where-it-lives).
 
 ## Before you change code
