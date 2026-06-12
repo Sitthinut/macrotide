@@ -361,6 +361,13 @@ function streamAdvisorResponse(opts: AdvisorStreamOptions): Response {
         }
       }
 
+      // Surface the served model id on the live message as a TRANSIENT data part
+      // (not added to the SDK message history). The badge is admin-only on the
+      // client; the value is also persisted on the row for reload. The provider's
+      // served id isn't known until generation finishes, so it can't ride a
+      // response header — it streams here instead.
+      if (modelId) writer.write({ type: "data-model", data: modelId, transient: true });
+
       runWithDbContext(opts.ctx, () => {
         if (text.trim()) opts.persist(text, modelId, cards);
         opts.recordUsageFor?.({ inputTokens, outputTokens, modelId });
