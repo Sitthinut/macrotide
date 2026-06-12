@@ -117,6 +117,19 @@ The cost cap is **off by default** — until you both set a `DAILY_CENTS_BUDGET_
 and run a priced model, only the token cap bites. Cost is an *estimate*
 (`served tokens × MODEL_PRICES`), not a provider-reported charge.
 
+#### Account-level spend probe
+
+A separate guard from the per-user caps above: a server-run probe
+([scripts/check-openrouter-budget.ts](../../scripts/check-openrouter-budget.ts))
+that watches the **whole account's** OpenRouter spend against the key's monthly
+limit — read live from `GET /api/v1/key`, so the cap lives only in the OpenRouter
+dashboard and can't drift into the repo — and signals when spend nears it, before
+the 403 that would break all chat.
+
+| Var | Default | Read by | Notes |
+| --- | --- | --- | --- |
+| `OPENROUTER_BUDGET_HEARTBEAT_URL` | unset → no ping | [scripts/check-openrouter-budget.ts](../../scripts/check-openrouter-budget.ts) | Optional dead-man heartbeat URL: the probe pings it on a healthy/warn run so a server-side "silence = problem" monitor notices a crashed probe. Spend thresholds are CLI flags on the job unit (`--warn-pct` / `--crit-pct`, default 80 / 95), not env — the dollar cap itself is read from OpenRouter, never declared here. The systemd unit + alert routing are server-side ops. |
+
 ### External data sources
 
 | Var | Default | Read by | Notes |

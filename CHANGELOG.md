@@ -15,6 +15,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **An early-warning probe guards against OpenRouter spend silently breaking
+  chat.** A server-run job reads the account key's live monthly limit from
+  OpenRouter and signals when spend nears it — before the cap trips a 403 that
+  would break all chat — so the operator can act first. The dollar cap is read
+  live from OpenRouter (never copied into the repo), so there's nothing to drift;
+  alert thresholds are job-unit flags.
 - **The served model is shown to the operator, not to users.** Each assistant
   reply's served model id (e.g. `glm-4.6`) now appears in the message meta only
   for the owner (and in local dev) — kept from regular users so a raw model slug
