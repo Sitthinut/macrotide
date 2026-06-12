@@ -69,6 +69,37 @@ A model / route / tool-schema switch invalidates the cached prefix everywhere. T
 correct, but budget input cost for a *cold* prefix on the fallback path, and keep
 the fallback's prompt structure byte-identical so it re-warms fast.
 
+### The current owner pick (2026-06-11 sweep)
+
+`AI_MODELS=x-ai/grok-4.3,z-ai/glm-5.1` — the first decision made with the eval
+harness ([scripts/eval](../../scripts/eval); method + judge design in
+[agent-evals.md](research/agent-evals.md)). Five candidates ran the complex tier
+(N=3) through the real path; answers were scored on the 5-dimension rubric by
+Opus-4.8 subagents (a budget-driven one-off — see the harness's calibrated
+gpt-5.5 judge for the reproducible path). Quality = mean of 5 dims /5; dead-end =
+no-prose rate; latency = wall-clock/turn; $/1k = complex-tier, list price:
+
+| Model | Quality | Dead-end | Latency | $/1k | |
+|---|---|---|---|---|---|
+| **x-ai/grok-4.3** | 4.43 | **3%** | **9s** | ~17 | concise; best balance ← primary |
+| z-ai/glm-5.1 | **4.55** | 5% | 35s | ~24 | highest quality ← fallback (diff. provider) |
+| minimax/minimax-m3 | 4.01 | 5% | 78s | ~8 | cheapest, slow + verbose |
+| z-ai/glm-4.6 *(prod at sweep time)* | 3.55 | **28%** | 44s | ~12 | good answers, but dead-ends sink it |
+| moonshotai/kimi-k2.6 | 3.69 | 23% | **194s** | ~25 | slowest by far + dead-ends |
+
+**Why grok-4.3:** it wins on what makes an advisor *feel* good — speed (9s vs
+35–78s) and reliability (3% dead-ends) — at quality within judge-noise of glm-5.1.
+This ties back to routing-by-reliability above: the model live at sweep time
+(`glm-4.6`, itself only a brief interim pick) **dead-ended ~28% of complex turns**
+— the intermittent-silence failure mode (#21) that makes any model *feel* broken,
+which is exactly what reliability-first routing exists to avoid. glm-5.1 is the
+fallback (top quality, different provider → no shared-outage risk). Input tokens
+dominate and grok supports prompt caching (cached read ~16% of input), so real
+cost runs **~$11–13/1k complex turns** — see § 2 and § 5 for the input-cost levers.
+**Caveats:** N=3; complex tier only; Opus-authored rubric; the grok↔glm-5.1 gap is
+within noise. Re-run on a trigger (new model, price/deprecation change, prompt
+change) — never swap blind.
+
 ## 2. Prompt-cache strategy
 
 **The envelope split is correct — keep volatile data strictly AFTER the frozen
@@ -312,10 +343,14 @@ arguments* (e.g. the fee-switch question asked about the fund the user actually
 holds) and *over how long a trajectory* (a lookup that loops to five generations
 is thrashing), and it includes a **negative control** — an empty-holdings turn
 where the only correct answer is "you have no holdings yet" and naming a fund is a
-hallucination, so the harness rewards *refusing* as well as answering. An **LLM-as-judge** layer is deliberately
-*deferred*: the floor already gates regressions, and an uncalibrated judge adds
-cost and bias, not signal (it earns its place only once observed grader-vs-human
-disagreement justifies it — see the survey).
+hallucination, so the harness rewards *refusing* as well as answering. On top of
+this floor, an **opt-in LLM-as-judge** (`EVAL_JUDGE=on`) grades the qualities
+regex can't reach — grounded · complete · structured · adaptive · helpful, a
+criterion-separated rubric scored by a different-family model (default
+`openai/gpt-5.5`), evidence-anchored against the captured tool results. It never
+replaces the deterministic gate, and it's trusted only after **calibration**
+(`eval:judge:calibrate`) clears ~75% agreement with hand labels — the same run
+prices a cheaper judge so the cost-vs-intelligence choice is data-driven.
 
 **How we decide.** Acceptance criteria are **pre-declared** per tier (`THRESHOLDS`
 in `run.ts`: dead-end ≤5% retrieve / ≤15% complex, grounded-facts ≥80%/≥60%,
