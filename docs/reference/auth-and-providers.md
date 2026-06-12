@@ -128,6 +128,18 @@ tripping blocks the turn, both reset at UTC midnight):
 Owner / `AUTH_DISABLED` mode is never metered. Full var table:
 [configuration.md § Quotas + tier gating](./configuration.md#quotas--tier-gating).
 
+### Account-level spend guard
+
+The per-user caps above bound a single user. A separate, server-run probe
+([`scripts/check-openrouter-budget.ts`](../../scripts/check-openrouter-budget.ts))
+watches the **whole account's** OpenRouter spend against the key's monthly limit —
+read live from `GET /api/v1/key`, so the cap lives only in the OpenRouter dashboard
+and never drifts into the repo. It warns as spend nears the limit, before the 403
+that would otherwise break all chat with no warning. Set the key's monthly limit in
+the OpenRouter dashboard; spend thresholds are CLI flags on the server job, and an
+optional `OPENROUTER_BUDGET_HEARTBEAT_URL` lets the probe feed a dead-man monitor.
+The job unit + alert routing are server-side ops.
+
 ### In-chat vision
 
 An image-bearing chat turn (the Advisor reads images you attach) routes to its
