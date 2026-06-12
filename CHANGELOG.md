@@ -18,7 +18,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 - **An early-warning probe guards against OpenRouter spend silently breaking
   chat.** A server-run job reads the account key's live monthly limit from
   OpenRouter and signals when spend nears it — before the cap trips a 403 that
-  would break all chat — so the operator can act first. The dollar cap is read
+  would break all chat — so the operator can act first. When a heartbeat URL is
+  configured it self-notifies: a one-line spend summary POSTed to the heartbeat's
+  `/fail` sub-path on a warn or critical reading, plus a liveness ping on
+  healthy/warn. Warn recurs as a self-resolving nudge; critical withholds the ping
+  so it stays a sustained incident; the read is retried on a transient hiccup, and
+  a persistently unreadable API surfaces via the dead-man. The dollar cap is read
   live from OpenRouter (never copied into the repo), so there's nothing to drift;
   alert thresholds are job-unit flags.
 - **The served model is shown to the operator, not to users.** Each assistant

@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  alertMessage,
   CRITICAL_EXIT_CODE,
   classify,
   DEFAULT_CRIT_PCT,
@@ -86,10 +87,38 @@ describe("classify", () => {
 });
 
 describe("exitCodeFor", () => {
-  it("is non-zero ONLY for critical", () => {
-    expect(exitCodeFor("critical")).toBe(CRITICAL_EXIT_CODE);
-    expect(exitCodeFor("healthy")).toBe(0);
-    expect(exitCodeFor("warn")).toBe(0);
-    expect(exitCodeFor("indeterminate")).toBe(0);
+  it("is non-zero ONLY for critical, and only without an alert URL (the fallback path)", () => {
+    // No heartbeat URL → critical exits non-zero to drive the server-side OnFailure alert.
+    expect(exitCodeFor("critical", false)).toBe(CRITICAL_EXIT_CODE);
+    expect(exitCodeFor("healthy", false)).toBe(0);
+    expect(exitCodeFor("warn", false)).toBe(0);
+    expect(exitCodeFor("indeterminate", false)).toBe(0);
+  });
+
+  it("is always 0 when an alert URL is set (the probe self-notifies via /fail)", () => {
+    expect(exitCodeFor("critical", true)).toBe(0);
+    expect(exitCodeFor("healthy", true)).toBe(0);
+    expect(exitCodeFor("warn", true)).toBe(0);
+    expect(exitCodeFor("indeterminate", true)).toBe(0);
+  });
+});
+
+describe("alertMessage", () => {
+  it("warn body carries the status word, percent, and used/limit dollars", () => {
+    expect(alertMessage("warn", { limit: 20, limitRemaining: 4 })).toBe(
+      "warn: OpenRouter spend 80.0% — $16.00/$20.00",
+    );
+  });
+
+  it("critical body uses the critical word", () => {
+    expect(alertMessage("critical", { limit: 20, limitRemaining: 1 })).toBe(
+      "critical: OpenRouter spend 95.0% — $19.00/$20.00",
+    );
+  });
+
+  it("renders n/a when the limit can't be read", () => {
+    expect(alertMessage("warn", { limit: null, limitRemaining: null })).toBe(
+      "warn: OpenRouter spend n/a — n/a/n/a",
+    );
   });
 });

@@ -2,7 +2,8 @@
 //
 // Reads the account key's live monthly limit + remaining from OpenRouter's
 // `GET /api/v1/key`, classifies how close spend is to the cap, and signals the
-// result via exit code (+ a logged line) for a server-side monitor to consume.
+// result — primarily by notifying an optional heartbeat, with the exit code as a
+// fallback — for a server-side monitor to consume.
 //
 // Design — single source of truth, no local state:
 //   The cap lives ONLY in the OpenRouter dashboard (the key's monthly limit).
@@ -19,13 +20,23 @@
 // Usage:
 //   npm run jobs:check-budget [-- [--warn-pct=N] [--crit-pct=N]]
 //
-// Exit code IS the signalling contract for server-side ops:
-//   0   healthy / warn / indeterminate (API error, no key limit) — never page.
-//   10  critical (>= crit-pct of the limit used) — an act-now budget alert.
-// Warn logs a WARN line but stays exit 0, so a near-threshold reading doesn't page.
-// Any internal probe error also exits 0 — a bug here must never masquerade as a
-// budget breach; a crashed/silent probe is caught by the optional dead-man
-// heartbeat, not by a false page.
+// Alerting — primary path is the heartbeat, exit code is the fallback:
+//   • When OPENROUTER_BUDGET_HEARTBEAT_URL is set, the probe self-notifies via the
+//     heartbeat and exits 0. It POSTs a one-line summary to the URL's /fail
+//     sub-path on warn AND critical (distinct messages), and GETs the base URL (a
+//     liveness ping) only on healthy/warn. So warn both /fails and pings → a
+//     self-resolving recurring nudge; critical /fails but does NOT ping → a
+//     sustained, escalatable incident until spend recovers.
+//   • When NO heartbeat URL is set, the probe can't self-notify, so a CRITICAL
+//     reading exits 10 (the only non-zero exit) to drive the server-side OnFailure
+//     alert path. Warn / healthy / indeterminate always exit 0.
+// The /key read is retried on a transient hiccup (network / timeout / 5xx); a 4xx
+// (bad key) fails fast. If it's still unreadable the run is `indeterminate`: it
+// neither /fails nor pings, so a one-off is absorbed by the monitor's grace while
+// a SUSTAINED unreadable API (or a crashed probe) stops the heartbeat and the
+// dead-man surfaces it. Size the monitor's grace to ≥ ~1.5× the run cadence so a
+// single non-pinging run is tolerated but two-plus in a row fire. A bug here must
+// never masquerade as a budget breach — any internal probe error exits 0.
 //
 // Loads .env.local via tsx's --env-file flag (configured in package.json). On the
 // box it runs via scripts/run-job.sh against the same key the app uses.
@@ -102,9 +113,32 @@ export function classify(usage: KeyUsage, warnPct: number, critPct: number): Bud
   return "healthy";
 }
 
-/** Map a status to its process exit code. Non-zero ONLY for critical. */
-export function exitCodeFor(status: BudgetStatus): number {
-  return status === "critical" ? CRITICAL_EXIT_CODE : 0;
+/**
+ * Map a status to its process exit code. The exit code is only the FALLBACK alert
+ * signal: when a heartbeat URL is configured the probe self-notifies via the
+ * heartbeat `/fail` (see main), so it exits 0 and the exit code carries nothing.
+ * Only when NO heartbeat URL is set does a critical reading exit non-zero, so the
+ * server-side `OnFailure` path can still raise the alert. Never non-zero for
+ * warn / healthy / indeterminate (fail open).
+ */
+export function exitCodeFor(status: BudgetStatus, hasAlertUrl: boolean): number {
+  return status === "critical" && !hasAlertUrl ? CRITICAL_EXIT_CODE : 0;
+}
+
+const money = (v: number | null): string => (v === null ? "n/a" : `$${v.toFixed(2)}`);
+
+/**
+ * One-line human summary for a warn/critical heartbeat `/fail` body, e.g.
+ * `"warn: OpenRouter spend 82.0% — $16.40/$20.00"`. Pure — safe to unit-test.
+ */
+export function alertMessage(status: BudgetStatus, usage: KeyUsage): string {
+  const pct = pctUsed(usage);
+  const pctStr = pct === null ? "n/a" : `${pct.toFixed(1)}%`;
+  const used =
+    usage.limit !== null && usage.limitRemaining !== null
+      ? usage.limit - usage.limitRemaining
+      : null;
+  return `${status}: OpenRouter spend ${pctStr} — ${money(used)}/${money(usage.limit)}`;
 }
 
 /** Shape of the bits of `GET /api/v1/key` we read (everything else ignored). */
@@ -123,7 +157,19 @@ interface KeyReading {
   label: string | null;
 }
 
-async function fetchKeyReading(apiKey: string): Promise<KeyReading> {
+/** Attempts for the `/key` read. A transient hiccup (network / timeout / 5xx) is
+ *  retried so it doesn't masquerade as a sustained outage; a 4xx is not. */
+const MAX_FETCH_ATTEMPTS = 3;
+/** Backoff before attempts 2 and 3 (ms). Short — this is an hourly job. */
+const RETRY_BACKOFF_MS = [500, 1500];
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** A non-retryable read failure — a 4xx (bad/revoked key, bad request) that a
+ *  retry can't fix. Marked so the retry loop fails fast on it. */
+class NonRetryableKeyError extends Error {}
+
+async function fetchKeyOnce(apiKey: string): Promise<KeyReading> {
   const res = await fetch(KEY_ENDPOINT, {
     method: "GET",
     headers: {
@@ -133,7 +179,14 @@ async function fetchKeyReading(apiKey: string): Promise<KeyReading> {
     },
     signal: AbortSignal.timeout(15_000),
   });
-  if (!res.ok) throw new Error(`OpenRouter /key returned HTTP ${res.status}`);
+  if (res.status >= 400 && res.status < 500) {
+    // Client error (bad/revoked key, bad request) — won't recover from a retry.
+    throw new NonRetryableKeyError(`OpenRouter /key returned HTTP ${res.status}`);
+  }
+  if (!res.ok) {
+    // 5xx or other non-OK — transient server-side; let the caller retry.
+    throw new Error(`OpenRouter /key returned HTTP ${res.status}`);
+  }
   const json = (await res.json()) as KeyResponse;
   const d = json.data ?? {};
   const num = (v: unknown): number | null => (typeof v === "number" ? v : null);
@@ -144,14 +197,55 @@ async function fetchKeyReading(apiKey: string): Promise<KeyReading> {
   };
 }
 
-const money = (v: number | null): string => (v === null ? "n/a" : `$${v.toFixed(2)}`);
+/** Read `/key`, retrying TRANSIENT failures (network / timeout / 5xx) so a
+ *  momentary hiccup doesn't masquerade as a sustained outage. A 4xx fails fast.
+ *  Throws the last error if every attempt fails — the caller treats that as
+ *  `indeterminate`. */
+async function fetchKeyReading(apiKey: string): Promise<KeyReading> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt++) {
+    try {
+      return await fetchKeyOnce(apiKey);
+    } catch (err) {
+      if (err instanceof NonRetryableKeyError) throw err;
+      lastErr = err;
+      if (attempt < MAX_FETCH_ATTEMPTS) await sleep(RETRY_BACKOFF_MS[attempt - 1] ?? 1500);
+    }
+  }
+  throw lastErr;
+}
+
+/** POST a one-line failure message to the heartbeat's `/fail` sub-path (the
+ *  standard dead-man convention — same one scripts/heartbeat.sh uses). */
+async function postFail(url: string, message: string): Promise<void> {
+  await fetch(`${url}/fail`, {
+    method: "POST",
+    body: message,
+    signal: AbortSignal.timeout(10_000),
+  });
+}
+
+/** GET the heartbeat base URL — the dead-man liveness ping. No-ops if the URL is
+ *  unset; a ping failure never changes the budget verdict. */
+async function pingLiveness(url: string | undefined): Promise<void> {
+  if (!url) return;
+  try {
+    await fetch(url, { method: "GET", signal: AbortSignal.timeout(10_000) });
+  } catch {
+    // A heartbeat-ping failure must not change the budget verdict.
+  }
+}
 
 async function main(): Promise<void> {
   const { warnPct, critPct } = parseArgs(process.argv.slice(2));
+  const heartbeatUrl = process.env.OPENROUTER_BUDGET_HEARTBEAT_URL;
 
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
-    // Fail OPEN — a missing key is a config gap, not a budget breach. Never page.
+    // Fail OPEN — a missing key is a config gap, not a budget breach: log + exit 0,
+    // never page directly. DON'T ping: a one-off is absorbed by the monitor's
+    // grace, but a persistently missing key stops the heartbeat and the dead-man
+    // surfaces it ("budget monitoring degraded").
     console.log("budget: indeterminate (OPENROUTER_API_KEY unset) — exit 0");
     return;
   }
@@ -160,8 +254,10 @@ async function main(): Promise<void> {
   try {
     reading = await fetchKeyReading(apiKey);
   } catch (err) {
-    // An API hiccup is NOT a budget breach — exit 0 and let the server-side
-    // "no signal" timeout surface a stuck/crashed probe instead.
+    // Every retry failed → the API is unreadable right now. NOT a budget breach,
+    // so exit 0 and never page on it directly. DON'T ping either: a one-off is
+    // absorbed by the monitor's grace, but a SUSTAINED unreadable API stops the
+    // heartbeat and the dead-man surfaces it.
     const msg = err instanceof Error ? err.message : String(err);
     console.log(`budget: indeterminate (could not read OpenRouter /key: ${msg}) — exit 0`);
     return;
@@ -192,20 +288,28 @@ async function main(): Promise<void> {
     }
   }
 
-  // Dead-man liveness: ping the heartbeat on a healthy/warn run so a server-side
-  // "silence = problem" monitor notices a crashed/stuck probe. Deliberately NOT
-  // pinged on critical (so that monitor can double as the budget signal if wired
-  // that way) nor on indeterminate (a broken read must not look healthy).
-  const heartbeatUrl = process.env.OPENROUTER_BUDGET_HEARTBEAT_URL;
-  if (heartbeatUrl && (status === "healthy" || status === "warn")) {
+  // Budget heartbeat — alerting + dead-man liveness, gated by status:
+  //   • warn/critical → POST a one-line spend summary to the heartbeat's /fail
+  //     sub-path (opens a budget incident).
+  //   • healthy/warn → GET the base URL (liveness ping). So WARN both /fails and
+  //     pings → its incident self-resolves → a recurring nudge. CRITICAL /fails
+  //     but does NOT ping → its incident stays open → a sustained, escalatable
+  //     alert until spend recovers.
+  //   • critical + indeterminate withhold the ping on purpose: a sustained
+  //     over-budget-but-crashed probe, or a sustained unreadable API, then
+  //     surfaces via the dead-man (missing pings). Size the monitor's grace to
+  //     ≥ ~1.5× the run cadence so a single non-pinging run is absorbed but two
+  //     or more in a row fire.
+  if (heartbeatUrl && (status === "warn" || status === "critical")) {
     try {
-      await fetch(heartbeatUrl, { method: "GET", signal: AbortSignal.timeout(10_000) });
+      await postFail(heartbeatUrl, alertMessage(status, reading.usage));
     } catch {
-      // A heartbeat-ping failure must not change the budget verdict.
+      // A failed alert POST must not change the budget verdict.
     }
   }
+  if (status === "healthy" || status === "warn") await pingLiveness(heartbeatUrl);
 
-  process.exit(exitCodeFor(status));
+  process.exit(exitCodeFor(status, Boolean(heartbeatUrl)));
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

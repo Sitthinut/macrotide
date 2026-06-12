@@ -136,9 +136,14 @@ watches the **whole account's** OpenRouter spend against the key's monthly limit
 read live from `GET /api/v1/key`, so the cap lives only in the OpenRouter dashboard
 and never drifts into the repo. It warns as spend nears the limit, before the 403
 that would otherwise break all chat with no warning. Set the key's monthly limit in
-the OpenRouter dashboard; spend thresholds are CLI flags on the server job, and an
-optional `OPENROUTER_BUDGET_HEARTBEAT_URL` lets the probe feed a dead-man monitor.
-The job unit + alert routing are server-side ops.
+the OpenRouter dashboard; spend thresholds are CLI flags on the server job. The
+read is retried on a transient hiccup so a momentary blip doesn't false-alarm. An
+optional `OPENROUTER_BUDGET_HEARTBEAT_URL` does double duty: on a warn or critical
+reading the probe POSTs a one-line spend summary to the URL's `/fail` sub-path so
+the monitor raises a threshold alert, and on healthy/warn it pings the base URL as
+a dead-man liveness signal. It withholds the ping on critical and indeterminate, so
+a critical alert stays a sustained incident and a persistently unreadable API
+surfaces via the dead-man. The job unit + monitor wiring are server-side ops.
 
 ### In-chat vision
 

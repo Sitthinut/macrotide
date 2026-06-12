@@ -128,7 +128,7 @@ the 403 that would break all chat.
 
 | Var | Default | Read by | Notes |
 | --- | --- | --- | --- |
-| `OPENROUTER_BUDGET_HEARTBEAT_URL` | unset → no ping | [scripts/check-openrouter-budget.ts](../../scripts/check-openrouter-budget.ts) | Optional dead-man heartbeat URL: the probe pings it on a healthy/warn run so a server-side "silence = problem" monitor notices a crashed probe. Spend thresholds are CLI flags on the job unit (`--warn-pct` / `--crit-pct`, default 80 / 95), not env — the dollar cap itself is read from OpenRouter, never declared here. The systemd unit + alert routing are server-side ops. |
+| `OPENROUTER_BUDGET_HEARTBEAT_URL` | unset → no ping | [scripts/check-openrouter-budget.ts](../../scripts/check-openrouter-budget.ts) | Optional heartbeat URL the probe uses two ways. On a **warn or critical** reading it **POSTs a one-line spend summary to the URL's `/fail` sub-path** (the standard dead-man convention) to raise a threshold alert. And on **healthy/warn** it **GETs the base URL** as a dead-man liveness ping. It deliberately **withholds the ping on critical and indeterminate** — so a critical `/fail` stays a sustained incident, and a *persistently* unreadable API (the `/key` read is retried on a transient hiccup first) stops the heartbeat and surfaces via the dead-man. Size the monitor's grace to **≥ ~1.5× the run cadence** so a single non-pinging run is tolerated but two-plus in a row fire. Spend thresholds are CLI flags on the job unit (`--warn-pct` / `--crit-pct`, default 80 / 95), not env — the dollar cap itself is read from OpenRouter, never declared here. The systemd unit + monitor wiring are server-side ops. |
 
 ### External data sources
 
