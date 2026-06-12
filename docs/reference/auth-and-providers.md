@@ -104,28 +104,26 @@ OpenRouter proxies every major model behind one API:
 - Zero-cost router (`openrouter/free`) covers demo use without billing.
 - Pay per-token credit; load up via the OpenRouter dashboard.
 
-If you want a specific model, set `AI_MODELS` to any id from [openrouter.ai/models](https://openrouter.ai/models). It's a comma-separated fallback chain — the first model is tried first, and the next one is used if the previous fails. The default `openrouter/auto` lets OpenRouter pick the best model per prompt. `AI_MODELS` also serves `tier='trusted'` users.
+If you want a specific model, set `TRUSTED_TIER_MODELS` to any id from [openrouter.ai/models](https://openrouter.ai/models). It's a comma-separated fallback chain — the first model is tried first, and the next one is used if the previous fails. The default `openrouter/auto` lets OpenRouter pick the best model per prompt. `TRUSTED_TIER_MODELS` also serves `tier='trusted'` users.
 
 ### Tier model selection + spend caps
 
-A `tier='public'` user's chat model comes from its **own** `PUBLIC_TIER_MODEL` var
-(default `openrouter/free`), never from `AI_MODELS` — so an owner-chain change
+A `tier='public'` user's chat model comes from its **own** `PUBLIC_TIER_MODELS` var
+(default `openrouter/free`), never from `TRUSTED_TIER_MODELS` — so a trusted-chain change
 can't widen public access. To lift public-tier quality, point it at a cheap paid
 model:
 
 ```sh
-PUBLIC_TIER_MODEL=google/gemini-2.5-flash
+PUBLIC_TIER_MODELS=google/gemini-2.5-flash
 ```
-
-(`FREE_TIER_MODEL` is a deprecated-but-honored alias for `PUBLIC_TIER_MODEL`.)
 
 Public-tier spend is bounded by two caps, checked before each request (either
 tripping blocks the turn, both reset at UTC midnight):
 
-- **Token cap** — `DAILY_TOKEN_BUDGET_PUBLIC` (default 20k tokens/day). Always on. (`DAILY_TOKEN_BUDGET_FREE` is a deprecated-but-honored alias.)
+- **Token cap** — `DAILY_TOKEN_BUDGET_PUBLIC` (default 20k tokens/day). Always on.
 - **Cost cap** — `DAILY_CENTS_BUDGET_PUBLIC` (US cents/day). **Off unless set**; the
   right bound for a paid model with asymmetric in/out pricing. The per-turn cost
-  estimate reads `MODEL_PRICES` (USD/Mtok), so set that to match `PUBLIC_TIER_MODEL`. (`DAILY_CENTS_BUDGET_FREE` is a deprecated-but-honored alias.)
+  estimate reads `MODEL_PRICES` (USD/Mtok), so set that to match `PUBLIC_TIER_MODELS`.
 
 Owner / `AUTH_DISABLED` mode is never metered. Full var table:
 [configuration.md § Quotas + tier gating](./configuration.md#quotas--tier-gating).
@@ -134,8 +132,8 @@ Owner / `AUTH_DISABLED` mode is never metered. Full var table:
 
 An image-bearing chat turn (the Advisor reads images you attach) routes to its
 **own** `VISION_CHAT_MODEL` (default `google/gemini-2.5-flash`), not the text
-chains — for the same reason `PUBLIC_TIER_MODEL` is separate: public-tier vision
-derives from a dedicated var and can't widen `AI_MODELS`/`PUBLIC_TIER_MODEL`.
+chains — for the same reason `PUBLIC_TIER_MODELS` is separate: public-tier vision
+derives from a dedicated var and can't widen `TRUSTED_TIER_MODELS`/`PUBLIC_TIER_MODELS`.
 Owner, trusted, and public all use it; public-tier image turns stay bounded by the
 same daily token + optional cents caps above. Set `VISION_CHAT_MODEL=off` to
 disable inline chat vision entirely (image turns then get a stub pointing at the
@@ -158,7 +156,7 @@ Demo chat is routed through `DEMO_OPENROUTER_API_KEY`. If unset, it falls back t
 The `openrouter/free` router picks among ~25 free-tier models per request (volunteer GPUs; subject to OpenRouter's rate limits). For a pinned free model:
 
 ```sh
-DEMO_AI_MODELS=meta-llama/llama-3.3-70b-instruct:free
+DEMO_TIER_MODELS=meta-llama/llama-3.3-70b-instruct:free
 ```
 
 ## Market data providers (indices / FX / stocks)

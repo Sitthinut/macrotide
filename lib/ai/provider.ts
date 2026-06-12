@@ -22,10 +22,10 @@ import type { LanguageModel } from "ai";
  *                `openrouter/free`; same cheap-model posture as titling.
  *
  * Configure via env (comma-separated, first is primary, rest are fallbacks):
- *   AI_MODELS=openrouter/free,openrouter/auto
- *   DEMO_AI_MODELS=openrouter/free
- *   TITLE_MODEL=openrouter/free
- *   EXTRACT_MODEL=openrouter/free   # optional; falls back to TITLE_MODEL
+ *   TRUSTED_TIER_MODELS=openrouter/free,openrouter/auto
+ *   DEMO_TIER_MODELS=openrouter/free
+ *   TITLE_MODELS=openrouter/free
+ *   EXTRACT_MODELS=openrouter/free   # optional; falls back to TITLE_MODELS
  */
 
 export interface ResolvedProvider {
@@ -36,20 +36,20 @@ export interface ResolvedProvider {
   label: string;
 }
 
-const OWNER_DEFAULT = ["openrouter/free", "openrouter/auto"];
-const DEMO_DEFAULT = ["openrouter/free"];
+const TRUSTED_TIER_DEFAULT = ["openrouter/free", "openrouter/auto"];
+const DEMO_TIER_DEFAULT = ["openrouter/free"];
 // Auto-titling a chat is a 3–5-word task. We deliberately don't burn
 // Claude/GPT capacity on it — `openrouter/free` is the meta-router that
 // fans out across cheap free models (DeepSeek, Qwen, etc.). Override with
-// the `TITLE_MODEL` env var; pinning anything in the Claude or GPT family
+// the `TITLE_MODELS` env var; pinning anything in the Claude or GPT family
 // would be an escalation per AGENTS.md § AI / model selection.
-const TITLE_DEFAULT = ["openrouter/free"];
+const TITLE_MODELS_DEFAULT = ["openrouter/free"];
 // Archive-time fact extraction. Same posture as titling — a
 // background summarize-and-extract pass over an idle chat is an ancillary task
-// that doesn't justify Claude/GPT spend. Override with `EXTRACT_MODEL`; falls
-// back to `TITLE_MODEL` then `openrouter/free` so an operator who already
+// that doesn't justify Claude/GPT spend. Override with `EXTRACT_MODELS`; falls
+// back to `TITLE_MODELS` then `openrouter/free` so an operator who already
 // pinned a cheap title model gets the same model for extraction for free.
-const EXTRACT_DEFAULT = ["openrouter/free"];
+const EXTRACT_MODELS_DEFAULT = ["openrouter/free"];
 
 function parseModels(value: string | undefined): string[] | null {
   if (!value) return null;
@@ -122,7 +122,7 @@ export function resolveOwnerProvider(
 ): ResolvedProvider {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) return { model: null, ready: false, label: "OpenRouter (no key)" };
-  const models = parseModels(process.env.AI_MODELS) ?? OWNER_DEFAULT;
+  const models = parseModels(process.env.TRUSTED_TIER_MODELS) ?? TRUSTED_TIER_DEFAULT;
   // Effort is gated per-turn by intent in the route (undefined = model default).
   return {
     model: openrouter(key, models, { reasoningEffort: opts.reasoningEffort }),
@@ -131,24 +131,23 @@ export function resolveOwnerProvider(
   };
 }
 
-// The public tier derives ONLY from its own dedicated `PUBLIC_TIER_MODEL` var
-// (deprecated alias: `FREE_TIER_MODEL`, still honored), defaulting to
-// OpenRouter's zero-cost meta-router — DELIBERATELY never from `AI_MODELS`. This
-// preserves the cost/security invariant by construction: a slip in the owner
-// chain (`AI_MODELS`) can't widen public-tier access, because the public branch
-// doesn't read it. Pointing the public tier at a cheap PAID model is a separate,
-// conscious operator act (set `PUBLIC_TIER_MODEL`), and it's bounded by the
-// daily token + optional cents cap — see lib/db/queries/usage.ts.
+// The public tier chain derives ONLY from `PUBLIC_TIER_MODELS`, never from
+// `TRUSTED_TIER_MODELS`, defaulting to OpenRouter's zero-cost meta-router. This
+// preserves the cost/security invariant by construction: a slip in the trusted
+// chain (`TRUSTED_TIER_MODELS`) can't widen public-tier access, because the
+// public branch doesn't read it. Pointing the public tier at a cheap PAID model
+// is a separate, conscious operator act (set `PUBLIC_TIER_MODELS`), and it's
+// bounded by the daily token + optional cents cap — see lib/db/queries/usage.ts.
 const PUBLIC_TIER_DEFAULT = ["openrouter/free"];
 
 /**
  * Resolve the chat provider for a tier:
- *   - 'trusted' → the owner model chain (`AI_MODELS`, default
+ *   - 'trusted' → the owner model chain (`TRUSTED_TIER_MODELS`, default
  *                 `openrouter/free → openrouter/auto`); identical to the owner
  *                 path.
- *   - 'public'  → `PUBLIC_TIER_MODEL` (deprecated alias `FREE_TIER_MODEL`;
- *                 default `openrouter/free`) ONLY. Reads its own var, NEVER
- *                 `AI_MODELS`, so the owner chain can't leak in.
+ *   - 'public'  → `PUBLIC_TIER_MODELS` (default `openrouter/free`) ONLY. Reads
+ *                 its own var, NEVER `TRUSTED_TIER_MODELS`, so the trusted chain
+ *                 can't leak in.
  *
  * Both read the shared `OPENROUTER_API_KEY`; per-user keys are out of scope —
  * tier gating + the daily caps are what bound public-tier spend.
@@ -160,7 +159,7 @@ export function resolveTierProvider(
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) return { model: null, ready: false, label: "OpenRouter (no key)" };
   if (tier === "trusted") {
-    const models = parseModels(process.env.AI_MODELS) ?? OWNER_DEFAULT;
+    const models = parseModels(process.env.TRUSTED_TIER_MODELS) ?? TRUSTED_TIER_DEFAULT;
     // Trusted shares the owner chain AND the per-turn intent-gated effort.
     return {
       model: openrouter(key, models, { reasoningEffort: opts.reasoningEffort }),
@@ -168,9 +167,7 @@ export function resolveTierProvider(
       label: chainLabel("Trusted", models),
     };
   }
-  const models =
-    parseModels(process.env.PUBLIC_TIER_MODEL ?? process.env.FREE_TIER_MODEL) ??
-    PUBLIC_TIER_DEFAULT;
+  const models = parseModels(process.env.PUBLIC_TIER_MODELS) ?? PUBLIC_TIER_DEFAULT;
   // Public tier: ALWAYS pin reasoning off, ignoring any gated effort. Public is
   // the cost-protected path — a cheap model the router lands on must not reason
   // (slow + billed at the output rate) even on an analytical-looking turn. The
@@ -185,7 +182,7 @@ export function resolveTierProvider(
 export function resolveDemoProvider(): ResolvedProvider {
   const key = process.env.DEMO_OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY;
   if (!key) return { model: null, ready: false, label: "Demo (no key configured)" };
-  const models = parseModels(process.env.DEMO_AI_MODELS) ?? DEMO_DEFAULT;
+  const models = parseModels(process.env.DEMO_TIER_MODELS) ?? DEMO_TIER_DEFAULT;
   // Demo: pin reasoning off — public, abuse-exposed, and on the free chain; it
   // should never burn reasoning latency/cost on a throwaway demo turn.
   return {
@@ -196,14 +193,14 @@ export function resolveDemoProvider(): ResolvedProvider {
 }
 
 // Inline chat vision (a turn that carries one or more attached images). The
-// owner/public chat chains (`AI_MODELS` / `PUBLIC_TIER_MODEL`) may resolve to
-// text-only models, so an image turn routes here instead — to a SINGLE
-// vision-capable model named by its OWN dedicated `VISION_CHAT_MODEL` var
+// trusted/public chat chains (`TRUSTED_TIER_MODELS` / `PUBLIC_TIER_MODELS`) may
+// resolve to text-only models, so an image turn routes here instead — to a
+// SINGLE vision-capable model named by its OWN dedicated `VISION_CHAT_MODEL` var
 // (default `google/gemini-2.5-flash`, the same family the pinned OCR extractor
 // uses). Two deliberate consequences:
 //   - The public-tier cost invariant is preserved by construction: public-tier
-//     vision derives from `VISION_CHAT_MODEL`, NEVER from `AI_MODELS`, exactly
-//     like `PUBLIC_TIER_MODEL`. Public image turns are bounded by the daily
+//     vision derives from `VISION_CHAT_MODEL`, NEVER from `TRUSTED_TIER_MODELS`,
+//     exactly like `PUBLIC_TIER_MODELS`. Public image turns are bounded by the daily
 //     token + optional cents caps enforced in the route before this is reached.
 //   - Setting `VISION_CHAT_MODEL=off` (or empty) disables inline chat vision
 //     entirely — the resolver returns not-ready and the route serves a stub that
@@ -247,13 +244,13 @@ export function resolveVisionProvider(
  * Tiny model used for ancillary tasks where Claude/GPT capacity is overkill
  * — currently just auto-titling a chat after the first turn pair. Reads the
  * same `OPENROUTER_API_KEY` as the chat path but uses a separate model var
- * (`TITLE_MODEL`, default `openrouter/free`) so the operator can pin a
+ * (`TITLE_MODELS`, default `openrouter/free`) so the operator can pin a
  * cost-efficient small model without affecting chat quality.
  */
 export function resolveTitleProvider(): ResolvedProvider {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) return { model: null, ready: false, label: "Title (no key)" };
-  const models = parseModels(process.env.TITLE_MODEL) ?? TITLE_DEFAULT;
+  const models = parseModels(process.env.TITLE_MODELS) ?? TITLE_MODELS_DEFAULT;
   // Reasoning off — a 3–5-word title never needs chain-of-thought.
   return {
     model: openrouter(key, models, { reasoningEffort: "none" }),
@@ -264,8 +261,8 @@ export function resolveTitleProvider(): ResolvedProvider {
 
 /**
  * Cheap model for archive-time extraction. Reads the shared
- * `OPENROUTER_API_KEY`. Model resolution order: `EXTRACT_MODEL` →
- * `TITLE_MODEL` → `openrouter/free`. Pinning a Claude/GPT-family model here
+ * `OPENROUTER_API_KEY`. Model resolution order: `EXTRACT_MODELS` →
+ * `TITLE_MODELS` → `openrouter/free`. Pinning a Claude/GPT-family model here
  * would be an escalation per AGENTS.md § AI / model selection — extraction is
  * a background, best-effort pass and should stay on cheap free models.
  */
@@ -273,9 +270,9 @@ export function resolveExtractorProvider(): ResolvedProvider {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) return { model: null, ready: false, label: "Extract (no key)" };
   const models =
-    parseModels(process.env.EXTRACT_MODEL) ??
-    parseModels(process.env.TITLE_MODEL) ??
-    EXTRACT_DEFAULT;
+    parseModels(process.env.EXTRACT_MODELS) ??
+    parseModels(process.env.TITLE_MODELS) ??
+    EXTRACT_MODELS_DEFAULT;
   // Reasoning off — a background summarize-and-extract pass doesn't need it.
   return {
     model: openrouter(key, models, { reasoningEffort: "none" }),

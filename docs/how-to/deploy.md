@@ -85,13 +85,13 @@ PUBLIC_APP_URL=https://macrotide.example.com
 AUTH_RP_ID=macrotide.example.com
 AUTH_SECRET=        # fresh: openssl rand -base64 32 — do NOT reuse a dev secret
 OPENROUTER_API_KEY=sk-or-...
-AI_MODELS=openrouter/free,openrouter/auto
-# Public-tier chat model (own var, never AI_MODELS). Default openrouter/free; point
+TRUSTED_TIER_MODELS=openrouter/free,openrouter/auto
+# Public-tier chat model (own var, never TRUSTED_TIER_MODELS). Default openrouter/free; point
 # at a cheap paid model to lift public-tier quality, bounded by the caps below.
-# PUBLIC_TIER_MODEL=google/gemini-2.5-flash
+# PUBLIC_TIER_MODELS=google/gemini-2.5-flash
 # Public-tier spend caps (checked pre-request, reset UTC midnight). Token cap is
 # always on; the cents cost cap is OFF unless set (the right bound for a paid
-# public-tier model). MODEL_PRICES feeds the cost estimate — match PUBLIC_TIER_MODEL.
+# public-tier model). MODEL_PRICES feeds the cost estimate — match PUBLIC_TIER_MODELS.
 # DAILY_TOKEN_BUDGET_PUBLIC=20000
 # DAILY_CENTS_BUDGET_PUBLIC=50
 # MODEL_PRICES={"google/gemini-2.5-flash":{"in":0.3,"out":2.5}}
@@ -292,7 +292,7 @@ chmod 600 .env.local
 #   PUBLIC_APP_URL=https://macrotide.yourdomain.com
 #   AUTH_SECRET=$(openssl rand -base64 32)
 #   OPENROUTER_API_KEY=sk-or-...
-#   AI_MODELS=openrouter/auto   (comma-separated fallback chain; ids from openrouter.ai/models)
+#   TRUSTED_TIER_MODELS=openrouter/auto   (comma-separated fallback chain; ids from openrouter.ai/models)
 #   # Optional: separate key for demo chat — see reference/auth-and-providers.md.
 #   # DEMO_OPENROUTER_API_KEY=sk-or-...
 # Auth is required by default; set AUTH_DISABLED=1 only for trusted local dev.
