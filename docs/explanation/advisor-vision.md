@@ -35,20 +35,20 @@ before model-message conversion.
 
 ## Model routing — a dedicated vision model
 
-The owner/free chat chains (`AI_MODELS` / `FREE_TIER_MODEL`) may resolve to
+The owner/public chat chains (`AI_MODELS` / `PUBLIC_TIER_MODEL`) may resolve to
 text-only models, so an image turn routes to its own `VISION_CHAT_MODEL`
 (default `google/gemini-2.5-flash`, the family the OCR importer already proves
 out) via `resolveVisionProvider` ([lib/ai/provider.ts](../../lib/ai/provider.ts)).
 
-This is the same shape as the `FREE_TIER_MODEL` invariant, and for the same
-reason: **free-tier vision derives from its own var, never from `AI_MODELS`** — so
+This is the same shape as the `PUBLIC_TIER_MODEL` invariant, and for the same
+reason: **public-tier vision derives from its own var, never from `AI_MODELS`** — so
 enabling vision can't widen the text model chains. The decision per turn
 (`visionDecisionFor`) is:
 
 | Path | Image turn |
 | --- | --- |
 | owner / trusted | vision model (trusted keeps the intent-gated reasoning effort) |
-| free | vision model, **bounded by the daily token + optional cents caps** (reasoning pinned `none`) |
+| public | vision model, **bounded by the daily token + optional cents caps** (reasoning pinned `none`) |
 | demo | **stub unless `DEMO_VISION` is set**; when on, uses the demo key, bounded by the 10-turn cap |
 | any, `VISION_CHAT_MODEL=off` | stub pointing at the Add-holdings importer |
 

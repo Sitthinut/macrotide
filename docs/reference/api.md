@@ -54,7 +54,7 @@ or rename a route.
 | `/api/admin/refresh-market` | GET, POST | Trigger a market data refresh (admin) |
 | `/api/admin/status` | GET | Returns `{ isOwner: boolean }` for the current session; used by the UI to decide whether to show the Admin entry point — not a security boundary (each admin action enforces authorization independently); always 200 |
 | `/api/admin/users` | GET | Owner-only — lists every user with id, email, name, tier, and today's token usage; returns 403 for non-owners |
-| `/api/admin/users/[id]/tier` | POST | Owner-only — sets a user's account tier (`{ tier: "free" \| "trusted" }`); returns 403 for non-owners; the owner cannot demote their own account to `free` (409 lockout guard) |
+| `/api/admin/users/[id]/tier` | POST | Owner-only — sets a user's account tier (`{ tier: "public" \| "trusted" }`); returns 403 for non-owners; the owner cannot demote their own account to `public` (409 lockout guard) |
 
 ## Funds & screener
 

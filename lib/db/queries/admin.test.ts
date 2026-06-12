@@ -61,14 +61,14 @@ beforeEach(() => {
 });
 
 describe("listUsers", () => {
-  it("returns all users with default 'free' tier and zero usage", () => {
+  it("returns all users with default 'public' tier and zero usage", () => {
     seedUser(db, "u1", new Date("2026-01-01"));
     seedUser(db, "u2", new Date("2026-01-02"));
     const rows = runWithDbContext(ctx, () => listUsers("2026-05-24")) as ReturnType<
       typeof listUsers
     >;
     expect(rows.map((r) => r.id)).toEqual(["u1", "u2"]); // ordered by createdAt
-    expect(rows.every((r) => r.tier === "free")).toBe(true);
+    expect(rows.every((r) => r.tier === "public")).toBe(true);
     expect(rows.every((r) => r.usageToday === 0)).toBe(true);
   });
 
@@ -93,7 +93,7 @@ describe("listUsers", () => {
 });
 
 describe("setUserTier", () => {
-  it("flips an existing user between free and trusted", () => {
+  it("flips an existing user between public and trusted", () => {
     seedUser(db, "u1", new Date("2026-01-01"));
     const okUp = runWithDbContext(ctx, () => setUserTier("u1", "trusted")) as boolean;
     expect(okUp).toBe(true);
@@ -101,10 +101,10 @@ describe("setUserTier", () => {
       "trusted",
     );
 
-    const okDown = runWithDbContext(ctx, () => setUserTier("u1", "free")) as boolean;
+    const okDown = runWithDbContext(ctx, () => setUserTier("u1", "public")) as boolean;
     expect(okDown).toBe(true);
     expect((runWithDbContext(ctx, () => listUsers()) as ReturnType<typeof listUsers>)[0].tier).toBe(
-      "free",
+      "public",
     );
   });
 

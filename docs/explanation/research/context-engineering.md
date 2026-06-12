@@ -17,7 +17,7 @@ the model to terminate cleanly; and treat the system prompt as a steering
 instrument for tool-first behavior.
 
 This survey is oriented toward Macrotide's specific problem: a **small / cheap
-model** (the free-tier OpenRouter chain) acting as **Advisor** over a tool
+model** (the public-tier OpenRouter chain) acting as **Advisor** over a tool
 surface that reads the user's portfolio, plan, and journal and can save notes.
 Small models fail the loop more often than frontier models, so the engineering
 here matters more, not less.
@@ -53,7 +53,7 @@ document is a tactic in service of that one constraint.
 
 For a small model the budget is smaller and the rot is faster, so the same
 discipline that is a nicety on a frontier model is a correctness requirement on
-the free tier.
+the public tier.
 
 Sources:
 [Anthropic — Effective context engineering for AI agents](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents).
@@ -224,7 +224,7 @@ keeps
 ([AI SDK — Tool calling](https://ai-sdk.dev/docs/ai-sdk-core/tools-and-tool-calling)).
 Small models are disproportionately hurt by a big JSON dump: it eats their
 limited budget, accelerates context rot, and buries the relevant number — so
-result shaping is the single highest-leverage reliability lever for the free
+result shaping is the single highest-leverage reliability lever for the public
 tier.
 
 For very large tool *surfaces*, Anthropic's **tool-search** approach loads tool
@@ -340,7 +340,7 @@ document on the *memory* axis.
 ### The cost of stuffing
 
 The reason to bother: **context rot** (recall degrades as tokens grow) plus the
-literal token bill. On a metered free tier the second cost is concrete — every
+literal token bill. On a metered public tier the second cost is concrete — every
 redundant tool-result field and every un-compacted old turn is paid for on every
 subsequent turn of the conversation. Macrotide's frozen-snapshot memory injection
 (built once per session, held identical across turns) is partly a **prefix-cache
@@ -482,7 +482,7 @@ mechanism:
 ## About this research
 
 This survey was gathered in May 2026 via web search and direct fetches of primary
-sources, oriented toward Macrotide's free-tier, small-model Advisor.
+sources, oriented toward Macrotide's public-tier, small-model Advisor.
 
 - The **Anthropic** material is from the company's own published engineering
   posts and docs, fetched directly:
@@ -526,7 +526,7 @@ sources, oriented toward Macrotide's free-tier, small-model Advisor.
 - Anthropic's reported metrics (the 37% token reduction; the 72%→90% and
   25.6%→28.5% accuracy figures; the "85%" tool-search overhead reduction) are
   Anthropic's own published numbers for *their* models on *their* benchmarks;
-  they are not independently reproduced and may not transfer to a free-tier
+  they are not independently reproduced and may not transfer to a public-tier
   OpenRouter model. A separately-verified Anthropic example shows the
   **direction** holds: a concise vs. detailed tool-result `ResponseFormat` cut a
   Slack tool's output from ~206 to ~72 tokens (~66%)

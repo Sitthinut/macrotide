@@ -453,7 +453,7 @@ reordered tool list, a new timestamp, a model/route swap).
 
 **Caching breaks on failover.** Changing the underlying model, provider route, or
 tool schema invalidates the prefix everywhere. The Advisor multi-models for
-free-tier resilience (the empty-turn reliability problem), so **expect a
+public-tier resilience (the empty-turn reliability problem), so **expect a
 cache miss on every failover** — budget input cost for cold prefixes on the
 fallback path, and keep the fallback's prompt structure byte-identical so it
 warms quickly.

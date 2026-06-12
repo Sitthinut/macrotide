@@ -560,15 +560,15 @@ export const usage = sqliteTable(
 );
 
 // Tier gating: which OpenRouter model chain a user can hit.
-//   'free'    = openrouter free router only (zero cost to owner)
+//   'public'  = the public-tier model chain only (zero cost to owner by default)
 //   'trusted' = full owner model chain (AI_MODELS env)
 // Owner promotes via SQL: UPDATE account_tier SET tier='trusted' WHERE user_id=?
 export const accountTier = sqliteTable("account_tier", {
   userId: text("user_id")
     .primaryKey()
     .references(() => user.id),
-  tier: text("tier", { enum: ["free", "trusted"] })
+  tier: text("tier", { enum: ["public", "trusted"] })
     .notNull()
-    .default("free"),
+    .default("public"),
   grantedAt: text("granted_at").notNull(), // ISO-8601 UTC
 });

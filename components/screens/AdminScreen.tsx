@@ -8,7 +8,7 @@ import { fmtDate, fmtTokens } from "@/lib/format";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Tier = "free" | "trusted";
+type Tier = "public" | "trusted";
 
 interface AdminUser {
   id: string;
@@ -249,10 +249,10 @@ export function AdminScreen({ onBack }: AdminScreenProps) {
                       overflow: "hidden",
                     }}
                   >
-                    {(["free", "trusted"] as Tier[]).map((t) => {
+                    {(["public", "trusted"] as Tier[]).map((t) => {
                       const active = u.tier === t;
                       // Guard the UI mirror of the server-side self-demote rule.
-                      const blocked = isSelf && t === "free";
+                      const blocked = isSelf && t === "public";
                       return (
                         <button
                           key={t}
@@ -291,8 +291,9 @@ export function AdminScreen({ onBack }: AdminScreenProps) {
             lineHeight: 1.5,
           }}
         >
-          <strong>free</strong> = OpenRouter free models only (zero cost). <strong>trusted</strong>{" "}
-          = full owner model chain. Changes take effect on the user's next chat turn.
+          <strong>public</strong> = the public-tier model chain only (zero cost by default).{" "}
+          <strong>trusted</strong> = full owner model chain. Changes take effect on the user's next
+          chat turn.
         </div>
       </div>
     </div>

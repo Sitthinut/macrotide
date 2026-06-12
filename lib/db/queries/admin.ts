@@ -17,7 +17,7 @@ export interface AdminUserRow {
 }
 
 /**
- * Every user with their tier (defaulting to 'free' when no account_tier row
+ * Every user with their tier (defaulting to 'public' when no account_tier row
  * exists) and today's total token usage. One query with LEFT JOINs so a user
  * missing a tier or usage row still appears.
  */
@@ -42,7 +42,7 @@ export function listUsers(date: string = utcDate()): AdminUserRow[] {
     id: r.id,
     email: r.email,
     name: r.name,
-    tier: (r.tier as Tier | null) ?? "free",
+    tier: (r.tier as Tier | null) ?? "public",
     createdAt:
       r.createdAt instanceof Date ? r.createdAt.toISOString() : new Date(r.createdAt).toISOString(),
     usageToday: (r.inputTokens ?? 0) + (r.outputTokens ?? 0),

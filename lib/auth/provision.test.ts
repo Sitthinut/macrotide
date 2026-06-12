@@ -1,5 +1,5 @@
 // New-user provisioning: a freshly-created user gets a default
-// 'free' account_tier row and one seeded bucket stamped with their user_id.
+// 'public' account_tier row and one seeded bucket stamped with their user_id.
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
@@ -45,7 +45,7 @@ function seedUser(db: ReturnType<typeof freshDb>["db"], id: string) {
 }
 
 describe("provisionNewUser", () => {
-  it("inserts a default 'free' account_tier row and seeds one owned bucket", () => {
+  it("inserts a default 'public' account_tier row and seeds one owned bucket", () => {
     const { sqlite, db, marketDb, marketSqlite } = freshDb();
     seedUser(db, "u1");
     const ctx: DbContext = {
@@ -62,7 +62,7 @@ describe("provisionNewUser", () => {
       provisionNewUser("u1");
 
       const tier = db.select().from(accountTier).where(eq(accountTier.userId, "u1")).get();
-      expect(tier?.tier).toBe("free");
+      expect(tier?.tier).toBe("public");
       expect(tier?.grantedAt).toBeTruthy();
 
       const buckets = listBuckets();

@@ -23,7 +23,7 @@ genuine cross-provider splits, and reads the consensus off them.
 
 ## Decision
 
-Macrotide's Advisor is a small, cheap model (the free-tier OpenRouter chain)
+Macrotide's Advisor is a small, cheap model (the public-tier OpenRouter chain)
 driving a deliberately small tool surface through the Vercel AI SDK `streamText`
 loop. The *implementation* of that loop — model resolution by tier, the frozen
 memory snapshot, the tool set, the structured context envelope, and the
@@ -541,7 +541,7 @@ documents; underlying behavior is inherited from whichever model serves the rout
 ## Macrotide implications
 
 For a small-model, tool-using, OpenRouter-fronted advisor, these primitives line
-up against Macrotide's existing constraints (the free-tier `openrouter/free`
+up against Macrotide's existing constraints (the public-tier `openrouter/free`
 chain, the 24h quote TTL, the demo-mode budget caps, and the empty-turn
 reliability theme). The loop *implementation* already lives in
 [architecture.md § The chat path](../architecture.md#the-chat-path) and
@@ -589,8 +589,8 @@ reasons behind its shape.
 - **Default reasoning off/low; gate effort behind intent.** Quote lookups and
   portfolio display are the well-defined workhorse path where reasoning adds
   latency and output-token cost with little gain. **Macrotide sends no `reasoning`
-  param today**, so a reasoning-capable free model the router picks reasons at its
-  own default and bills it at the output rate — a silent cost leak on the free
+  param today**, so a reasoning-capable zero-cost model the router picks reasons at its
+  own default and bills it at the output rate — a silent cost leak on the public
   tier. Standardize on OpenRouter's `reasoning:{effort}` defaulting to
   `none`/`minimal`, and reserve higher effort for genuinely analytical asks
   (rebalancing rationale, feeder look-through, "should I tilt toward gold given THB

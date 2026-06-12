@@ -113,7 +113,7 @@ Writes follow the same path with POST/PATCH/DELETE and revalidation.
 `POST /api/chat` is the most involved route:
 
 1. Resolve the model provider by tier and demo status ([lib/ai/provider.ts](../../lib/ai/provider.ts)).
-   Free/demo traffic is pinned to the free model chain in code so it can never
+   Public/demo traffic is pinned to the public model chain in code so it can never
    resolve to a paid model.
 2. Inject the user's active memory into the system prompt
    ([lib/memory/inject.ts](../../lib/memory/inject.ts)), frozen for the session.

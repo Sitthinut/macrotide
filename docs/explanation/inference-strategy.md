@@ -22,7 +22,7 @@ The loop's mechanics live in
 knobs*.
 
 The Advisor's shape: ~10 tools (memory + advisor reads/proposals), `stepCountIs(5)`,
-`maxOutputTokens` 1024 (demo/free) / 2048 (trusted/owner), a frozen
+`maxOutputTokens` 1024 (demo/public) / 2048 (trusted/owner), a frozen
 system+memory prefix (`composeSystemPrompt`), a per-turn `EntryContext` user
 message after it, **no prompt-cache breakpoints**, and **reasoning pinned off on
 the cost-sensitive paths** — over the `openrouter/free → openrouter/auto` chain
@@ -32,9 +32,9 @@ with recover-on-empty + retry-on-error resilience.
 
 | Lever | Where Macrotide stands | Highest-value move |
 |---|---|---|
-| **Model routing** | free pinned to its own `FREE_TIER_MODEL`; multi-model fallback; recover-on-empty net | route by tool-call reliability, not just price |
-| **Prompt caching** | frozen prefix is cache-*ready* but no breakpoints sent | keep volatile data after the prefix; exploit free-chain auto-caching; clear the floor |
-| **Reasoning tokens** | `effort:none` pinned on free/demo/title/extract; owner/trusted gated by intent (`none`↔`medium`) | push more "complex math" into tools so even complex turns need less reasoning |
+| **Model routing** | public pinned to its own `PUBLIC_TIER_MODEL`; multi-model fallback; recover-on-empty net | route by tool-call reliability, not just price |
+| **Prompt caching** | frozen prefix is cache-*ready* but no breakpoints sent | keep volatile data after the prefix; exploit public-chain auto-caching; clear the floor |
+| **Reasoning tokens** | `effort:none` pinned on public/demo/title/extract; owner/trusted gated by intent (`none`↔`medium`) | push more "complex math" into tools so even complex turns need less reasoning |
 | **Context loading** | JIT tool reads + the entry-context envelope | keep JIT default; app-layer compaction; shape tool results |
 | **Structured output** | tool-call-as-extraction via the AI SDK | one schema to the strictest intersection + Zod re-validate |
 
@@ -51,12 +51,12 @@ by it for tool-calling requests); filter candidates on
 meta-router fans across DeepSeek/Qwen/etc. with *no* such guarantee — which is
 exactly why the recover-on-empty net is load-bearing, not optional.
 
-**A cheap paid free-tier floor, bounded by caps.**
-The free tier's model is now its own operator knob (`FREE_TIER_MODEL`, default the
+**A cheap paid public-tier floor, bounded by caps.**
+The public tier's model is now its own operator knob (`PUBLIC_TIER_MODEL`, default the
 zero-cost `openrouter/free`), so a cheap paid model (the A/B picked
 `google/gemini-2.5-flash-lite` / `-flash`) can remove most dead-ends *at the
 source*. The cost guard the AGENTS.md invariant mandates is preserved **by
-construction**: the free chain derives only from `FREE_TIER_MODEL`, never from
+construction**: the public chain derives only from `PUBLIC_TIER_MODEL`, never from
 `AI_MODELS`, so a paid floor is a deliberate, separately-capped choice — not a
 widening of the pinned chain. Spend is bounded by the daily token cap plus the
 optional cents cost cap. *Watch the DeepSeek alias churn:* `deepseek-chat` /
@@ -112,12 +112,12 @@ guard: never inject `currentDate`, a session id, or a freshly-fetched quote into
 the system prefix — a 24h date string busts the cache every day, a quote block
 every turn.
 
-**Don't pay for explicit breakpoints on the free chain; do exploit automatic
+**Don't pay for explicit breakpoints on the public chain; do exploit automatic
 caching.**
-The free/auto router fans across OpenAI-shape, DeepSeek, and Gemini-2.5 models —
+The public/auto router fans across OpenAI-shape, DeepSeek, and Gemini-2.5 models —
 all of which cache **automatically** with no config and no write premium. On
 OpenRouter, explicit `cache_control` breakpoints apply **only to Anthropic Claude
-and Alibaba Qwen** — and Qwen *is* on the free chain, so a Qwen route could
+and Alibaba Qwen** — and Qwen *is* on the public chain, so a Qwen route could
 actually benefit from breakpoints, whereas the rest get nothing from them. So:
 keep the prefix stable, and add breakpoints only if you pin Claude or Qwen (then up
 to 4 — after tools, system, static context, last stable turn — on the default
@@ -189,14 +189,14 @@ cut the slowest of them 2–4× with no reliability loss.
 ### The policy
 
 **Disabled on the cost-sensitive paths.**
-The free tier, demo, and the ancillary title/extract calls send
+The public tier, demo, and the ancillary title/extract calls send
 `reasoning:{effort:"none"}` (`openrouter()` in `lib/ai/provider.ts`), so a
 reasoning-capable model the router lands on doesn't burn hidden chain-of-thought
-(billed at the output rate) on a turn that doesn't need it. Free stays pinned to
+(billed at the output rate) on a turn that doesn't need it. Public stays pinned to
 `none` **even when the intent gate would raise it** — it is the cost-protected
 path. Non-reasoning models ignore the flag. Beware the multiplier when you *do*
 raise effort: at `high` OpenRouter allocates ~80% of `max_tokens` to reasoning,
-so keep `max_tokens` tight (the free tier is already 1024).
+so keep `max_tokens` tight (the public tier is already 1024).
 
 **Gate higher effort behind analytical intent — shipped.**
 The owner/trusted paths no longer inherit model-default reasoning; a cheap,
@@ -241,14 +241,14 @@ reserved `image` slot is the forward-compatible home for in-chat vision.
 **App-layer compaction, not a provider primitive.**
 Server-side compaction (Anthropic `compact_20260112`, OpenAI `compact_threshold`)
 is vendor-specific and behind beta headers; OpenRouter normalizes to a chat-
-completions surface, so you can't depend on it across the free chain. Macrotide
+completions surface, so you can't depend on it across the public chain. Macrotide
 already summarizes-and-archives over the same key — treat provider-native
 compaction as a bonus, not a dependency. Tune by maximizing recall first, then
 precision.
 
 **Lean on the memory file as the durable source of truth.**
 The memory block persists durable facts (risk tolerance, THB base currency,
-response prefs) in the DB, so they survive the free-tier empty-turn drop — state
+response prefs) in the DB, so they survive the public-tier empty-turn drop — state
 lives in the store, not only the volatile transcript. Re-inject only the relevant
 slice each turn.
 
@@ -271,7 +271,7 @@ needs — allocation, drift, blended TER, the headline figure — not the raw bl
 Anthropic's own `concise` vs `detailed` example cut a tool result ~66% (≈72 vs 206
 tokens). In AI SDK 6, implement `toModelOutput` per tool so the model-facing view
 diverges from the rich object the app keeps. This directly reduces context rot and
-the free-tier dead-end rate.
+the public-tier dead-end rate.
 
 **Return instructive errors as results, not exceptions.**
 A rate limit or missing symbol should come back as `is_error`-style content with
@@ -290,8 +290,8 @@ keep them unless a cheap model garbles batches.
 ## 6. Structured output & citations
 
 **Tool-call-as-extraction + client-side Zod re-validation is the portable floor.**
-Cheap free-tier models may lack a native `json_schema` / `response_format` mode —
-this is the one structured-output claim with no primary anchor for the free chain,
+Cheap public-tier models may lack a native `json_schema` / `response_format` mode —
+this is the one structured-output claim with no primary anchor for the public chain,
 so treat it as **untested** (verify via
 `openrouter/models?supported_parameters=structured_outputs` before relying on it).
 The lowest common denominator works everywhere: define one tool whose schema *is*
@@ -314,7 +314,7 @@ both set). For "show the user where this figure came from" on an uploaded
 statement, run two calls: one extracts structured data, one produces cited prose —
 `cited_text` is free on tokens and points at real spans, a strong fit for the
 statement-import UX *if* Anthropic is ever pinned. For market/news grounding, gate
-web search behind explicit user intent (Gemini 3 bills per query). Moot on the free
+web search behind explicit user intent (Gemini 3 bills per query). Moot on the public
 chain today, which has no Anthropic route.
 
 ## 7. Evaluation
@@ -364,7 +364,7 @@ A/B is mechanical and only calls a winner when the flips are significant. Each
 result file is tagged with its git SHA. The run hits the live API and **stays out
 of CI** (a token-free vitest guards the harness structure there).
 
-**When we run it.** Before flipping `FREE_TIER_MODEL`, editing the system prompt,
+**When we run it.** Before flipping `PUBLIC_TIER_MODEL`, editing the system prompt,
 or changing the reasoning budget (§3) — exactly the changes whose effect a single
 manual test would misjudge. The reasoning-gate decision in §3 was made this way:
 the complex tier measured `medium` reasoning at +10pp quality for ~3.5× latency,

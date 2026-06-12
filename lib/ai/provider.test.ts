@@ -11,6 +11,7 @@ const ENV_KEYS = [
   "DEMO_OPENROUTER_API_KEY",
   "AI_MODELS",
   "DEMO_AI_MODELS",
+  "PUBLIC_TIER_MODEL",
   "FREE_TIER_MODEL",
   "VISION_CHAT_MODEL",
 ] as const;
@@ -63,7 +64,7 @@ describe("resolveOwnerProvider", () => {
 describe("resolveTierProvider (tier gating)", () => {
   it("returns not-ready when key is missing", () => {
     delete process.env.OPENROUTER_API_KEY;
-    expect(resolveTierProvider("free").ready).toBe(false);
+    expect(resolveTierProvider("public").ready).toBe(false);
     expect(resolveTierProvider("trusted").ready).toBe(false);
   });
 
@@ -82,19 +83,44 @@ describe("resolveTierProvider (tier gating)", () => {
     );
   });
 
-  it("free tier resolves to openrouter/free only", () => {
+  it("public tier resolves to openrouter/free only", () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
     delete process.env.AI_MODELS;
-    expect(resolveTierProvider("free").label).toBe("Free · openrouter/free");
+    delete process.env.PUBLIC_TIER_MODEL;
+    delete process.env.FREE_TIER_MODEL;
+    expect(resolveTierProvider("public").label).toBe("Public · openrouter/free");
   });
 
-  it("INVARIANT: free tier NEVER resolves to a paid model, regardless of AI_MODELS", () => {
+  it("public tier honors PUBLIC_TIER_MODEL", () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
-    // Operator misconfigures AI_MODELS with a pricey model — free tier must
+    process.env.PUBLIC_TIER_MODEL = "google/gemini-2.5-flash";
+    delete process.env.FREE_TIER_MODEL;
+    expect(resolveTierProvider("public").label).toBe("Public · google/gemini-2.5-flash");
+  });
+
+  it("BACK-COMPAT: public tier falls back to FREE_TIER_MODEL when PUBLIC_TIER_MODEL is unset", () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    delete process.env.PUBLIC_TIER_MODEL;
+    process.env.FREE_TIER_MODEL = "google/gemini-2.5-flash-lite";
+    expect(resolveTierProvider("public").label).toBe("Public · google/gemini-2.5-flash-lite");
+  });
+
+  it("BACK-COMPAT: PUBLIC_TIER_MODEL wins over the deprecated FREE_TIER_MODEL alias", () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    process.env.PUBLIC_TIER_MODEL = "google/gemini-2.5-flash";
+    process.env.FREE_TIER_MODEL = "google/gemini-2.5-flash-lite";
+    expect(resolveTierProvider("public").label).toBe("Public · google/gemini-2.5-flash");
+  });
+
+  it("INVARIANT: public tier NEVER resolves to a paid model from AI_MODELS", () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    delete process.env.PUBLIC_TIER_MODEL;
+    delete process.env.FREE_TIER_MODEL;
+    // Operator misconfigures AI_MODELS with a pricey model — public tier must
     // ignore it entirely. A regression here burns the owner's budget.
     process.env.AI_MODELS = "anthropic/claude-opus-4.1,openai/gpt-5";
-    const p = resolveTierProvider("free");
-    expect(p.label).toBe("Free · openrouter/free");
+    const p = resolveTierProvider("public");
+    expect(p.label).toBe("Public · openrouter/free");
     expect(p.label).not.toContain("anthropic");
     expect(p.label).not.toContain("openai");
   });
@@ -248,8 +274,9 @@ describe("openrouter fetch wrapper", () => {
     expect(body.models).toEqual(["openrouter/free", "openrouter/auto"]);
   });
 
-  it("free tier injects reasoning:{effort:'none'} to disable reasoning", async () => {
+  it("public tier injects reasoning:{effort:'none'} to disable reasoning", async () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
+    delete process.env.PUBLIC_TIER_MODEL;
     delete process.env.FREE_TIER_MODEL;
 
     let capturedBody: string | undefined;
@@ -261,7 +288,7 @@ describe("openrouter fetch wrapper", () => {
       });
     });
 
-    const p = resolveTierProvider("free");
+    const p = resolveTierProvider("public");
     if (!p.model || typeof p.model === "string") throw new Error("expected model object");
     try {
       await p.model.doGenerate({
@@ -315,12 +342,13 @@ describe("openrouter fetch wrapper", () => {
     expect(body.reasoning).toEqual({ effort: "medium" });
   });
 
-  it("INVARIANT: free tier IGNORES a gated effort and stays pinned to none (#58)", async () => {
+  it("INVARIANT: public tier IGNORES a gated effort and stays pinned to none (#58)", async () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
+    delete process.env.PUBLIC_TIER_MODEL;
     delete process.env.FREE_TIER_MODEL;
-    // Even if the route passed `medium`, free must never reason (cost-protected).
+    // Even if the route passed `medium`, public must never reason (cost-protected).
     const body = await captureBody(() =>
-      resolveTierProvider("free", { reasoningEffort: "medium" }),
+      resolveTierProvider("public", { reasoningEffort: "medium" }),
     );
     expect(body.reasoning).toEqual({ effort: "none" });
   });

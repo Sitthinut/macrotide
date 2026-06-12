@@ -11,7 +11,7 @@ import { accountTier } from "@/lib/db/schema";
  * Two side effects, both within the current DB context (the auth hook wraps
  * this in `runWithDbContext` with the new user's id so `ownerId()` stamps the
  * seeded bucket correctly):
- *   1. Insert an `account_tier` row defaulting to `'free'` (gates AI model
+ *   1. Insert an `account_tier` row defaulting to `'public'` (gates AI model
  *      access — see lib/db/queries/usage.ts). Idempotent via ON CONFLICT DO NOTHING.
  *   2. Seed one empty bucket so the dashboard isn't blank on first login.
  *
@@ -21,7 +21,7 @@ import { accountTier } from "@/lib/db/schema";
 export function provisionNewUser(userId: string): void {
   getDb()
     .insert(accountTier)
-    .values({ userId, tier: "free", grantedAt: new Date().toISOString() })
+    .values({ userId, tier: "public", grantedAt: new Date().toISOString() })
     .onConflictDoNothing()
     .run();
 
