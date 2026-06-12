@@ -199,6 +199,13 @@ function makeId(): string {
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+// Tidy a raw OpenRouter model id for the owner-only badge: drop the provider
+// prefix and any trailing date stamp OpenRouter appends — e.g.
+// "openai/gpt-5.5-20260423" → "gpt-5.5", "z-ai/glm-4.6" → "glm-4.6".
+function prettyModel(id: string): string {
+  return (id.split("/").pop() ?? id).replace(/-\d{4}-\d{2}-\d{2}$/, "").replace(/-\d{8}$/, "");
+}
+
 interface MsgFeedback {
   rating?: "up" | "down" | null;
   saved?: boolean;
@@ -545,6 +552,15 @@ export function ChatScreen({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { data: caps } = useResource<{ imageUpload: boolean }>("/api/chat/capabilities");
   const imageUploadEnabled = caps?.imageUpload === true;
+  // Operator-only: the served-model badge on each assistant message is a
+  // diagnostic (which model answered, while A/B-ing), hidden from regular users
+  // so the raw model slug never breaks the "Advisor" persona. Shown to the owner
+  // (same source the App shell uses to gate the Admin entry; the GET is deduped),
+  // and always in local dev — where AUTH_DISABLED has no owner session but the
+  // developer is effectively the operator. NODE_ENV is inlined at build, so this
+  // can never expose the badge in a production bundle.
+  const { data: adminStatus } = useResource<{ isOwner: boolean }>("/api/admin/status");
+  const showModelBadge = (adminStatus?.isOwner ?? false) || process.env.NODE_ENV === "development";
   const [msgFeedback, setMsgFeedback] = useState<Record<number, MsgFeedback>>({});
   const [showThreads, setShowThreads] = useState(false);
   // Set when the server signals it crossed ~80% of the model context budget
@@ -1004,6 +1020,15 @@ export function ChatScreen({
                 prev.map((m) => (m.id === placeholderId ? { ...m, text: accumulated } : m)),
               );
             }
+            // Served model id (transient part from the route) — attach it to the
+            // live message so the owner's badge shows without a reload. Rendering
+            // is gated to the owner below; non-owners just ignore the value.
+            if (event.type === "data-model" && typeof event.data === "string") {
+              const servedModel = event.data;
+              setMessages((prev) =>
+                prev.map((m) => (m.id === placeholderId ? { ...m, model: servedModel } : m)),
+              );
+            }
             // Tool result, regardless of the exact event variant: our memory
             // tools return `{ message: string }`. Pull it from common shapes.
             const toolOut: unknown = event.output ?? event.result ?? undefined;
@@ -1428,7 +1453,7 @@ export function ChatScreen({
                       hour: "2-digit",
                       minute: "2-digit",
                     })}
-                    {m.model && <> · {m.model}</>}
+                    {showModelBadge && m.model && <> · {prettyModel(m.model)}</>}
                   </div>
                 )}
                 {m.role === "ai" && !m.text && loading ? (

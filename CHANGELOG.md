@@ -15,6 +15,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **The served model is shown to the operator, not to users.** Each assistant
+  reply's served model id (e.g. `glm-4.6`) now appears in the message meta only
+  for the owner (and in local dev) — kept from regular users so a raw model slug
+  never breaks the "Advisor" persona. It streams live so it shows on the current
+  turn without a reload, and the label drops the provider prefix and date stamp.
+
 - **The Advisor can review each portfolio on its own, not just the whole book.**
   `read_portfolio` now returns a per-portfolio breakdown (each portfolio's value,
   asset mix, drift, blended fee, and money-weighted return) by default, and
