@@ -32,7 +32,7 @@ with recover-on-empty + retry-on-error resilience.
 
 | Lever | Where Macrotide stands | Highest-value move |
 |---|---|---|
-| **Model routing** | public pinned to its own `PUBLIC_TIER_MODEL`; multi-model fallback; recover-on-empty net | route by tool-call reliability, not just price |
+| **Model routing** | public pinned to its own `PUBLIC_TIER_MODELS`; multi-model fallback; recover-on-empty net | route by tool-call reliability, not just price |
 | **Prompt caching** | frozen prefix is cache-*ready* but no breakpoints sent | keep volatile data after the prefix; exploit public-chain auto-caching; clear the floor |
 | **Reasoning tokens** | `effort:none` pinned on public/demo/title/extract; owner/trusted gated by intent (`none`↔`medium`) | push more "complex math" into tools so even complex turns need less reasoning |
 | **Context loading** | JIT tool reads + the entry-context envelope | keep JIT default; app-layer compaction; shape tool results |
@@ -52,12 +52,12 @@ meta-router fans across DeepSeek/Qwen/etc. with *no* such guarantee — which is
 exactly why the recover-on-empty net is load-bearing, not optional.
 
 **A cheap paid public-tier floor, bounded by caps.**
-The public tier's model is now its own operator knob (`PUBLIC_TIER_MODEL`, default the
+The public tier's model is now its own operator knob (`PUBLIC_TIER_MODELS`, default the
 zero-cost `openrouter/free`), so a cheap paid model (the A/B picked
 `google/gemini-2.5-flash-lite` / `-flash`) can remove most dead-ends *at the
 source*. The cost guard the AGENTS.md invariant mandates is preserved **by
-construction**: the public chain derives only from `PUBLIC_TIER_MODEL`, never from
-`AI_MODELS`, so a paid floor is a deliberate, separately-capped choice — not a
+construction**: the public tier chain derives ONLY from `PUBLIC_TIER_MODELS`, never from
+`TRUSTED_TIER_MODELS`, so a paid floor is a deliberate, separately-capped choice — not a
 widening of the pinned chain. Spend is bounded by the daily token cap plus the
 optional cents cost cap. *Watch the DeepSeek alias churn:* `deepseek-chat` /
 `deepseek-reasoner` are now aliases for `deepseek-v4-flash` and deprecate
@@ -71,7 +71,7 @@ the fallback's prompt structure byte-identical so it re-warms fast.
 
 ### The current owner pick (2026-06-11 sweep)
 
-`AI_MODELS=x-ai/grok-4.3,z-ai/glm-5.1` — the first decision made with the eval
+`TRUSTED_TIER_MODELS=x-ai/grok-4.3,z-ai/glm-5.1` — the first decision made with the eval
 harness ([scripts/eval](../../scripts/eval); method + judge design in
 [agent-evals.md](research/agent-evals.md)). Five candidates ran the complex tier
 (N=3) through the real path; answers were scored on the 5-dimension rubric by
@@ -364,7 +364,7 @@ A/B is mechanical and only calls a winner when the flips are significant. Each
 result file is tagged with its git SHA. The run hits the live API and **stays out
 of CI** (a token-free vitest guards the harness structure there).
 
-**When we run it.** Before flipping `PUBLIC_TIER_MODEL`, editing the system prompt,
+**When we run it.** Before flipping `PUBLIC_TIER_MODELS`, editing the system prompt,
 or changing the reasoning budget (§3) — exactly the changes whose effect a single
 manual test would misjudge. The reasoning-gate decision in §3 was made this way:
 the complex tier measured `medium` reasoning at +10pp quality for ~3.5× latency,

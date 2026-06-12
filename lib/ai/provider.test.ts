@@ -9,10 +9,9 @@ import {
 const ENV_KEYS = [
   "OPENROUTER_API_KEY",
   "DEMO_OPENROUTER_API_KEY",
-  "AI_MODELS",
-  "DEMO_AI_MODELS",
-  "PUBLIC_TIER_MODEL",
-  "FREE_TIER_MODEL",
+  "TRUSTED_TIER_MODELS",
+  "DEMO_TIER_MODELS",
+  "PUBLIC_TIER_MODELS",
   "VISION_CHAT_MODEL",
 ] as const;
 
@@ -40,22 +39,22 @@ describe("resolveOwnerProvider", () => {
 
   it("defaults to free → auto fallback chain", () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
-    delete process.env.AI_MODELS;
+    delete process.env.TRUSTED_TIER_MODELS;
     const p = resolveOwnerProvider();
     expect(p.ready).toBe(true);
     expect(p.label).toBe("OpenRouter · openrouter/free → openrouter/auto");
   });
 
-  it("honors AI_MODELS as comma-separated chain", () => {
+  it("honors TRUSTED_TIER_MODELS as comma-separated chain", () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
-    process.env.AI_MODELS = "openrouter/auto,anthropic/claude-sonnet-4.5";
+    process.env.TRUSTED_TIER_MODELS = "openrouter/auto,anthropic/claude-sonnet-4.5";
     const p = resolveOwnerProvider();
     expect(p.label).toBe("OpenRouter · openrouter/auto → anthropic/claude-sonnet-4.5");
   });
 
-  it("accepts a single-model AI_MODELS value (no fallback)", () => {
+  it("accepts a single-model TRUSTED_TIER_MODELS value (no fallback)", () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
-    process.env.AI_MODELS = "openrouter/auto";
+    process.env.TRUSTED_TIER_MODELS = "openrouter/auto";
     const p = resolveOwnerProvider();
     expect(p.label).toBe("OpenRouter · openrouter/auto");
   });
@@ -68,16 +67,16 @@ describe("resolveTierProvider (tier gating)", () => {
     expect(resolveTierProvider("trusted").ready).toBe(false);
   });
 
-  it("trusted tier uses the owner AI_MODELS chain", () => {
+  it("trusted tier uses the owner TRUSTED_TIER_MODELS chain", () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
-    process.env.AI_MODELS = "openrouter/auto,anthropic/claude-sonnet-4.5";
+    process.env.TRUSTED_TIER_MODELS = "openrouter/auto,anthropic/claude-sonnet-4.5";
     const p = resolveTierProvider("trusted");
     expect(p.label).toBe("Trusted · openrouter/auto → anthropic/claude-sonnet-4.5");
   });
 
-  it("trusted tier defaults to free → auto when AI_MODELS unset", () => {
+  it("trusted tier defaults to free → auto when TRUSTED_TIER_MODELS unset", () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
-    delete process.env.AI_MODELS;
+    delete process.env.TRUSTED_TIER_MODELS;
     expect(resolveTierProvider("trusted").label).toBe(
       "Trusted · openrouter/free → openrouter/auto",
     );
@@ -85,40 +84,23 @@ describe("resolveTierProvider (tier gating)", () => {
 
   it("public tier resolves to openrouter/free only", () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
-    delete process.env.AI_MODELS;
-    delete process.env.PUBLIC_TIER_MODEL;
-    delete process.env.FREE_TIER_MODEL;
+    delete process.env.TRUSTED_TIER_MODELS;
+    delete process.env.PUBLIC_TIER_MODELS;
     expect(resolveTierProvider("public").label).toBe("Public · openrouter/free");
   });
 
-  it("public tier honors PUBLIC_TIER_MODEL", () => {
+  it("public tier honors PUBLIC_TIER_MODELS", () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
-    process.env.PUBLIC_TIER_MODEL = "google/gemini-2.5-flash";
-    delete process.env.FREE_TIER_MODEL;
+    process.env.PUBLIC_TIER_MODELS = "google/gemini-2.5-flash";
     expect(resolveTierProvider("public").label).toBe("Public · google/gemini-2.5-flash");
   });
 
-  it("BACK-COMPAT: public tier falls back to FREE_TIER_MODEL when PUBLIC_TIER_MODEL is unset", () => {
+  it("INVARIANT: public tier NEVER resolves to a paid model from TRUSTED_TIER_MODELS", () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
-    delete process.env.PUBLIC_TIER_MODEL;
-    process.env.FREE_TIER_MODEL = "google/gemini-2.5-flash-lite";
-    expect(resolveTierProvider("public").label).toBe("Public · google/gemini-2.5-flash-lite");
-  });
-
-  it("BACK-COMPAT: PUBLIC_TIER_MODEL wins over the deprecated FREE_TIER_MODEL alias", () => {
-    process.env.OPENROUTER_API_KEY = "sk-test";
-    process.env.PUBLIC_TIER_MODEL = "google/gemini-2.5-flash";
-    process.env.FREE_TIER_MODEL = "google/gemini-2.5-flash-lite";
-    expect(resolveTierProvider("public").label).toBe("Public · google/gemini-2.5-flash");
-  });
-
-  it("INVARIANT: public tier NEVER resolves to a paid model from AI_MODELS", () => {
-    process.env.OPENROUTER_API_KEY = "sk-test";
-    delete process.env.PUBLIC_TIER_MODEL;
-    delete process.env.FREE_TIER_MODEL;
-    // Operator misconfigures AI_MODELS with a pricey model — public tier must
-    // ignore it entirely. A regression here burns the owner's budget.
-    process.env.AI_MODELS = "anthropic/claude-opus-4.1,openai/gpt-5";
+    delete process.env.PUBLIC_TIER_MODELS;
+    // Operator misconfigures TRUSTED_TIER_MODELS with a pricey model — public
+    // tier must ignore it entirely. A regression here burns the owner's budget.
+    process.env.TRUSTED_TIER_MODELS = "anthropic/claude-opus-4.1,openai/gpt-5";
     const p = resolveTierProvider("public");
     expect(p.label).toBe("Public · openrouter/free");
     expect(p.label).not.toContain("anthropic");
@@ -129,7 +111,7 @@ describe("resolveTierProvider (tier gating)", () => {
 describe("resolveDemoProvider", () => {
   it("defaults to openrouter/free with no fallback", () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
-    delete process.env.DEMO_AI_MODELS;
+    delete process.env.DEMO_TIER_MODELS;
     const p = resolveDemoProvider();
     expect(p.label).toBe("Demo · openrouter/free");
   });
@@ -182,9 +164,9 @@ describe("resolveVisionProvider", () => {
     expect(p.label).toBe("Vision (disabled)");
   });
 
-  it("INVARIANT: vision model derives from VISION_CHAT_MODEL, never AI_MODELS", () => {
+  it("INVARIANT: vision model derives from VISION_CHAT_MODEL, never TRUSTED_TIER_MODELS", () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
-    process.env.AI_MODELS = "anthropic/claude-opus-4.1";
+    process.env.TRUSTED_TIER_MODELS = "anthropic/claude-opus-4.1";
     delete process.env.VISION_CHAT_MODEL;
     const p = resolveVisionProvider();
     expect(p.label).toBe("Vision · google/gemini-2.5-flash");
@@ -218,7 +200,7 @@ describe("resolveVisionProvider", () => {
 describe("openrouter fetch wrapper", () => {
   it("does not inject `models` field for single-model chain", async () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
-    process.env.AI_MODELS = "openrouter/auto";
+    process.env.TRUSTED_TIER_MODELS = "openrouter/auto";
 
     let capturedBody: string | undefined;
     vi.stubGlobal("fetch", async (_url: unknown, init?: RequestInit) => {
@@ -247,7 +229,7 @@ describe("openrouter fetch wrapper", () => {
 
   it("injects `models` array when chain has fallbacks", async () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
-    process.env.AI_MODELS = "openrouter/free,openrouter/auto";
+    process.env.TRUSTED_TIER_MODELS = "openrouter/free,openrouter/auto";
 
     let capturedBody: string | undefined;
     vi.stubGlobal("fetch", async (_url: unknown, init?: RequestInit) => {
@@ -276,8 +258,7 @@ describe("openrouter fetch wrapper", () => {
 
   it("public tier injects reasoning:{effort:'none'} to disable reasoning", async () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
-    delete process.env.PUBLIC_TIER_MODEL;
-    delete process.env.FREE_TIER_MODEL;
+    delete process.env.PUBLIC_TIER_MODELS;
 
     let capturedBody: string | undefined;
     vi.stubGlobal("fetch", async (_url: unknown, init?: RequestInit) => {
@@ -328,14 +309,14 @@ describe("openrouter fetch wrapper", () => {
 
   it("owner path injects the intent-gated effort when given one (#58)", async () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
-    process.env.AI_MODELS = "openrouter/auto";
+    process.env.TRUSTED_TIER_MODELS = "openrouter/auto";
     const body = await captureBody(() => resolveOwnerProvider({ reasoningEffort: "medium" }));
     expect(body.reasoning).toEqual({ effort: "medium" });
   });
 
   it("trusted path injects the intent-gated effort when given one (#58)", async () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
-    process.env.AI_MODELS = "openrouter/auto";
+    process.env.TRUSTED_TIER_MODELS = "openrouter/auto";
     const body = await captureBody(() =>
       resolveTierProvider("trusted", { reasoningEffort: "medium" }),
     );
@@ -344,8 +325,7 @@ describe("openrouter fetch wrapper", () => {
 
   it("INVARIANT: public tier IGNORES a gated effort and stays pinned to none (#58)", async () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
-    delete process.env.PUBLIC_TIER_MODEL;
-    delete process.env.FREE_TIER_MODEL;
+    delete process.env.PUBLIC_TIER_MODELS;
     // Even if the route passed `medium`, public must never reason (cost-protected).
     const body = await captureBody(() =>
       resolveTierProvider("public", { reasoningEffort: "medium" }),
@@ -355,7 +335,7 @@ describe("openrouter fetch wrapper", () => {
 
   it("owner path does NOT pin reasoning (keeps model default for the owner)", async () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
-    process.env.AI_MODELS = "openrouter/auto"; // single model → no models[] override either
+    process.env.TRUSTED_TIER_MODELS = "openrouter/auto"; // single model → no models[] override either
 
     let capturedBody: string | undefined;
     vi.stubGlobal("fetch", async (_url: unknown, init?: RequestInit) => {

@@ -196,11 +196,11 @@ same commit.
 
 Two invariants protect cost/security — don't regress them:
 
-- The `public` tier model chain derives ONLY from its own `PUBLIC_TIER_MODEL` var
+- The public tier chain derives ONLY from `PUBLIC_TIER_MODELS`
   (default `openrouter/free`) in code
   ([lib/ai/provider.ts](./lib/ai/provider.ts) `resolveTierProvider`), never from
-  `AI_MODELS` — so an owner-chain change can't widen public access. Pointing public at
-  a paid model is a deliberate `PUBLIC_TIER_MODEL` change, bounded by the daily token
+  `TRUSTED_TIER_MODELS` — so a trusted-chain change can't widen public access. Pointing public at
+  a paid model is a deliberate `PUBLIC_TIER_MODELS` change, bounded by the daily token
   cap + optional `DAILY_CENTS_BUDGET_*` cost cap.
 - `AUTH_SECRET` is required in production (boot throws); `PUBLIC_APP_URL` is pinned
   in prod — changing it breaks existing passkeys.

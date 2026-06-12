@@ -13,7 +13,7 @@
 //   - the TOKEN cap (always on) — a coarse floor on volume; and
 //   - the optional COST cap (cents/day) — only active when a cents budget is
 //     configured AND the served model is priced. The cost cap exists because a
-//     paid public-tier model (PUBLIC_TIER_MODEL) has asymmetric in/out pricing that
+//     paid public-tier model (PUBLIC_TIER_MODELS) has asymmetric in/out pricing that
 //     a flat token count can't bound. Either cap tripping blocks the request.
 //
 // All functions take an explicit `userId` (like the memory queries) so they're
@@ -131,13 +131,13 @@ export function estimateCostMicros(
  * malformed — i.e. cost gating is OFF by default and a typo can't silently
  * invent a money cap (the always-on token cap still bounds spend). There is
  * deliberately no built-in cents default: a dollar limit must be a conscious
- * operator choice. `DAILY_CENTS_BUDGET_FREE` is a deprecated-but-honored alias.
+ * operator choice.
  */
 export function dailyCentsBudget(tier: Tier): number | null {
   const raw =
     tier === "trusted"
       ? process.env.DAILY_CENTS_BUDGET_TRUSTED
-      : (process.env.DAILY_CENTS_BUDGET_PUBLIC ?? process.env.DAILY_CENTS_BUDGET_FREE);
+      : process.env.DAILY_CENTS_BUDGET_PUBLIC;
   if (!raw) return null;
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -152,14 +152,13 @@ export function utcDate(d: Date = new Date()): string {
  * Daily token budget (input+output) for a tier. Reads
  * `DAILY_TOKEN_BUDGET_PUBLIC` / `DAILY_TOKEN_BUDGET_TRUSTED` with documented
  * defaults (20k / 200k). A malformed/negative env value falls back to the
- * default rather than disabling the cap. `DAILY_TOKEN_BUDGET_FREE` is a
- * deprecated-but-honored alias for the public-tier budget.
+ * default rather than disabling the cap.
  */
 export function dailyTokenBudget(tier: Tier): number {
   const raw =
     tier === "trusted"
       ? process.env.DAILY_TOKEN_BUDGET_TRUSTED
-      : (process.env.DAILY_TOKEN_BUDGET_PUBLIC ?? process.env.DAILY_TOKEN_BUDGET_FREE);
+      : process.env.DAILY_TOKEN_BUDGET_PUBLIC;
   const fallback = tier === "trusted" ? DEFAULT_BUDGET_TRUSTED : DEFAULT_BUDGET_PUBLIC;
   if (!raw) return fallback;
   const n = Number.parseInt(raw, 10);

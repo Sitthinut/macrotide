@@ -35,13 +35,13 @@ before model-message conversion.
 
 ## Model routing — a dedicated vision model
 
-The owner/public chat chains (`AI_MODELS` / `PUBLIC_TIER_MODEL`) may resolve to
+The trusted/public chat chains (`TRUSTED_TIER_MODELS` / `PUBLIC_TIER_MODELS`) may resolve to
 text-only models, so an image turn routes to its own `VISION_CHAT_MODEL`
 (default `google/gemini-2.5-flash`, the family the OCR importer already proves
 out) via `resolveVisionProvider` ([lib/ai/provider.ts](../../lib/ai/provider.ts)).
 
-This is the same shape as the `PUBLIC_TIER_MODEL` invariant, and for the same
-reason: **public-tier vision derives from its own var, never from `AI_MODELS`** — so
+This is the same shape as the `PUBLIC_TIER_MODELS` invariant, and for the same
+reason: **public-tier vision derives from its own var, never from `TRUSTED_TIER_MODELS`** — so
 enabling vision can't widen the text model chains. The decision per turn
 (`visionDecisionFor`) is:
 

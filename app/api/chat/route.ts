@@ -622,7 +622,7 @@ export async function POST(req: Request) {
       // Image turn → the shared vision model (bounded by the daily token/cents
       // caps already checked above). Public tier pins reasoning off; trusted
       // keeps the intent-gated effort. The public-tier cost invariant holds:
-      // vision derives from VISION_CHAT_MODEL, never AI_MODELS. Text turn → tier chain.
+      // vision derives from VISION_CHAT_MODEL, never TRUSTED_TIER_MODELS. Text turn → tier chain.
       let model: LanguageModel | null;
       if (hasImages) {
         const vision = resolveVisionProvider({
