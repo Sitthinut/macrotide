@@ -26,9 +26,9 @@ advisor + memory tools, using the **exact production system prompt**
   a breach (a pre-change gate). See `questions.ts` for per-question expectations
   and `run.ts` `THRESHOLDS` for the acceptance criteria.
 
-The grading is **deterministic** (no LLM judge) — the floor that survives model
-swaps. An LLM-as-judge layer is deliberately deferred (see the research survey
-and inference-strategy.md § Evaluation).
+The deterministic grader is the **floor that survives model swaps** and stays the
+regression gate. On top of it, an **opt-in LLM-as-judge** (`EVAL_JUDGE=on`) grades
+the qualities regex can't reach — see [LLM-judge](#llm-judge-quality-layer) below.
 
 Two tiers (`questions.ts`):
 
@@ -82,9 +82,54 @@ second (candidate) scored higher.
 | `EVAL_MAX_TOKENS` | 1024 (2048 when reasoning ≥ low) | output cap per turn |
 | `EVAL_OUT` | `eval-results/<timestamp>.json` | raw per-turn results (gitignored) |
 | `EVAL_GATE` | _off_ | `on` → exit non-zero when a pre-declared threshold is breached |
+| `EVAL_JUDGE` | _off_ | `on` → also run the LLM-judge quality layer (extra token cost) |
+| `EVAL_JUDGE_MODEL` | `openai/gpt-5.5` | judge model (a different family than the model under test) |
+| `EVAL_JUDGE_REASONING` | _unset_ | optional `reasoning.effort` for the judge |
 
 Use `EVAL_N≥3` for any comparison (a single run conflates model variance with
 capability).
+
+## LLM-judge (quality layer)
+
+The deterministic grader proves an answer is **grounded + complete + safe**, but
+can't see whether advice is well-structured, adapted to a beginner, or genuinely
+helpful rather than a hedged deflection. `EVAL_JUDGE=on` adds a second model
+(`scripts/eval/judge.ts`) that scores each answer on a criterion-separated rubric
+— **grounded · complete · structured · adaptive · helpful**, each 1–5 with an
+explicit *Unknown* escape — reasoning before the score, evidence-anchored against
+the captured tool results, at temperature 0. It is **opt-in and additive**: the
+deterministic floor still runs and stays the regression gate.
+
+```bash
+EVAL_JUDGE=on EVAL_TIER=complex EVAL_N=3 npm run eval:advisor   # quality sweep
+```
+
+The judge must be a **different model family** than the candidates (never grade
+your own family) — default `openai/gpt-5.5`, neutral vs. the gemini/glm/minimax/
+kimi candidates. Build details and the design rationale:
+`docs/explanation/research/agent-evals.md § LLM-as-judge, done safely`.
+
+### Calibrate the judge first
+
+An uncalibrated judge is noise. Before trusting it, run it against hand-labeled
+answers (a few ideal, a few deliberately bad) and confirm it agrees:
+
+```bash
+EVAL_JUDGE_MODELS=openai/gpt-5.5,moonshotai/kimi-k2.6 npm run eval:judge:calibrate
+```
+
+Reports per-judge **agreement %** (target ≥ 75) + ideal-vs-bad separation + token
+cost, so the **cheapest** judge that clears the bar can be chosen. Cases live in
+`scripts/eval/calibration.ts`.
+
+## Multi-turn ("long discussion")
+
+A question can carry follow-up `turns: string[]` after its `prompt`, turning it
+into a multi-turn conversation. The run threads the assistant + tool messages back
+between turns; the deterministic grader + the judge evaluate the **final** turn
+(the judge also sees the whole transcript, scoring cross-turn coherence and
+whether the model held earlier context). See `M1-long-discussion` in
+`questions.ts`.
 
 ## Changing the question set
 

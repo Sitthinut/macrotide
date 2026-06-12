@@ -60,6 +60,12 @@ export interface EvalQuestion {
   id: string;
   tier: EvalTier;
   prompt: string;
+  /** Optional FOLLOW-UP user messages after `prompt`, turning the question into a
+   * multi-turn "long discussion". The run threads the assistant + tool messages
+   * back between turns; the deterministic grader + the LLM-judge evaluate the
+   * FINAL turn (the judge also sees the whole transcript for cross-turn coherence
+   * + did-it-remember-context). Single-turn questions omit this. */
+  turns?: string[];
   expect: Expect;
   /** Which synthetic data surface to run against (issue #69). "empty" routes the
    * portfolio reads to the no-holdings fixture; defaults to the populated one. */
@@ -285,6 +291,104 @@ export const QUESTIONS: EvalQuestion[] = [
     },
     note: "Per-portfolio performance — scope the return to one portfolio and compare to the indices.",
   },
+
+  // ── Expanded complex-tier golden set (issue #70) ────────────────────────────
+  // These deliberately under-specify the deterministic checks (grounding + safety
+  // floor only) and lean on the LLM-judge (EVAL_JUDGE=on) for the qualities regex
+  // can't see — adaptivity, structure, genuine helpfulness. Freeze-then-extend:
+  // additive, no loosening of the questions above.
+  {
+    // Adaptivity probe: a self-described beginner. The judge's `adaptive` lens
+    // does the real grading; deterministically we only guard grounding + that it
+    // didn't bury a beginner in fund codes they didn't ask about.
+    id: "G1-beginner-review",
+    tier: "complex",
+    prompt:
+      "I'm new to investing and I don't really understand all the jargon. Can you look at my portfolios and explain in simple terms how I'm doing?",
+    expect: {
+      expectTools: ["read_portfolio"],
+      mustInclude: [/Core/, /Tax/],
+      mustNotInclude: [/EXAMPLE-FUND-[E-Z]/],
+    },
+    note: "Beginner framing — judge scores `adaptive` (defines jargon, plain language) above all.",
+  },
+  {
+    // New-money allocation: bonds are 15pp under target in the book, so the
+    // grounded answer steers new money toward bonds. A real number/sleeve, not
+    // 'talk to an advisor'.
+    id: "G2-new-money-allocation",
+    tier: "complex",
+    prompt: "I just got a ฿200,000 bonus to invest. Where should it go across what I already hold?",
+    expect: {
+      expectTools: ["read_portfolio"],
+      anyOf: [/bond/i, /underweight/i, /target/i],
+      mustNotInclude: [/EXAMPLE-FUND-[E-Z]/],
+    },
+    note: "Plan-anchored allocation of new money — bonds are −15pp, so a grounded answer tilts there.",
+  },
+  {
+    // Decision-forcing diagnosis of the weak, single-fund Tax portfolio.
+    id: "G3-weak-subportfolio",
+    tier: "complex",
+    prompt:
+      "My Tax portfolio is basically all in one fund. Is that actually a problem, and what would you do about it?",
+    expect: {
+      expectTools: ["read_portfolio"],
+      mustInclude: [/Tax/],
+      anyOf: [/83\s?%/, /concentrat/i, /diversif/i, /single fund|one fund/i, /add|spread/i],
+      expectToolArgs: [{ tool: "read_portfolio", contains: /tax/i }],
+    },
+    note: "Concentration diagnosis + a committed action — judge scores `structured` + `helpful`.",
+  },
+  {
+    // Cross-portfolio comparison: which is healthier, with the per-bucket numbers.
+    id: "G4-compare-portfolios",
+    tier: "complex",
+    prompt: "Compare my Core and Tax portfolios — which one is healthier, and why?",
+    expect: {
+      expectTools: ["read_portfolio"],
+      mustInclude: [/Core/, /Tax/],
+      anyOf: [/9\.4|1\.2/, /return|irr/i, /fee|ter/i, /concentrat|cash/i],
+      mustNotInclude: [/EXAMPLE-FUND-[E-Z]/],
+    },
+    note: "Side-by-side using the per-bucket breakdown (Core IRR 9.4% vs Tax 1.2%) — judge: `complete`.",
+  },
+  {
+    // Prioritization: force ONE most-important action across the whole book.
+    id: "G5-single-priority",
+    tier: "complex",
+    prompt:
+      "Across everything I hold, what's the single most important thing I should fix this month?",
+    expect: {
+      expectTools: ["read_portfolio"],
+      anyOf: [/bond/i, /cash/i, /concentrat/i, /fee/i, /rebalanc/i, /Tax/],
+      mustNotInclude: [/EXAMPLE-FUND-[E-Z]/],
+    },
+    note: "Commit to ONE prioritized fix, not a laundry list — judge scores `helpful` (does it commit?).",
+  },
+  {
+    // The motivating "long discussion" (issue #70, multi-turn). Threads four user
+    // turns; the run carries the assistant + tool messages between them. The
+    // deterministic floor grades the FINAL (beginner-explanation) turn; the judge
+    // scores the whole transcript for coherence + did-it-remember + adaptivity.
+    id: "M1-long-discussion",
+    tier: "complex",
+    prompt: "What do you think of all of my portfolios?",
+    turns: [
+      "Focus on the Tax one — why is its return so low?",
+      "OK. What exactly should I do about it this month?",
+      "I'm a beginner — explain in plain terms why that actually helps.",
+    ],
+    expect: {
+      // read_portfolio must be called somewhere across the discussion.
+      expectTools: ["read_portfolio"],
+      mustInclude: [/Tax/],
+      // The final turn is a plain-language rationale for the recommended action.
+      anyOf: [/concentrat|diversif|one fund|single fund|cash|bond|spread|risk/i],
+      mustNotInclude: [/EXAMPLE-FUND-[E-Z]/],
+    },
+    note: "Multi-turn long discussion: review → scope to Tax → concrete action → beginner rationale. Judge scores cross-turn coherence + memory + adaptivity.",
+  },
 ];
 
 // ── Grading ───────────────────────────────────────────────────────────────
@@ -293,10 +397,14 @@ function matches(text: string, m: Matcher): boolean {
   return typeof m === "string" ? text.includes(m) : m.test(text);
 }
 
-/** One captured tool call: its name and the arguments the model passed. */
+/** One captured tool call: its name, the arguments the model passed, and (when
+ * captured) the tool's RESULT — the figures the answer should be grounded in.
+ * The deterministic grader uses name + args; the LLM-judge also reads `result`
+ * to verify grounding against the real numbers (issue #65). */
 export interface ToolCall {
   name: string;
   args: unknown;
+  result?: unknown;
 }
 
 export interface GradeInput {
