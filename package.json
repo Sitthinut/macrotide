@@ -32,6 +32,7 @@
     "jobs:prewarm-benchmark": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/prewarm-benchmark.ts",
     "refresh:demo-history": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/refresh-demo-history.ts",
     "eval:advisor": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/eval/run.ts",
+    "eval:judge:calibrate": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/eval/calibration.ts",
     "eval:diff": "tsx --tsconfig tsconfig.scripts.json scripts/eval/diff.ts",
     "smoke:sec": "tsx --env-file=.env.local scripts/smoke-sec-thailand.ts",
     "prepare": "simple-git-hooks"

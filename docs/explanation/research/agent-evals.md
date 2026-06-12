@@ -1,6 +1,6 @@
 # Evaluating tool-using agents — a prior-art survey
 
-*Researched May 2026*
+*Researched May 2026 · extended June 2026 (LLM-judge built + calibrated; the dated model price/intelligence snapshot)*
 
 ## Summary
 
@@ -46,7 +46,10 @@ on demand (not in CI); a token-free vitest guards its structure. This document i
 the **evidence** behind that shape; the **verdict and knobs** live in
 [inference-strategy.md § Evaluation](../inference-strategy.md#7-evaluation), and
 the **how-to** in [scripts/eval/README.md](../../../scripts/eval/README.md). An
-LLM-as-judge layer is deliberately deferred (see § LLM-as-judge below).
+opt-in, calibrated LLM-as-judge layer sits on top of it (see § LLM-as-judge below).
+The harness's first sweep (Jun 2026) locked the owner model; that result + the
+pick live in the verdict doc —
+[inference-strategy.md § Model routing & tiers](../inference-strategy.md#1-model-routing--tiers).
 
 ## The eval triple: task, harness, grader
 
@@ -150,8 +153,31 @@ agrees on:
 - **Calibrate first**: *"Use human feedback to calibrate automated scoring"*
   (OpenAI) — target ~75–90% agreement on ~20 human labels before trusting it.
 
-This is why Macrotide *defers* the judge: the deterministic floor already gates
-regressions, and an uncalibrated judge would add cost and noise, not signal.
+Macrotide implements the judge along exactly these lines, as an **opt-in** layer
+(`EVAL_JUDGE=on`) on top of — never replacing — the deterministic floor, which
+stays the regression gate: a criterion-separated rubric
+(grounded · complete · structured · adaptive · helpful), reasoning before the
+score, evidence-anchored against the captured tool results, temperature 0, a
+per-dimension *Unknown* escape, and a different-family default judge
+(`openai/gpt-5.5`). It is gated on **calibration** — `npm run eval:judge:calibrate`
+scores it against hand-labeled answers and only a judge clearing ~75% agreement
+(with clear ideal-vs-bad separation) is trusted; the same run compares a cheaper
+judge (e.g. `moonshotai/kimi-k2.6`) so the cost-vs-intelligence pick is made on
+data. Code: `scripts/eval/judge.ts` + `calibration.ts`.
+
+**Provenance / known bias (read before trusting the judge).** The judge rubric,
+the golden questions, and the calibration answer key were all authored by **Claude
+Opus 4.8** — the model that built this eval. Three consequences follow directly:
+(1) the judge **must** be a different family — an Opus/Claude judge would be
+marking its own family's key (self-consistency, not judging skill), so its
+agreement number would be inflated and uninformative; (2) that is precisely why
+GPT-5.5's **cross-family** 96% agreement is the trustworthy validation, and why we
+did not put a Claude model in the judge bake-off; (3) for maximum rigor the
+Opus-authored key should be replaced or augmented with **human** labels (per #65's
+"~20 human labels") before the judge is trusted on *Claude-family* candidates. The
+sweep candidates are all non-Claude, so an Opus-authored key + a GPT-5.5 judge is
+sound for the current model-lock decision — but the bias is real and recorded here
+so it is never forgotten.
 
 ## The dead-end / empty-turn failure as a first-class metric
 
@@ -197,13 +223,64 @@ production traces fed back into the set.
 | Is it reliable, not just right-on-average? | `pass^k` / `avg@N` over N runs | `EVAL_N` repeats, `pass^k` per tier |
 | Is a change actually better? | Pre-declared thresholds + paired test | `THRESHOLDS` + PASS/FAIL verdict (CIs: planned) |
 | Can grading be trusted? | Read transcripts; hermetic data | per-run transcript spot-read; `EXAMPLE-FUND-*` only |
-| Prose / advice quality | LLM-as-judge (calibrated) | **deferred** until the floor demands it |
+| Prose / advice quality | LLM-as-judge (calibrated) | **`EVAL_JUDGE=on`** — opt-in 5-dimension rubric, calibrated (`eval:judge:calibrate`) |
+
+## Model price + intelligence snapshot (2026-06-11)
+
+A **point-in-time** reference for cross-checking eval cost estimates and as the
+baseline for the quarterly "has anything cheaper or smarter landed?" model-review
+check. Sorted by intelligence. **Prices drift — re-pull before relying on these.**
+Price `$/1M` (in / out) = **OpenRouter** (what we pay; it routes to the cheapest
+provider). *Intel* = **Artificial Analysis Intelligence Index** (v4.0, reasoning/
+agentic/coding-weighted); *t/s* = AA output speed. Sources confirmed from each
+model's [artificialanalysis.ai](https://artificialanalysis.ai/) page, 2026-06-11.
+
+| Model | In | Out | Intel | t/s | Note |
+|---|---|---|---|---|---|
+| `anthropic/claude-fable-5` | 10 | 50 | 65 | — | frontier |
+| `anthropic/claude-opus-4.8` | 5 | 25 | 61 | — | frontier |
+| `openai/gpt-5.5` | 5 | 30 | 60 | — | **eval judge** |
+| `minimax/minimax-m3` | 0.30 | 1.20 | 55 | 51 | smart+cheapest, but **slow + verbose** |
+| `google/gemini-3.5-flash` | 1.50 | 9.00 | 55 | 153 | fast output but **~18s TTFT** |
+| `moonshotai/kimi-k2.6` | 0.67 | 3.39 | 54 | 54 | smart, slow |
+| `x-ai/grok-4.3` | 1.25 | 2.50 | 53 | 160 | **fast AND smart**, mid price |
+| `z-ai/glm-5.1` | 0.98 | 3.08 | 51 | 73 | |
+| `z-ai/glm-5` | 0.60 | 1.92 | 50 | 75 | cheaper near-twin of 5.1 |
+| `anthropic/claude-sonnet-4.6` | 3 | 15 | 44 | — | out-scored by cheaper models |
+| `google/gemini-2.5-pro` | 1.25 | 10 | 35 | 135 | weak + output-pricey → **dominated** |
+| `z-ai/glm-4.6` | 0.43 | 1.74 | 30 | 49 | **current prod** — low on this index |
+| `deepseek/deepseek-chat-v3.1` | 0.21 | 0.79 | 28 | — | non-reasoning |
+| `google/gemini-2.5-flash` | 0.30 | 2.50 | 21 | 180 | non-reasoning, very fast |
+| `google/gemini-2.5-flash-lite` | 0.10 | 0.40 | — | — | titles/extract/public tier |
+
+Reading:
+- **Output price dominates** for chat (answers are output-heavy), so the owner
+  model comes from the cheap-smart band; the judge is a one-off frontier cost.
+- **Current prod `glm-4.6` scores 30** — low on this reasoning-weighted index;
+  `glm-5`/`glm-5.1` (50/51) are large in-family upgrades, and `minimax-m3` /
+  `kimi-k2.6` (55/54) are smarter still at comparable cost.
+- **`gemini-2.5-pro` (35, $10 out) is dominated** by `gemini-3.5-flash` (55, $9
+  out) — don't keep 2.5-pro as a candidate.
+- The smartest cheap models (`minimax-m3`, `kimi-k2.6`) are **slow** (~51–54 t/s);
+  `grok-4.3` (53, 160 t/s) and `gemini-3.5-flash` (55, 153 t/s but slow TTFT) are
+  the fast-AND-smart options. **For an interactive advisor, latency is a
+  first-class axis** — which is exactly why our own eval measures wall-clock
+  alongside quality rather than trusting this index alone (it's reasoning-bench-
+  weighted, not advisor-task-weighted).
+
+> The first sweep using this harness (2026-06-11) locked the owner model. Per this
+> folder's evidence-not-verdict rule, that result + decision live in the verdict
+> doc: [inference-strategy.md § Model routing & tiers](../inference-strategy.md#1-model-routing--tiers).
 
 ## About this research
 
 Gathered in May 2026 via web search and direct fetches of primary sources,
 oriented toward Macrotide's small-model Advisor. Synthesized from a parallel
-multi-reader sweep; quoted phrasings are verbatim and attributed.
+multi-reader sweep; quoted phrasings are verbatim and attributed. **Extended June
+2026:** the LLM-as-judge layer was built + calibrated, and a dated model
+price/intelligence snapshot added (point-in-time — re-pull before relying). The
+model-lock *verdict* it produced lives in the verdict doc (linked in § Decision),
+not here — this folder stays evidence, not verdict.
 
 - **Anthropic** — [*Demystifying evals for AI agents*](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)
   (the task/harness/grader triple, grade-the-outcome, negative cases, the
