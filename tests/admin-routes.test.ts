@@ -4,7 +4,7 @@ import type { SessionUser } from "@/lib/auth/session";
 // Authorization contract for the owner-only admin API:
 //   - non-owner (no session, OR logged-in but not OWNER_EMAIL) -> 403
 //   - owner -> 200 and the write goes through
-//   - owner demoting THEMSELVES to free -> 409 (lockout guard)
+//   - owner demoting THEMSELVES to public -> 409 (lockout guard)
 //
 // We mock the session resolver + the admin queries so the tests exercise ONLY
 // the route's authorization branching, not real SQLite or headers.
@@ -19,7 +19,7 @@ vi.mock("@/lib/api/with-db", () => ({
   withDb: <T>(fn: (ctx: unknown) => T | Promise<T>) => fn({}),
 }));
 
-const mockListUsers = vi.fn(() => [{ id: "u1", email: "u1@x.io", name: "u1", tier: "free" }]);
+const mockListUsers = vi.fn(() => [{ id: "u1", email: "u1@x.io", name: "u1", tier: "public" }]);
 const mockSetUserTier = vi.fn((_id: string, _tier: string) => true);
 vi.mock("@/lib/db/queries/admin", () => ({
   listUsers: () => mockListUsers(),
@@ -92,11 +92,11 @@ describe("POST /api/admin/users/[id]/tier (set tier)", () => {
     expect(mockSetUserTier).toHaveBeenCalledWith("u1", "trusted");
   });
 
-  it("lets the owner demote another user to free", async () => {
+  it("lets the owner demote another user to public", async () => {
     mockGetSessionUser.mockResolvedValue(OWNER);
-    const res = await setTierRoute(tierReq("free"), params("u1"));
+    const res = await setTierRoute(tierReq("public"), params("u1"));
     expect(res.status).toBe(200);
-    expect(mockSetUserTier).toHaveBeenCalledWith("u1", "free");
+    expect(mockSetUserTier).toHaveBeenCalledWith("u1", "public");
   });
 
   it("rejects an invalid tier value with 400", async () => {
@@ -106,9 +106,9 @@ describe("POST /api/admin/users/[id]/tier (set tier)", () => {
     expect(mockSetUserTier).not.toHaveBeenCalled();
   });
 
-  it("SELF-DEMOTE GUARD: owner cannot demote their own account to free (409)", async () => {
+  it("SELF-DEMOTE GUARD: owner cannot demote their own account to public (409)", async () => {
     mockGetSessionUser.mockResolvedValue(OWNER);
-    const res = await setTierRoute(tierReq("free"), params(OWNER.id));
+    const res = await setTierRoute(tierReq("public"), params(OWNER.id));
     expect(res.status).toBe(409);
     expect(mockSetUserTier).not.toHaveBeenCalled();
   });

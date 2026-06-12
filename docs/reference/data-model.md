@@ -143,7 +143,7 @@ These timestamps are stored as integer epoch-ms (app tables use ISO-8601 text).
 | Table | Holds | Key columns / notes |
 |---|---|---|
 | `usage` | Per-user daily token usage | Composite PK (`user_id`, `date`); `input_tokens`, `output_tokens` |
-| `account_tier` | Per-user tier gating | `tier` (`free`/`trusted`); free is pinned to the free model chain in code |
+| `account_tier` | Per-user tier gating | `tier` (`public`/`trusted`); public is pinned to the public model chain in code |
 
 ## Ownership & multi-user
 

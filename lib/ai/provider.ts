@@ -131,28 +131,30 @@ export function resolveOwnerProvider(
   };
 }
 
-// The free tier derives ONLY from its own dedicated `FREE_TIER_MODEL` var,
-// defaulting to OpenRouter's zero-cost free meta-router — DELIBERATELY never
-// from `AI_MODELS`. This preserves the cost/security invariant by construction:
-// a slip in the owner chain (`AI_MODELS`) can't widen free-tier access, because
-// the free branch doesn't read it. Pointing free at a cheap PAID model is a
-// separate, conscious operator act (set `FREE_TIER_MODEL`), and it's bounded by
-// the daily token + optional cents cap — see lib/db/queries/usage.ts.
-const FREE_TIER_DEFAULT = ["openrouter/free"];
+// The public tier derives ONLY from its own dedicated `PUBLIC_TIER_MODEL` var
+// (deprecated alias: `FREE_TIER_MODEL`, still honored), defaulting to
+// OpenRouter's zero-cost meta-router — DELIBERATELY never from `AI_MODELS`. This
+// preserves the cost/security invariant by construction: a slip in the owner
+// chain (`AI_MODELS`) can't widen public-tier access, because the public branch
+// doesn't read it. Pointing the public tier at a cheap PAID model is a separate,
+// conscious operator act (set `PUBLIC_TIER_MODEL`), and it's bounded by the
+// daily token + optional cents cap — see lib/db/queries/usage.ts.
+const PUBLIC_TIER_DEFAULT = ["openrouter/free"];
 
 /**
  * Resolve the chat provider for a tier:
  *   - 'trusted' → the owner model chain (`AI_MODELS`, default
  *                 `openrouter/free → openrouter/auto`); identical to the owner
  *                 path.
- *   - 'free'    → `FREE_TIER_MODEL` (default `openrouter/free`) ONLY. Reads its
- *                 own var, NEVER `AI_MODELS`, so the owner chain can't leak in.
+ *   - 'public'  → `PUBLIC_TIER_MODEL` (deprecated alias `FREE_TIER_MODEL`;
+ *                 default `openrouter/free`) ONLY. Reads its own var, NEVER
+ *                 `AI_MODELS`, so the owner chain can't leak in.
  *
  * Both read the shared `OPENROUTER_API_KEY`; per-user keys are out of scope —
- * tier gating + the daily caps are what bound free-tier spend.
+ * tier gating + the daily caps are what bound public-tier spend.
  */
 export function resolveTierProvider(
-  tier: "free" | "trusted",
+  tier: "public" | "trusted",
   opts: { reasoningEffort?: ReasoningEffort } = {},
 ): ResolvedProvider {
   const key = process.env.OPENROUTER_API_KEY;
@@ -166,15 +168,17 @@ export function resolveTierProvider(
       label: chainLabel("Trusted", models),
     };
   }
-  const models = parseModels(process.env.FREE_TIER_MODEL) ?? FREE_TIER_DEFAULT;
-  // Free tier: ALWAYS pin reasoning off, ignoring any gated effort. Free is the
-  // cost-protected path — a cheap model the router lands on must not reason
+  const models =
+    parseModels(process.env.PUBLIC_TIER_MODEL ?? process.env.FREE_TIER_MODEL) ??
+    PUBLIC_TIER_DEFAULT;
+  // Public tier: ALWAYS pin reasoning off, ignoring any gated effort. Public is
+  // the cost-protected path — a cheap model the router lands on must not reason
   // (slow + billed at the output rate) even on an analytical-looking turn. The
   // intent gate raises effort only for owner/trusted, who value (and fund) it.
   return {
     model: openrouter(key, models, { reasoningEffort: "none" }),
     ready: true,
-    label: chainLabel("Free", models),
+    label: chainLabel("Public", models),
   };
 }
 
@@ -192,15 +196,15 @@ export function resolveDemoProvider(): ResolvedProvider {
 }
 
 // Inline chat vision (a turn that carries one or more attached images). The
-// owner/free chat chains (`AI_MODELS` / `FREE_TIER_MODEL`) may resolve to
+// owner/public chat chains (`AI_MODELS` / `PUBLIC_TIER_MODEL`) may resolve to
 // text-only models, so an image turn routes here instead — to a SINGLE
 // vision-capable model named by its OWN dedicated `VISION_CHAT_MODEL` var
 // (default `google/gemini-2.5-flash`, the same family the pinned OCR extractor
 // uses). Two deliberate consequences:
-//   - The free-tier cost invariant is preserved by construction: free-tier
+//   - The public-tier cost invariant is preserved by construction: public-tier
 //     vision derives from `VISION_CHAT_MODEL`, NEVER from `AI_MODELS`, exactly
-//     like `FREE_TIER_MODEL`. Free image turns are bounded by the daily token +
-//     optional cents caps enforced in the route before this is reached.
+//     like `PUBLIC_TIER_MODEL`. Public image turns are bounded by the daily
+//     token + optional cents caps enforced in the route before this is reached.
 //   - Setting `VISION_CHAT_MODEL=off` (or empty) disables inline chat vision
 //     entirely — the resolver returns not-ready and the route serves a stub that
 //     points the user at the Add-holdings image importer.

@@ -86,14 +86,14 @@ AUTH_RP_ID=macrotide.example.com
 AUTH_SECRET=        # fresh: openssl rand -base64 32 — do NOT reuse a dev secret
 OPENROUTER_API_KEY=sk-or-...
 AI_MODELS=openrouter/free,openrouter/auto
-# Free-tier chat model (own var, never AI_MODELS). Default openrouter/free; point
-# at a cheap paid model to lift free quality, bounded by the caps below.
-# FREE_TIER_MODEL=google/gemini-2.5-flash
-# Free-tier spend caps (checked pre-request, reset UTC midnight). Token cap is
+# Public-tier chat model (own var, never AI_MODELS). Default openrouter/free; point
+# at a cheap paid model to lift public-tier quality, bounded by the caps below.
+# PUBLIC_TIER_MODEL=google/gemini-2.5-flash
+# Public-tier spend caps (checked pre-request, reset UTC midnight). Token cap is
 # always on; the cents cost cap is OFF unless set (the right bound for a paid
-# free-tier model). MODEL_PRICES feeds the cost estimate — match FREE_TIER_MODEL.
-# DAILY_TOKEN_BUDGET_FREE=20000
-# DAILY_CENTS_BUDGET_FREE=50
+# public-tier model). MODEL_PRICES feeds the cost estimate — match PUBLIC_TIER_MODEL.
+# DAILY_TOKEN_BUDGET_PUBLIC=20000
+# DAILY_CENTS_BUDGET_PUBLIC=50
 # MODEL_PRICES={"google/gemini-2.5-flash":{"in":0.3,"out":2.5}}
 # Separate key so demo traffic never burns the owner quota (hardening item):
 DEMO_OPENROUTER_API_KEY=sk-or-...
@@ -383,7 +383,7 @@ sudo ufw --force enable
 
 ### 8. Promote the owner account
 
-New accounts default to the `free` tier (free-model chain only). After you've signed up and registered a passkey on the live URL — so the account exists — grant *your* account the full model chain:
+New accounts default to the `public` tier (public-model chain only). After you've signed up and registered a passkey on the live URL — so the account exists — grant *your* account the full model chain:
 
 ```sh
 # In .env.local, set the email you signed up with:
@@ -808,4 +808,4 @@ Before sharing the URL with anyone:
 - [ ] Off-site backup configured (restic / rclone / borg)
 - [ ] First demo session works from incognito (proves cookie isolation)
 - [ ] Owner data is not visible to a demo session (proves DB context isolation)
-- [ ] Owner account promoted to `trusted` (step 8) — otherwise you're on free-tier models
+- [ ] Owner account promoted to `trusted` (step 8) — otherwise you're on public-tier models

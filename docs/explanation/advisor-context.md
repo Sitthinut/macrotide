@@ -184,7 +184,7 @@ surfaced as *"I didn't have a reply for that."*
 
 ### What actually causes it (investigated 2026-05)
 
-The cause is **free-tier model/provider reliability**, confirmed by local
+The cause is **public-tier model/provider reliability**, confirmed by local
 reproduction with per-turn logging. `logEmptyTurn` (`app/api/chat/route.ts`)
 records, on any empty turn, the model OpenRouter actually routed to, the
 `finishReason`, each step's reason, and which tools ran. It shows three flavours:
@@ -207,11 +207,11 @@ Three tempting explanations were **tested and ruled out**:
   **not** fix it.
 - *Not the tool surface.* A faithful standalone harness — same model, system
   prompt, and full 14-tool surface — answers reliably when the tools' results
-  come back cleanly. The trigger is real free-tier generation/routing flakiness,
+  come back cleanly. The trigger is real public-tier generation/routing flakiness,
   not tool count.
 
 The trusted/owner chain (`openrouter/free → openrouter/auto`) barely sees this
-because it has the paid `auto` fallback the free tier deliberately lacks.
+because it has the paid `auto` fallback the public tier deliberately lacks.
 
 ### The fix: recover, don't depend on the model
 
@@ -244,8 +244,8 @@ Beyond the recovery net, three levers reduce dead-ends further:
   (rebalance, fee-switch): the figures arrive as facts (see
   [the context envelope](#the-context-envelope)), so the model can skip a
   `read_portfolio` hop and has fewer chances to stall.
-- **A cheaper, more reliable free-tier model** removes most dead-ends at the
-  source. The free tier's model is operator-configurable and bounded by usage
+- **A cheaper, more reliable public-tier model** removes most dead-ends at the
+  source. The public tier's model is operator-configurable and bounded by usage
   limits, so pointing it at a cheap paid model (Gemini-Flash class) is a config
   choice, not a code change; the recovery stays as belt-and-suspenders either way.
 - **Tool-result shaping** — returning a compact, model-legible subset instead of

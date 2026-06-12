@@ -103,7 +103,7 @@ this happened. This keeps a 50-turn chat from costing dramatically more than a
 short one.
 
 The "budget" is a fixed conservative constant (`DEFAULT_CONTEXT_BUDGET_TOKENS`,
-32k, in `lib/ai/summarize.ts`) — a safe floor across the varied free-tier
+32k, in `lib/ai/summarize.ts`) — a safe floor across the varied public-tier
 OpenRouter models, *not* read from the live model's actual window. Token use is
 estimated with a chars/4 heuristic (no tokenizer dependency). Both the budget
 and the 0.8 threshold are overridable per call via `compressContext()`; the chat

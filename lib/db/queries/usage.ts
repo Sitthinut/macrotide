@@ -1,8 +1,8 @@
 // Per-user token accounting + tier gating.
 //
 // Two tables back this module (migration 0007):
-//   - `account_tier`  one row per user; `tier` ∈ {'free','trusted'}. A user
-//                     with NO row defaults to 'free' (the safe, zero-cost
+//   - `account_tier`  one row per user; `tier` ∈ {'public','trusted'}. A user
+//                     with NO row defaults to 'public' (the safe, zero-cost
 //                     posture). Owner promotes via SQL.
 //   - `usage`         one row per (user, UTC date) holding the running
 //                     input/output token totals AND an estimated cost in
@@ -13,7 +13,7 @@
 //   - the TOKEN cap (always on) — a coarse floor on volume; and
 //   - the optional COST cap (cents/day) — only active when a cents budget is
 //     configured AND the served model is priced. The cost cap exists because a
-//     paid free-tier model (FREE_TIER_MODEL) has asymmetric in/out pricing that
+//     paid public-tier model (PUBLIC_TIER_MODEL) has asymmetric in/out pricing that
 //     a flat token count can't bound. Either cap tripping blocks the request.
 //
 // All functions take an explicit `userId` (like the memory queries) so they're
@@ -25,10 +25,10 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "../context";
 import { accountTier, usage } from "../schema";
 
-export type Tier = "free" | "trusted";
+export type Tier = "public" | "trusted";
 
 /** Default daily token budgets (input+output) — overridable via env. */
-const DEFAULT_BUDGET_FREE = 20_000;
+const DEFAULT_BUDGET_PUBLIC = 20_000;
 const DEFAULT_BUDGET_TRUSTED = 200_000;
 
 /** Cost is stored in micro-dollars (1e-6 USD). 1 cent = 10_000 micro-dollars. */
@@ -127,16 +127,17 @@ export function estimateCostMicros(
 
 /**
  * Optional daily cost ceiling in **cents** for a tier, from
- * `DAILY_CENTS_BUDGET_FREE` / `_TRUSTED`. Returns `null` when unset or malformed
- * — i.e. cost gating is OFF by default and a typo can't silently invent a money
- * cap (the always-on token cap still bounds spend). There is deliberately no
- * built-in cents default: a dollar limit must be a conscious operator choice.
+ * `DAILY_CENTS_BUDGET_PUBLIC` / `_TRUSTED`. Returns `null` when unset or
+ * malformed — i.e. cost gating is OFF by default and a typo can't silently
+ * invent a money cap (the always-on token cap still bounds spend). There is
+ * deliberately no built-in cents default: a dollar limit must be a conscious
+ * operator choice. `DAILY_CENTS_BUDGET_FREE` is a deprecated-but-honored alias.
  */
 export function dailyCentsBudget(tier: Tier): number | null {
   const raw =
     tier === "trusted"
       ? process.env.DAILY_CENTS_BUDGET_TRUSTED
-      : process.env.DAILY_CENTS_BUDGET_FREE;
+      : (process.env.DAILY_CENTS_BUDGET_PUBLIC ?? process.env.DAILY_CENTS_BUDGET_FREE);
   if (!raw) return null;
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -149,23 +150,24 @@ export function utcDate(d: Date = new Date()): string {
 
 /**
  * Daily token budget (input+output) for a tier. Reads
- * `DAILY_TOKEN_BUDGET_FREE` / `DAILY_TOKEN_BUDGET_TRUSTED` with documented
+ * `DAILY_TOKEN_BUDGET_PUBLIC` / `DAILY_TOKEN_BUDGET_TRUSTED` with documented
  * defaults (20k / 200k). A malformed/negative env value falls back to the
- * default rather than disabling the cap.
+ * default rather than disabling the cap. `DAILY_TOKEN_BUDGET_FREE` is a
+ * deprecated-but-honored alias for the public-tier budget.
  */
 export function dailyTokenBudget(tier: Tier): number {
   const raw =
     tier === "trusted"
       ? process.env.DAILY_TOKEN_BUDGET_TRUSTED
-      : process.env.DAILY_TOKEN_BUDGET_FREE;
-  const fallback = tier === "trusted" ? DEFAULT_BUDGET_TRUSTED : DEFAULT_BUDGET_FREE;
+      : (process.env.DAILY_TOKEN_BUDGET_PUBLIC ?? process.env.DAILY_TOKEN_BUDGET_FREE);
+  const fallback = tier === "trusted" ? DEFAULT_BUDGET_TRUSTED : DEFAULT_BUDGET_PUBLIC;
   if (!raw) return fallback;
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
 /**
- * Resolve a user's tier. No row → 'free' (zero-cost default; new accounts
+ * Resolve a user's tier. No row → 'public' (zero-cost default; new accounts
  * start here until the owner promotes them via SQL).
  */
 export function getTier(userId: string): Tier {
@@ -174,7 +176,7 @@ export function getTier(userId: string): Tier {
     .from(accountTier)
     .where(eq(accountTier.userId, userId))
     .get();
-  return (row?.tier as Tier | undefined) ?? "free";
+  return (row?.tier as Tier | undefined) ?? "public";
 }
 
 export interface TodayUsage {

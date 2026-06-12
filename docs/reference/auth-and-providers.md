@@ -101,29 +101,31 @@ OpenRouter proxies every major model behind one API:
 
 - Anthropic Claude · OpenAI GPT · Google Gemini · Meta Llama · Mistral · DeepSeek · Qwen · ...
 - One key, one billing surface, one set of telemetry.
-- Free-tier router (`openrouter/free`) covers demo use without billing.
+- Zero-cost router (`openrouter/free`) covers demo use without billing.
 - Pay per-token credit; load up via the OpenRouter dashboard.
 
 If you want a specific model, set `AI_MODELS` to any id from [openrouter.ai/models](https://openrouter.ai/models). It's a comma-separated fallback chain — the first model is tried first, and the next one is used if the previous fails. The default `openrouter/auto` lets OpenRouter pick the best model per prompt. `AI_MODELS` also serves `tier='trusted'` users.
 
 ### Tier model selection + spend caps
 
-A `tier='free'` user's chat model comes from its **own** `FREE_TIER_MODEL` var
+A `tier='public'` user's chat model comes from its **own** `PUBLIC_TIER_MODEL` var
 (default `openrouter/free`), never from `AI_MODELS` — so an owner-chain change
-can't widen free access. To lift free-tier quality, point it at a cheap paid
+can't widen public access. To lift public-tier quality, point it at a cheap paid
 model:
 
 ```sh
-FREE_TIER_MODEL=google/gemini-2.5-flash
+PUBLIC_TIER_MODEL=google/gemini-2.5-flash
 ```
 
-Free-tier spend is bounded by two caps, checked before each request (either
+(`FREE_TIER_MODEL` is a deprecated-but-honored alias for `PUBLIC_TIER_MODEL`.)
+
+Public-tier spend is bounded by two caps, checked before each request (either
 tripping blocks the turn, both reset at UTC midnight):
 
-- **Token cap** — `DAILY_TOKEN_BUDGET_FREE` (default 20k tokens/day). Always on.
-- **Cost cap** — `DAILY_CENTS_BUDGET_FREE` (US cents/day). **Off unless set**; the
+- **Token cap** — `DAILY_TOKEN_BUDGET_PUBLIC` (default 20k tokens/day). Always on. (`DAILY_TOKEN_BUDGET_FREE` is a deprecated-but-honored alias.)
+- **Cost cap** — `DAILY_CENTS_BUDGET_PUBLIC` (US cents/day). **Off unless set**; the
   right bound for a paid model with asymmetric in/out pricing. The per-turn cost
-  estimate reads `MODEL_PRICES` (USD/Mtok), so set that to match `FREE_TIER_MODEL`.
+  estimate reads `MODEL_PRICES` (USD/Mtok), so set that to match `PUBLIC_TIER_MODEL`. (`DAILY_CENTS_BUDGET_FREE` is a deprecated-but-honored alias.)
 
 Owner / `AUTH_DISABLED` mode is never metered. Full var table:
 [configuration.md § Quotas + tier gating](./configuration.md#quotas--tier-gating).
@@ -132,9 +134,9 @@ Owner / `AUTH_DISABLED` mode is never metered. Full var table:
 
 An image-bearing chat turn (the Advisor reads images you attach) routes to its
 **own** `VISION_CHAT_MODEL` (default `google/gemini-2.5-flash`), not the text
-chains — for the same reason `FREE_TIER_MODEL` is separate: free-tier vision
-derives from a dedicated var and can't widen `AI_MODELS`/`FREE_TIER_MODEL`.
-Owner, trusted, and free all use it; free-tier image turns stay bounded by the
+chains — for the same reason `PUBLIC_TIER_MODEL` is separate: public-tier vision
+derives from a dedicated var and can't widen `AI_MODELS`/`PUBLIC_TIER_MODEL`.
+Owner, trusted, and public all use it; public-tier image turns stay bounded by the
 same daily token + optional cents caps above. Set `VISION_CHAT_MODEL=off` to
 disable inline chat vision entirely (image turns then get a stub pointing at the
 Add-holdings importer). Demo image upload is **off** unless `DEMO_VISION` is set,
@@ -142,7 +144,7 @@ and when on uses the demo key, bounded by the 10-turn demo cap. Attached images
 are sent to the vision provider to answer the turn and cached only in the user's
 browser for the session — never stored on the server (see [SECURITY.md](../../SECURITY.md)).
 
-The free, demo, and ancillary (title/extract) paths also send
+The public, demo, and ancillary (title/extract) paths also send
 `reasoning: { effort: "none" }` so a reasoning-capable model the router picks
 doesn't spend hidden chain-of-thought (billed at the output rate, ~8–29s/turn
 vs ~2s) on a turn that doesn't need it. Owner/trusted keep their model-default

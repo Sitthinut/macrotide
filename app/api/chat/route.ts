@@ -620,13 +620,13 @@ export async function POST(req: Request) {
       }
 
       // Image turn → the shared vision model (bounded by the daily token/cents
-      // caps already checked above). Free tier pins reasoning off; trusted keeps
-      // the intent-gated effort. The free-tier cost invariant holds: vision
-      // derives from VISION_CHAT_MODEL, never AI_MODELS. Text turn → tier chain.
+      // caps already checked above). Public tier pins reasoning off; trusted
+      // keeps the intent-gated effort. The public-tier cost invariant holds:
+      // vision derives from VISION_CHAT_MODEL, never AI_MODELS. Text turn → tier chain.
       let model: LanguageModel | null;
       if (hasImages) {
         const vision = resolveVisionProvider({
-          reasoningEffort: tier === "free" ? "none" : reasoningEffort,
+          reasoningEffort: tier === "public" ? "none" : reasoningEffort,
         });
         const decision = visionDecisionFor("tiered", true, {
           visionReady: vision.ready && !!vision.model,

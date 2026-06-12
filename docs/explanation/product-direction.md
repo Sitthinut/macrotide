@@ -205,7 +205,7 @@ do.
 **Infrastructure / platform** (revisited only on a real need):
 
 - **Open SaaS / billing / self-serve upgrade / admin web UI beyond tier
-  toggling** — public sign-up defaults to free-tier; tier promotion is
+  toggling** — public sign-up defaults to the public tier; tier promotion is
   owner-driven.
 - **Horizontal scaling / multi-region** — single VM, single SQLite writer; the
   trigger to change is migrating to Turso/Postgres, not layering on SQLite.

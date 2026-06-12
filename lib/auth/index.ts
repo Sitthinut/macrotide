@@ -245,7 +245,7 @@ export const auth = betterAuth({
       allowUnlinkingAll: true,
     },
   },
-  // New-account provisioning: default tier='free' + one seeded
+  // New-account provisioning: default tier='public' + one seeded
   // bucket. Runs in an owner DB context stamped with the new user's id so the
   // bucket's user_id is set correctly (the auth route is not withDb-wrapped, so
   // there is no ambient request context here).

@@ -1,6 +1,6 @@
 // Quotas + tier gating. Locks in the invariants the chat route
 // depends on:
-//   - tier defaults to 'free' when there's no account_tier row;
+//   - tier defaults to 'public' when there's no account_tier row;
 //   - the daily cap reads env budgets with the documented defaults;
 //   - usage upserts then atomically increments today's (UTC) row;
 //   - the cap check flips at the budget boundary (>=).
@@ -78,31 +78,31 @@ describe("dailyTokenBudget", () => {
   });
 
   it("uses documented defaults when env is unset", () => {
-    process.env.DAILY_TOKEN_BUDGET_FREE = undefined;
+    process.env.DAILY_TOKEN_BUDGET_PUBLIC = undefined;
     process.env.DAILY_TOKEN_BUDGET_TRUSTED = undefined;
-    expect(dailyTokenBudget("free")).toBe(20_000);
+    expect(dailyTokenBudget("public")).toBe(20_000);
     expect(dailyTokenBudget("trusted")).toBe(200_000);
   });
 
   it("honors env overrides", () => {
-    process.env.DAILY_TOKEN_BUDGET_FREE = "5000";
+    process.env.DAILY_TOKEN_BUDGET_PUBLIC = "5000";
     process.env.DAILY_TOKEN_BUDGET_TRUSTED = "999999";
-    expect(dailyTokenBudget("free")).toBe(5000);
+    expect(dailyTokenBudget("public")).toBe(5000);
     expect(dailyTokenBudget("trusted")).toBe(999999);
   });
 
   it("falls back to the default on a malformed env value", () => {
-    process.env.DAILY_TOKEN_BUDGET_FREE = "not-a-number";
+    process.env.DAILY_TOKEN_BUDGET_PUBLIC = "not-a-number";
     process.env.DAILY_TOKEN_BUDGET_TRUSTED = "-5";
-    expect(dailyTokenBudget("free")).toBe(20_000);
+    expect(dailyTokenBudget("public")).toBe(20_000);
     expect(dailyTokenBudget("trusted")).toBe(200_000);
   });
 });
 
 describe("getTier", () => {
-  it("defaults to 'free' when there's no account_tier row", () => {
+  it("defaults to 'public' when there's no account_tier row", () => {
     withFresh(() => {
-      expect(getTier("u1")).toBe("free");
+      expect(getTier("u1")).toBe("public");
     });
   });
 
@@ -200,7 +200,7 @@ describe("usage accounting", () => {
 describe("isOverDailyCap", () => {
   const orig = { ...process.env };
   beforeEach(() => {
-    process.env.DAILY_TOKEN_BUDGET_FREE = "1000";
+    process.env.DAILY_TOKEN_BUDGET_PUBLIC = "1000";
     process.env.DAILY_TOKEN_BUDGET_TRUSTED = "10000";
   });
   afterEach(() => {
@@ -210,28 +210,28 @@ describe("isOverDailyCap", () => {
   it("is false under the cap", () => {
     withFresh(() => {
       recordUsage("u1", 400, 400); // 800 < 1000
-      expect(isOverDailyCap("u1", "free")).toBe(false);
+      expect(isOverDailyCap("u1", "public")).toBe(false);
     });
   });
 
   it("is true at the cap boundary (>=)", () => {
     withFresh(() => {
       recordUsage("u1", 500, 500); // 1000 == cap
-      expect(isOverDailyCap("u1", "free")).toBe(true);
+      expect(isOverDailyCap("u1", "public")).toBe(true);
     });
   });
 
   it("is true over the cap", () => {
     withFresh(() => {
       recordUsage("u1", 900, 900); // 1800 > 1000
-      expect(isOverDailyCap("u1", "free")).toBe(true);
+      expect(isOverDailyCap("u1", "public")).toBe(true);
     });
   });
 
-  it("the trusted budget is higher — same usage that caps free passes trusted", () => {
+  it("the trusted budget is higher — same usage that caps public passes trusted", () => {
     withFresh(() => {
-      recordUsage("u1", 600, 600); // 1200: over free (1000), under trusted (10000)
-      expect(isOverDailyCap("u1", "free")).toBe(true);
+      recordUsage("u1", 600, 600); // 1200: over public (1000), under trusted (10000)
+      expect(isOverDailyCap("u1", "public")).toBe(true);
       expect(isOverDailyCap("u1", "trusted")).toBe(false);
     });
   });
@@ -285,23 +285,23 @@ describe("dailyCentsBudget", () => {
   });
 
   it("is null (cost gating off) when unset", () => {
-    process.env.DAILY_CENTS_BUDGET_FREE = undefined;
+    process.env.DAILY_CENTS_BUDGET_PUBLIC = undefined;
     process.env.DAILY_CENTS_BUDGET_TRUSTED = undefined;
-    expect(dailyCentsBudget("free")).toBeNull();
+    expect(dailyCentsBudget("public")).toBeNull();
     expect(dailyCentsBudget("trusted")).toBeNull();
   });
 
   it("honors a positive env value", () => {
-    process.env.DAILY_CENTS_BUDGET_FREE = "50";
+    process.env.DAILY_CENTS_BUDGET_PUBLIC = "50";
     process.env.DAILY_CENTS_BUDGET_TRUSTED = "500";
-    expect(dailyCentsBudget("free")).toBe(50);
+    expect(dailyCentsBudget("public")).toBe(50);
     expect(dailyCentsBudget("trusted")).toBe(500);
   });
 
   it("is null (not a default) on a malformed or non-positive value", () => {
-    process.env.DAILY_CENTS_BUDGET_FREE = "not-a-number";
+    process.env.DAILY_CENTS_BUDGET_PUBLIC = "not-a-number";
     process.env.DAILY_CENTS_BUDGET_TRUSTED = "-5";
-    expect(dailyCentsBudget("free")).toBeNull();
+    expect(dailyCentsBudget("public")).toBeNull();
     expect(dailyCentsBudget("trusted")).toBeNull();
   });
 });
@@ -336,30 +336,30 @@ describe("cost accounting + cost cap", () => {
   });
 
   it("isOverDailyCostCap is false when no cents budget is configured", () => {
-    process.env.DAILY_CENTS_BUDGET_FREE = undefined;
+    process.env.DAILY_CENTS_BUDGET_PUBLIC = undefined;
     withFresh(() => {
       recordUsage("u1", 0, 0, undefined, 9_999_999);
-      expect(isOverDailyCostCap("u1", "free")).toBe(false);
+      expect(isOverDailyCostCap("u1", "public")).toBe(false);
     });
   });
 
   it("trips at the cents boundary (1 cent = 10_000 micro-dollars, >=)", () => {
-    process.env.DAILY_CENTS_BUDGET_FREE = "1";
+    process.env.DAILY_CENTS_BUDGET_PUBLIC = "1";
     withFresh(() => {
       recordUsage("u1", 0, 0, undefined, 9_999); // just under 1 cent
-      expect(isOverDailyCostCap("u1", "free")).toBe(false);
+      expect(isOverDailyCostCap("u1", "public")).toBe(false);
       recordUsage("u1", 0, 0, undefined, 1); // exactly 10_000 = 1 cent
-      expect(isOverDailyCostCap("u1", "free")).toBe(true);
+      expect(isOverDailyCostCap("u1", "public")).toBe(true);
     });
   });
 
   it("token cap and cost cap are independent (one trips, the other doesn't)", () => {
-    process.env.DAILY_TOKEN_BUDGET_FREE = "1000000"; // effectively unbounded here
-    process.env.DAILY_CENTS_BUDGET_FREE = "1"; // 1 cent
+    process.env.DAILY_TOKEN_BUDGET_PUBLIC = "1000000"; // effectively unbounded here
+    process.env.DAILY_CENTS_BUDGET_PUBLIC = "1"; // 1 cent
     withFresh(() => {
       recordUsage("u1", 100, 50, undefined, 10_000); // tiny tokens, 1 cent cost
-      expect(isOverDailyCap("u1", "free")).toBe(false); // under the token cap
-      expect(isOverDailyCostCap("u1", "free")).toBe(true); // at the cost cap
+      expect(isOverDailyCap("u1", "public")).toBe(false); // under the token cap
+      expect(isOverDailyCostCap("u1", "public")).toBe(true); // at the cost cap
     });
   });
 });
