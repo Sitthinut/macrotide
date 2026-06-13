@@ -22,6 +22,7 @@
     "db:drop:app": "drizzle-kit drop --config=drizzle/config.app.ts",
     "db:drop:market": "drizzle-kit drop --config=drizzle/config.market.ts",
     "db:seed": "tsx lib/mock/seed.ts",
+    "db:seed:presets": "tsx --tsconfig tsconfig.scripts.json scripts/seed-presets.ts",
     "market:refresh": "curl -s -X POST http://localhost:3000/api/admin/refresh-market | python3 -m json.tool",
     "jobs:close-stale": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/close-stale-sessions.ts",
     "jobs:refresh-catalog": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/refresh-fund-catalog.ts",

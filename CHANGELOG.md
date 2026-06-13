@@ -15,6 +15,13 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Curated model-portfolio templates ship as built-ins and seed reliably into
+  any database.** The factory set (Bogleheads 3-Fund, All-Weather, Permanent
+  Portfolio, Golden Butterfly, and more) now lives in a first-class presets
+  module and lands via an idempotent, additive seed on boot — plus a
+  `db:seed:presets` command for existing instances — so a database with real
+  holdings gets the templates without the destructive full reseed that
+  previously left the library empty.
 - **The side panel can be resized and expanded to full width.** A drag handle on
   the panel's left edge resizes it freely (keyboard-accessible — Arrow/Home/End),
   and a maximize toggle in every panel header (Advisor, Portfolios, Plan, Notes)

@@ -71,6 +71,7 @@ order.
 | --- | --- | --- |
 | Background job scheduling | systemd timers firing the `npm run jobs:*` scripts (topology in [deploy.md](../../how-to/deploy.md#scheduled-jobs-systemd-timers)) | In-process `node-cron` ties jobs to the web process + event loop; external cron needs an authed route surface |
 | Storage scale | Single VM, single SQLite writer | Postgres/Turso only when a real scaling trigger appears |
+| Built-in template seeding | Factory presets ([presets.ts](../../../lib/templates/presets.ts)) land via an idempotent, **additive** ensure-pass on boot ([client.ts](../../../lib/db/client.ts)) + a `db:seed:presets` CLI; a `PRESETS_VERSION` watermark records reconciliation, and a `presets_hidden` tombstone keeps owner removals from resurrecting. | The destructive `db:seed` wipes real holdings/chat to refresh demo data, so storing presets only in the demo seed left them unreachable in any DB with real data — the built-in library silently sat empty. Re-ensuring on every boot is cheap (~10 rows) and self-heals a fresh or upgraded instance without a migration |
 
 ## Durable rules
 

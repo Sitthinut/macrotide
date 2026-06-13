@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { ensureTemplatePresets } from "../templates/ensure-presets";
 import * as appSchema from "./schema/app";
 import * as marketSchema from "./schema/market";
 
@@ -57,6 +58,10 @@ function initApp() {
 
   if (existsSync(APP_MIGRATIONS_DIR) && !BUILD_PHASE) {
     migrate(db, { migrationsFolder: APP_MIGRATIONS_DIR });
+    // Land any missing factory template presets (built-in model portfolios).
+    // Additive + idempotent: never wipes or overwrites, so it's safe on every
+    // boot against a DB full of real data. See lib/templates/ensure-presets.ts.
+    ensureTemplatePresets(db);
   }
 
   // Back up app.db only — it is the precious system of record. market.db is
