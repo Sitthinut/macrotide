@@ -1441,9 +1441,9 @@
   color: var(--accent-ink);
 }
 .mt-tag-planned {
-  background: var(--accent-2-soft);
-  border-color: rgba(10, 166, 148, 0.28);
-  color: var(--accent-2-ink);
+  background: var(--paper);
+  border-color: var(--line);
+  color: var(--ink-soft);
 }
 .mt-tag-dot {
   width: 6px;
@@ -1455,7 +1455,7 @@
   background: var(--accent);
 }
 .mt-tag-planned .mt-tag-dot {
-  background: var(--accent-2);
+  background: var(--muted-2);
 }
 
 /* ============ Open source ============ */
