@@ -666,9 +666,9 @@ const PILLARS: Array<{
   {
     num: "04",
     name: "Select",
-    body: "The lowest-fee fund for any exposure, with holdings, feeder look-through, and fee-creep alerts.",
-    tag: "shipped",
-    tagLabel: "Available now",
+    body: "A fee-aware fund finder already names the lowest-fee fund for the exposure you want. Planned: per-fund depth (holdings, risk, feeder look-through) and a fee-creep flag.",
+    tag: "planned",
+    tagLabel: "Depth planned",
   },
 ];
 

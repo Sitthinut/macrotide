@@ -38,7 +38,7 @@ import type { Portfolio } from "@/lib/static/types";
 import { type ImportSeedRow, useImportSeed } from "@/lib/stores/import-seed";
 import { setActiveId, usePortfolioUi } from "@/lib/stores/portfolio-ui";
 import { useScrollHide } from "@/lib/useScrollHide";
-import { useViewport } from "@/lib/useViewport";
+import { useViewport, type Viewport } from "@/lib/useViewport";
 
 function portfolioToFormValues(p: Portfolio): PortfolioFormValues {
   return {
@@ -120,6 +120,69 @@ const APPS_RAIL: { id: AppId; icon: string; label: string }[] = [
 
 const THEME_STORAGE_KEY = "macrotide-theme";
 const ACTIVE_APP_STORAGE_KEY = "macrotide-active-app";
+const PANEL_WIDTH_STORAGE_KEY = "macrotide-panel-width";
+const PANEL_MAX_STORAGE_KEY = "macrotide-panel-max";
+
+// Resizable Advisor panel (issue #95). The panel is a grid column on desktop
+// (widening it eats into main, so main keeps a floor) and a fixed overlay on
+// tablet (no main to squeeze — it grows until its left edge meets the nav rail).
+// The two modes treat the drag endpoint differently:
+//   - Desktop: drag stops at a comfort cap; Maximize is a separate full takeover.
+//   - Overlay: drag runs all the way to the nav rail, and that endpoint IS the
+//     maximized state — drag-to-full and Maximize are one and the same.
+const PANEL_MIN_WIDTH = 380; // matches the historical fixed width
+const PANEL_MAX_WIDTH = 720; // desktop-only comfort cap (Maximize ignores it)
+// Overlay drag-to-maximize snap zone, sized as a fraction of the available
+// travel (max − min) rather than a fixed pixel: a fixed value snaps too eagerly
+// where there's little room and feels absent where there's a lot. Floored so it
+// stays a deliberate gesture on small tablets.
+const PANEL_SNAP_FRAC = 0.15;
+const PANEL_SNAP_MIN_PX = 40;
+const MAIN_MIN_WIDTH = 440; // desktop main floor (also the CSS `minmax` bound)
+const APPS_RAIL_WIDTH = 76; // right apps-icon rail on desktop
+const TABLET_APPS_RAIL = 72; // right apps-icon rail on tablet (overlay anchor)
+const LEFT_RAIL_WIDE = 180; // labeled left rail at ≥1200px
+const LEFT_RAIL_NARROW = 88; // compact left rail at 1000–1199px and tablet
+
+// How wide the panel may grow. On the tablet overlay that's the nav rail (no
+// comfort cap — the rail IS the maximized endpoint). On desktop it's where main
+// would hit its floor, capped by the comfort max so a wide monitor can't make
+// the panel unwieldy (Maximize is the separate full takeover there).
+function panelMaxWidth(innerWidth: number, viewport: Viewport): number {
+  if (viewport === "tablet") {
+    return Math.max(PANEL_MIN_WIDTH, innerWidth - TABLET_APPS_RAIL - LEFT_RAIL_NARROW);
+  }
+  const leftRail = innerWidth >= 1200 ? LEFT_RAIL_WIDE : LEFT_RAIL_NARROW;
+  const structural = innerWidth - leftRail - APPS_RAIL_WIDTH - MAIN_MIN_WIDTH;
+  return Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, structural));
+}
+
+function clampPanelWidth(width: number, innerWidth: number, viewport: Viewport): number {
+  return Math.round(
+    Math.min(panelMaxWidth(innerWidth, viewport), Math.max(PANEL_MIN_WIDTH, width)),
+  );
+}
+
+// Approximate the viewport from width alone (thresholds mirror useViewport) so
+// the module-level read can clamp before the hook is available. The on-mount
+// re-clamp effect corrects it against the live viewport anyway.
+function widthToViewport(w: number): Viewport {
+  if (w < 700) return "mobile";
+  if (w < 1000) return "tablet";
+  return "desktop";
+}
+
+// Mirrors readStoredActiveApp: a missing/garbage value falls back to the default.
+function readStoredPanelWidth(): number {
+  if (typeof window === "undefined") return PANEL_MIN_WIDTH;
+  try {
+    const stored = Number(window.localStorage.getItem(PANEL_WIDTH_STORAGE_KEY));
+    if (Number.isFinite(stored) && stored > 0) {
+      return clampPanelWidth(stored, window.innerWidth, widthToViewport(window.innerWidth));
+    }
+  } catch {}
+  return PANEL_MIN_WIDTH;
+}
 
 const APP_IDS: AppId[] = ["chat", "portfolios", "plan", "notes"];
 
@@ -281,6 +344,20 @@ export function App({ isDemo }: { isDemo: boolean }) {
   });
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
 
+  // Resizable Advisor panel (issue #95). `panelWidth` drives the desktop grid
+  // column (via a `--ra-panel-width` CSS var on the shell); `panelMaxed` is the
+  // Notion-style "expand to full" state that hides main and lets the panel span.
+  // Both persist; the width is re-clamped on read and on viewport resize so a
+  // value saved on a wide screen can't strand main on a narrower one.
+  const [panelWidth, setPanelWidth] = useState<number>(readStoredPanelWidth);
+  const [panelMaxed, setPanelMaxed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem(PANEL_MAX_STORAGE_KEY) === "1";
+    } catch {}
+    return false;
+  });
+
   // The mobile and wide shells are entirely different JSX/DOM trees. If we
   // rendered renderScreen() inside each shell's branch, crossing a viewport
   // breakpoint (e.g. phone rotate 390↔844 crossing 700) would unmount one
@@ -339,6 +416,29 @@ export function App({ isDemo }: { isDemo: boolean }) {
       window.localStorage.setItem(ACTIVE_APP_STORAGE_KEY, activeApp ?? "null");
     } catch {}
   }, [activeApp]);
+
+  // Persist the resizable-panel choices (issue #95), mirroring the dock pattern.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(panelWidth));
+    } catch {}
+  }, [panelWidth]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PANEL_MAX_STORAGE_KEY, panelMaxed ? "1" : "0");
+    } catch {}
+  }, [panelMaxed]);
+
+  // Re-clamp the panel width when the viewport changes (resize/rotate). A width
+  // saved on a wide window must shrink as the window narrows — on desktop so
+  // main keeps its floor, on the tablet overlay so it can't overrun the nav rail.
+  useEffect(() => {
+    if (viewport === "mobile") return;
+    const reclamp = () => setPanelWidth((w) => clampPanelWidth(w, window.innerWidth, viewport));
+    reclamp();
+    window.addEventListener("resize", reclamp);
+    return () => window.removeEventListener("resize", reclamp);
+  }, [viewport]);
 
   // If we resize mobile → wide while on the Chat screen, the chat tab has no
   // home in the wide rail, so navigate off it. We move the *screen* to the
@@ -760,11 +860,94 @@ export function App({ isDemo }: { isDemo: boolean }) {
     );
   })();
 
+  // ===== Resizable Advisor panel (issue #95) =====
+  // The handle sits on the panel's LEFT edge, so the panel grows as the pointer
+  // moves left: width = (window right edge − apps rail) − pointerX. The apps rail
+  // is the panel's right anchor and differs by mode (desktop grid column 76px vs
+  // tablet overlay `right: 72px`). Resizing works on both desktop and the tablet
+  // overlay; only mobile (separate shell, no panel) opts out.
+  const railOffset = viewport === "tablet" ? TABLET_APPS_RAIL : APPS_RAIL_WIDTH;
+  // Shared by every panel head's Maximize/Restore toggle (issue #95).
+  const toggleMax = () => setPanelMaxed((m) => !m);
+  // Apply a freshly-computed width during a resize. On the tablet overlay the
+  // nav rail is the maximized endpoint: once the drag gets within `snap` of it
+  // the panel snaps the rest of the way and flips into the maximized state (a
+  // little hysteresis below that releases it, so it doesn't flicker); dragging
+  // back out un-maximizes. Keyboard passes snap=0 for exact, step-by-step
+  // control. On desktop, drag and Maximize stay distinct — width only.
+  // Returns the resulting maximized state. `snapFrac` sizes the snap-to-maximize
+  // zone as a fraction of the overlay's travel (0 = exact, for keyboard).
+  // `wasMaxed` lets a drag pass its own synchronously-tracked value (state
+  // updates are async) so the hysteresis and the end-of-drag decision stay
+  // consistent within one gesture.
+  const applyResize = (next: number, snapFrac = 0, wasMaxed = panelMaxed): boolean => {
+    if (viewport !== "tablet") {
+      setPanelWidth(clampPanelWidth(next, window.innerWidth, viewport));
+      return false;
+    }
+    const max = panelMaxWidth(window.innerWidth, "tablet");
+    const snap = snapFrac > 0 ? Math.max(PANEL_SNAP_MIN_PX, (max - PANEL_MIN_WIDTH) * snapFrac) : 0;
+    const enter = max - snap;
+    const exit = snap > 0 ? enter - 24 : enter;
+    const nowMaxed = next >= enter ? true : next < exit ? false : wasMaxed;
+    setPanelMaxed(nowMaxed);
+    if (next < enter) setPanelWidth(clampPanelWidth(next, window.innerWidth, viewport));
+    return nowMaxed;
+  };
+  const onPanelResizePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (viewport === "mobile") return;
+    e.preventDefault();
+    // Snapshot the pre-drag width. A drag that ends maximized shouldn't leave
+    // panelWidth at the snap edge it last tracked — restore should return to the
+    // width the panel had before this gesture, like un-maximizing a window.
+    const startWidth = panelWidth;
+    let maxed = panelMaxed;
+    const move = (ev: PointerEvent) => {
+      maxed = applyResize(window.innerWidth - railOffset - ev.clientX, PANEL_SNAP_FRAC, maxed);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      if (maxed) setPanelWidth(startWidth);
+    };
+    // Attach the tracking listeners BEFORE pointer capture: capture can throw
+    // for a non-primary/synthetic pointer, and we don't want that to strand the
+    // drag. The window listeners keep the drag alive past the 8px bar on their
+    // own; capture is just a nicety so the cursor stays consistent.
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+  };
+  // Keyboard resize: arrows nudge, Home/End jump to the min/max. On the overlay,
+  // End (or arrowing to the rail) maximizes and Home/ArrowRight un-maximizes;
+  // when already maxed we measure from the max endpoint so the first nudge is
+  // smooth rather than jumping from a stale pre-maximize width.
+  const onPanelResizeKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const max = panelMaxWidth(window.innerWidth, viewport);
+    const step = e.shiftKey ? 48 : 16;
+    const current = panelMaxed && viewport === "tablet" ? max : panelWidth;
+    const targets: Record<string, number> = {
+      ArrowLeft: current + step,
+      ArrowRight: current - step,
+      Home: PANEL_MIN_WIDTH,
+      End: max,
+    };
+    const target = targets[e.key];
+    if (target === undefined) return;
+    e.preventDefault();
+    applyResize(target);
+  };
+
   // ===== WIDE SHELL (tablet + desktop) =====
   const wideShell = (
     <>
       <div
-        className={`ra-shell ${viewport} ${activeApp ? "panel-open" : "panel-closed"}`}
+        className={`ra-shell ${viewport} ${activeApp ? "panel-open" : "panel-closed"}${
+          panelMaxed && activeApp ? " panel-max" : ""
+        }`}
+        style={{ ["--ra-panel-width" as string]: `${panelWidth}px` }}
         data-screen-label={screen}
       >
         {/* ===== Left nav rail ===== */}
@@ -824,17 +1007,64 @@ export function App({ isDemo }: { isDemo: boolean }) {
               aria-label="Close panel"
             />
             <section className="ra-panel">
+              {/* Drag-to-resize handle on the panel's left edge. Kept visible on
+                  the tablet overlay even when maximized so the user can drag back
+                  out; on desktop it hides while maximized (Restore via the button,
+                  drag unchanged). role="separator" + aria-value* = keyboard slider. */}
+              {!(panelMaxed && isDesktop) && (
+                // biome-ignore lint/a11y/useSemanticElements: a focusable resizer is the canonical separator pattern (W3C ARIA, radix/shadcn Resizable); an <hr> can't host the pointer-drag + keyboard-slider behavior.
+                <div
+                  className="ra-panel-resize"
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="Resize panel"
+                  tabIndex={0}
+                  aria-valuemin={PANEL_MIN_WIDTH}
+                  aria-valuemax={
+                    typeof window === "undefined"
+                      ? PANEL_MIN_WIDTH
+                      : panelMaxWidth(window.innerWidth, viewport)
+                  }
+                  aria-valuenow={
+                    panelMaxed && typeof window !== "undefined"
+                      ? panelMaxWidth(window.innerWidth, viewport)
+                      : panelWidth
+                  }
+                  onPointerDown={onPanelResizePointerDown}
+                  onKeyDown={onPanelResizeKeyDown}
+                />
+              )}
               {activeApp === "chat" && (
                 <ChatPanel
                   seedPrompt={pendingPrompt}
                   onPromptConsumed={() => setPendingPrompt(null)}
                   onClose={() => setActiveApp(null)}
                   activeScreen={toAdvisorScreen(screen)}
+                  maxed={panelMaxed}
+                  onToggleMax={toggleMax}
                 />
               )}
-              {activeApp === "portfolios" && <PortfoliosPanel onClose={() => setActiveApp(null)} />}
-              {activeApp === "plan" && <PlanPanel onClose={() => setActiveApp(null)} />}
-              {activeApp === "notes" && <NotesPanel onClose={() => setActiveApp(null)} />}
+              {activeApp === "portfolios" && (
+                <PortfoliosPanel
+                  onClose={() => setActiveApp(null)}
+                  maxed={panelMaxed}
+                  onToggleMax={toggleMax}
+                />
+              )}
+              {activeApp === "plan" && (
+                <PlanPanel
+                  onClose={() => setActiveApp(null)}
+                  maxed={panelMaxed}
+                  onToggleMax={toggleMax}
+                />
+              )}
+              {activeApp === "notes" && (
+                <NotesPanel
+                  onClose={() => setActiveApp(null)}
+                  maxed={panelMaxed}
+                  onToggleMax={toggleMax}
+                />
+              )}
             </section>
           </>
         )}
