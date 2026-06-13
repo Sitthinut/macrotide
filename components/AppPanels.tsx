@@ -55,21 +55,49 @@ function PanelScrollBody({
   );
 }
 
-interface PanelHeaderProps {
+// Shared "expand to full" toggle (issue #95). Carried by every panel head so the
+// behavior is identical across Advisor, Portfolios, Plan, and Notes. The button
+// is absent when `onToggleMax` is — e.g. on the tablet/mobile shells that don't
+// wire it up — so a head without maximize support just renders nothing extra.
+interface PanelMaxProps {
+  maxed?: boolean;
+  onToggleMax?: () => void;
+}
+
+function PanelMaxButton({ maxed, onToggleMax }: PanelMaxProps) {
+  if (!onToggleMax) return null;
+  return (
+    <button
+      type="button"
+      className="icon-btn ra-panel-max-btn"
+      onClick={onToggleMax}
+      aria-label={maxed ? "Restore panel width" : "Maximize panel"}
+      aria-pressed={maxed}
+      title={maxed ? "Restore" : "Maximize"}
+    >
+      <Icon name={maxed ? "minimize-2" : "maximize-2"} size={14} />
+    </button>
+  );
+}
+
+interface PanelHeaderProps extends PanelMaxProps {
   title: string;
   showDot?: boolean;
   onClose: () => void;
 }
 
-function PanelHeader({ title, showDot, onClose }: PanelHeaderProps) {
+function PanelHeader({ title, showDot, onClose, maxed, onToggleMax }: PanelHeaderProps) {
   return (
     <div className="ra-panel-head">
       <div className="ra-panel-title">
         {showDot && <span className="ra-dot"></span>} {title}
       </div>
-      <button className="icon-btn" onClick={onClose} aria-label="Close">
-        <Icon name="close" size={14} />
-      </button>
+      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <PanelMaxButton maxed={maxed} onToggleMax={onToggleMax} />
+        <button className="icon-btn" onClick={onClose} aria-label="Close">
+          <Icon name="close" size={14} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -79,12 +107,17 @@ export function ChatPanel({
   onPromptConsumed,
   onClose,
   activeScreen,
+  maxed,
+  onToggleMax,
 }: {
   seedPrompt: SeedPrompt | null;
   onPromptConsumed: () => void;
   onClose: () => void;
   /** The screen behind the dock, so chat suggestions reflect it. Forwarded to ChatScreen. */
   activeScreen?: AdvisorScreenContext | null;
+  /** Panel "expand to full" state + toggle (issue #95); shared with the other panels. */
+  maxed?: boolean;
+  onToggleMax?: () => void;
 }) {
   // In-panel view swap (Option B): the chat body and the thread list share one
   // panel. "All chats" swaps to the list; the back arrow returns to chat.
@@ -141,6 +174,7 @@ export function ChatPanel({
             >
               <Icon name="sparkle" size={12} /> New chat
             </button>
+            <PanelMaxButton maxed={maxed} onToggleMax={onToggleMax} />
             <button className="icon-btn" onClick={onClose} aria-label="Close">
               <Icon name="close" size={14} />
             </button>
@@ -267,7 +301,11 @@ function SortableBucketRow({
   );
 }
 
-export function PortfoliosPanel({ onClose }: { onClose: () => void }) {
+export function PortfoliosPanel({
+  onClose,
+  maxed,
+  onToggleMax,
+}: { onClose: () => void } & PanelMaxProps) {
   const { portfolios, isLoading } = usePortfolioView();
   // Active id + edit/new intents flow through the shared store, so the sidebar
   // highlight tracks whatever the PortfolioScreen shows — no event handshake.
@@ -298,7 +336,7 @@ export function PortfoliosPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      <PanelHeader title="Portfolios" onClose={onClose} />
+      <PanelHeader title="Portfolios" onClose={onClose} maxed={maxed} onToggleMax={onToggleMax} />
       <PanelScrollBody style={{ padding: "10px 14px 14px" }}>
         {isLoading || !portfolios ? (
           <SkeletonRows rows={3} height={56} padding={0} />
@@ -344,7 +382,11 @@ const TONE_COLOR: Record<string, string> = {
   action: "var(--loss)",
 };
 
-export function PlanPanel({ onClose }: { onClose: () => void }) {
+export function PlanPanel({
+  onClose,
+  maxed,
+  onToggleMax,
+}: { onClose: () => void } & PanelMaxProps) {
   // Real, computed health over the combined book vs the selected target model.
   const { aggregate } = usePortfolioView();
   const { models } = useModelPortfoliosView();
@@ -363,7 +405,12 @@ export function PlanPanel({ onClose }: { onClose: () => void }) {
   if (!health) {
     return (
       <>
-        <PanelHeader title="Plan & Health" onClose={onClose} />
+        <PanelHeader
+          title="Plan & Health"
+          onClose={onClose}
+          maxed={maxed}
+          onToggleMax={onToggleMax}
+        />
         <PanelScrollBody style={{ padding: 16 }}>
           <SkeletonRows rows={4} height={42} padding={0} />
         </PanelScrollBody>
@@ -386,7 +433,12 @@ export function PlanPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      <PanelHeader title="Plan & Health" onClose={onClose} />
+      <PanelHeader
+        title="Plan & Health"
+        onClose={onClose}
+        maxed={maxed}
+        onToggleMax={onToggleMax}
+      />
       <PanelScrollBody style={{ padding: "12px 14px" }}>
         <div
           className="card-soft"
@@ -465,12 +517,16 @@ export function PlanPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
-export function NotesPanel({ onClose }: { onClose: () => void }) {
+export function NotesPanel({
+  onClose,
+  maxed,
+  onToggleMax,
+}: { onClose: () => void } & PanelMaxProps) {
   const { journal } = useJournalView();
   const notes = journal?.notes ?? [];
   return (
     <>
-      <PanelHeader title="Pinned notes" onClose={onClose} />
+      <PanelHeader title="Pinned notes" onClose={onClose} maxed={maxed} onToggleMax={onToggleMax} />
       <PanelScrollBody style={{ padding: "8px 12px 12px" }}>
         {notes.slice(0, 6).map((n) => (
           <div className="article-card" key={n.id}>

@@ -2799,13 +2799,22 @@ button.chip {
   grid-template-columns: 88px 1fr 72px;
 }
 
-/* Desktop ≥1200: 180 | flex | 380 (if panel) | 76 — labeled rail sized to the
-   longest nav label ("Portfolio"), no wasted whitespace. */
+/* Desktop ≥1200: 180 | flex | panel | 76 — labeled rail sized to the longest
+   nav label ("Portfolio"), no wasted whitespace. The panel column is user-
+   resizable (issue #95): its width is `--ra-panel-width` (set on the shell,
+   default 380px), and main is `minmax(440px, 1fr)` so dragging the panel wider
+   can never starve main below its floor. */
 .ra-shell.desktop.panel-open {
-  grid-template-columns: 180px 1fr 380px 76px;
+  grid-template-columns: 180px minmax(440px, 1fr) var(--ra-panel-width, 380px) 76px;
 }
 .ra-shell.desktop.panel-closed {
   grid-template-columns: 180px 1fr 76px;
+}
+
+/* Maximized ("expand to full", issue #95): collapse main, panel takes the flex
+   column. Main is display:none below so the 0 column carries no overflow. */
+.ra-shell.desktop.panel-open.panel-max {
+  grid-template-columns: 180px 0 1fr 76px;
 }
 
 /* Narrow desktop (1000–1199): keep side-by-side panel but borrow the tablet
@@ -2815,11 +2824,22 @@ button.chip {
    wrapped in (min-width: 1200px) so it doesn't fight the compact one. */
 @media (max-width: 1199px) {
   .ra-shell.desktop.panel-open {
-    grid-template-columns: 88px 1fr 380px 76px;
+    grid-template-columns: 88px minmax(440px, 1fr) var(--ra-panel-width, 380px) 76px;
   }
   .ra-shell.desktop.panel-closed {
     grid-template-columns: 88px 1fr 76px;
   }
+  .ra-shell.desktop.panel-open.panel-max {
+    grid-template-columns: 88px 0 1fr 76px;
+  }
+}
+
+/* When maximized, main collapses to its 0-width grid track and clips its
+   content — a full takeover. We must NOT `display:none` it: removing a grid
+   item reflows auto-placement, so the panel would slide into main's 0 track
+   and vanish. Keeping it in flow at width 0 preserves the column mapping. */
+.ra-shell.panel-max .ra-main {
+  overflow: hidden;
 }
 
 /* ----- Left nav rail ----- */
@@ -3190,21 +3210,82 @@ button.chip {
   flex-direction: column;
   overflow: hidden;
   z-index: 20;
+  transition: border-left-color 0.15s ease;
+}
+
+/* Drag-to-resize handle (issue #95): an invisible bar over the panel's left
+   edge. Sits fully INSIDE the panel — `.ra-panel` is `overflow: hidden`, which
+   clips (and so kills the hit area of) anything straddling the border — but an
+   8px target flush at the edge stays entirely hittable. The visible affordance
+   is a 2px line ON the divider: the panel's own 1px border lights up (below)
+   plus a 1px inner line flush against it, so it reads as one line on the edge,
+   not a second line set in from it. */
+.ra-panel-resize {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 30;
+  touch-action: none;
+}
+.ra-panel-resize::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 1px;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+.ra-panel-resize:focus-visible {
+  outline: none; /* the lit divider is the focus indicator (below) */
+}
+/* Light up the inner 1px (the part inside the clip) on the same states... */
+.ra-panel-resize:hover::before {
+  background: var(--line);
+}
+.ra-panel-resize:active::before,
+.ra-panel-resize:focus-visible::before {
+  background: var(--accent);
+}
+/* ...and the panel's OWN 1px border (the part on the edge) to match, via `:has`
+   so the parent reacts to the handle's state. Together = a 2px line on the
+   divider. `.ra-shell` prefix wins specificity over the tablet overlay's border.
+   Hover = quiet neutral; active drag + keyboard focus = the accent (focus needs
+   a visible indicator, and shouldn't look like a passive hover). */
+.ra-shell .ra-panel:has(.ra-panel-resize:hover) {
+  border-left-color: var(--line);
+}
+.ra-shell .ra-panel:has(.ra-panel-resize:active),
+.ra-shell .ra-panel:has(.ra-panel-resize:focus-visible) {
+  border-left-color: var(--accent);
 }
 
 /* Tablet: panel becomes an overlay anchored just inside the apps rail. Main
-   content underneath keeps its full width — no squeeze. */
+   content underneath keeps its full width — no squeeze. Opens at the same 380px
+   default as desktop and is resizable via the same `--ra-panel-width` var
+   (issue #95); the JS clamp keeps it from overrunning the nav rail, and the
+   `min(...)` here is a belt-and-suspenders cap for the moment before a resize
+   re-clamps. Maximize expands it up to — but not over — the nav rail. */
 .ra-shell.tablet .ra-panel {
   position: fixed;
   top: var(--demo-banner-h, 0px);
   right: 72px;
-  width: min(380px, calc(100vw - 88px - 72px - 24px));
+  width: min(var(--ra-panel-width, 380px), calc(100vw - 88px - 72px));
   height: calc(100vh - var(--demo-banner-h, 0px));
   z-index: 50;
   border-left: 1px solid var(--line-soft);
   /* Subtle separation only — no heavy elevation. */
   box-shadow: -2px 0 12px rgba(0, 0, 0, 0.06);
   animation: slideInRight 0.22s ease-out;
+}
+/* Maximized overlay stops at the nav rail's right edge (left rail 88 + apps rail
+   72) — the same edge a full drag reaches, so the nav stays visible and is never
+   covered. Uncapped by the comfort max, so it can exceed the drag ceiling on a
+   wide tablet — mirroring how desktop Maximize fills the whole content area. */
+.ra-shell.tablet.panel-max .ra-panel {
+  width: calc(100vw - 72px - 88px);
 }
 
 @keyframes slideInRight {
@@ -3232,11 +3313,17 @@ button.chip {
   color: inherit;
 }
 .ra-shell.tablet.panel-open .ra-panel-backdrop {
-  /* No dim — keeps the dashboard fully readable while the chat panel is
-     open. The backdrop is still a click target for dismissing the panel. */
+  /* No dim — keeps the dashboard fully readable while the panel is open. The
+     backdrop is a click target for dismissing the panel, but it spans only the
+     MAIN area between the rails (left nav 88px, apps rail 72px) — not the rails
+     themselves — so switching panels or screens from a rail is a single click,
+     not dismiss-then-reopen. Clicking the exposed main still dismisses. */
   display: block;
   position: fixed;
-  inset: 0;
+  top: var(--demo-banner-h, 0px);
+  right: 72px;
+  bottom: 0;
+  left: 88px;
   background: transparent;
   z-index: 49;
   cursor: pointer;

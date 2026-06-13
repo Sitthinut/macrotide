@@ -15,6 +15,15 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **The side panel can be resized and expanded to full width.** A drag handle on
+  the panel's left edge resizes it freely (keyboard-accessible — Arrow/Home/End),
+  and a maximize toggle in every panel header (Advisor, Portfolios, Plan, Notes)
+  expands it to a full takeover and back. On desktop the main view keeps a usable
+  minimum and drag stops at a comfortable maximum (maximize is the separate full
+  takeover); on the tablet overlay, dragging all the way to the nav rail simply
+  is the maximized state — drag-to-full and maximize are one and the same, and
+  you can drag back out of it. The chosen width and maximized state persist
+  across reloads; mobile is unchanged.
 - **An early-warning probe guards against OpenRouter spend silently breaking
   chat.** A server-run job reads the account key's live monthly limit from
   OpenRouter and signals when spend nears it — before the cap trips a 403 that
