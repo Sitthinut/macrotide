@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { clientIp, type RateLimitConfig, rateLimit } from "@/lib/api/rate-limit";
+import {
+  clientIp,
+  globalRateLimit,
+  OCR_GLOBAL_RATE_LIMIT,
+  type RateLimitConfig,
+  rateLimit,
+} from "@/lib/api/rate-limit";
 import { withDb } from "@/lib/api/with-db";
 import { deriveRowsWithNav } from "@/lib/portfolio/derive-rows";
 import {
@@ -43,6 +49,14 @@ export async function POST(req: Request) {
         status: 429,
         headers: { "Retry-After": Math.ceil(rl.resetMs / 1000).toString() },
       },
+    );
+  }
+  // Process-wide OCR ceiling — see lib/api/rate-limit.ts.
+  const breaker = globalRateLimit(OCR_GLOBAL_RATE_LIMIT);
+  if (!breaker.ok) {
+    return NextResponse.json(
+      { error: "rate_limited", retryAfterMs: breaker.resetMs },
+      { status: 429, headers: { "Retry-After": Math.ceil(breaker.resetMs / 1000).toString() } },
     );
   }
 

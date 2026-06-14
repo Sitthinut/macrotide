@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { rateLimit } from "./rate-limit";
+import { globalRateLimit, rateLimit } from "./rate-limit";
 
 const TEST_CFG = { scope: "test", limit: 3, windowMs: 1000 };
 
@@ -40,5 +40,26 @@ describe("rateLimit", () => {
     expect(rateLimit("3.3.3.3", TEST_CFG).remaining).toBe(2);
     expect(rateLimit("3.3.3.3", TEST_CFG).remaining).toBe(1);
     expect(rateLimit("3.3.3.3", TEST_CFG).remaining).toBe(0);
+  });
+});
+
+describe("globalRateLimit (IP-independent circuit breaker)", () => {
+  const G = { scope: "ocr-global-test", limit: 3, windowMs: 1000 };
+
+  it("trips on total volume regardless of caller — spoofed IPs share one budget", () => {
+    // The per-IP limiter would let each of these through; the global breaker
+    // counts them all against one bucket.
+    expect(globalRateLimit(G).ok).toBe(true);
+    expect(globalRateLimit(G).ok).toBe(true);
+    expect(globalRateLimit(G).ok).toBe(true);
+    expect(globalRateLimit(G).ok).toBe(false);
+  });
+
+  it("is independent per scope", () => {
+    globalRateLimit(G);
+    globalRateLimit(G);
+    globalRateLimit(G);
+    expect(globalRateLimit(G).ok).toBe(false);
+    expect(globalRateLimit({ ...G, scope: "chat-global-test" }).ok).toBe(true);
   });
 });
