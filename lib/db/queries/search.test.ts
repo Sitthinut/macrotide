@@ -4,7 +4,7 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { freshMarketDb } from "@/tests/db-helpers";
-import { runWithDbContext } from "../context";
+import { getDb, runWithDbContext, runWithUserScope } from "../context";
 import * as schema from "../schema";
 import { appendMessage, createThread, purgeThread, renameThread, softDeleteThread } from "./chat";
 import { searchThreads, toFtsMatchQuery } from "./search";
@@ -142,5 +142,59 @@ describe("searchThreads", () => {
       renameThread(t.id, "Brandnew topic");
       expect(searchThreads("brandnew")).toHaveLength(1);
     });
+  });
+});
+
+// #188: search must be fail-closed, mirroring ownedBy() — a logged-in user sees
+// ONLY their own threads, never the shared NULL-owned set or another user's.
+describe("searchThreads is owner-scoped (fail-closed)", () => {
+  function seedUser(id: string): void {
+    const now = new Date();
+    getDb()
+      .insert(schema.user)
+      .values({
+        id,
+        name: id,
+        email: `${id}@example.test`,
+        emailVerified: true,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+  }
+
+  it("a logged-in user's search excludes NULL-owned and other users' threads", () => {
+    const { sqlite, db, marketDb, marketSqlite } = freshDb();
+    runWithDbContext(
+      { appDb: db, appSqlite: sqlite, marketDb, marketSqlite, isDemo: false, sessionId: "owner" },
+      () => {
+        seedUser("alice");
+        seedUser("bob");
+
+        // Owner (single-owner / NULL-owned) thread — the pre-multi-user shape.
+        const ownerThread = createThread({ title: "Owner notes" });
+        appendMessage({ threadId: ownerThread.id, role: "user", content: "owner rebalance plan" });
+
+        runWithUserScope("alice", () => {
+          const t = createThread({ title: "Alice notes" });
+          appendMessage({ threadId: t.id, role: "user", content: "alice rebalance plan" });
+        });
+        runWithUserScope("bob", () => {
+          const t = createThread({ title: "Bob notes" });
+          appendMessage({ threadId: t.id, role: "user", content: "bob rebalance plan" });
+        });
+
+        // Alice sees only her own — NOT the owner's NULL thread, NOT Bob's.
+        runWithUserScope("alice", () => {
+          expect(searchThreads("rebalance").map((h) => h.thread.title)).toEqual(["Alice notes"]);
+        });
+        // Bob likewise.
+        runWithUserScope("bob", () => {
+          expect(searchThreads("rebalance").map((h) => h.thread.title)).toEqual(["Bob notes"]);
+        });
+        // No user in context (single-owner) → only the NULL-owned set.
+        expect(searchThreads("rebalance").map((h) => h.thread.title)).toEqual(["Owner notes"]);
+      },
+    );
   });
 });
