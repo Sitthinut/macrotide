@@ -46,13 +46,16 @@ function hydrateThread(r: ThreadRowRaw): ChatThread {
 
 /**
  * SQL fragment + bind params scoping `chat_threads` (aliased `t`) to the
- * current user, plus shared NULL-owned rows. In single-owner mode (no user in
- * context) this collapses to `t.user_id IS NULL` — the single-owner row set.
+ * current user. Fail-closed, mirroring `ownedBy()` in scope.ts: a logged-in
+ * user sees ONLY their own rows (`t.user_id = ?`), never the shared NULL-owned
+ * set. In single-owner mode (no user in context) this is the `t.user_id IS NULL`
+ * set. (A prior version OR-ed in `IS NULL` for logged-in users, which leaked the
+ * owner's NULL-owned threads into any user's search results — #188.)
  */
 function ownerScope(): { clause: string; params: string[] } {
   const userId = getUserId();
   if (userId === null) return { clause: "AND t.user_id IS NULL", params: [] };
-  return { clause: "AND (t.user_id = ? OR t.user_id IS NULL)", params: [userId] };
+  return { clause: "AND t.user_id = ?", params: [userId] };
 }
 
 /**
