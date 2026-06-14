@@ -26,6 +26,7 @@ Macrotide follows the **secure-by-default** principle, one of [Saltzer & Schroed
 ### We defend against
 
 - **Anonymous network visitors reading the owner's portfolio.** Passkey auth blocks the dashboard. Unauthenticated requests get bounced to `/login`.
+- **Anonymous access to the JSON API (deny-by-default).** The API layer is fail-closed, not just the UI: every data route runs inside `withDb` (`lib/api/with-db.ts`), which rejects an anonymous request (no session, no demo cookie) with `401` instead of serving the shared `user_id IS NULL` row set. The few intentionally-public routes are the explicit, in-code allowlist — they don't go through `withDb` (`/api/auth/*`, `/api/auth-config`, `/api/demo`, `/api/chat/capabilities`) or opt in with `withDb(fn, { public: true })`. Routes with no DB access that still spend resources gate with `requireApiSession()` (e.g. `/api/chat/transcribe`). Admin/operator routes are stricter still — owner-only via `requireOwner()` / `getOwnerStatus()` (e.g. `/api/admin/*`). `AUTH_DISABLED=1` (single-owner local dev) bypasses all of this.
 - **Cross-session leakage in demo mode.** Each demo session is its own in-memory SQLite, keyed by cookie, swept after 1h idle.
 - **Brute-force on `/api/chat`.** IP-based rate limit, 20 req/min (per-IP, in-memory).
 - **Demo abuse.** 10 chat turns per session cap, separate AI provider key supported so demo can't burn owner quota.

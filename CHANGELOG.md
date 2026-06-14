@@ -15,6 +15,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **The JSON API is fail-closed (deny-by-default auth).** Every data route now
+  rejects an anonymous request with `401` instead of silently serving the
+  shared owner row set; the few intentionally-public routes are an explicit,
+  in-code allowlist, the demo sandbox stays open, and `AUTH_DISABLED=1` local
+  dev is unchanged. Resource-spending routes with no DB access (OCR transcribe)
+  and operator routes (market refresh) gained matching session/owner gates.
 - **Curated model-portfolio templates ship as built-ins and seed reliably into
   any database.** The factory set (Bogleheads 3-Fund, All-Weather, Permanent
   Portfolio, Golden Butterfly, and more) now lives in a first-class presets

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { clientIp, type RateLimitConfig, rateLimit } from "@/lib/api/rate-limit";
+import { requireApiSession } from "@/lib/api/with-db";
 import {
   extractHoldingsFromImage,
   isAllowedMimeType,
@@ -25,6 +26,11 @@ const TRANSCRIBE_RATE_LIMIT: RateLimitConfig = {
 // vision path / busting the prompt cache every turn). The image is never
 // persisted. No DB access — pure OCR — so no withDb wrapper.
 export async function POST(req: Request) {
+  // Deny-by-default: this route has no withDb wrapper but still spends the
+  // owner's paid OCR key, so it must reject anonymous callers explicitly.
+  const denied = await requireApiSession();
+  if (denied) return denied;
+
   const rl = rateLimit(clientIp(req), TRANSCRIBE_RATE_LIMIT);
   if (!rl.ok) {
     return NextResponse.json(
