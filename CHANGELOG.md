@@ -21,6 +21,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   in-code allowlist, the demo sandbox stays open, and `AUTH_DISABLED=1` local
   dev is unchanged. Resource-spending routes with no DB access (OCR transcribe)
   and operator routes (market refresh) gained matching session/owner gates.
+- **Hardening pass (defense-in-depth).** Image uploads are validated by their
+  magic bytes (not the client-declared type); the broker import token is
+  compared in constant time; the connector-manifest URL fetch has SSRF guards
+  (https-only, no private hosts, no redirects, bounded time/size); and a test
+  guards against a password-reset flow being added while the inert credential
+  path is enabled.
 - **Tighter abuse & cost defenses.** A process-wide OCR circuit breaker
   (`OCR_GLOBAL_LIMIT_PER_MIN`, default 60/min) caps total vision spend even if
   the per-IP limit is bypassed; demo-session creation is now rate-limited; and
