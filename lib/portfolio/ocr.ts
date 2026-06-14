@@ -158,6 +158,45 @@ export function isAllowedMimeType(mimeType: string): mimeType is AllowedMimeType
   return (ALLOWED_MIME_TYPES as readonly string[]).includes(mimeType);
 }
 
+/**
+ * Detect an image's real type from its leading bytes (magic number), so the
+ * client-declared MIME can't smuggle a non-image (or a mislabeled file) into the
+ * OCR path. Returns the detected allowed type, or null if the bytes aren't a
+ * supported image. Routes should trust THIS over `file.type`.
+ */
+export function sniffImageMime(data: Buffer): AllowedMimeType | null {
+  if (data.length < 12) return null;
+  // JPEG: FF D8 FF
+  if (data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return "image/jpeg";
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    data[0] === 0x89 &&
+    data[1] === 0x50 &&
+    data[2] === 0x4e &&
+    data[3] === 0x47 &&
+    data[4] === 0x0d &&
+    data[5] === 0x0a &&
+    data[6] === 0x1a &&
+    data[7] === 0x0a
+  ) {
+    return "image/png";
+  }
+  // WebP: "RIFF" .... "WEBP"
+  if (
+    data[0] === 0x52 &&
+    data[1] === 0x49 &&
+    data[2] === 0x46 &&
+    data[3] === 0x46 &&
+    data[8] === 0x57 &&
+    data[9] === 0x45 &&
+    data[10] === 0x42 &&
+    data[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+  return null;
+}
+
 function openrouterVisionModel(apiKey: string, modelId: string) {
   const provider = createOpenAICompatible({
     name: "openrouter",

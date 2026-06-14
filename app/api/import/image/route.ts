@@ -15,6 +15,7 @@ import {
   type ImportDocType,
   isAllowedMimeType,
   OcrProviderUnavailableError,
+  sniffImageMime,
 } from "@/lib/portfolio/ocr";
 
 export const runtime = "nodejs";
@@ -101,6 +102,14 @@ export async function POST(req: Request) {
 
   const buffer = Buffer.from(await file.arrayBuffer());
 
+  // Trust the file's magic bytes over the client-declared MIME — a mislabeled
+  // or non-image payload is rejected here, and the sniffed type is what we hand
+  // the model.
+  const sniffed = sniffImageMime(buffer);
+  if (!sniffed) {
+    return badRequest("File contents are not a supported image (JPG, PNG, or WebP).");
+  }
+
   // Optional caller override: when the auto-classifier was unsure and the user
   // explicitly picked a type, the client re-posts with `as` to skip detection.
   const asRaw = formData.get("as");
@@ -131,18 +140,18 @@ export async function POST(req: Request) {
         docType = override;
         confidence = "high";
       } else {
-        const c = await classifyImportImage({ data: buffer, mimeType }, ctx);
+        const c = await classifyImportImage({ data: buffer, mimeType: sniffed }, ctx);
         docType = c.docType;
         confidence = c.confidence;
         asOf = c.asOf;
       }
 
       if (docType === "transactions") {
-        const transactions = await extractTransactionRows({ data: buffer, mimeType });
+        const transactions = await extractTransactionRows({ data: buffer, mimeType: sniffed });
         return NextResponse.json({ docType, confidence, asOf, transactions }, { status: 200 });
       }
 
-      const extracted = await extractStructuredHoldings({ data: buffer, mimeType });
+      const extracted = await extractStructuredHoldings({ data: buffer, mimeType: sniffed });
       // Derive units/avgCost from the NAV on the snapshot's own date (#130),
       // falling back to the latest NAV (shared with the advisor's
       // propose_holdings_import tool — see lib/portfolio/derive-rows.ts).

@@ -11,6 +11,7 @@ import {
   extractHoldingsFromImage,
   isAllowedMimeType,
   OcrProviderUnavailableError,
+  sniffImageMime,
 } from "@/lib/portfolio/ocr";
 
 export const runtime = "nodejs";
@@ -76,8 +77,15 @@ export async function POST(req: Request) {
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
+
+  // Trust the file's magic bytes over the client-declared MIME.
+  const sniffed = sniffImageMime(buffer);
+  if (!sniffed) {
+    return NextResponse.json({ error: "unsupported_type", text: "" }, { status: 400 });
+  }
+
   try {
-    const { text } = await extractHoldingsFromImage({ data: buffer, mimeType });
+    const { text } = await extractHoldingsFromImage({ data: buffer, mimeType: sniffed });
     return NextResponse.json({ text }, { status: 200 });
   } catch (err) {
     if (err instanceof OcrProviderUnavailableError) {

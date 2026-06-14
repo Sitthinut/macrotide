@@ -11,6 +11,7 @@ import {
   extractTransactionRows,
   isAllowedMimeType,
   OcrProviderUnavailableError,
+  sniffImageMime,
 } from "@/lib/portfolio/ocr";
 
 export const runtime = "nodejs";
@@ -84,13 +85,19 @@ export async function POST(req: Request) {
 
   const buffer = Buffer.from(await file.arrayBuffer());
 
+  // Trust the file's magic bytes over the client-declared MIME.
+  const sniffed = sniffImageMime(buffer);
+  if (!sniffed) {
+    return badRequest("File contents are not a supported image (JPG, PNG, or WebP).");
+  }
+
   // Returns raw transaction rows for the editable confirmation table; the client
   // normalizes kind/date and the user reviews before anything saves. The image
   // is never persisted. (withDb keeps any incidental read on the right app.db,
   // matching the holdings OCR route.)
   return withDb(async () => {
     try {
-      const rows = await extractTransactionRows({ data: buffer, mimeType });
+      const rows = await extractTransactionRows({ data: buffer, mimeType: sniffed });
       return NextResponse.json({ rows }, { status: 200 });
     } catch (err) {
       if (err instanceof OcrProviderUnavailableError) {
