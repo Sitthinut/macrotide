@@ -72,6 +72,11 @@ list names shipped capabilities only (no status column).
 The [board](https://github.com/users/Sitthinut/projects/2) holds the data — don't
 restate the issue list, colors, or IDs here; they'd go stale. The conventions:
 
+- **Scope** = code-level only — the board is public (open-source project). App
+  behavior, features, bugs, app-side security; **never** server/host/deployment
+  detail (prod paths, infra topology, deploy/secrets mechanics, host hardening),
+  which is managed separately. A host-only finding gets no issue — and an
+  existing one that turns out host-only is removed, not described.
 - **Priority** = tier: **P0** now (launch, small/high-trust, or visible fixes),
   **P1** next, **P2** later. Stay within P0 unless told otherwise.
 - **Status** = `Backlog → Todo → In Progress → Done`. File new planned work in
