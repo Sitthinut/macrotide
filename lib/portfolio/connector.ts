@@ -61,20 +61,78 @@ function fromFile(path: string): Connector | null {
 // Brief in-memory cache per URL so we don't refetch on every request.
 const urlCache = new Map<string, { at: number; data: Connector | null }>();
 const URL_TTL_MS = 5 * 60_000;
+const MAX_MANIFEST_BYTES = 256 * 1024;
+const FETCH_TIMEOUT_MS = 5_000;
+
+/**
+ * Reject hostnames that are (or obviously map to) private, loopback, or
+ * link-local addresses — the SSRF danger zone (cloud metadata at
+ * 169.254.169.254, localhost, RFC1918, CGNAT). `BROKER_CONNECTOR_URL` is
+ * operator-set, so this is defense-in-depth: a misconfigured or redirecting
+ * endpoint must not be able to reach internal services. (Host-string check; not
+ * a DNS-rebind defense, but the URL isn't user-supplied.)
+ */
+function isDisallowedHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, ""); // strip IPv6 brackets
+  if (
+    h === "localhost" ||
+    h.endsWith(".localhost") ||
+    h.endsWith(".internal") ||
+    h.endsWith(".local")
+  ) {
+    return true;
+  }
+  if (h === "::1" || h.startsWith("fe80:") || h.startsWith("fc") || h.startsWith("fd")) return true; // IPv6 loopback/link-local/ULA
+  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (m) {
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    if (a === 127 || a === 10 || a === 0) return true; // loopback, RFC1918 /8, this-host
+    if (a === 169 && b === 254) return true; // link-local incl. cloud metadata
+    if (a === 172 && b >= 16 && b <= 31) return true; // RFC1918 /12
+    if (a === 192 && b === 168) return true; // RFC1918 /16
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+  }
+  return false;
+}
 
 async function fromUrl(url: string): Promise<Connector | null> {
   const now = Date.now();
   const cached = urlCache.get(url);
   if (cached && now - cached.at < URL_TTL_MS) return cached.data;
+
+  // SSRF defense-in-depth: https only, to a public host, no redirects, bounded
+  // time + size.
+  let parsed: URL;
   try {
-    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    parsed = new URL(url);
+  } catch {
+    return cached?.data ?? null;
+  }
+  if (parsed.protocol !== "https:" || isDisallowedHost(parsed.hostname)) {
+    return cached?.data ?? null;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      headers: { Accept: "application/json" },
+      redirect: "error",
+      signal: controller.signal,
+    });
     if (!res.ok) throw new Error(`status ${res.status}`);
+    if (Number(res.headers.get("content-length") ?? 0) > MAX_MANIFEST_BYTES) {
+      throw new Error("connector manifest too large");
+    }
     const data = toConnector(await res.json());
     urlCache.set(url, { at: now, data });
     return data;
   } catch {
     // On failure keep serving the last good value (if any), else null.
     return cached?.data ?? null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
