@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { clientIp, type RateLimitConfig, rateLimit } from "@/lib/api/rate-limit";
+import {
+  clientIp,
+  globalRateLimit,
+  OCR_GLOBAL_RATE_LIMIT,
+  type RateLimitConfig,
+  rateLimit,
+} from "@/lib/api/rate-limit";
 import { requireApiSession } from "@/lib/api/with-db";
 import {
   extractHoldingsFromImage,
@@ -36,6 +42,15 @@ export async function POST(req: Request) {
     return NextResponse.json(
       { error: "rate_limited", retryAfterMs: rl.resetMs },
       { status: 429, headers: { "Retry-After": Math.ceil(rl.resetMs / 1000).toString() } },
+    );
+  }
+  // Process-wide OCR ceiling: bounds total owner-key spend even if the per-IP
+  // limit is bypassed or spread across sessions.
+  const breaker = globalRateLimit(OCR_GLOBAL_RATE_LIMIT);
+  if (!breaker.ok) {
+    return NextResponse.json(
+      { error: "rate_limited", retryAfterMs: breaker.resetMs },
+      { status: 429, headers: { "Retry-After": Math.ceil(breaker.resetMs / 1000).toString() } },
     );
   }
   if (!process.env.OPENROUTER_API_KEY) {

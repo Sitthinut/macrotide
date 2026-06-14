@@ -80,6 +80,29 @@ export function clientIp(req: Request): string {
   return "local";
 }
 
+/**
+ * Process-wide circuit breaker — an IP-INDEPENDENT ceiling on a class of
+ * expensive operations per window. The per-IP limiter (`rateLimit`) can be
+ * sidestepped by spoofing a forwarding header or spreading load across many IPs
+ * / demo sessions; this is the backstop that bounds TOTAL paid spend. Keyed only
+ * by scope, so every caller shares one global budget. Pairs with — does not
+ * replace — the per-IP limit and the deny-by-default auth gate.
+ */
+export function globalRateLimit(cfg: RateLimitConfig): RateLimitResult {
+  return rateLimit("__all__", cfg);
+}
+
+/**
+ * Global OCR ceiling: total vision/OCR calls per minute across ALL callers,
+ * bounding the owner's OpenRouter spend even if the per-IP limit is bypassed or
+ * spread across demo sessions. Override with `OCR_GLOBAL_LIMIT_PER_MIN`.
+ */
+export const OCR_GLOBAL_RATE_LIMIT: RateLimitConfig = {
+  scope: "ocr-global",
+  limit: Number(process.env.OCR_GLOBAL_LIMIT_PER_MIN) || 60,
+  windowMs: 60_000,
+};
+
 export const CHAT_RATE_LIMIT: RateLimitConfig = {
   scope: "chat",
   limit: 20,

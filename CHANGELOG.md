@@ -21,6 +21,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   in-code allowlist, the demo sandbox stays open, and `AUTH_DISABLED=1` local
   dev is unchanged. Resource-spending routes with no DB access (OCR transcribe)
   and operator routes (market refresh) gained matching session/owner gates.
+- **Tighter abuse & cost defenses.** A process-wide OCR circuit breaker
+  (`OCR_GLOBAL_LIMIT_PER_MIN`, default 60/min) caps total vision spend even if
+  the per-IP limit is bypassed; demo-session creation is now rate-limited; and
+  create routes stamp ownership server-side so a request body can't reassign a
+  record's owner. Private files (broker connector manifests, scratch) no longer
+  bake into the Docker image.
 - **Curated model-portfolio templates ship as built-ins and seed reliably into
   any database.** The factory set (Bogleheads 3-Fund, All-Weather, Permanent
   Portfolio, Golden Butterfly, and more) now lives in a first-class presets
