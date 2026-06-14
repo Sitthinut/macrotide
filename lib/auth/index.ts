@@ -193,6 +193,12 @@ export const auth = betterAuth({
   // the signup flow sets a random unknowable password.
   // This is a bootstrap stopgap: OAuth will eventually replace this
   // mechanism, at which point emailAndPassword can be disabled.
+  //
+  // INVARIANT (guarded by lib/auth/no-reset-flow.test.ts): do NOT wire a
+  // password-reset / "forgot password" flow (sendResetPassword, etc.) while this
+  // is enabled — the credential path is intentionally inert (random password, no
+  // password-login UI), and a reset flow would make it a real, attacker-usable
+  // login that bypasses passkeys. Disable password sign-in first.
   emailAndPassword: { enabled: true },
   // OAuth. Registered only when GOOGLE_CLIENT_ID/SECRET are both present;
   // otherwise this is `{}` and the app runs passkey-only.
