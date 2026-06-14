@@ -37,11 +37,16 @@ export function getModelPortfolio(id: string): ModelPortfolio | undefined {
 export function createModelPortfolio(
   input: Omit<ModelPortfolioInsert, "createdAt">,
 ): ModelPortfolio {
-  return getDb()
-    .insert(modelPortfolios)
-    .values({ userId: ownerId(), ...input, createdAt: new Date().toISOString() })
-    .returning()
-    .get();
+  return (
+    getDb()
+      .insert(modelPortfolios)
+      // Stamp ownership AFTER the input spread so a client-supplied `userId` can't
+      // override the server's owner scoping (#190). `builtIn` is sanitized at the
+      // route — the seeder legitimately sets it true through this same path.
+      .values({ ...input, userId: ownerId(), createdAt: new Date().toISOString() })
+      .returning()
+      .get()
+  );
 }
 
 export function updateModelPortfolio(

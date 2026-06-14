@@ -71,11 +71,15 @@ export function getJournalEntry(id: number): JournalEntry | undefined {
 }
 
 export function createJournalEntry(input: Omit<JournalEntryInsert, "createdAt">): JournalEntry {
-  return getDb()
-    .insert(journalEntries)
-    .values({ userId: ownerId(), ...input, createdAt: new Date().toISOString() })
-    .returning()
-    .get();
+  return (
+    getDb()
+      .insert(journalEntries)
+      // Stamp ownership AFTER the input spread so a client-supplied `userId` can't
+      // override the server's owner scoping (#190).
+      .values({ ...input, userId: ownerId(), createdAt: new Date().toISOString() })
+      .returning()
+      .get()
+  );
 }
 
 export function updateJournalEntry(
