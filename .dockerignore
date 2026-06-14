@@ -12,3 +12,11 @@ data
 .DS_Store
 .playwright-cli
 coverage
+# Mirror .gitignore: keep private/host-only files out of image layers too. The
+# real broker connector manifests arrive via a runtime read-only volume mount,
+# not the image; tmp/ + eval-results/ are local scratch; .claude is agent config.
+.connectors/*.json
+!.connectors/example.json
+tmp
+eval-results
+.claude
