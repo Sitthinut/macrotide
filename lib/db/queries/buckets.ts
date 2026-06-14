@@ -28,11 +28,15 @@ export function getBucket(id: string): Bucket | undefined {
 }
 
 export function createBucket(input: BucketInsert): Bucket {
-  return getDb()
-    .insert(buckets)
-    .values({ userId: ownerId(), ...input })
-    .returning()
-    .get();
+  return (
+    getDb()
+      .insert(buckets)
+      // Stamp ownership AFTER the input spread so a client-supplied `userId` can't
+      // override the server's owner scoping (#190).
+      .values({ ...input, userId: ownerId() })
+      .returning()
+      .get()
+  );
 }
 
 export function updateBucket(id: string, patch: BucketUpdate): Bucket | undefined {
