@@ -55,7 +55,7 @@ vi.mock("@/lib/db/context", () => ({
   runWithDbContext: <T>(_ctx: DbContext, fn: () => T | Promise<T>) => fn(),
 }));
 
-import { withDb } from "./with-db";
+import { requireApiSession, withDb } from "./with-db";
 
 function setDemoCookie(value: string | undefined) {
   mockCookieStore.get.mockReturnValue(value ? { value } : undefined);
@@ -65,6 +65,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   setDemoCookie(undefined);
   mockRequireUser.mockResolvedValue(null);
+  // Auth is required by default; individual single-owner tests opt out.
+  delete process.env.AUTH_DISABLED;
 });
 
 describe("withDb routing precedence", () => {
@@ -102,7 +104,8 @@ describe("withDb routing precedence", () => {
     expect(mockGetOrCreateDemoSession).toHaveBeenCalledWith("demo-abc");
   });
 
-  it("no user + no cookie -> owner singleton, userId null (single-owner / AUTH_DISABLED)", async () => {
+  it("AUTH_DISABLED + no user + no cookie -> owner singleton, userId null (single-owner dev)", async () => {
+    process.env.AUTH_DISABLED = "1";
     mockRequireUser.mockResolvedValue(null);
     setDemoCookie(undefined);
 
@@ -114,5 +117,81 @@ describe("withDb routing precedence", () => {
     expect(ctx.appDb).toBe(appDb);
     expect(ctx.marketDb).toBe(marketDb);
     expect(mockGetOrCreateDemoSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("withDb deny-by-default auth (#187)", () => {
+  it("anonymous (no user, no cookie, auth required) -> 401, fn never runs", async () => {
+    mockRequireUser.mockResolvedValue(null);
+    setDemoCookie(undefined);
+
+    const fn = vi.fn((c) => c);
+    const res = (await withDb(fn)) as unknown as Response;
+
+    expect(res.status).toBe(401);
+    expect(fn).not.toHaveBeenCalled();
+    expect(mockGetOrCreateDemoSession).not.toHaveBeenCalled();
+  });
+
+  it("explicit public route serves the anonymous owner-null context (no 401)", async () => {
+    mockRequireUser.mockResolvedValue(null);
+    setDemoCookie(undefined);
+
+    const ctx = await withDb((c) => c, { public: true });
+
+    expect(ctx.isDemo).toBe(false);
+    expect(ctx.userId).toBeNull();
+    expect(ctx.sessionId).toBe("owner");
+  });
+
+  it("authenticated request is allowed through", async () => {
+    mockRequireUser.mockResolvedValue("user-123");
+
+    const ctx = await withDb((c) => c);
+
+    expect(ctx.userId).toBe("user-123");
+    expect(ctx.isDemo).toBe(false);
+  });
+
+  it("demo cookie is allowed through", async () => {
+    mockRequireUser.mockResolvedValue(null);
+    setDemoCookie("demo-abc");
+
+    const ctx = await withDb((c) => c);
+
+    expect(ctx.isDemo).toBe(true);
+    expect(ctx.sessionId).toBe("demo-abc");
+  });
+});
+
+describe("requireApiSession (gate for non-withDb routes)", () => {
+  it("returns 401 for an anonymous request when auth is required", async () => {
+    mockRequireUser.mockResolvedValue(null);
+    setDemoCookie(undefined);
+
+    const res = await requireApiSession();
+
+    expect(res?.status).toBe(401);
+  });
+
+  it("returns null (allowed) for an authenticated request", async () => {
+    mockRequireUser.mockResolvedValue("user-123");
+
+    expect(await requireApiSession()).toBeNull();
+  });
+
+  it("returns null (allowed) for a demo session", async () => {
+    mockRequireUser.mockResolvedValue(null);
+    setDemoCookie("demo-abc");
+
+    expect(await requireApiSession()).toBeNull();
+  });
+
+  it("returns null (allowed) under AUTH_DISABLED", async () => {
+    process.env.AUTH_DISABLED = "1";
+    mockRequireUser.mockResolvedValue(null);
+    setDemoCookie(undefined);
+
+    expect(await requireApiSession()).toBeNull();
   });
 });

@@ -13,10 +13,13 @@ export const runtime = "nodejs";
  */
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  // Single owner (userId null). Multi-user resolves the user here.
-  const result = await withDb(() => closeSession(id, { userId: null }));
-  return NextResponse.json({
-    closed: result.closed,
-    extractedCount: result.extraction?.saved.length ?? 0,
+  // Single owner (userId null). Multi-user resolves the user here. Building the
+  // response INSIDE withDb lets the deny-by-default 401 flow straight through.
+  return withDb(async () => {
+    const result = await closeSession(id, { userId: null });
+    return NextResponse.json({
+      closed: result.closed,
+      extractedCount: result.extraction?.saved.length ?? 0,
+    });
   });
 }

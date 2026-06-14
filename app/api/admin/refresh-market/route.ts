@@ -7,14 +7,21 @@
 //
 //   0 7 * * *  curl -s -X POST http://localhost:3000/api/admin/refresh-market
 //
-// In multi-user mode this should be gated behind a shared secret
-// or admin-only auth; for single-user / localhost it's intentionally open.
+// Owner-only: this fans out to every paid market provider and force-expires the
+// quote cache, so an unauthenticated caller could exhaust provider quotas. The
+// scheduled refresh runs the same job directly via the systemd timer / CLI, so
+// the HTTP route exists only for manual owner/operator use. AUTH_DISABLED
+// (single-owner localhost dev) is treated as the owner.
 
 import { NextResponse } from "next/server";
+import { requireOwner } from "@/lib/api/require-owner";
 import { refreshTrackedMarket } from "@/lib/jobs/refresh-tracked-market";
 import { INDICATOR_CATALOG } from "@/lib/market/indicators";
 
 export async function POST() {
+  const denied = await requireOwner();
+  if (denied) return denied;
+
   const result = await refreshTrackedMarket();
   return NextResponse.json({
     refreshedAt: new Date().toISOString(),
@@ -26,6 +33,9 @@ export async function POST() {
 }
 
 export async function GET() {
+  const denied = await requireOwner();
+  if (denied) return denied;
+
   return NextResponse.json({
     hint: "POST this endpoint to refresh market data (provider-chain cache).",
     indices: INDICATOR_CATALOG.map((i) => i.symbol),
