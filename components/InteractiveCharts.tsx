@@ -29,7 +29,7 @@ import {
   pickAxisTicks,
 } from "@/lib/portfolio/adapter";
 import type { AllocationSlice, SleeveDrift } from "@/lib/portfolio/health";
-import { rebaseBenchmark } from "@/lib/portfolio/rebase";
+import { rebaseBenchmark, rebaseBenchmarkContrib } from "@/lib/portfolio/rebase";
 import type { SeriesPoint } from "@/lib/static/types";
 
 const TOOLTIP_STYLE: React.CSSProperties = {
@@ -196,7 +196,9 @@ export function NavChart({
   // rebase it onto the portfolio's value at their first common date so both
   // lines share a scale. Tolerant of different lengths / non-overlapping trading
   // days (an exact-length check would drop the line whenever the two series
-  // differed, which is almost always). Shared with PerfChart via rebaseBenchmark.
+  // differed, which is almost always). This LUMP-SUM rebase drives the single-line
+  // view below (and PerfChart); the wealth view overrides it with a
+  // contribution-matched series — see there.
   const rebased = rebaseBenchmark(data, benchmarkData);
   const benchByLabel = rebased ? new Map(rebased.map((b) => [b.d, b.v])) : null;
 
@@ -205,9 +207,24 @@ export function NavChart({
     const investedByLabel = new Map(investedData.map((p) => [p.d, p.v]));
     const cashByLabel = cashData ? new Map(cashData.map((p) => [p.d, p.v])) : null;
     const windowed = baselineValue !== 0 || baselineInvested !== 0;
+
+    // Contribution-matched benchmark: instead of a single lump held from the
+    // window start, mirror the user's own cash flows into the index. The per-date
+    // deltas are the change in the cumulative net-invested line we already plot
+    // (`investedData`), so the benchmark tracks the exact "Net invested" curve
+    // shown here — adding money no longer makes the benchmark look flat.
+    const contribDeltas = new Map<string, number>();
+    let prevInv: number | null = null;
+    for (const p of investedData) {
+      if (prevInv !== null) contribDeltas.set(p.d, p.v - prevInv);
+      prevInv = p.v;
+    }
+    const matched = rebaseBenchmarkContrib(data, benchmarkData, contribDeltas);
+    const benchMatchedByLabel = matched ? new Map(matched.map((b) => [b.d, b.v])) : null;
+
     const merged: TwoLinePoint[] = data.map((p) => {
       const v = p.v - baselineValue;
-      const rawBench = benchByLabel?.get(p.d);
+      const rawBench = benchMatchedByLabel?.get(p.d);
       const inv = (investedByLabel.get(p.d) ?? baselineInvested) - baselineInvested;
       const gain = v - inv;
       return {
@@ -248,12 +265,29 @@ export function NavChart({
       // Absolute: gain relative to everything you've put in.
       const denom = windowed ? baselineValue : p.inv;
       const pct = denom > 0 ? (gain / denom) * 100 : null;
+      // The benchmark is contribution-matched, so its line carries the same
+      // contributions as the portfolio — comparing GAIN (value − net invested),
+      // not raw value, is the like-for-like read (a contribution lifts both lines
+      // equally and must not look like benchmark outperformance). Same formula as
+      // the portfolio's Gain above.
+      const benchGain = p.bench == null ? null : p.bench - p.inv;
+      const benchPct = benchGain != null && denom > 0 ? (benchGain / denom) * 100 : null;
       const row = (label: string, text: string, color = "var(--ink)") => (
         <div style={{ display: "flex", gap: 10, justifyContent: "space-between" }}>
           <span style={{ color: "var(--muted)" }}>{label}</span>
           <span style={{ color, fontVariantNumeric: "tabular-nums" }}>{text}</span>
         </div>
       );
+      // A signed ฿ + % gain string, masking the ฿ figure under the privacy toggle
+      // but keeping the % (matches the portfolio Gain row). Shared by both gains.
+      const gainText = (amount: number, percent: number | null) =>
+        `${valuesHidden ? "" : `${fmtTHBSigned(amount)}${percent === null ? "" : " · "}`}${
+          percent === null
+            ? valuesHidden
+              ? "—"
+              : ""
+            : `${percent >= 0 ? "+" : ""}${percent.toFixed(2)}%`
+        }`;
       return (
         <div style={TOOLTIP_STYLE}>
           <div style={TOOLTIP_LABEL}>{formatTooltipDate(String(props.label ?? p.d))}</div>
@@ -265,20 +299,9 @@ export function NavChart({
             )}
           {!valuesHidden &&
             row("Net invested", windowed ? fmtTHBSigned(p.inv) : fmtTHBClean(p.inv))}
-          {row(
-            "Gain",
-            `${valuesHidden ? "" : `${fmtTHBSigned(gain)}${pct === null ? "" : " · "}`}${
-              pct === null ? (valuesHidden ? "—" : "") : `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`
-            }`,
-            gain >= 0 ? "var(--gain)" : "var(--loss)",
-          )}
-          {p.bench != null &&
-            !valuesHidden &&
-            row(
-              benchmarkLabel ?? "Benchmark",
-              windowed ? fmtTHBSigned(p.bench) : fmtTHBClean(p.bench),
-              "var(--benchmark)",
-            )}
+          {row("Gain", gainText(gain, pct), gain >= 0 ? "var(--gain)" : "var(--loss)")}
+          {benchGain != null &&
+            row(benchmarkLabel ?? "Benchmark", gainText(benchGain, benchPct), "var(--benchmark)")}
           {p.cash > 0 && !valuesHidden && (
             <div style={{ color: "var(--muted)", marginTop: 3, fontSize: 11 }}>
               incl. {fmtTHBClean(p.cash)} awaiting reinvestment

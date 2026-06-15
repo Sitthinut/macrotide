@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { SeriesPoint } from "@/lib/static/types";
-import { rebaseBenchmark } from "./rebase";
+import { rebaseBenchmark, rebaseBenchmarkContrib } from "./rebase";
 
 const pf = (...vals: [string, number][]): SeriesPoint[] => vals.map(([d, v]) => ({ d, v }));
+const deltas = (...vals: [string, number][]): Map<string, number> => new Map(vals);
 
 describe("rebaseBenchmark", () => {
   it("rebases the benchmark to the portfolio value at the first common date", () => {
@@ -55,5 +56,86 @@ describe("rebaseBenchmark", () => {
     expect(rebaseBenchmark(pf(["Jan 2", 1000]), [])).toBeNull();
     // Zero benchmark base can't be rebased (division by zero).
     expect(rebaseBenchmark(pf(["Jan 2", 1000]), pf(["Jan 2", 0]))).toBeNull();
+  });
+});
+
+describe("rebaseBenchmarkContrib", () => {
+  it("equals rebaseBenchmark when there are no contributions", () => {
+    const portfolio = pf(["Jan 2", 1000], ["Jan 3", 1100], ["Jan 4", 1200]);
+    const benchmark = pf(["Jan 2", 50], ["Jan 3", 55], ["Jan 4", 60]);
+
+    const matched = rebaseBenchmarkContrib(portfolio, benchmark, deltas());
+    const lump = rebaseBenchmark(portfolio, benchmark);
+    expect(matched).toEqual(lump);
+  });
+
+  it("treats an all-zero delta map the same as no contributions", () => {
+    const portfolio = pf(["Jan 2", 1000], ["Jan 3", 1100]);
+    const benchmark = pf(["Jan 2", 50], ["Jan 3", 55]);
+
+    const matched = rebaseBenchmarkContrib(
+      portfolio,
+      benchmark,
+      deltas(["Jan 2", 1000], ["Jan 3", 0]), // Jan 2 is at the anchor → ignored
+    );
+    expect(matched).toEqual(rebaseBenchmark(portfolio, benchmark));
+  });
+
+  it("buys benchmark units with a mid-window deposit", () => {
+    // Benchmark flat at 100 the whole window → no market move. A +500 deposit on
+    // Jan 3 should lift the benchmark value by exactly the cash added (500 / 100
+    // = 5 units × 100), so the line steps with the contribution, not flat.
+    const portfolio = pf(["Jan 2", 1000], ["Jan 3", 1500], ["Jan 4", 1500]);
+    const benchmark = pf(["Jan 2", 100], ["Jan 3", 100], ["Jan 4", 100]);
+
+    const out = rebaseBenchmarkContrib(portfolio, benchmark, deltas(["Jan 3", 500]));
+    const byD = new Map(out?.map((p) => [p.d, p.v]));
+    expect(byD.get("Jan 2")).toBeCloseTo(1000); // anchor lump (10 units)
+    expect(byD.get("Jan 3")).toBeCloseTo(1500); // +5 units → 15 units × 100
+    expect(byD.get("Jan 4")).toBeCloseTo(1500);
+  });
+
+  it("compounds the deposit at the benchmark's later return", () => {
+    // Anchor lump 10 units @100. +500 on Jan 3 buys 5 units @100 → 15 units.
+    // Jan 4 price 110 → 15 × 110 = 1650 (vs lump-only 10 × 110 = 1100).
+    const portfolio = pf(["Jan 2", 1000], ["Jan 3", 1500], ["Jan 4", 1650]);
+    const benchmark = pf(["Jan 2", 100], ["Jan 3", 100], ["Jan 4", 110]);
+
+    const out = rebaseBenchmarkContrib(portfolio, benchmark, deltas(["Jan 3", 500]));
+    const byD = new Map(out?.map((p) => [p.d, p.v]));
+    expect(byD.get("Jan 4")).toBeCloseTo(1650);
+    // Higher than the lump-sum line, which ignores the deposit.
+    const lump = new Map(rebaseBenchmark(portfolio, benchmark)?.map((p) => [p.d, p.v]));
+    expect(byD.get("Jan 4") as number).toBeGreaterThan(lump.get("Jan 4") as number);
+  });
+
+  it("sells units on a withdrawal (negative delta)", () => {
+    // Anchor 10 units @100. −300 on Jan 3 sells 3 units → 7 units. Jan 4 @100 → 700.
+    const portfolio = pf(["Jan 2", 1000], ["Jan 3", 700], ["Jan 4", 700]);
+    const benchmark = pf(["Jan 2", 100], ["Jan 3", 100], ["Jan 4", 100]);
+
+    const out = rebaseBenchmarkContrib(portfolio, benchmark, deltas(["Jan 3", -300]));
+    const byD = new Map(out?.map((p) => [p.d, p.v]));
+    expect(byD.get("Jan 3")).toBeCloseTo(700);
+    expect(byD.get("Jan 4")).toBeCloseTo(700);
+  });
+
+  it("ignores deltas at/before the anchor (the lump already reflects them)", () => {
+    // Benchmark starts Jan 3, so the anchor is Jan 3. A delta on Jan 2 (pre-anchor)
+    // must not be applied; the anchor lump is the portfolio's Jan 3 value.
+    const portfolio = pf(["Jan 2", 800], ["Jan 3", 1000], ["Jan 4", 1000]);
+    const benchmark = pf(["Jan 3", 100], ["Jan 4", 100]);
+
+    const out = rebaseBenchmarkContrib(portfolio, benchmark, deltas(["Jan 2", 200]));
+    const byD = new Map(out?.map((p) => [p.d, p.v]));
+    expect(byD.get("Jan 2")).toBeNull(); // pre-anchor gap
+    expect(byD.get("Jan 3")).toBeCloseTo(1000); // anchor lump, delta NOT re-added
+    expect(byD.get("Jan 4")).toBeCloseTo(1000);
+  });
+
+  it("returns null for the same empty / zero-base cases as rebaseBenchmark", () => {
+    expect(rebaseBenchmarkContrib([], pf(["Jan 2", 100]), deltas())).toBeNull();
+    expect(rebaseBenchmarkContrib(pf(["Jan 2", 1000]), null, deltas())).toBeNull();
+    expect(rebaseBenchmarkContrib(pf(["Jan 2", 1000]), pf(["Jan 2", 0]), deltas())).toBeNull();
   });
 });
