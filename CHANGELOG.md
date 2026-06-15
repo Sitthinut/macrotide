@@ -737,6 +737,10 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Fixed
 
+- **The date field no longer overflows its cell in the Add-to-portfolio editor
+  on iPadOS.** Native date inputs in the record editor get an appearance reset
+  so they match the height of the adjacent fields instead of overlapping the
+  next one.
 - **One account can no longer see another's holdings through shared surfaces.**
   Holdings reads are now bucket-ownership-scoped at the query layer, closing
   the places that read the whole table: fee-creep action items no longer

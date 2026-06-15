@@ -4332,6 +4332,16 @@ button.chip {
 .rec-edit select:focus {
   border-color: var(--accent);
 }
+.rec-edit input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: 0;
+}
+.rec-edit input[type="date"]::-webkit-date-and-time-value {
+  margin: 0;
+  text-align: left;
+  line-height: normal;
+}
 /* An optional field (avg cost, current price, fee): a dashed border is the quiet
    "you can skip this" cue — but a value you DO type reads as a normal fact (the
    caption already says "· optional"), so don't mute the text or hollow the field. */
