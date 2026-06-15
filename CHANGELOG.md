@@ -15,6 +15,10 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Installable as a standalone app (PWA).** A web app manifest plus iOS
+  home-screen metadata let the app be added to the home screen and launch
+  standalone (no browser chrome), with proper home-screen icons on iOS and
+  Android.
 - **The JSON API is fail-closed (deny-by-default auth).** Every data route now
   rejects an anonymous request with `401` instead of silently serving the
   shared owner row set; the few intentionally-public routes are an explicit,

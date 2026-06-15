@@ -36,12 +36,26 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
   },
+  // Installed-PWA behavior on iOS: launch standalone (no Safari chrome) and use
+  // the short title under the home-screen icon. The manifest (app/manifest.ts)
+  // covers Android/desktop; these meta tags are the iOS-only equivalents.
+  appleWebApp: {
+    capable: true,
+    title: "Macrotide",
+    statusBarStyle: "default",
+    startupImage: [], // no splash images — a blank launch frame is fine (fast boot)
+  },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  // Tints the browser/PWA UI chrome per theme (the app defaults to system).
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0c0d0f" },
+  ],
 };
 
 // Runs before React hydrates so the saved theme is applied on first paint.
