@@ -74,7 +74,7 @@ export function SymbolCombobox({
   const local = useMemo(() => (query ? filterKnownTickers(pool, query) : []), [pool, query]);
 
   // Live catalog autocomplete — real priceable share classes, ≥2 chars only.
-  const { data: catalog } = useResource<ShareClassListItem[]>(
+  const { data: catalog } = useResource<{ items: ShareClassListItem[]; total: number }>(
     query.length >= 2 ? `/api/fund-classes?query=${encodeURIComponent(query)}&limit=8` : null,
   );
 
@@ -93,7 +93,7 @@ export function SymbolCombobox({
         fromHoldings: s.fromHoldings,
       });
     }
-    for (const c of catalog ?? []) {
+    for (const c of catalog?.items ?? []) {
       const key = c.ticker.trim().toUpperCase();
       if (seen.has(key)) continue;
       seen.add(key);

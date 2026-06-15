@@ -5,13 +5,17 @@
 // Backed by findShareClasses() in lib/db/queries/funds.ts. /api/funds (parent
 // funds) is unchanged and still backs the advisor's find_funds tool.
 //
-// Query params (all optional): assetClass, query, limit (default 50, max 100),
+// Query params (all optional): assetClass, query, limit (default 50, max 600 —
+// the screener's "Load more" grows the limit to page through the full catalog),
 // activeOnly ('0' to include closed), indexType ('index'|'active'; indexOnly
 // '1' still accepted as a deprecated alias for indexType=index), taxIncentive
 // ('SSF'|'ThaiESG'|'RMF'), region ('foreign'|'domestic'|'mixed'),
 // trackingIndex (normalized index family, e.g. 'S&P 500' — index-style funds
 // tracking it), excludeFixedTerm ('0' to include), includeNonRetail ('1' to
 // show institutional/insurance classes).
+//
+// Returns { items: ShareClassListItem[], total } — `total` is the full eligible
+// count so the client can show "Showing X of N" and stop paging at the end.
 
 import { NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
@@ -20,6 +24,11 @@ import { findShareClasses } from "@/lib/db/queries/funds";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+// Generous ceiling so "Load more" can reach the whole catalog (a 100-row cap
+// would just move the silent truncation, not remove it). It only guards against
+// abusive direct API calls; the UI never requests beyond the reported `total`.
+const SCREENER_MAX_LIMIT = 600;
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -35,7 +44,10 @@ export async function GET(req: Request) {
   const excludeFixedTermParam = url.searchParams.get("excludeFixedTerm");
   const includeNonRetail = url.searchParams.get("includeNonRetail") === "1";
 
-  const limit = Math.min(limitParam ? Math.max(1, Number.parseInt(limitParam, 10) || 50) : 50, 100);
+  const limit = Math.min(
+    limitParam ? Math.max(1, Number.parseInt(limitParam, 10) || 50) : 50,
+    SCREENER_MAX_LIMIT,
+  );
   const activeOnly = activeOnlyParam !== "0";
   const indexType =
     indexTypeParam === "index" || indexTypeParam === "active" ? indexTypeParam : undefined;
@@ -53,7 +65,7 @@ export async function GET(req: Request) {
       : undefined;
 
   return withDb(() => {
-    const classes = findShareClasses({
+    const result = findShareClasses({
       assetClass,
       query,
       activeOnly,
@@ -66,6 +78,6 @@ export async function GET(req: Request) {
       excludeFixedTerm,
       includeNonRetail,
     });
-    return NextResponse.json(classes);
+    return NextResponse.json(result);
   });
 }

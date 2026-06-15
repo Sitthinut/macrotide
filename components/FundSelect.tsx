@@ -12,10 +12,10 @@
 // fees, and tax wrapper are all per class. A small demo seed ensures the list is
 // non-empty in demo mode before the daily SEC refresh has run.
 
-import { useEffect, useRef, useState } from "react";
+import { type Ref, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { FundDetailSheet } from "@/components/FundDetailSheet";
 import { Icon } from "@/components/Icon";
-import { Skeleton } from "@/components/ui/Skeleton";
+import { Skeleton, SkeletonRows } from "@/components/ui/Skeleton";
 import type { ShareClassListItem, TrackedIndexFamily } from "@/lib/db/queries/funds";
 import { prefetchResource, useResource } from "@/lib/fetchers/swr";
 import { matchIndexFamily } from "@/lib/search/index-alias";
@@ -83,6 +83,7 @@ function buildUrl(
   taxIncentive: TaxIncentiveFilter,
   region: RegionFilter,
   trackingIndex: string,
+  limit: number,
 ): string {
   const params = new URLSearchParams();
   if (assetClass) params.set("assetClass", assetClass);
@@ -91,9 +92,17 @@ function buildUrl(
   if (taxIncentive) params.set("taxIncentive", taxIncentive);
   if (region) params.set("region", region);
   if (trackingIndex) params.set("trackingIndex", trackingIndex);
-  params.set("limit", "30");
-  const qs = params.toString();
-  return qs ? `/api/fund-classes?${qs}` : "/api/fund-classes";
+  params.set("limit", String(limit));
+  return `/api/fund-classes?${params.toString()}`;
+}
+
+/** The screener result page — a window of `items` plus full-set stats. */
+interface ShareClassPage {
+  items: ShareClassListItem[];
+  total: number;
+  /** Counts over the WHOLE filtered set (not just the loaded window). */
+  withTer: number;
+  indexCount: number;
 }
 
 function useFunds(
@@ -103,12 +112,33 @@ function useFunds(
   taxIncentive: TaxIncentiveFilter,
   region: RegionFilter,
   trackingIndex: string,
+  limit: number,
 ) {
-  const url = buildUrl(assetClass, query, indexType, taxIncentive, region, trackingIndex);
-  // keepPreviousData: typing or toggling a filter keeps the previous results
-  // on screen while the narrowed list loads, instead of flashing to empty.
-  return useResource<ShareClassListItem[]>(url, { keepPreviousData: true });
+  const url = buildUrl(assetClass, query, indexType, taxIncentive, region, trackingIndex, limit);
+  // keepPreviousData: typing, toggling a filter, or growing the limit via "Load
+  // more" keeps the current rows on screen while the new window loads, instead of
+  // flashing to empty. A larger limit returns a strict superset of the same
+  // deterministically-ordered list, so rows never reorder as more arrive.
+  return useResource<ShareClassPage>(url, { keepPreviousData: true });
 }
+
+/**
+ * Rows stream in as you scroll — the initial load and each auto-load step add this
+ * many. Kept small so the feed fills smoothly (each step is prefetched, so it's
+ * imperceptible); tunable down to 25 for an even finer stream.
+ */
+const AUTO_STEP = 50;
+
+/**
+ * Auto-load stops once this many rows are shown; past it the user clicks "Load
+ * more". The common browse stays in the cheap top, so the first ~100 stream in
+ * click-free; the long tail (the catalog runs to thousands) is opt-in, which caps
+ * DOM growth and restores keyboard/screen-reader control.
+ */
+const AUTO_LOAD_MAX = 100;
+
+/** Each explicit "Load more" click adds this many rows. */
+const CLICK_STEP = 100;
 
 /** How many top rows get their detail + series warmed for instant opens. */
 const PREFETCH_ROWS = 6;
@@ -283,10 +313,13 @@ function FundRow({
   cls,
   rank,
   onSelect,
+  focusRef,
 }: {
   cls: ShareClassListItem;
   rank: number;
   onSelect: (ticker: string) => void;
+  /** Set on the first row appended by "Load more" so focus lands in new content. */
+  focusRef?: Ref<HTMLButtonElement>;
 }) {
   // The class ticker (e.g. "MDIVA-A") is the priceable identity and the headline.
   const ticker = cls.ticker;
@@ -309,6 +342,7 @@ function FundRow({
           nested, so the markup stays valid. */}
       <button
         type="button"
+        ref={focusRef}
         aria-label={`View details for ${ticker}`}
         onClick={() => onSelect(ticker)}
         style={{
@@ -776,7 +810,7 @@ function TracksFacet({ value, onChange }: { value: string; onChange: (family: st
             <span style={{ flex: 1 }}>{f.indexFamily}</span>
             <span
               style={{ color: "var(--muted)", fontSize: 10.5, fontFamily: "var(--font-mono)" }}
-              title={`${f.trackers} index fund${f.trackers === 1 ? "" : "s"} tracking it`}
+              title={`${f.trackers} share class${f.trackers === 1 ? "" : "es"} tracking it`}
             >
               {f.trackers}
             </span>
@@ -808,19 +842,29 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
   // Selected share-class ticker for the detail sheet. The detail route resolves
   // a class ticker and defaults its chart to that exact class.
   const [detailTicker, setDetailTicker] = useState<string | null>(null);
+  // How many rows to request. Streams up by AUTO_STEP on scroll, then jumps by
+  // CLICK_STEP per "Load more"; resets to the first step when filters/search change.
+  const [limit, setLimit] = useState(AUTO_STEP);
 
   useEffect(() => {
     const timer = setTimeout(() => setQuery(queryInput), 280);
     return () => clearTimeout(timer);
   }, [queryInput]);
 
-  const { data: funds, isLoading } = useFunds(
+  // A new filter/search is a new result set — start back at page one.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: AUTO_STEP is a module constant; we reset only when the query shape changes.
+  useEffect(() => {
+    setLimit(AUTO_STEP);
+  }, [assetClass, query, indexType, taxIncentive, region, trackingIndex]);
+
+  const { data, isLoading, isValidating } = useFunds(
     assetClass,
     query,
     indexType,
     taxIncentive,
     region,
     trackingIndex,
+    limit,
   );
 
   // When the search text IS an index name ("sp500", "S&P 500"…), offer the
@@ -853,15 +897,15 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
   // session-scoped set keeps filter hopping from re-issuing the same warms.
   const prefetched = useRef(new Set<string>());
   useEffect(() => {
-    if (!funds) return;
-    for (const cls of funds.slice(0, PREFETCH_ROWS)) {
+    if (!data?.items) return;
+    for (const cls of data.items.slice(0, PREFETCH_ROWS)) {
       if (prefetched.current.has(cls.ticker)) continue;
       prefetched.current.add(cls.ticker);
       const id = encodeURIComponent(cls.ticker);
       prefetchResource(`/api/funds/${id}`);
       prefetchResource(`/api/funds/${id}/series?range=1y`);
     }
-  }, [funds]);
+  }, [data]);
 
   const handleAskAdvisor = (ticker: string) => {
     const prompt = `Tell me about ${ticker} — is it a good low-fee option for my portfolio, and are there cheaper alternatives?`;
@@ -881,8 +925,92 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
     }
   };
 
-  const list = funds ?? [];
+  const list = data?.items ?? [];
+  const total = data?.total ?? 0;
+  // Counts over the whole filtered set (server-computed), not the loaded window.
+  const withTer = data?.withTer ?? 0;
+  const indexCount = data?.indexCount ?? 0;
   const hasResults = list.length > 0;
+  const moreExist = list.length < total;
+  // The API caps a single response (SCREENER_MAX_LIMIT), so a huge catalog can
+  // have more rows than one request can return. When a settled load comes back
+  // shorter than we asked for yet `total` is still larger, we've hit that ceiling
+  // — swap "Load more" for a "refine with filters" hint instead of a dead button.
+  const reachedServerCap = !isValidating && hasResults && list.length < limit && moreExist;
+  const hasMore = moreExist && !reachedServerCap;
+  // Below the threshold rows auto-load on scroll; past it the explicit button takes
+  // over. The button shows only once auto-load has handed off.
+  const autoLoading = hasMore && limit < AUTO_LOAD_MAX;
+  const showLoadMore = hasMore && !autoLoading;
+  // Only a true gap — validating AND the current window isn't yet full — counts as
+  // "loading". When the next page was prefetched, items catch up to limit instantly,
+  // so this stays false and nothing flashes. It only shows if the user out-scrolls
+  // the prefetch.
+  const fetchingMore = isValidating && hasResults && list.length < limit;
+
+  // The next advance is an auto-step while streaming, then a full click-step once
+  // the button takes over. Prefetch exactly that window so whichever comes next is
+  // already cached.
+  const nextStep = limit < AUTO_LOAD_MAX ? AUTO_STEP : CLICK_STEP;
+
+  // Keep the next window warm — one step ahead — so auto-advances and the first
+  // "Load more" click both resolve from cache with no spinner. preload() dedupes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: prefetch the window after the current one whenever the result settles.
+  useEffect(() => {
+    if (!data || !moreExist || reachedServerCap) return;
+    prefetchResource(
+      buildUrl(assetClass, query, indexType, taxIncentive, region, trackingIndex, limit + nextStep),
+    );
+  }, [data, limit, nextStep, moreExist, reachedServerCap]);
+
+  // Auto-load on scroll up to AUTO_LOAD_MAX. rootMargin fires the advance before the
+  // sentinel is actually in view so the prefetched page is already cached when it
+  // renders — no perceived loading. Re-armed as the row count grows.
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-observe when the row count grows so the moved sentinel keeps advancing.
+  useEffect(() => {
+    if (!autoLoading) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) setLimit((l) => Math.min(l + AUTO_STEP, AUTO_LOAD_MAX));
+      },
+      { rootMargin: "300px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [autoLoading, list.length]);
+
+  // "Load more" a11y: after a CLICKED page renders, move focus to the first newly
+  // appended row so keyboard / screen-reader users land in the new content instead
+  // of being stranded at the top, and announce the new count. Auto-loads don't set
+  // pendingFocus — they must not steal focus or chatter while the user is reading.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const newRowRef = useRef<HTMLButtonElement>(null);
+  const pendingFocus = useRef(false);
+  const firstNewRow = useRef(-1);
+  const savedScrollTop = useRef(0);
+  const [liveMsg, setLiveMsg] = useState("");
+  const loadMore = () => {
+    // Snapshot the scroll position now; we restore it after the 100 new rows mount
+    // so the viewport stays exactly where the reader was (they appended BELOW).
+    savedScrollTop.current = scrollRef.current?.scrollTop ?? 0;
+    firstNewRow.current = list.length;
+    pendingFocus.current = true;
+    setLimit((l) => l + CLICK_STEP);
+  };
+  // Runs after the new rows are in the DOM but BEFORE paint, so the reader never
+  // sees a jump. Pin scrollTop back to where they clicked (defeats the browser's
+  // scroll-anchoring / focus scroll), then place a11y focus without moving it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fire only when the row count grows.
+  useLayoutEffect(() => {
+    if (!pendingFocus.current) return;
+    if (scrollRef.current) scrollRef.current.scrollTop = savedScrollTop.current;
+    newRowRef.current?.focus({ preventScroll: true });
+    setLiveMsg(`Showing ${list.length.toLocaleString()} of ${total.toLocaleString()} funds`);
+    pendingFocus.current = false;
+  }, [list.length]);
 
   return (
     <>
@@ -1036,7 +1164,10 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
         {/* Legend bar — search results are relevance-ranked, browse is fee-ranked */}
         <FeeLegend ordering={query.trim() ? "best match first" : "cheapest first"} />
 
-        {/* Results count */}
+        {/* Results count. "Showing X of N" surfaces the true catalog size — the
+            silent 30-cap used to hide it. Announcements ride a dedicated live
+            region (below) fired only on an explicit "Load more", not on every
+            auto-load, to avoid chattering at screen-reader users mid-scroll. */}
         {hasResults && (
           <div
             style={{
@@ -1048,26 +1179,111 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
               borderBottom: "1px solid var(--line-soft)",
             }}
           >
-            {list.length} class{list.length === 1 ? "" : "es"} ·{" "}
-            {list.filter((f) => f.ter != null).length} with TER data
-            {list.filter((f) => f.indexType === "index").length > 0 && (
-              <> · {list.filter((f) => f.indexType === "index").length} index</>
-            )}
+            Showing {total.toLocaleString()} class{total === 1 ? "" : "es"} ·{" "}
+            {withTer.toLocaleString()} with TER data
+            {indexCount > 0 && <> · {indexCount.toLocaleString()} index</>}
           </div>
         )}
+
+        {/* Screen-reader announcement, fired only on an explicit "Load more". */}
+        <div
+          aria-live="polite"
+          style={{
+            position: "absolute",
+            width: 1,
+            height: 1,
+            margin: -1,
+            padding: 0,
+            overflow: "hidden",
+            clip: "rect(0 0 0 0)",
+            whiteSpace: "nowrap",
+            border: 0,
+          }}
+        >
+          {liveMsg}
+        </div>
 
         {/* Fund list. minHeight ≥ the facet menu (320px + breathing room): on
             desktop the panel is content-height, so an empty result would
             otherwise collapse the container and clip an open dropdown at its
             overflow boundary (and the panel would jump between empty and
             non-empty states). */}
-        <div style={{ flex: 1, overflowY: "auto", minHeight: 360 }}>
+        <div
+          ref={scrollRef}
+          // overflowAnchor: none — we manage scroll position on "Load more"
+          // ourselves (see loadMore); let the browser's anchoring not fight it.
+          style={{ flex: 1, overflowY: "auto", minHeight: 360, overflowAnchor: "none" }}
+        >
           {!hasResults ? (
             <EmptyState query={query} isLoading={isLoading} />
           ) : (
-            list.map((cls, i) => (
-              <FundRow key={cls.ticker} cls={cls} rank={i + 1} onSelect={setDetailTicker} />
-            ))
+            <>
+              {list.map((cls, i) => (
+                <FundRow
+                  key={cls.ticker}
+                  cls={cls}
+                  rank={i + 1}
+                  onSelect={setDetailTicker}
+                  focusRef={i === firstNewRow.current ? newRowRef : undefined}
+                />
+              ))}
+              {autoLoading && (
+                <>
+                  {fetchingMore && <SkeletonRows rows={3} />}
+                  <div ref={sentinelRef} aria-hidden style={{ height: 1 }} />
+                </>
+              )}
+              {showLoadMore && (
+                <div style={{ padding: "12px 14px 18px", textAlign: "center" }}>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "var(--muted)",
+                      fontFamily: "var(--font-mono)",
+                      letterSpacing: "0.04em",
+                      marginBottom: 8,
+                    }}
+                  >
+                    {list.length.toLocaleString()} of {total.toLocaleString()}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={loadMore}
+                    disabled={fetchingMore}
+                    style={{
+                      width: "100%",
+                      padding: "10px 16px",
+                      borderRadius: 8,
+                      border: "1px solid var(--line)",
+                      background: "var(--surface)",
+                      color: "var(--text)",
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      letterSpacing: "0.02em",
+                      cursor: fetchingMore ? "default" : "pointer",
+                      opacity: fetchingMore ? 0.6 : 1,
+                    }}
+                  >
+                    {fetchingMore
+                      ? "Loading…"
+                      : `Load ${Math.min(CLICK_STEP, total - list.length)} more`}
+                  </button>
+                </div>
+              )}
+              {reachedServerCap && (
+                <div
+                  style={{
+                    padding: "12px 14px 18px",
+                    textAlign: "center",
+                    fontSize: 11.5,
+                    color: "var(--muted)",
+                  }}
+                >
+                  Showing the first {list.length} of {total}. Refine with the filters above to
+                  narrow the rest.
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

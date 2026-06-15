@@ -429,14 +429,19 @@ export function findFunds(filter: FindFundsFilter = {}): FundWithTer[] {
 export interface TrackedIndexFamily {
   /** Canonical fund_catalog.index_family value ("S&P 500", "SET50", …). */
   indexFamily: string;
-  /** Active index-style (PN/PM) funds tracking it — never 0 by construction. */
+  /** Buyable share classes tracking it — matches the screener's result count. */
   trackers: number;
 }
 
 /**
- * Every index family with at least one active index-style tracker, most-tracked
- * first. Backs the Explore "Tracks" dropdown — derived live from the catalog so
- * the menu follows the nightly refresh and can never offer an empty result.
+ * Every index family with at least one tracker, most-tracked first. Backs the
+ * Explore "Tracks" dropdown — derived live so the menu follows the nightly refresh
+ * and can never offer an empty result.
+ *
+ * `trackers` counts the priceable SHARE CLASSES the screener returns for that
+ * family (not parent funds), applying the same gates findShareClasses does —
+ * active PN/PM, non-fixed-term, retail-or-unknown fund, non-institutional/insurance
+ * class — so the badge equals the "Showing N classes" the user lands on.
  */
 export function listTrackedIndexFamilies(): TrackedIndexFamily[] {
   return getMarketDb()
@@ -444,12 +449,19 @@ export function listTrackedIndexFamilies(): TrackedIndexFamily[] {
       indexFamily: fundCatalog.indexFamily,
       trackers: sql<number>`count(*)`,
     })
-    .from(fundCatalog)
+    .from(fundShareClasses)
+    .innerJoin(fundCatalog, eq(fundCatalog.projId, fundShareClasses.projId))
     .where(
       and(
         isNotNull(fundCatalog.indexFamily),
         eq(fundCatalog.status, "active"),
         inArray(fundCatalog.managementStyle, ["PN", "PM"]),
+        eq(fundCatalog.isFixedTerm, false),
+        or(isNull(fundCatalog.projRetailType), eq(fundCatalog.projRetailType, "R")),
+        or(
+          isNull(fundShareClasses.investorType),
+          not(inArray(fundShareClasses.investorType, ["institutional", "insurance"])),
+        ),
       ),
     )
     .groupBy(fundCatalog.indexFamily)
@@ -502,32 +514,37 @@ export interface ShareClassListItem {
  *
  * findFunds is left untouched — the advisor `find_funds` tool still gets parents.
  */
-export function findShareClasses(
-  filter: FindFundsFilter & { includeNonRetail?: boolean } = {},
-): ShareClassListItem[] {
+export function findShareClasses(filter: FindFundsFilter & { includeNonRetail?: boolean } = {}): {
+  items: ShareClassListItem[];
+  total: number;
+  /** Breakdown over the FULL eligible set (not the returned window). */
+  withTer: number;
+  indexCount: number;
+} {
   const { limit = 50, taxIncentive, includeNonRetail = false, ...rest } = filter;
   const hasQuery = !!filter.query?.trim();
-  // Pull parents generously (each yields several classes, most filtered out) so
-  // class-level filtering still fills ~limit rows:
-  //   • Search: relevance already narrows the set — a small over-fetch suffices.
-  //   • Browse: classes are ranked by their OWN TER across the whole list, so the
-  //     globally-cheapest class can sit in any family — pull a wide pool. findFunds
-  //     sorts all funds then slices, so a larger cap is nearly free there; only the
-  //     per-parent class fetch below scales with it.
+  // Expand EVERY eligible parent into its classes, rank the whole set, then window
+  // it with `limit`. The requested `limit` slices the final list only — it must
+  // NOT bound the pool, or the reported `total` (and the "Load more" reachability
+  // it drives) would drift as the user pages deeper. findFunds fetches all matches
+  // from SQL then sorts, so an unbounded cap there is cheap; the per-parent class
+  // fetch below is the only cost that scales with the pool, and browse already
+  // expanded ~1000 parents per request before. Search is relevance-ranked and
+  // narrow, so the matched set is the natural full pool.
   const parents = findFunds({
     ...rest,
     taxIncentive: undefined,
-    limit: hasQuery ? Math.max(limit * 4, 200) : Math.max(limit * 20, 1000),
+    limit: hasQuery ? Math.max(limit * 4, 200) : Number.MAX_SAFE_INTEGER,
   });
 
-  // Gather filtered classes. Search keeps families whole and stops at ~limit rows
-  // (relevance order IS the ranking). Browse collects every eligible class in the
-  // pool, then ranks the whole set by per-class TER below.
+  // Gather every eligible class across the pool. Browse ranks the whole set by
+  // per-class TER below; search preserves the parent's relevance order. We collect
+  // all of them (no early stop) so `total` reflects the full reachable catalog and
+  // each larger page is a strict superset of the smaller one.
   const out: ShareClassListItem[] = [];
   const parentOrder = new Map<string, number>();
   let order = 0;
   for (const p of parents) {
-    if (hasQuery && out.length >= limit) break;
     // Fund-level retail gate: the SEC marks accredited / institutional-only
     // private funds with proj_retail_type != 'R' (their class detail describes
     // hedging, not audience, so the per-class filter can't catch them). Hide the
@@ -576,30 +593,54 @@ export function findShareClasses(
     }
   }
 
-  if (out.length === 0) return out;
+  // Counts over the full eligible set (not the returned window).
+  const withTer = out.filter((o) => o.ter != null).length;
+  const indexCount = out.filter((o) => o.indexType === "index").length;
 
-  attachQuotesAndAum(out);
+  if (out.length === 0) return { items: out, total: 0, withTer: 0, indexCount: 0 };
 
-  // Ordering depends on whether the user is searching:
-  //   • Search (query): relevance first, so a great name match isn't buried by a
-  //     cheaper unrelated class. Families stay grouped (parentOrder = relevance)
-  //     and compareClassesForList ranks within a family; TER is only an indirect
-  //     tie-break via the parent.
-  //   • Browse (no query): rank each priceable class on its OWN TER — the screener
-  //     is a fee finder, so a row's position must match the TER it shows, and a
-  //     cheap sibling must NOT lift an expensive class up with it. Ties → larger
-  //     AUM, then retail before restricted, then ticker. Zero/null TER sorts last.
-  const effTer = (t: number | null) => (t != null && t > 0 ? t : null);
-  const audienceTier = (c: ShareClassListItem) =>
-    c.investorType === "retail" ? 0 : c.investorType == null ? 1 : 2;
-  out.sort((a, b) => {
-    if (hasQuery) {
+  // ── Search (query) ──────────────────────────────────────────────────────────
+  // Relevance first, so a great name match isn't buried by a cheaper unrelated
+  // class. Families stay grouped (parentOrder = relevance) and compareClassesForList
+  // ranks within a family — which considers AUM, so the whole set needs quotes
+  // before sorting. That's fine: relevance has already narrowed `out` to the match
+  // set, so attaching it all is cheap (unlike browse, which spans the catalog).
+  if (hasQuery) {
+    attachQuotesAndAum(out);
+    out.sort((a, b) => {
       const pa = parentOrder.get(a.projId) ?? Number.MAX_SAFE_INTEGER;
       const pb = parentOrder.get(b.projId) ?? Number.MAX_SAFE_INTEGER;
       if (pa !== pb) return pa - pb;
       // Same parent → same abbr, so a.abbrName drives the flagship-ticker check.
       return compareClassesForList(a.abbrName)(a, b);
+    });
+    // The user typed a specific class code (e.g. "SCBGOLDP") → float that exact
+    // ticker to the very top, ahead of its siblings and every other family.
+    const q = filter.query?.trim().toLowerCase();
+    if (q) {
+      const idx = out.findIndex((x) => x.ticker.toLowerCase() === q);
+      if (idx > 0) out.unshift(out.splice(idx, 1)[0]);
     }
+    return { items: out.slice(0, limit), total: out.length, withTer, indexCount };
+  }
+
+  // ── Browse (no query) ───────────────────────────────────────────────────────
+  // Rank each priceable class on its OWN TER — the screener is a fee finder, so a
+  // row's position must match the TER it shows, and a cheap sibling must NOT lift
+  // an expensive class up with it. Ties → larger AUM, then retail before
+  // restricted, then ticker. Zero/null TER sorts last.
+  //
+  // The AUM tie-break must rank the WHOLE eligible set BEFORE slicing — this
+  // catalog has large blocks of identical TER (e.g. many funds at 0.10%), so a
+  // window-local tie-break would reshuffle those rows as the limit grows and the
+  // "Load more" list would no longer be a strict superset (rank 100 would change
+  // funds when you load 200). So attach quotes/AUM to the full set, then sort, then
+  // slice — the slice is a stable prefix at every limit.
+  attachQuotesAndAum(out);
+  const effTer = (t: number | null) => (t != null && t > 0 ? t : null);
+  const audienceTier = (c: ShareClassListItem) =>
+    c.investorType === "retail" ? 0 : c.investorType == null ? 1 : 2;
+  out.sort((a, b) => {
     const ta = effTer(a.ter);
     const tb = effTer(b.ter);
     if (ta == null && tb != null) return 1; // null/zero TER last
@@ -612,16 +653,9 @@ export function findShareClasses(
     if (at !== 0) return at; // retail before restricted
     return a.ticker.localeCompare(b.ticker);
   });
-
-  // The user typed a specific class code (e.g. "SCBGOLDP") → float that exact
-  // ticker to the very top, ahead of its siblings and every other family.
-  const q = filter.query?.trim().toLowerCase();
-  if (q) {
-    const idx = out.findIndex((x) => x.ticker.toLowerCase() === q);
-    if (idx > 0) out.unshift(out.splice(idx, 1)[0]);
-  }
-
-  return out.slice(0, limit);
+  // `total` is the full eligible count; `items` is the requested window — a strict
+  // prefix of the full sorted list, so growing `limit` only appends.
+  return { items: out.slice(0, limit), total: out.length, withTer, indexCount };
 }
 
 /** Batch-attach latest NAV/quote (fund_quotes) + latest AUM (nav_history) per class. */
