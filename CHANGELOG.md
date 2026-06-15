@@ -133,6 +133,13 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   currency-matched — so the comparison is like-for-like instead of against a
   dividend-dropping price index that flatters the benchmark. The Advisor's
   performance answers use the same total-return benchmarks.
+- **The benchmark overlay now matches your contributions.** Instead of a single
+  lump invested at the window start and held, the "VS" line mirrors your own
+  deposits and withdrawals into the index on the same dates — so adding money no
+  longer makes the benchmark look flat, and the comparison answers "what if I'd
+  put the same money into the index at the same times." The tooltip puts the
+  benchmark's gain and % beside your own (same net-invested basis, so a deposit
+  lifts both equally rather than reading as benchmark outperformance).
 - **Deep total-return benchmark series.** Each benchmark is a tracking-ETF proxy
   cached as dividend-reinvested adjusted close (~20 years deep) under a dedicated
   `benchmark_tr` data source, warmed by a `prewarm-benchmark` job, labeled by the
