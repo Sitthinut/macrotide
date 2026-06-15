@@ -38,7 +38,12 @@ import { BENCHMARK_TR_OPTIONS } from "@/lib/market/benchmark-options";
 import { DEFAULT_QUOTE_SOURCE, isQuoteSource } from "@/lib/market/sources";
 import { feeCreepKey } from "@/lib/portfolio/action-item-key";
 import { REASON_CHIPS, type ReasonChip } from "@/lib/portfolio/action-item-resurface";
-import { formatTooltipDate, seriesReturnPct, windowStartIso } from "@/lib/portfolio/adapter";
+import {
+  formatTooltipDate,
+  NAV_CHART_HEIGHT,
+  seriesReturnPct,
+  windowStartIso,
+} from "@/lib/portfolio/adapter";
 import { buildNamedChecks, type NamedCheck } from "@/lib/portfolio/checks";
 import {
   feeCheckInlineIntro,
@@ -774,7 +779,7 @@ export function PortfolioScreen({
         <div style={{ padding: "20px 16px" }} aria-hidden>
           <Skeleton width="42%" height={30} />
           <Skeleton width="26%" height={13} style={{ marginTop: 8 }} />
-          <Skeleton height={130} style={{ marginTop: 18 }} />
+          <Skeleton height={NAV_CHART_HEIGHT} style={{ marginTop: 18 }} />
           <SkeletonRows rows={4} height={52} padding="18px 0 0" />
         </div>
       </div>
@@ -1053,7 +1058,7 @@ export function PortfolioScreen({
               ? (BENCHMARK_TR_OPTIONS.find((b) => b.key === benchmark)?.short ?? null)
               : null
           }
-          height={130}
+          height={NAV_CHART_HEIGHT}
           accent="var(--accent)"
           emptyHint={
             view.holdings.length === 0

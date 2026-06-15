@@ -35,7 +35,7 @@ import {
   perfTypeLabel,
   periodSortKey,
 } from "@/lib/fund-detail-format";
-import { seriesReturnPct } from "@/lib/portfolio/adapter";
+import { NAV_CHART_HEIGHT, seriesReturnPct } from "@/lib/portfolio/adapter";
 import { buildHoldingDetailRows } from "@/lib/portfolio/holding-detail";
 import {
   buildPortfolioGroups,
@@ -974,7 +974,7 @@ function LoadingState() {
           <Skeleton key={i} width={w} height={22} radius={11} />
         ))}
       </div>
-      <Skeleton height={140} style={{ marginTop: 12 }} />
+      <Skeleton height={NAV_CHART_HEIGHT} style={{ marginTop: 12 }} />
       <SkeletonRows rows={3} height={44} padding="16px 0 0" />
     </div>
   );
@@ -1415,7 +1415,7 @@ function FundNavChartSection({ ticker }: { ticker: string | null }) {
       )}
       <NavChart
         data={chartData}
-        height={140}
+        height={NAV_CHART_HEIGHT}
         accent="var(--accent)"
         valueFormatter={mode === "aum" ? fmtAum : fmtNav}
         seriesLabel={mode === "aum" ? "Fund size" : "Price"}

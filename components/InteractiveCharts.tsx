@@ -26,6 +26,7 @@ import {
   formatDay,
   formatMonthYear,
   formatTooltipDate,
+  NAV_CHART_HEIGHT,
   pickAxisTicks,
 } from "@/lib/portfolio/adapter";
 import type { AllocationSlice, SleeveDrift } from "@/lib/portfolio/health";
@@ -133,7 +134,7 @@ interface TwoLinePoint {
 
 export function NavChart({
   data,
-  height = 160,
+  height = NAV_CHART_HEIGHT,
   accent = "var(--accent)",
   benchmarkData = null,
   benchmarkLabel = null,

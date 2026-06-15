@@ -14,6 +14,7 @@ import { Stat } from "@/components/ui/Stat";
 import { type SeriesRange, useHoldingSeries, useHoldings } from "@/lib/fetchers/portfolio";
 import { useResource } from "@/lib/fetchers/swr";
 import { fmtPct, fmtRatioPct, fmtTHBClean, fmtTHBSigned } from "@/lib/format";
+import { NAV_CHART_HEIGHT } from "@/lib/portfolio/adapter";
 import type { TransactionAnalytics } from "@/lib/portfolio/transaction-analytics";
 import { usePrivacy } from "@/lib/stores/privacy";
 
@@ -233,7 +234,7 @@ export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps
               <NavChart
                 data={valueData}
                 investedData={costData}
-                height={150}
+                height={NAV_CHART_HEIGHT}
                 seriesLabel="Value"
                 valuesHidden={valuesHidden}
               />

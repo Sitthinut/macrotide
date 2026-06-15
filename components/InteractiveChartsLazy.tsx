@@ -7,6 +7,7 @@
 // Import charts from here, not from ./InteractiveCharts, in app code.
 
 import { type ComponentType, lazy, Suspense } from "react";
+import { NAV_CHART_HEIGHT } from "@/lib/portfolio/adapter";
 import type {
   AllocationDonut as AllocationDonutImpl,
   DriftBars as DriftBarsImpl,
@@ -52,7 +53,7 @@ const LazyDriftBars = lazyChunk(() =>
 );
 
 function ChartFallback({ height }: { height?: number }) {
-  return <div className="skeleton" aria-hidden style={{ height: height ?? 130 }} />;
+  return <div className="skeleton" aria-hidden style={{ height: height ?? NAV_CHART_HEIGHT }} />;
 }
 
 export function NavChart(props: Parameters<typeof NavChartImpl>[0]) {

@@ -129,6 +129,13 @@ export function formatTooltipDate(iso: string): string {
   });
 }
 
+// Standard height (px) for the interactive value/NAV time-series line charts
+// (the portfolio balance chart, a position's value chart, a fund's NAV/AUM
+// chart). One number so every NavChart — and its loading skeleton — sizes the
+// same. Lives here (a recharts-free module) so screens can import it without
+// pulling the lazy-loaded chart bundle. Donuts/bars keep their own height.
+export const NAV_CHART_HEIGHT = 160;
+
 // Pick up to `count` evenly-spaced points for x-axis ticks, INSET from both
 // edges — each tick sits at the centre of its 1/count slot, so there are
 // half-slot margins on each side. No label lands on the chart boundary (so
