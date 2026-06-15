@@ -15,6 +15,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **The fund screener reaches the whole catalog.** Explore no longer silently
+  caps at 30 results — funds auto-load as you scroll (the next page is prefetched,
+  so there's no loading flash), then a "Load more" button takes over for the long
+  tail. A running "Showing X of N" count surfaces the true match total, focus
+  moves into newly loaded rows for keyboard and screen-reader users, and a
+  refine-with-filters hint appears once the result window is exhausted.
 - **Installable as a standalone app (PWA).** A web app manifest plus iOS
   home-screen metadata let the app be added to the home screen and launch
   standalone (no browser chrome), with proper home-screen icons on iOS and

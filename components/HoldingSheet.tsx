@@ -73,10 +73,10 @@ export function HoldingSheet({
   // come from there — they're locked; only Portfolio + Source stay editable. A
   // custom (off-catalog) asset stays fully editable.
   const q = values.ticker.trim();
-  const { data: catalogMatches } = useResource<ShareClassListItem[]>(
+  const { data: catalogMatches } = useResource<{ items: ShareClassListItem[]; total: number }>(
     q.length >= 2 ? `/api/fund-classes?query=${encodeURIComponent(q)}&limit=8` : null,
   );
-  const catalogMatch = (catalogMatches ?? []).find(
+  const catalogMatch = (catalogMatches?.items ?? []).find(
     (m) => m.ticker.trim().toUpperCase() === q.toUpperCase(),
   );
   const known = !!catalogMatch;

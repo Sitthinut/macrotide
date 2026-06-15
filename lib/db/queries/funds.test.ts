@@ -631,7 +631,7 @@ describe("findShareClasses (search + popularity ranking)", () => {
     withDb(() => {
       seedGoldFamily();
       // The parent-abbr search was already working; the point is the order.
-      const tickers = findShareClasses({ query: "SCBGOLD" }).map((c) => c.ticker);
+      const tickers = findShareClasses({ query: "SCBGOLD" }).items.map((c) => c.ticker);
       expect(tickers).toEqual(["SCBGOLDA", "SCBGOLDRA", "SCBGOLDP"]); // 500 > 300 > 100
     });
   });
@@ -640,7 +640,7 @@ describe("findShareClasses (search + popularity ranking)", () => {
     withDb(() => {
       seedGoldFamily();
       // The bug: this query used to return nothing. Now SCBGOLDP is found AND first.
-      const tickers = findShareClasses({ query: "SCBGOLDP" }).map((c) => c.ticker);
+      const tickers = findShareClasses({ query: "SCBGOLDP" }).items.map((c) => c.ticker);
       expect(tickers[0]).toBe("SCBGOLDP"); // exact match wins despite lowest AUM
       expect(tickers).toEqual(["SCBGOLDP", "SCBGOLDA", "SCBGOLDRA"]);
     });
@@ -657,7 +657,7 @@ describe("findShareClasses (search + popularity ranking)", () => {
       seedAum("MIXF-A", 100);
       seedAum("MIXF-R", 9999); // huge AUM must NOT lift it above retail
 
-      const tickers = findShareClasses({ query: "MIXF" }).map((c) => c.ticker);
+      const tickers = findShareClasses({ query: "MIXF" }).items.map((c) => c.ticker);
       expect(tickers).toEqual(["MIXF-A", "MIXF-R"]); // insurance hidden; restricted last
     });
   });
@@ -693,7 +693,12 @@ describe("findShareClasses browse order (pure per-class TER)", () => {
       seedTer("MIDB", "MIDB", [["MIDB", 0.4, "retail"]]);
 
       // Pure per-class TER: FAM-B sits at its own 0.53%, NOT grouped up with FAM-P.
-      expect(findShareClasses({}).map((c) => c.ticker)).toEqual(["FAM-P", "MIDA", "MIDB", "FAM-B"]);
+      expect(findShareClasses({}).items.map((c) => c.ticker)).toEqual([
+        "FAM-P",
+        "MIDA",
+        "MIDB",
+        "FAM-B",
+      ]);
     });
   });
 
@@ -716,7 +721,7 @@ describe("findShareClasses browse order (pure per-class TER)", () => {
           { ticker: "thai_mutual_fund:EQ-SMALLA", date: "2026-06-01", nav: 10, netAsset: 100 },
         ])
         .run();
-      expect(findShareClasses({}).map((c) => c.ticker)).toEqual([
+      expect(findShareClasses({}).items.map((c) => c.ticker)).toEqual([
         "EQ-BIG", // 900, restricted — AUM beats audience
         "EQ-MID", // 500
         "EQ-SMALLA", // 100, retail — beats EQ-SMALLR on audience at equal AUM
@@ -730,9 +735,71 @@ describe("findShareClasses browse order (pure per-class TER)", () => {
       seedTer("PRICED", "PRICED", [["PRICED", 1.5, "retail"]]);
       seedTer("ZERO", "ZERO", [["ZERO", 0, "retail"]]);
       seedTer("NULLT", "NULLT", [["NULLT", null, "retail"]]);
-      const tickers = findShareClasses({}).map((c) => c.ticker);
+      const tickers = findShareClasses({}).items.map((c) => c.ticker);
       expect(tickers[0]).toBe("PRICED"); // a real 1.5% beats no-fee
       expect(tickers.slice(1)).toEqual(expect.arrayContaining(["ZERO", "NULLT"]));
+    });
+  });
+});
+
+describe("findShareClasses pagination (Load more — stable total + windowed items)", () => {
+  // Eight single-class funds with distinct, increasing TERs → a fully
+  // deterministic cheapest-first order (FUND0 cheapest … FUND7 priciest).
+  const seedEight = () => {
+    for (let i = 0; i < 8; i++) {
+      upsertFund(fund(`FUND${i}`, { abbrName: `FUND${i}` }));
+      upsertShareClasses([
+        {
+          projId: `FUND${i}`,
+          className: `FUND${i}`,
+          ticker: `FUND${i}`,
+          investorType: "retail",
+          currentTer: 0.1 * (i + 1),
+        },
+      ]);
+    }
+  };
+
+  it("reports the full eligible total, invariant across the requested limit", () => {
+    withDb(() => {
+      seedEight();
+      expect(findShareClasses({ limit: 3 }).total).toBe(8);
+      expect(findShareClasses({ limit: 5 }).total).toBe(8);
+      expect(findShareClasses({ limit: 100 }).total).toBe(8);
+    });
+  });
+
+  it("windows items to the limit; each larger page is a prefix-superset of the smaller", () => {
+    withDb(() => {
+      seedEight();
+      const p3 = findShareClasses({ limit: 3 }).items.map((c) => c.ticker);
+      const p6 = findShareClasses({ limit: 6 }).items.map((c) => c.ticker);
+      const pAll = findShareClasses({ limit: 100 }).items.map((c) => c.ticker);
+      expect(p3).toHaveLength(3);
+      expect(p6).toHaveLength(6);
+      expect(pAll).toHaveLength(8);
+      // Growing the limit only appends — earlier rows never reorder.
+      expect(p6.slice(0, 3)).toEqual(p3);
+      expect(pAll.slice(0, 6)).toEqual(p6);
+    });
+  });
+
+  it("caps search results to the limit while reporting the full matched total", () => {
+    withDb(() => {
+      // One family, five matching classes — mirrors the typeahead (limit=8) path.
+      upsertFund(fund("FAMQ", { abbrName: "FAMQ", englishName: "Family Q" }));
+      upsertShareClasses(
+        [0, 1, 2, 3, 4].map((i) => ({
+          projId: "FAMQ",
+          className: `FAMQ-${i}`,
+          ticker: `FAMQ-${i}`,
+          investorType: "retail",
+          currentTer: 0.1 * (i + 1),
+        })),
+      );
+      const page = findShareClasses({ query: "FAMQ", limit: 2 });
+      expect(page.items).toHaveLength(2);
+      expect(page.total).toBe(5);
     });
   });
 });
@@ -760,7 +827,7 @@ describe("retail-availability gate + zero-TER sort (#117)", () => {
         { projId: "PRIVF", className: "PRV", ticker: "PRV", investorType: "retail" },
         { projId: "UNKNOWNF", className: "UNK", ticker: "UNK", investorType: "retail" },
       ]);
-      const tickers = findShareClasses({}).map((c) => c.ticker);
+      const tickers = findShareClasses({}).items.map((c) => c.ticker);
       expect(tickers).toContain("RTL"); // retail kept
       expect(tickers).toContain("UNK"); // null = unknown (pre-crawl) → kept (safe no-op)
       expect(tickers).not.toContain("PRV"); // proj_retail_type=X → whole fund hidden
@@ -773,7 +840,9 @@ describe("retail-availability gate + zero-TER sort (#117)", () => {
       upsertShareClasses([
         { projId: "PRIVF", className: "PRV", ticker: "PRV", investorType: "retail" },
       ]);
-      expect(findShareClasses({ includeNonRetail: true }).map((c) => c.ticker)).toContain("PRV");
+      expect(findShareClasses({ includeNonRetail: true }).items.map((c) => c.ticker)).toContain(
+        "PRV",
+      );
     });
   });
 
@@ -888,6 +957,41 @@ describe("trackingIndex facet", () => {
       { projId: "BENCHMARKED-ACTIVE", ...facets, indexFamily: "S&P 500" },
       { projId: "OTHER-FAMILY", ...facets, indexFamily: "SET50" },
     ]);
+    // Share classes: the Tracks badge counts these (not funds). TRACK-CHEAP has
+    // two buyable classes; TRACK-PRICEY has one buyable + one institutional (hidden).
+    upsertShareClasses([
+      {
+        projId: "TRACK-CHEAP",
+        className: "TRACK-CHEAP-A",
+        ticker: "TRACK-CHEAP-A",
+        investorType: "retail",
+      },
+      {
+        projId: "TRACK-CHEAP",
+        className: "TRACK-CHEAP-SSF",
+        ticker: "TRACK-CHEAP-SSF",
+        investorType: "retail",
+      },
+      {
+        projId: "TRACK-PRICEY",
+        className: "TRACK-PRICEY-A",
+        ticker: "TRACK-PRICEY-A",
+        investorType: "retail",
+      },
+      {
+        projId: "TRACK-PRICEY",
+        className: "TRACK-PRICEY-I",
+        ticker: "TRACK-PRICEY-I",
+        investorType: "institutional",
+      },
+      {
+        projId: "BENCHMARKED-ACTIVE",
+        className: "BENCH-A",
+        ticker: "BENCH-A",
+        investorType: "retail",
+      },
+      { projId: "OTHER-FAMILY", className: "OTHER-A", ticker: "OTHER-A", investorType: "retail" },
+    ]);
   }
 
   it("filters to index-style funds of the family, cheapest first", () => {
@@ -906,10 +1010,10 @@ describe("trackingIndex facet", () => {
     });
   });
 
-  it("listTrackedIndexFamilies counts active PN/PM trackers per family, most-tracked first", () => {
+  it("counts buyable share classes per family (multi-class + institutional gate), most-tracked first", () => {
     withDb(() => {
       seedTrackers();
-      // An inactive tracker must not count toward (or surface) its family.
+      // An inactive tracker (with a class) must not count toward or surface its family.
       upsertFund(fund("DEAD-TRACKER", { status: "inactive", managementStyle: "PN" }));
       updateFundFacets([
         {
@@ -921,8 +1025,13 @@ describe("trackingIndex facet", () => {
           aimcCategory: null,
         },
       ]);
+      upsertShareClasses([
+        { projId: "DEAD-TRACKER", className: "DEAD-A", ticker: "DEAD-A", investorType: "retail" },
+      ]);
+      // S&P 500 = TRACK-CHEAP(2 retail) + TRACK-PRICEY(1 retail; institutional hidden);
+      // BENCHMARKED-ACTIVE excluded by style. SET50 = OTHER-FAMILY(1). TOPIX inactive.
       expect(listTrackedIndexFamilies()).toEqual([
-        { indexFamily: "S&P 500", trackers: 2 },
+        { indexFamily: "S&P 500", trackers: 3 },
         { indexFamily: "SET50", trackers: 1 },
       ]);
     });
