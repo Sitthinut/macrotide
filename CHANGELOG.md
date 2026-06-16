@@ -718,6 +718,11 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Changed
 
+- **The fund screener loads roughly an order of magnitude faster.** The Explore
+  browse query dropped from ~0.8s to under 60ms by skipping the funds' long-form
+  policy text in the list read and resolving each share class's latest fund size
+  through a dedicated index instead of scanning the full NAV history — the same
+  results and ordering, served well within the read-performance budget.
 - **Custom templates are designed with the advisor (or duplicated), not "imported".**
   The Add-template dialog's URL / Text / Image methods were placeholders that
   returned a canned allocation for any input while claiming "AI parsed this

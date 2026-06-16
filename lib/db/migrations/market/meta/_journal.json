@@ -99,6 +99,13 @@
       "when": 1781078984724,
       "tag": "0013_narrow_miss_america",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1781570667938,
+      "tag": "0014_graceful_tarot",
+      "breakpoints": true
     }
   ]
 }

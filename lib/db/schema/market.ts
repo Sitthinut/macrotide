@@ -62,6 +62,14 @@ export const navHistory = sqliteTable(
   (table) => [
     primaryKey({ columns: [table.ticker, table.date] }),
     index("idx_nav_history_date").on(table.date),
+    // Powers the screener's per-class latest-AUM lookup: find the most recent
+    // date carrying a net_asset for each ticker. Partial (net_asset IS NOT NULL)
+    // so it spans only the ~3k AUM-bearing fund rows, not every index/FX row, and
+    // lets a correlated `ORDER BY date DESC LIMIT 1` resolve via index instead of
+    // scanning ~3M rows (queries/funds.ts attachQuotesAndAum).
+    index("idx_nav_history_aum")
+      .on(table.ticker, table.date)
+      .where(sql`${table.netAsset} IS NOT NULL`),
   ],
 );
 
