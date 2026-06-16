@@ -3,7 +3,7 @@ import { quoteCacheKey } from "@/lib/market/sources";
 import type { TxnKind } from "@/lib/portfolio/lots";
 import { isAnchorKind, signedAmount, signFor } from "@/lib/portfolio/txn-import";
 import { deriveUnits } from "@/lib/portfolio/value-ledger";
-import { listFundQuotes, navOnDate } from "./quotes";
+import { listFundQuotes, navOnDates } from "./quotes";
 import type { Transaction } from "./transactions";
 
 // Facts-only ledger (ADR 0004): the ledger stores only the money fact the user gave
@@ -56,9 +56,8 @@ export function resolveDerivedUnits(rows: readonly Transaction[]): Transaction[]
   const keys = [...new Set(targets.map(cacheKey))];
   const latest = new Map<string, number>();
   for (const q of listFundQuotes(keys)) if (q.nav > 0) latest.set(q.ticker, q.nav);
-  const navByDate = new Map<string, Map<string, number>>();
-  for (const date of new Set(targets.map((r) => r.tradeDate)))
-    navByDate.set(date, navOnDate(keys, date));
+  // One scan resolves every distinct trade date (was a navOnDate query per date).
+  const navByDate = navOnDates(keys, [...new Set(targets.map((r) => r.tradeDate))]);
 
   return rows.map((r) => {
     if (!isDerivable(r)) return r;

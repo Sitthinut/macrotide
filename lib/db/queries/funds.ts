@@ -734,24 +734,37 @@ export function getCheaperAlternatives(projId: string, limit = 5): FundWithTer[]
   const refTer = getCurrentTer(projId);
   if (refTer == null) return [];
 
-  const peers = findFunds({
-    assetClass: ref.assetClass ?? undefined,
-    limit: 200,
-  });
-  // Facet semantics differ:
-  //   • regionFocus null = "we don't know" → enforce equality only when BOTH
-  //     sides are known (don't punish unknowns beyond the coarse investRegion
-  //     match, which still applies exactly including null).
-  //   • sectorFocus null = "diversified" (sector funds are detectable from
-  //     benchmark/name) → exact match including null: a gold fund is never a
-  //     cheaper version of a diversified fund, and vice versa.
+  const peers = findFunds({ assetClass: ref.assetClass ?? undefined, limit: 200 });
+  return filterCheaperAlternatives(ref, refTer, peers, limit);
+}
+
+/**
+ * The pure "is this a cheaper version of the same product" filter, split out so a
+ * caller that already holds the reference row + a fetched peer pool (e.g. the
+ * fee-creep pass, which fetches one pool per asset class instead of one per holding)
+ * reuses the exact same matching rule rather than re-deriving it.
+ *
+ * `peers` must already be scoped to the reference's asset class (that's the only
+ * predicate {@link getCheaperAlternatives} pushes into SQL); every other facet is
+ * applied here. Facet semantics differ:
+ *   • regionFocus null = "we don't know" → enforce equality only when BOTH sides are
+ *     known (don't punish unknowns beyond the coarse investRegion match, which still
+ *     applies exactly including null).
+ *   • sectorFocus null = "diversified" → exact match including null: a gold fund is
+ *     never a cheaper version of a diversified fund, and vice versa.
+ */
+export function filterCheaperAlternatives(
+  ref: Pick<Fund, "projId" | "investRegion" | "managementStyle" | "regionFocus" | "sectorFocus">,
+  refTer: number,
+  peers: FundWithTer[],
+  limit: number,
+): FundWithTer[] {
   const regionCompatible = (a: string | null, b: string | null) =>
     a == null || b == null || a === b;
-
   return peers
     .filter(
       (f) =>
-        f.projId !== projId &&
+        f.projId !== ref.projId &&
         f.ter != null &&
         f.ter < refTer &&
         f.investRegion === ref.investRegion &&

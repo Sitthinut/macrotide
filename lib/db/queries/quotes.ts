@@ -43,6 +43,52 @@ export function navOnDate(keys: string[], date: string): Map<string, number> {
   return out;
 }
 
+/**
+ * Batched {@link navOnDate}: the latest NAV at-or-before EACH of several dates, per
+ * ticker. A fold resolves derived units across every distinct trade date in the
+ * ledger — calling navOnDate per date is a query-per-date loop that, on a long
+ * history, blocks the event loop for ~100ms. This pulls each ticker's history up to
+ * the latest needed date in ONE scan, then walks it in memory to answer every date.
+ *
+ * Result mirrors a Map of navOnDate results: `date → (ticker → nav)`, with an entry
+ * for every requested date (empty inner map when nothing resolves). Matches navOnDate
+ * exactly — only the row at the latest date ≤ target counts, and a non-positive NAV
+ * there yields no entry (never falls back to an earlier row).
+ */
+export function navOnDates(keys: string[], dates: string[]): Map<string, Map<string, number>> {
+  const out = new Map<string, Map<string, number>>();
+  for (const d of dates) out.set(d, new Map());
+  if (keys.length === 0 || dates.length === 0) return out;
+
+  const maxDate = dates.reduce((m, d) => (d > m ? d : m));
+  const rows = getMarketDb()
+    .select({ ticker: navHistory.ticker, date: navHistory.date, nav: navHistory.nav })
+    .from(navHistory)
+    .where(and(inArray(navHistory.ticker, keys), lte(navHistory.date, maxDate)))
+    .orderBy(navHistory.ticker, navHistory.date)
+    .all();
+
+  // Ascending (date, nav) per ticker.
+  const series = new Map<string, { date: string; nav: number }[]>();
+  for (const r of rows) {
+    const s = series.get(r.ticker);
+    if (s) s.push({ date: r.date, nav: r.nav });
+    else series.set(r.ticker, [{ date: r.date, nav: r.nav }]);
+  }
+
+  // For each ticker, walk its ascending series once across the ascending target
+  // dates — a single forward pointer answers every date (latest row with date ≤ it).
+  const sortedDates = [...dates].sort();
+  for (const [ticker, s] of series) {
+    let i = -1;
+    for (const target of sortedDates) {
+      while (i + 1 < s.length && s[i + 1].date <= target) i++;
+      if (i >= 0 && s[i].nav > 0) out.get(target)?.set(ticker, s[i].nav);
+    }
+  }
+  return out;
+}
+
 export function upsertFundQuote(input: FundQuoteInsert): FundQuote {
   return getMarketDb()
     .insert(fundQuotes)
