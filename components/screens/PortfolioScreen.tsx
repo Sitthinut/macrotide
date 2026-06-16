@@ -98,6 +98,14 @@ function swatchAbbr(t: string) {
   return SWATCH_ABBR[t] || t.slice(0, 3);
 }
 
+// Color for a holding-row's inline TER token. Unlike the fund-detail badge (which
+// greens the cheap band), a cheap fee stays muted here so it blends into the sub
+// line — only an elevated fee draws the eye: amber 0.5–1.5%, red > 1.5%.
+function terRowColor(ter: number): string {
+  if (ter <= 0.5) return "var(--muted)";
+  return ter <= 1.5 ? "var(--amber, #d89a1f)" : "var(--loss)";
+}
+
 // Human labels for the "Not for me" reason chips (keys from REASON_CHIPS).
 const REASON_CHIP_LABELS: Record<ReasonChip, string> = {
   too_small: "Too small to matter",
@@ -1722,7 +1730,15 @@ export function PortfolioScreen({
                     {h.syncedBroker && <SyncedIcon broker={h.syncedBroker} />}
                   </div>
                   <div className="sub">
-                    {h.category} · {pct.toFixed(1)}%
+                    Weight {pct.toFixed(1)}%
+                    {h.ter != null && (
+                      <>
+                        {" · "}
+                        <span style={{ color: terRowColor(h.ter) }}>TER {h.ter.toFixed(2)}%</span>
+                      </>
+                    )}
+                    {" · "}
+                    {h.category}
                   </div>
                 </div>
                 <div className="stack-xs" style={{ alignItems: "flex-end" }}>
