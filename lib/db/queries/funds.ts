@@ -10,7 +10,7 @@
 // funds on a single-VM SQLite, so clarity beats a window-function query here.
 
 import "server-only";
-import { and, eq, inArray, isNotNull, isNull, not, or, sql } from "drizzle-orm";
+import { and, eq, getTableColumns, inArray, isNotNull, isNull, not, or, sql } from "drizzle-orm";
 import { indexTypeFromManagementStyle, isIndexStyle } from "../../market/fund-classify";
 import { type FeeType, TER_FEE_TYPE } from "../../market/fund-fees";
 import { compareClassesForList } from "../../market/share-class-select";
@@ -253,7 +253,14 @@ export function getCurrentTer(projId: string): number | null {
   return terFromCurrentFees(getCurrentFees(projId));
 }
 
-export type FundWithTer = Fund & { ter: number | null };
+// The screener/finder never reads the fund's long-form policy text, so its
+// catalog query omits `investment_policy_desc` (a ~5KB HTML blob per row). For
+// the ~2k-row browse expansion that single column dominated the scan — dropping
+// it cuts the catalog read ~10× (queries flow through `CATALOG_LIST_COLUMNS`).
+const { investmentPolicyDesc: _omitPolicyDesc, ...CATALOG_LIST_COLUMNS } =
+  getTableColumns(fundCatalog);
+
+export type FundWithTer = Omit<Fund, "investmentPolicyDesc"> & { ter: number | null };
 
 export type FindFundsFilter = {
   /** Normalized allocation class: 'equity' | 'bond' | 'alternative' | 'cash'. */
@@ -387,7 +394,7 @@ export function findFunds(filter: FindFundsFilter = {}): FundWithTer[] {
   }
 
   const funds = getMarketDb()
-    .select()
+    .select(CATALOG_LIST_COLUMNS)
     .from(fundCatalog)
     .where(conds.length ? and(...conds) : undefined)
     .all();
@@ -676,17 +683,18 @@ function attachQuotesAndAum(items: ShareClassListItem[]): void {
     .all();
   const qmap = new Map(quotes.map((q) => [q.ticker, q]));
 
-  // Latest non-null net_asset per ticker: the row on each ticker's most recent
-  // date that actually carries an AUM (some NAV rows have a NULL net_asset).
+  // Latest non-null net_asset per ticker (some NAV rows carry a NULL net_asset).
+  // The correlated `ORDER BY date DESC LIMIT 1` resolves each ticker through the
+  // partial idx_nav_history_aum index instead of scanning all ~3M nav_history
+  // rows for a GROUP BY MAX — ~5ms vs ~500ms across the full screener set.
+  // json_each carries the key list so it stays a single round-trip.
   const aumRows = db.all(
-    sql`SELECT nh.ticker AS ticker, nh.net_asset AS aum
-        FROM ${navHistory} nh
-        JOIN (
-          SELECT ticker, MAX(date) AS d FROM ${navHistory}
-          WHERE ${inArray(navHistory.ticker, keys)} AND net_asset IS NOT NULL
-          GROUP BY ticker
-        ) m ON m.ticker = nh.ticker AND m.d = nh.date`,
-  ) as Array<{ ticker: string; aum: number }>;
+    sql`SELECT k.value AS ticker,
+          (SELECT nh.net_asset FROM ${navHistory} nh
+           WHERE nh.ticker = k.value AND nh.net_asset IS NOT NULL
+           ORDER BY nh.date DESC LIMIT 1) AS aum
+        FROM json_each(${JSON.stringify(keys)}) k`,
+  ) as Array<{ ticker: string; aum: number | null }>;
   const amap = new Map(aumRows.map((r) => [r.ticker, r.aum]));
 
   for (const x of items) {
