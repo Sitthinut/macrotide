@@ -2,7 +2,7 @@
 
 import "overlayscrollbars/overlayscrollbars.css";
 import { useOverlayScrollbars } from "overlayscrollbars-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   type AppId,
@@ -31,12 +31,14 @@ import { authClient } from "@/lib/auth/client";
 import { usePortfolioView, useSelectedModelId } from "@/lib/fetchers/legacy";
 import { usePlan } from "@/lib/fetchers/portfolio";
 import { invalidate, useResource } from "@/lib/fetchers/swr";
+import { clearBackLayers, pushBackLayer } from "@/lib/nav/back-stack";
 import type { AdvisorScreenContext } from "@/lib/portfolio/chat-suggestions";
 import type { ExtractedTxnRow } from "@/lib/portfolio/ocr";
 import { getScrollRoot, saveScreenScroll } from "@/lib/screenScroll";
 import type { Portfolio } from "@/lib/static/types";
 import { type ImportSeedRow, useImportSeed } from "@/lib/stores/import-seed";
 import { setActiveId, usePortfolioUi } from "@/lib/stores/portfolio-ui";
+import { syncThemeColor } from "@/lib/theme-color";
 import { useScrollHide } from "@/lib/useScrollHide";
 import { useViewport, type Viewport } from "@/lib/useViewport";
 
@@ -102,6 +104,10 @@ const MOBILE_NAV: { id: Screen; icon: string; label: string }[] = [
   { id: "chat", icon: "chat", label: "Advisor" },
   { id: "journal", icon: "book", label: "Journal" },
 ];
+
+// The bottom-tab roots: switching between them is lateral, not a drill-in, so a
+// tab tap abandons any open drill-in rather than stacking onto Back history.
+const ROOT_SCREENS = new Set<Screen>(["portfolio", "markets", "funds", "chat", "journal"]);
 
 // Wide shell drops "chat" from the rail — chat lives in the right dock instead.
 const WIDE_NAV: { id: Screen; icon: string; label: string }[] = [
@@ -265,14 +271,31 @@ export function App({ isDemo }: { isDemo: boolean }) {
     return "system";
   });
   const [screen, setScreen] = useState<Screen>("portfolio");
-  // Where the broker-connect wizard returns on Back — contextual: the screen it
-  // was opened from (portfolio when launched from the Add sheet, settings when
-  // launched from Settings → Connections).
-  const [connectReturn, setConnectReturn] = useState<Screen>("portfolio");
-  const openConnect = (from: Screen) => {
-    setConnectReturn(from);
-    setScreen("connect");
+  // Always-current screen, read by navigate() in event handlers without making
+  // effects re-subscribe.
+  const screenRef = useRef(screen);
+  screenRef.current = screen;
+  // Single entry point for every screen change, kept in sync with browser
+  // history so hardware/gesture Back behaves natively: bottom tabs are roots
+  // (switching abandons any open drill-in), while a drill-in screen pushes one
+  // history entry that Back pops to return to the screen it opened from.
+  // Stable (reads the live screen via screenRef, not a captured value) so it can
+  // sit in effect dep lists without re-subscribing every render.
+  const navigate = useCallback((target: Screen) => {
+    const from = screenRef.current;
+    if (target === from) return;
+    if (ROOT_SCREENS.has(target)) clearBackLayers();
+    else pushBackLayer(() => setScreen(from));
+    setScreen(target);
+  }, []);
+  // The on-screen Back affordances route through Back so a tapped back-arrow and
+  // a hardware Back share one path and history depth stays aligned.
+  const goBack = () => {
+    if (typeof window !== "undefined") window.history.back();
   };
+  // The broker-connect wizard is a drill-in; navigate() captures the screen it
+  // was opened from so Back returns there.
+  const openConnect = () => navigate("connect");
   const [pendingPrompt, setPendingPrompt] = useState<SeedPrompt | null>(null);
   // One "Add to portfolio" sheet with a Holdings (snapshot) / Activity (ledger)
   // toggle — both write to the same ledger (ADR 0004). `addMode` picks the entry
@@ -400,9 +423,17 @@ export function App({ isDemo }: { isDemo: boolean }) {
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
+    syncThemeColor(theme);
     try {
       window.localStorage.setItem(THEME_STORAGE_KEY, theme);
     } catch {}
+    // In "system" mode the resolved status-bar color depends on the OS
+    // preference, so re-sync when the OS flips while the app is open.
+    if (theme !== "system" || typeof window === "undefined") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => syncThemeColor("system");
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
   }, [theme]);
   useEffect(() => {
     document.documentElement.setAttribute("data-viewport", viewport);
@@ -447,9 +478,9 @@ export function App({ isDemo }: { isDemo: boolean }) {
   // their choice; leave it untouched so a closed dock stays closed.
   useEffect(() => {
     if (isWide && screen === "chat") {
-      setScreen("portfolio");
+      navigate("portfolio");
     }
-  }, [isWide, screen]);
+  }, [isWide, screen, navigate]);
 
   // Screens are swapped in place inside one persistent scroll container, which
   // keeps its scrollTop across a swap. We turn that into per-screen scroll
@@ -581,7 +612,7 @@ export function App({ isDemo }: { isDemo: boolean }) {
     const navHandler = (e: Event) => {
       const target = (e as CustomEvent<Screen>).detail;
       if (isWide && target === "chat") setActiveApp("chat");
-      else setScreen(target);
+      else navigate(target);
     };
     const promptHandler = (e: Event) => {
       // detail is either a plain string (shown verbatim) or a { display, send }
@@ -589,7 +620,7 @@ export function App({ isDemo }: { isDemo: boolean }) {
       // out of the visible user bubble.
       setPendingPrompt((e as CustomEvent<SeedPrompt>).detail);
       if (isWide) setActiveApp("chat");
-      else setScreen("chat");
+      else navigate("chat");
     };
     const saveReadingHandler = (e: Event) => {
       const article = (e as CustomEvent<unknown>).detail;
@@ -603,12 +634,12 @@ export function App({ isDemo }: { isDemo: boolean }) {
       window.removeEventListener("ai-prompt", promptHandler);
       window.removeEventListener("save-reading", saveReadingHandler);
     };
-  }, [isWide]);
+  }, [isWide, navigate]);
 
   // Helper: opening chat goes to dock on wide, screen on mobile.
   const openChat = () => {
     if (isWide) setActiveApp("chat");
-    else setScreen("chat");
+    else navigate("chat");
   };
 
   // Mobile screens carry a top-right kebab that opens the account menu. The
@@ -619,7 +650,7 @@ export function App({ isDemo }: { isDemo: boolean }) {
   // sheet so the two stay in sync.
   const gotoScreen = (s: Screen) => {
     setAccountMenuOpen(false);
-    setScreen(s);
+    navigate(s);
   };
   const signOut = async () => {
     setAccountMenuOpen(false);
@@ -659,16 +690,16 @@ export function App({ isDemo }: { isDemo: boolean }) {
         <PortfolioScreen
           onOpenSettings={openMobileMenu}
           showMenu={!isWide}
-          onOpenModels={() => setScreen("models")}
+          onOpenModels={() => navigate("models")}
           onOpenChat={openChat}
           onOpenImport={() => {
             setAddMode("snapshot");
             setAddOpen(true);
           }}
-          onOpenActivity={() => setScreen("activity")}
+          onOpenActivity={() => navigate("activity")}
           onOpenPosition={(t) => {
             setPositionTicker(t);
-            setScreen("position");
+            navigate("position");
           }}
         />
       );
@@ -676,7 +707,7 @@ export function App({ isDemo }: { isDemo: boolean }) {
     if (screen === "activity") {
       return (
         <HistoryScreen
-          onBack={() => setScreen("portfolio")}
+          onBack={goBack}
           onAdd={() => {
             setAddMode("activity");
             setAddOpen(true);
@@ -688,7 +719,7 @@ export function App({ isDemo }: { isDemo: boolean }) {
       return (
         <PositionScreen
           ticker={positionTicker}
-          onBack={() => setScreen("portfolio")}
+          onBack={goBack}
           onRecord={() => {
             setAddMode("activity");
             setAddOpen(true);
@@ -717,7 +748,7 @@ export function App({ isDemo }: { isDemo: boolean }) {
       return (
         <JournalScreen
           onOpenChat={openChat}
-          onOpenModels={() => setScreen("models")}
+          onOpenModels={() => navigate("models")}
           onOpenSettings={openMobileMenu}
           showMenu={!isWide}
         />
@@ -743,7 +774,7 @@ export function App({ isDemo }: { isDemo: boolean }) {
               console.error("Failed to persist selected model:", err);
             }
           }}
-          onBack={() => setScreen("portfolio")}
+          onBack={goBack}
         />
       );
     }
@@ -752,26 +783,21 @@ export function App({ isDemo }: { isDemo: boolean }) {
         <SettingsScreen
           theme={theme}
           onThemeChange={(t) => setTheme(t)}
-          onBack={() => setScreen("portfolio")}
-          onConnectBroker={() => openConnect("settings")}
+          onBack={goBack}
+          onConnectBroker={openConnect}
         />
       );
     }
     if (screen === "account") {
-      return <AccountScreen isDemo={isDemo} onBack={() => setScreen("portfolio")} />;
+      return <AccountScreen isDemo={isDemo} onBack={goBack} />;
     }
     if (screen === "admin") {
       // Defense in depth: even if a non-owner reaches this branch, the API
       // returns 403 and AdminScreen renders an access-denied message.
-      return <AdminScreen onBack={() => setScreen("portfolio")} />;
+      return <AdminScreen onBack={goBack} />;
     }
     if (screen === "connect") {
-      return (
-        <ConnectBrokerScreen
-          onBack={() => setScreen(connectReturn)}
-          onOrganize={() => setScreen("settings")}
-        />
-      );
+      return <ConnectBrokerScreen onBack={goBack} onOrganize={() => navigate("settings")} />;
     }
     return null;
   };
@@ -806,9 +832,9 @@ export function App({ isDemo }: { isDemo: boolean }) {
           setAddOpen(false);
           setImportSeed(null);
           setTxnSeed(null);
-          openConnect(screen);
+          openConnect();
         }}
-        onSaved={() => setScreen("activity")}
+        onSaved={() => navigate("activity")}
       />
     </>
   );
@@ -834,7 +860,7 @@ export function App({ isDemo }: { isDemo: boolean }) {
                 <button
                   key={item.id}
                   data-active={screen === item.id}
-                  onClick={() => setScreen(item.id)}
+                  onClick={() => navigate(item.id)}
                 >
                   <Icon name={item.icon} size={17} />
                   <span>{item.label}</span>
@@ -958,7 +984,7 @@ export function App({ isDemo }: { isDemo: boolean }) {
                 key={item.id}
                 className="ra-rail-item"
                 data-active={screen === item.id}
-                onClick={() => setScreen(item.id)}
+                onClick={() => navigate(item.id)}
                 aria-label={item.label}
               >
                 <Icon name={item.icon} size={18} />

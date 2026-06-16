@@ -49,7 +49,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 - **Installable as a standalone app (PWA).** A web app manifest plus iOS
   home-screen metadata let the app be added to the home screen and launch
   standalone (no browser chrome), with proper home-screen icons on iOS and
-  Android.
+  Android. The hardware/gesture Back button now behaves natively — it closes an
+  open sheet or dialog first, then steps back out of a drilled-in screen, before
+  ever leaving the app. The status bar tints to match the in-app light/dark
+  theme (not just the OS preference). The shell is sized to the visible viewport
+  (so an installed PWA on iOS/iPadOS no longer over-scrolls past the screen), and
+  the bottom nav is lifted clear of the home indicator.
 - **The JSON API is fail-closed (deny-by-default auth).** Every data route now
   rejects an anonymous request with `401` instead of silently serving the
   shared owner row set; the few intentionally-public routes are an explicit,
