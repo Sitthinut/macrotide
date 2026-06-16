@@ -14,15 +14,22 @@ const mockImpl = {
 // `throw` when the queue is empty.
 const callQueue: Array<{ text?: string; throw?: Error }> = [];
 
+// A successful generateText result also carries usage + the served model id (the
+// real SDK shape) so the extractors' onUsage metering can read them.
+const usageShape = {
+  usage: { inputTokens: 100, outputTokens: 20 },
+  response: { modelId: "m-test" },
+};
+
 vi.mock("ai", () => ({
   generateText: vi.fn(async () => {
     const next = callQueue.shift();
     if (next) {
       if (next.throw) throw next.throw;
-      return { text: next.text ?? "" };
+      return { text: next.text ?? "", ...usageShape };
     }
     if (mockImpl.throw) throw mockImpl.throw;
-    return { text: mockImpl.text };
+    return { text: mockImpl.text, ...usageShape };
   }),
 }));
 
@@ -36,6 +43,7 @@ import {
   dateFromFilename,
   deriveRow,
   extractHoldingsFromImage,
+  extractStructuredHoldings,
   isAllowedMimeType,
   OcrProviderUnavailableError,
   parseClassification,
@@ -54,8 +62,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.OPENROUTER_API_KEY;
-  delete process.env.OCR_MODEL;
-  delete process.env.OCR_FALLBACK_MODEL;
+  delete process.env.OCR_MODELS;
 });
 
 describe("isAllowedMimeType", () => {
@@ -131,6 +138,31 @@ describe("extractHoldingsFromImage", () => {
   });
 });
 
+describe("usage metering (onUsage)", () => {
+  const fakeImage = { data: Buffer.from([0xff, 0xd8, 0xff]), mimeType: "image/jpeg" };
+
+  it("reports the model call's token usage + served id so the route can meter spend", async () => {
+    const seen: Array<{ inputTokens: number; outputTokens: number; modelId: string | null }> = [];
+    await extractStructuredHoldings(fakeImage, { onUsage: (u) => seen.push(u) });
+    expect(seen).toEqual([{ inputTokens: 100, outputTokens: 20, modelId: "m-test" }]);
+  });
+
+  it("fires once per model call — primary failure + fallback = two reports", async () => {
+    callQueue.push({
+      throw: Object.assign(new Error("Failed"), {
+        name: "AI_APICallError",
+        responseBody: JSON.stringify({ error: { message: "rate-limited upstream" } }),
+      }),
+    });
+    callQueue.push({ text: "[]" });
+    process.env.OCR_MODELS = "a/primary,b/fallback";
+    const seen: number[] = [];
+    await extractStructuredHoldings(fakeImage, { onUsage: () => seen.push(1) });
+    // Primary threw before reporting usage; only the successful fallback reports.
+    expect(seen).toHaveLength(1);
+  });
+});
+
 describe("extractHoldingsFromImage — primary/fallback chain", () => {
   const fakeImage = { data: Buffer.from([0xff, 0xd8, 0xff]), mimeType: "image/jpeg" };
   const providerErr = () =>
@@ -147,26 +179,25 @@ describe("extractHoldingsFromImage — primary/fallback chain", () => {
       }),
     });
 
-  it("uses the fallback when the default primary (qianfan free) hits a provider error", async () => {
-    // No OCR_MODEL pinned → default primary kicks in, default fallback (paid
-    // qianfan) applies. Queue: primary fails, fallback succeeds.
+  it("uses the fallback when the default primary hits a provider error", async () => {
+    // No OCR_MODELS pinned → default primary + default fallback chain applies.
+    // Queue: primary fails, fallback succeeds.
     callQueue.push({ throw: providerErr() });
     callQueue.push({ text: "K-WORLDX 12485 units" });
     const result = await extractHoldingsFromImage(fakeImage);
     expect(result.text).toBe("K-WORLDX 12485 units");
   });
 
-  it("does NOT auto-fallback when the operator has pinned OCR_MODEL (respects intent)", async () => {
-    process.env.OCR_MODEL = "openai/gpt-5-nano";
+  it("does NOT auto-fallback when the operator pins a single-model OCR_MODELS (respects intent)", async () => {
+    process.env.OCR_MODELS = "openai/gpt-5-nano";
     callQueue.push({ throw: providerErr() });
     await expect(extractHoldingsFromImage(fakeImage)).rejects.toBeInstanceOf(
       OcrProviderUnavailableError,
     );
   });
 
-  it("honors an explicit OCR_FALLBACK_MODEL even when the primary is pinned", async () => {
-    process.env.OCR_MODEL = "openai/gpt-5-nano";
-    process.env.OCR_FALLBACK_MODEL = "anthropic/claude-haiku-4.5";
+  it("honors a second model in the OCR_MODELS chain as the fallback", async () => {
+    process.env.OCR_MODELS = "openai/gpt-5-nano,anthropic/claude-haiku-4.5";
     callQueue.push({ throw: providerErr() });
     callQueue.push({ text: "AAPL 10 shares" });
     const result = await extractHoldingsFromImage(fakeImage);

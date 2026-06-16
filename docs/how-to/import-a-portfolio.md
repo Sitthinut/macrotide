@@ -99,9 +99,12 @@ Requirements and behavior:
 
 - Needs `OPENROUTER_API_KEY`. Without it the endpoint returns **503** with a
   message pointing you at the key. See [auth-and-providers.md](../reference/auth-and-providers.md).
-- Uses a vision model by default (`OCR_MODEL`, `google/gemini-2.5-flash`) with an
-  automatic fallback on provider/rate-limit errors. Not tier-gated — the same
-  model serves every user. Both are configurable — see the
+- Uses a vision model by default (`OCR_MODELS`, `google/gemini-2.5-flash-lite`) with an
+  automatic fallback on provider/rate-limit errors. The same model serves every
+  user, but the spend is metered: a signed-in non-owner's calls count against the
+  same daily usage cap as chat (a `429` when over), and the process-wide OCR
+  breaker counts each model call (a detect-then-route import is two). The owner is
+  uncapped. Both models are configurable — see the
   [env-var table](../reference/configuration.md#ai--model-selection).
 - The screenshot is read once and never stored.
 

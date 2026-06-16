@@ -75,12 +75,48 @@ interface OpenRouterOpts {
    * Non-reasoning models ignore it.
    */
   reasoningEffort?: ReasoningEffort;
+  /**
+   * A stable per-conversation id (the chat thread id) used to pin provider
+   * cache affinity, so a multi-turn chat keeps hitting the same backend and
+   * reusing its prompt cache. The *signal* differs by model family — see
+   * {@link cacheAffinity} — so this is provider-agnostic at the call site: pass
+   * the thread id and the right header/body lands for whichever model the env
+   * names. Omit for one-shot/stateless calls (titling, extraction, the vision
+   * sub-model) where there's no conversation to keep warm.
+   */
+  conversationId?: string;
+}
+
+/**
+ * Map a model id + conversation id to the provider-specific cache-affinity
+ * signal, so swapping the chat model via env keeps prompt caching working
+ * without touching call sites. Every family on OpenRouter uses sticky routing
+ * and reports reads uniformly as `usage.cachedInputTokens`; only the *explicit*
+ * affinity lever differs:
+ *   - xAI/Grok  → `x-grok-conv-id` header (xAI's documented affinity signal;
+ *                 without it OpenRouter may scatter requests across backends and
+ *                 miss the cache).
+ *   - Anthropic → `session_id` body field (OpenRouter's Anthropic sticky pin).
+ *   - OpenAI / Google / DeepSeek / openrouter meta-routers → nothing to inject;
+ *     sticky routing + a stable prompt prefix (our frozen system prompt + memory
+ *     block) is automatic.
+ * Adding explicit caching for a new family later is a one-line entry here.
+ */
+function cacheAffinity(
+  modelId: string,
+  conversationId: string,
+): { headers?: Record<string, string>; body?: Record<string, unknown> } {
+  if (modelId.startsWith("x-ai/")) return { headers: { "x-grok-conv-id": conversationId } };
+  if (modelId.startsWith("anthropic/")) return { body: { session_id: conversationId } };
+  return {};
 }
 
 function openrouter(apiKey: string, models: string[], opts: OpenRouterOpts = {}): LanguageModel {
   const [primary, ...rest] = models;
   const injectModels = rest.length > 0;
   const injectReasoning = opts.reasoningEffort !== undefined;
+  const affinity = opts.conversationId ? cacheAffinity(primary, opts.conversationId) : {};
+  const injectAffinityBody = affinity.body !== undefined;
   const provider = createOpenAICompatible({
     name: "openrouter",
     baseURL: "https://openrouter.ai/api/v1",
@@ -88,13 +124,17 @@ function openrouter(apiKey: string, models: string[], opts: OpenRouterOpts = {})
     headers: {
       "HTTP-Referer": process.env.PUBLIC_APP_URL ?? "https://macrotide.local",
       "X-Title": "Macrotide",
+      // Header-based cache affinity (e.g. grok's x-grok-conv-id). The provider is
+      // built fresh per request with the thread id known, so a static header is
+      // correct and per-conversation.
+      ...affinity.headers,
     },
-    // OpenRouter takes a `models: [primary, ...fallbacks]` fallback list and a
-    // `reasoning: { effort }` control as body fields. Only override fetch when we
-    // actually need to inject one of them — a single-model, default-reasoning
-    // request stays clean.
+    // OpenRouter takes `models: [primary, ...fallbacks]`, a `reasoning: { effort }`
+    // control, and (for some families) a body-level cache-affinity field as body
+    // fields. Only override fetch when we actually need to inject one of them — a
+    // single-model, default-reasoning, no-body-affinity request stays clean.
     fetch:
-      !injectModels && !injectReasoning
+      !injectModels && !injectReasoning && !injectAffinityBody
         ? undefined
         : async (input, init) => {
             if (init && typeof init.body === "string") {
@@ -102,6 +142,7 @@ function openrouter(apiKey: string, models: string[], opts: OpenRouterOpts = {})
                 const body = JSON.parse(init.body);
                 if (injectModels) body.models = models;
                 if (injectReasoning) body.reasoning = { effort: opts.reasoningEffort };
+                if (injectAffinityBody) Object.assign(body, affinity.body);
                 init = { ...init, body: JSON.stringify(body) };
               } catch {
                 // Body wasn't JSON — forward untouched rather than crashing.
@@ -118,14 +159,17 @@ function chainLabel(prefix: string, models: string[]): string {
 }
 
 export function resolveOwnerProvider(
-  opts: { reasoningEffort?: ReasoningEffort } = {},
+  opts: { reasoningEffort?: ReasoningEffort; conversationId?: string } = {},
 ): ResolvedProvider {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) return { model: null, ready: false, label: "OpenRouter (no key)" };
   const models = parseModels(process.env.TRUSTED_TIER_MODELS) ?? TRUSTED_TIER_DEFAULT;
   // Effort is gated per-turn by intent in the route (undefined = model default).
   return {
-    model: openrouter(key, models, { reasoningEffort: opts.reasoningEffort }),
+    model: openrouter(key, models, {
+      reasoningEffort: opts.reasoningEffort,
+      conversationId: opts.conversationId,
+    }),
     ready: true,
     label: chainLabel("OpenRouter", models),
   };
@@ -154,7 +198,7 @@ const PUBLIC_TIER_DEFAULT = ["openrouter/free"];
  */
 export function resolveTierProvider(
   tier: "public" | "trusted",
-  opts: { reasoningEffort?: ReasoningEffort } = {},
+  opts: { reasoningEffort?: ReasoningEffort; conversationId?: string } = {},
 ): ResolvedProvider {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) return { model: null, ready: false, label: "OpenRouter (no key)" };
@@ -162,7 +206,10 @@ export function resolveTierProvider(
     const models = parseModels(process.env.TRUSTED_TIER_MODELS) ?? TRUSTED_TIER_DEFAULT;
     // Trusted shares the owner chain AND the per-turn intent-gated effort.
     return {
-      model: openrouter(key, models, { reasoningEffort: opts.reasoningEffort }),
+      model: openrouter(key, models, {
+        reasoningEffort: opts.reasoningEffort,
+        conversationId: opts.conversationId,
+      }),
       ready: true,
       label: chainLabel("Trusted", models),
     };
@@ -173,55 +220,66 @@ export function resolveTierProvider(
   // (slow + billed at the output rate) even on an analytical-looking turn. The
   // intent gate raises effort only for owner/trusted, who value (and fund) it.
   return {
-    model: openrouter(key, models, { reasoningEffort: "none" }),
+    model: openrouter(key, models, {
+      reasoningEffort: "none",
+      conversationId: opts.conversationId,
+    }),
     ready: true,
     label: chainLabel("Public", models),
   };
 }
 
-export function resolveDemoProvider(): ResolvedProvider {
+export function resolveDemoProvider(opts: { conversationId?: string } = {}): ResolvedProvider {
   const key = process.env.DEMO_OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY;
   if (!key) return { model: null, ready: false, label: "Demo (no key configured)" };
   const models = parseModels(process.env.DEMO_TIER_MODELS) ?? DEMO_TIER_DEFAULT;
   // Demo: pin reasoning off — public, abuse-exposed, and on the free chain; it
   // should never burn reasoning latency/cost on a throwaway demo turn.
   return {
-    model: openrouter(key, models, { reasoningEffort: "none" }),
+    model: openrouter(key, models, {
+      reasoningEffort: "none",
+      conversationId: opts.conversationId,
+    }),
     ready: true,
     label: chainLabel("Demo", models),
   };
 }
 
-// Inline chat vision (a turn that carries one or more attached images). The
-// trusted/public chat chains (`TRUSTED_TIER_MODELS` / `PUBLIC_TIER_MODELS`) may
-// resolve to text-only models, so an image turn routes here instead — to a
-// SINGLE vision-capable model named by its OWN dedicated `VISION_CHAT_MODEL` var
-// (default `google/gemini-2.5-flash`, the same family the pinned OCR extractor
+// Inline chat vision — the model the Advisor's `examine_image` tool runs under
+// the hood to read an attached image (the chat driver, e.g. grok, stays on the
+// turn; it cannot see pixels and calls this as a tool). Named by its OWN
+// dedicated `VISION_CHAT_MODELS` var (default a gemini-flash-lite chain — primary
+// + an EOL-proof current-gen fallback, the same family the pinned OCR extractor
 // uses). Two deliberate consequences:
 //   - The public-tier cost invariant is preserved by construction: public-tier
-//     vision derives from `VISION_CHAT_MODEL`, NEVER from `TRUSTED_TIER_MODELS`,
+//     vision derives from `VISION_CHAT_MODELS`, NEVER from `TRUSTED_TIER_MODELS`,
 //     exactly like `PUBLIC_TIER_MODELS`. Public image turns are bounded by the daily
 //     token + optional cents caps enforced in the route before this is reached.
-//   - Setting `VISION_CHAT_MODEL=off` (or empty) disables inline chat vision
+//   - Setting `VISION_CHAT_MODELS=off` (or empty) disables inline chat vision
 //     entirely — the resolver returns not-ready and the route serves a stub that
 //     points the user at the Add-holdings image importer.
-const VISION_DEFAULT = ["google/gemini-2.5-flash"];
+const VISION_DEFAULT = ["google/gemini-2.5-flash-lite", "google/gemini-3.1-flash-lite"];
 
-/** True when `VISION_CHAT_MODEL` explicitly disables inline chat vision. */
+/** True when a vision var explicitly disables that vision path. */
 function visionDisabled(value: string | undefined): boolean {
   const v = value?.trim().toLowerCase();
   return v === "off" || v === "false" || v === "none" || v === "0";
 }
 
 /**
- * Resolve the provider for an image-bearing chat turn.
+ * Resolve the provider for the Advisor's `examine_image` tool (the cheap,
+ * common-case vision read).
  *
  * - `demo: true` reads `DEMO_OPENROUTER_API_KEY` (falling back to the owner key)
  *   so demo vision never silently bills the owner key — mirrors
  *   {@link resolveDemoProvider}.
- * - `VISION_CHAT_MODEL` set to `off`/empty → not-ready (vision disabled).
+ * - `VISION_CHAT_MODELS` set to `off`/empty → not-ready (vision disabled).
  * - `reasoningEffort` is passed through; the route pins `"none"` for the free
  *   and demo paths (cost) and forwards the intent-gated effort for owner/trusted.
+ *
+ * No `conversationId`: the vision read is a single-shot, stateless call (image +
+ * one question), so there's no conversation cache to keep warm here — affinity
+ * lives on the chat driver, not the sub-model.
  */
 export function resolveVisionProvider(
   opts: { reasoningEffort?: ReasoningEffort; demo?: boolean } = {},
@@ -230,13 +288,41 @@ export function resolveVisionProvider(
     ? (process.env.DEMO_OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY)
     : process.env.OPENROUTER_API_KEY;
   if (!key) return { model: null, ready: false, label: "Vision (no key)" };
-  const raw = process.env.VISION_CHAT_MODEL;
+  const raw = process.env.VISION_CHAT_MODELS;
   if (visionDisabled(raw)) return { model: null, ready: false, label: "Vision (disabled)" };
   const models = parseModels(raw) ?? VISION_DEFAULT;
   return {
     model: openrouter(key, models, { reasoningEffort: opts.reasoningEffort }),
     ready: true,
     label: chainLabel(opts.demo ? "Vision (demo)" : "Vision", models),
+  };
+}
+
+/**
+ * Resolve the STRONGER vision chain for the escalation hook — a chart/factsheet
+ * the user is reasoning *about*, where a cheap flash read may be too weak. Named
+ * by `VISION_CHAT_ESCALATE_MODELS`; **default unset → not-ready**, so escalation
+ * is dormant and the tool falls back to the cheap {@link resolveVisionProvider}
+ * until the chart-Q&A eval (G2) proves a pro tier earns its cost. Gated to
+ * owner/trusted at the call site — public/demo never escalate (cost invariant).
+ */
+export function resolveVisionEscalateProvider(
+  opts: { reasoningEffort?: ReasoningEffort; demo?: boolean } = {},
+): ResolvedProvider {
+  const raw = process.env.VISION_CHAT_ESCALATE_MODELS;
+  if (!raw || visionDisabled(raw)) {
+    return { model: null, ready: false, label: "Vision escalate (unset)" };
+  }
+  const key = opts.demo
+    ? (process.env.DEMO_OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY)
+    : process.env.OPENROUTER_API_KEY;
+  if (!key) return { model: null, ready: false, label: "Vision escalate (no key)" };
+  const models = parseModels(raw);
+  if (!models) return { model: null, ready: false, label: "Vision escalate (unset)" };
+  return {
+    model: openrouter(key, models, { reasoningEffort: opts.reasoningEffort }),
+    ready: true,
+    label: chainLabel("Vision escalate", models),
   };
 }
 

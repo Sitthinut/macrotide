@@ -56,6 +56,7 @@ export interface ModelPrice {
 const BUILTIN_PRICES: Record<string, ModelPrice> = {
   "google/gemini-2.5-flash": { in: 0.3, out: 2.5 },
   "google/gemini-2.5-flash-lite": { in: 0.1, out: 0.4 },
+  "google/gemini-3.1-flash-lite": { in: 0.25, out: 1.5 },
   "openai/gpt-4.1-mini": { in: 0.4, out: 1.6 },
   "openai/gpt-4.1-nano": { in: 0.1, out: 0.4 },
 };

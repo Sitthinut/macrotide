@@ -26,13 +26,42 @@ import type { QuoteSource } from "@/lib/market/sources";
  * value?) is deferred to either the user (read the transcription, fill rows
  * manually) or a future advisor flow.
  *
- * Defaults to `google/gemini-2.0-flash-001`. Override with `OCR_MODEL` — see
- * `.env.example`. Must be a vision-capable OpenRouter model.
+ * Defaults to a `google/gemini-2.5-flash-lite,google/gemini-3.1-flash-lite`
+ * chain (primary,fallback). Override with `OCR_MODELS` (comma-separated) — see
+ * `.env.example`. Each must be a vision-capable OpenRouter model.
  */
 
 export interface OcrInput {
   data: Buffer;
   mimeType: string;
+}
+
+/** Token usage from one OCR model call, so the caller can meter + cap spend. */
+export interface OcrUsage {
+  inputTokens: number;
+  outputTokens: number;
+  modelId: string | null;
+}
+
+/** Options shared by the image extractors. */
+export interface OcrOptions {
+  /** Called after each model call with its token usage (for recordUsage / caps). */
+  onUsage?: (usage: OcrUsage) => void;
+}
+
+function reportUsage(
+  onUsage: ((u: OcrUsage) => void) | undefined,
+  result: {
+    usage?: { inputTokens?: number; outputTokens?: number };
+    response?: { modelId?: string };
+  },
+): void {
+  if (!onUsage) return;
+  onUsage({
+    inputTokens: result.usage?.inputTokens ?? 0,
+    outputTokens: result.usage?.outputTokens ?? 0,
+    modelId: result.response?.modelId ?? null,
+  });
 }
 
 export interface OcrResult {
@@ -112,10 +141,39 @@ export interface ProposedRow {
 // so it uses the same model for every user for identical UX.
 //
 // On primary failure (HTTP 429 / provider error) the route catches
-// OcrProviderUnavailableError, retries once against OCR_FALLBACK_MODEL,
-// and only surfaces the error if both fail.
-const DEFAULT_OCR_MODEL = "google/gemini-2.5-flash";
-const DEFAULT_OCR_FALLBACK_MODEL = "google/gemini-2.0-flash-001";
+// OcrProviderUnavailableError, retries once against the fallback model, and only
+// surfaces the error if both fail.
+//
+// The default fallback is gemini-3.1-flash-lite — current-gen, so it survives the
+// gemini-2.5 EOL (2026-10-16) as a clean resilience net (the eval verdict lives
+// in docs/explanation/inference-strategy.md).
+const DEFAULT_OCR_MODEL = "google/gemini-2.5-flash-lite";
+const DEFAULT_OCR_FALLBACK_MODEL = "google/gemini-3.1-flash-lite";
+
+/**
+ * Resolve the OCR primary + fallback from the `OCR_MODELS` chain
+ * (`primary,fallback,…`). One source of truth for the four extractors, so they
+ * can't drift. A pinned single-model `OCR_MODELS=foo` means no fallback (don't
+ * surprise an operator who chose one model); unset → the default primary +
+ * fallback pair.
+ */
+function resolveOcrModels(): { primary: string; fallback: string | null } {
+  const chain = process.env.OCR_MODELS?.split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
+  if (chain && chain.length > 0) return { primary: chain[0], fallback: chain[1] ?? null };
+  return { primary: DEFAULT_OCR_MODEL, fallback: DEFAULT_OCR_FALLBACK_MODEL };
+}
+
+// Bounds for the post-parse sanity guard (A3): a final net against a model
+// fabricating absurd digits (the "value in the billions" failure mode), applied
+// regardless of which model produced them. An out-of-range field is DROPPED
+// (left undefined) so the editable confirmation table asks the user, rather than
+// seeding analytics with garbage. Generous on purpose — not a precise validator.
+const NAV_MIN = 0.01;
+const NAV_MAX = 1_000_000;
+const UNITS_MAX = 1e9;
+const MONEY_MAX = 1e12;
 
 const SYSTEM_PROMPT = `You are an OCR transcription engine. Read the image and return EVERY line of visible text, in reading order. Preserve numbers, currency symbols, percent signs, and column structure exactly as they appear. Use newlines between rows of a table. Do not summarize, interpret, or add commentary — just transcribe.
 
@@ -213,10 +271,10 @@ function openrouterVisionModel(apiKey: string, modelId: string) {
 /**
  * Transcribe a broker screenshot to plain text.
  *
- * Tries `OCR_MODEL` (defaults to qianfan free) first. If that fails with a
- * provider-unavailable error (rate limit, quota exhausted, no endpoint), and
- * `OCR_FALLBACK_MODEL` is set (defaults to paid qianfan), retries once on
- * the fallback. Only throws if both fail.
+ * Tries the `OCR_MODELS` primary (default gemini-2.5-flash-lite) first. If that
+ * fails with a provider-unavailable error (rate limit, quota exhausted, no
+ * endpoint) and the chain names a fallback (default gemini-3.1-flash-lite),
+ * retries once on the fallback. Only throws if both fail.
  *
  * Returns `{ text: "" }` (not an error) when a model runs successfully but
  * can't extract anything from the image — the route handler treats an empty
@@ -232,12 +290,7 @@ export async function extractHoldingsFromImage(input: OcrInput): Promise<OcrResu
     throw new Error("OPENROUTER_API_KEY is not set");
   }
 
-  const primary = process.env.OCR_MODEL?.trim() || DEFAULT_OCR_MODEL;
-  const fallbackEnv = process.env.OCR_FALLBACK_MODEL?.trim();
-  // Only apply the default fallback when the user hasn't pinned an override
-  // primary — if they explicitly chose a model, don't surprise them by
-  // falling back to qianfan-paid. They can opt back in via OCR_FALLBACK_MODEL.
-  const fallback = fallbackEnv ?? (process.env.OCR_MODEL ? null : DEFAULT_OCR_FALLBACK_MODEL);
+  const { primary, fallback } = resolveOcrModels();
 
   try {
     return await transcribe(apiKey, primary, input);
@@ -289,29 +342,30 @@ async function transcribe(apiKey: string, modelId: string, input: OcrInput): Pro
 /**
  * Read a broker screenshot into structured holding rows.
  *
- * Same provider + fallback policy as {@link extractHoldingsFromImage}: tries
- * `OCR_MODEL` (default gemini-2.5-flash), retries once on `OCR_FALLBACK_MODEL`
- * for provider-unavailable errors. Returns `[]` (not an error) when a model
+ * Same provider + fallback policy as {@link extractHoldingsFromImage}: tries the
+ * `OCR_MODELS` primary, retries once on the chain's fallback for
+ * provider-unavailable errors. Returns `[]` (not an error) when a model
  * runs but reads no holdings, so the route can show a friendly empty state.
  *
  * Returns raw extracted rows — NAV-derivation (units/avgCost from market data)
  * happens in the route, which has DB access.
  */
-export async function extractStructuredHoldings(input: OcrInput): Promise<ExtractedRow[]> {
+export async function extractStructuredHoldings(
+  input: OcrInput,
+  opts: OcrOptions = {},
+): Promise<ExtractedRow[]> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new Error("OPENROUTER_API_KEY is not set");
   }
 
-  const primary = process.env.OCR_MODEL?.trim() || DEFAULT_OCR_MODEL;
-  const fallbackEnv = process.env.OCR_FALLBACK_MODEL?.trim();
-  const fallback = fallbackEnv ?? (process.env.OCR_MODEL ? null : DEFAULT_OCR_FALLBACK_MODEL);
+  const { primary, fallback } = resolveOcrModels();
 
   try {
-    return await extractWith(apiKey, primary, input);
+    return await extractWith(apiKey, primary, input, opts.onUsage);
   } catch (err) {
     if (err instanceof OcrProviderUnavailableError && fallback && fallback !== primary) {
-      return await extractWith(apiKey, fallback, input);
+      return await extractWith(apiKey, fallback, input, opts.onUsage);
     }
     throw err;
   }
@@ -321,6 +375,7 @@ async function extractWith(
   apiKey: string,
   modelId: string,
   input: OcrInput,
+  onUsage?: (u: OcrUsage) => void,
 ): Promise<ExtractedRow[]> {
   const model = openrouterVisionModel(apiKey, modelId);
   try {
@@ -338,6 +393,7 @@ async function extractWith(
         },
       ],
     });
+    reportUsage(onUsage, result);
     return parseExtractedRows(result.text ?? "");
   } catch (err) {
     if (isProviderError(err)) {
@@ -399,22 +455,21 @@ Reply with ONLY a JSON object, no prose, no code fences: {"docType":"holdings"|"
 export async function classifyImportImage(
   input: OcrInput,
   ctx?: ImportContext,
+  opts: OcrOptions = {},
 ): Promise<ImportClassification> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new Error("OPENROUTER_API_KEY is not set");
   }
 
-  const primary = process.env.OCR_MODEL?.trim() || DEFAULT_OCR_MODEL;
-  const fallbackEnv = process.env.OCR_FALLBACK_MODEL?.trim();
-  const fallback = fallbackEnv ?? (process.env.OCR_MODEL ? null : DEFAULT_OCR_FALLBACK_MODEL);
+  const { primary, fallback } = resolveOcrModels();
 
   let result: ImportClassification;
   try {
-    result = await classifyWith(apiKey, primary, input, ctx);
+    result = await classifyWith(apiKey, primary, input, ctx, opts.onUsage);
   } catch (err) {
     if (err instanceof OcrProviderUnavailableError && fallback && fallback !== primary) {
-      result = await classifyWith(apiKey, fallback, input, ctx);
+      result = await classifyWith(apiKey, fallback, input, ctx, opts.onUsage);
     } else {
       throw err;
     }
@@ -451,6 +506,7 @@ async function classifyWith(
   modelId: string,
   input: OcrInput,
   ctx?: ImportContext,
+  onUsage?: (u: OcrUsage) => void,
 ): Promise<ImportClassification> {
   const model = openrouterVisionModel(apiKey, modelId);
   try {
@@ -468,6 +524,7 @@ async function classifyWith(
         },
       ],
     });
+    reportUsage(onUsage, result);
     return parseClassification(result.text ?? "");
   } catch (err) {
     if (isProviderError(err)) {
@@ -543,21 +600,22 @@ If the image shows no transaction history at all, return [].`;
  * runs but reads nothing. Rows come back raw — the client normalizes kind/date
  * and the route signs the amount.
  */
-export async function extractTransactionRows(input: OcrInput): Promise<ExtractedTxnRow[]> {
+export async function extractTransactionRows(
+  input: OcrInput,
+  opts: OcrOptions = {},
+): Promise<ExtractedTxnRow[]> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new Error("OPENROUTER_API_KEY is not set");
   }
 
-  const primary = process.env.OCR_MODEL?.trim() || DEFAULT_OCR_MODEL;
-  const fallbackEnv = process.env.OCR_FALLBACK_MODEL?.trim();
-  const fallback = fallbackEnv ?? (process.env.OCR_MODEL ? null : DEFAULT_OCR_FALLBACK_MODEL);
+  const { primary, fallback } = resolveOcrModels();
 
   try {
-    return await extractTxnWith(apiKey, primary, input);
+    return await extractTxnWith(apiKey, primary, input, opts.onUsage);
   } catch (err) {
     if (err instanceof OcrProviderUnavailableError && fallback && fallback !== primary) {
-      return await extractTxnWith(apiKey, fallback, input);
+      return await extractTxnWith(apiKey, fallback, input, opts.onUsage);
     }
     throw err;
   }
@@ -567,6 +625,7 @@ async function extractTxnWith(
   apiKey: string,
   modelId: string,
   input: OcrInput,
+  onUsage?: (u: OcrUsage) => void,
 ): Promise<ExtractedTxnRow[]> {
   const model = openrouterVisionModel(apiKey, modelId);
   try {
@@ -584,6 +643,7 @@ async function extractTxnWith(
         },
       ],
     });
+    reportUsage(onUsage, result);
     return parseExtractedTxnRows(result.text ?? "");
   } catch (err) {
     if (isProviderError(err)) {
@@ -612,10 +672,11 @@ export function parseExtractedTxnRows(text: string): ExtractedTxnRow[] {
     const price = coerceNumber(o.pricePerUnit);
     const amount = coerceNumber(o.amount);
     const fee = coerceNumber(o.fee);
-    if (units !== null) row.units = units;
-    if (price !== null) row.pricePerUnit = price;
-    if (amount !== null) row.amount = amount;
-    if (fee !== null) row.fee = fee;
+    // A3 bounds guard (see parseExtractedRows): drop an out-of-range fabrication.
+    if (units !== null && units > 0 && units <= UNITS_MAX) row.units = units;
+    if (price !== null && price >= NAV_MIN && price <= NAV_MAX) row.pricePerUnit = price;
+    if (amount !== null && amount >= 0 && amount <= MONEY_MAX) row.amount = amount;
+    if (fee !== null && fee >= 0 && fee <= MONEY_MAX) row.fee = fee;
     rows.push(row);
   }
   return rows;
@@ -683,12 +744,15 @@ export function parseExtractedRows(text: string): ExtractedRow[] {
     const value = coerceNumber(o.value);
     const pl = coerceNumber(o.pl);
     const costTotal = coerceNumber(o.costTotal);
-    if (units !== null) row.units = units;
-    if (nav !== null) row.nav = nav;
-    if (avgCost !== null) row.avgCost = avgCost;
-    if (value !== null) row.value = value;
-    if (pl !== null) row.pl = pl;
-    if (costTotal !== null) row.costTotal = costTotal;
+    // A3 bounds guard: keep a field only when it's within plausible range, so a
+    // fabricated absurd digit is dropped (→ confirmation table asks the user)
+    // rather than poisoning derivation.
+    if (units !== null && units > 0 && units <= UNITS_MAX) row.units = units;
+    if (nav !== null && nav >= NAV_MIN && nav <= NAV_MAX) row.nav = nav;
+    if (avgCost !== null && avgCost >= NAV_MIN && avgCost <= NAV_MAX) row.avgCost = avgCost;
+    if (value !== null && value >= 0 && value <= MONEY_MAX) row.value = value;
+    if (pl !== null && Math.abs(pl) <= MONEY_MAX) row.pl = pl;
+    if (costTotal !== null && costTotal >= 0 && costTotal <= MONEY_MAX) row.costTotal = costTotal;
     rows.push(row);
   }
   return rows;
