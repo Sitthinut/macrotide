@@ -28,7 +28,7 @@ export const PORTFOLIOS: Portfolio[] = [
   {
     id: "main",
     name: "Main",
-    icon: "○",
+    icon: "wallet",
     type: "free",
     typeLabel: "Free",
     color: "var(--accent)",
@@ -156,7 +156,7 @@ export const PORTFOLIOS: Portfolio[] = [
   {
     id: "rmf",
     name: "Retirement",
-    icon: "◇",
+    icon: "diamond",
     type: "tax-locked",
     typeLabel: "RMF · until 55",
     color: "oklch(0.55 0.10 230)",
@@ -234,7 +234,7 @@ export const PORTFOLIOS: Portfolio[] = [
   {
     id: "experiment",
     name: "Experiment",
-    icon: "△",
+    icon: "triangle",
     type: "experiment",
     typeLabel: "Sandbox",
     color: "oklch(0.55 0.10 50)",

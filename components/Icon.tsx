@@ -1,9 +1,24 @@
-// App-specific icons render from local single-path SVGs (stroke 1.5, lucide-feel).
-// Anything not in this map falls back to lucide-react's DynamicIcon (1700+ icons,
-// each lazy-loaded on demand). Use kebab-case lucide names for new code; legacy
-// camelCase names (piggyBank, trend) are mapped to kebab-case at lookup time.
+// Icons resolve in three tiers:
+//   1. CUSTOM_PATHS  — app-specific single-path SVGs (stroke 1.5, lucide-feel).
+//   2. STATIC_LUCIDE — a few always-visible chrome icons imported eagerly so
+//      they bundle into the main chunk and never lazy-load late.
+//   3. DynamicIcon   — everything else from lucide (1700+), lazy-loaded per
+//      glyph on demand.
+// Use kebab-case lucide names — a name in neither map is passed straight to
+// lucide's DynamicIcon.
 
+import { ArrowLeft, ChevronRight, EllipsisVertical, type LucideIcon, Menu } from "lucide-react";
 import { DynamicIcon, type IconName } from "lucide-react/dynamic";
+
+// Persistent chrome icons (screen-header kebab/menu/back, row chevrons) — eager
+// so they don't pop in after the inline icons around them. Keyed by the same
+// kebab name callers pass.
+const STATIC_LUCIDE: Record<string, LucideIcon> = {
+  "ellipsis-vertical": EllipsisVertical,
+  menu: Menu,
+  "arrow-left": ArrowLeft,
+  "chevron-right": ChevronRight,
+};
 
 const CUSTOM_PATHS: Record<string, string> = {
   home: "M3 12l9-8 9 8M5 10v10h14V10",
@@ -25,25 +40,10 @@ const CUSTOM_PATHS: Record<string, string> = {
   info: "M12 16v-4M12 8h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
   refresh: "M3 12a9 9 0 015-8 9 9 0 0114 5M21 12a9 9 0 01-5 8 9 9 0 01-14-5M21 4v6h-6M3 20v-6h6",
   pulse: "M22 12h-4l-3 9L9 3l-3 9H2",
+  search: "M11 19a8 8 0 100-16 8 8 0 000 16zM21 21l-4.3-4.3",
   lock: "M5 11h14v10H5zM7 11V7a5 5 0 0110 0v4",
   book: "M4 19V5a2 2 0 012-2h12v18H6a2 2 0 010-4h12",
   pencil: "M17 3a2.85 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z",
-};
-
-// Legacy camelCase / alias names → lucide kebab-case
-const LEGACY_TO_LUCIDE: Record<string, string> = {
-  piggyBank: "piggy-bank",
-  trend: "trending-up",
-  bank: "landmark",
-  // Common emoji-era fallbacks
-  "○": "wallet",
-  "◐": "piggy-bank",
-  "●": "circle",
-  "◇": "diamond",
-  "△": "triangle",
-  "□": "square",
-  "✦": "sparkles",
-  "♥": "heart",
 };
 
 export interface IconProps {
@@ -72,8 +72,13 @@ export function Icon({ name, size = 18, className = "" }: IconProps) {
       </svg>
     );
   }
-  // 2. Fall through to lucide. Map legacy aliases first.
-  const lucideName = (LEGACY_TO_LUCIDE[name] ?? name) as IconName;
+  // 2. Eager chrome icons — bundled, no lazy load.
+  const Static = STATIC_LUCIDE[name];
+  if (Static) {
+    return <Static size={size} strokeWidth={1.5} className={className} aria-hidden="true" />;
+  }
+  // 3. Fall through to lucide (1700+ icons, each lazy-loaded on demand).
+  const lucideName = name as IconName;
   return (
     <DynamicIcon
       name={lucideName}
