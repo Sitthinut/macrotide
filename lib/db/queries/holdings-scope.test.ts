@@ -34,7 +34,7 @@ function seedHolding(bucketId: string, ticker: string): void {
     id: bucketId,
     name: bucketId,
     typeLabel: "Test",
-    icon: "○",
+    icon: "wallet",
     color: "#000",
     brokerage: "TEST",
   });

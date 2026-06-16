@@ -6,7 +6,7 @@ const sampleBucket = {
   userId: null,
   name: "Core",
   typeLabel: "Free",
-  icon: "○",
+  icon: "wallet",
   color: "#000",
   brokerage: "FNDQ",
   notes: null,

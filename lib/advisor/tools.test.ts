@@ -48,7 +48,7 @@ const BUCKET = {
   id: "core",
   name: "Core",
   typeLabel: "Free",
-  icon: "○",
+  icon: "wallet",
   color: "#3b82f6",
   brokerage: "FNDQ",
   notes: null,
