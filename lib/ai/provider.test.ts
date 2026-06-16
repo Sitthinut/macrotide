@@ -3,6 +3,7 @@ import {
   resolveDemoProvider,
   resolveOwnerProvider,
   resolveTierProvider,
+  resolveVisionEscalateProvider,
   resolveVisionProvider,
 } from "./provider";
 
@@ -12,7 +13,8 @@ const ENV_KEYS = [
   "TRUSTED_TIER_MODELS",
   "DEMO_TIER_MODELS",
   "PUBLIC_TIER_MODELS",
-  "VISION_CHAT_MODEL",
+  "VISION_CHAT_MODELS",
+  "VISION_CHAT_ESCALATE_MODELS",
 ] as const;
 
 const saved: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
@@ -133,17 +135,17 @@ describe("resolveVisionProvider", () => {
     expect(p.model).toBeNull();
   });
 
-  it("defaults to google/gemini-2.5-flash", () => {
+  it("defaults to the gemini-flash-lite primary + EOL-proof fallback chain", () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
-    delete process.env.VISION_CHAT_MODEL;
+    delete process.env.VISION_CHAT_MODELS;
     const p = resolveVisionProvider();
     expect(p.ready).toBe(true);
-    expect(p.label).toBe("Vision · google/gemini-2.5-flash");
+    expect(p.label).toBe("Vision · google/gemini-2.5-flash-lite → google/gemini-3.1-flash-lite");
   });
 
-  it("honors VISION_CHAT_MODEL as a comma-separated chain", () => {
+  it("honors VISION_CHAT_MODELS as a comma-separated chain", () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
-    process.env.VISION_CHAT_MODEL = "google/gemini-2.5-flash,google/gemini-2.0-flash-001";
+    process.env.VISION_CHAT_MODELS = "google/gemini-2.5-flash,google/gemini-2.0-flash-001";
     const p = resolveVisionProvider();
     expect(p.label).toBe("Vision · google/gemini-2.5-flash → google/gemini-2.0-flash-001");
   });
@@ -155,21 +157,21 @@ describe("resolveVisionProvider", () => {
     "false",
     "0",
     "  off  ",
-  ])("treats VISION_CHAT_MODEL=%j as disabled (not-ready)", (value) => {
+  ])("treats VISION_CHAT_MODELS=%j as disabled (not-ready)", (value) => {
     process.env.OPENROUTER_API_KEY = "sk-test";
-    process.env.VISION_CHAT_MODEL = value;
+    process.env.VISION_CHAT_MODELS = value;
     const p = resolveVisionProvider();
     expect(p.ready).toBe(false);
     expect(p.model).toBeNull();
     expect(p.label).toBe("Vision (disabled)");
   });
 
-  it("INVARIANT: vision model derives from VISION_CHAT_MODEL, never TRUSTED_TIER_MODELS", () => {
+  it("INVARIANT: vision model derives from VISION_CHAT_MODELS, never TRUSTED_TIER_MODELS", () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
     process.env.TRUSTED_TIER_MODELS = "anthropic/claude-opus-4.1";
-    delete process.env.VISION_CHAT_MODEL;
+    delete process.env.VISION_CHAT_MODELS;
     const p = resolveVisionProvider();
-    expect(p.label).toBe("Vision · google/gemini-2.5-flash");
+    expect(p.label).toBe("Vision · google/gemini-2.5-flash-lite → google/gemini-3.1-flash-lite");
     expect(p.label).not.toContain("anthropic");
   });
 
@@ -179,7 +181,9 @@ describe("resolveVisionProvider", () => {
       process.env.DEMO_OPENROUTER_API_KEY = "sk-demo";
       const p = resolveVisionProvider({ demo: true });
       expect(p.ready).toBe(true);
-      expect(p.label).toBe("Vision (demo) · google/gemini-2.5-flash");
+      expect(p.label).toBe(
+        "Vision (demo) · google/gemini-2.5-flash-lite → google/gemini-3.1-flash-lite",
+      );
     });
 
     it("falls back to the owner key when DEMO_OPENROUTER_API_KEY unset", () => {
@@ -194,6 +198,106 @@ describe("resolveVisionProvider", () => {
       delete process.env.DEMO_OPENROUTER_API_KEY;
       expect(resolveVisionProvider({ demo: true }).ready).toBe(false);
     });
+  });
+});
+
+describe("resolveVisionEscalateProvider", () => {
+  it("is NOT-ready by default (escalation dormant until VISION_CHAT_ESCALATE_MODELS is set)", () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    delete process.env.VISION_CHAT_ESCALATE_MODELS;
+    const p = resolveVisionEscalateProvider();
+    expect(p.ready).toBe(false);
+    expect(p.model).toBeNull();
+  });
+
+  it("resolves the chain when VISION_CHAT_ESCALATE_MODELS is set", () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    process.env.VISION_CHAT_ESCALATE_MODELS = "google/gemini-3.1-pro,google/gemini-2.5-flash";
+    const p = resolveVisionEscalateProvider();
+    expect(p.ready).toBe(true);
+    expect(p.label).toBe("Vision escalate · google/gemini-3.1-pro → google/gemini-2.5-flash");
+  });
+
+  it("is not-ready when set but no key", () => {
+    delete process.env.OPENROUTER_API_KEY;
+    delete process.env.DEMO_OPENROUTER_API_KEY;
+    process.env.VISION_CHAT_ESCALATE_MODELS = "google/gemini-3.1-pro";
+    expect(resolveVisionEscalateProvider().ready).toBe(false);
+  });
+});
+
+describe("provider-agnostic cache affinity", () => {
+  // Capture the headers + body of one doGenerate call for a given chat chain.
+  async function capture(
+    modelsEnv: string,
+    conversationId: string,
+  ): Promise<{ headers: Headers; body: Record<string, unknown> }> {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    process.env.TRUSTED_TIER_MODELS = modelsEnv;
+    let capturedBody: string | undefined;
+    let capturedHeaders: Headers | undefined;
+    vi.stubGlobal("fetch", async (_url: unknown, init?: RequestInit) => {
+      capturedBody = init?.body as string;
+      capturedHeaders = new Headers(init?.headers);
+      return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const p = resolveOwnerProvider({ conversationId });
+    if (!p.model || typeof p.model === "string") throw new Error("expected model object");
+    try {
+      await p.model.doGenerate({
+        prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      });
+    } catch {
+      // forward
+    }
+    return { headers: capturedHeaders as Headers, body: JSON.parse(capturedBody as string) };
+  }
+
+  it("grok → x-grok-conv-id header (xAI affinity signal)", async () => {
+    const { headers, body } = await capture("x-ai/grok-4.3", "thread-abc");
+    expect(headers.get("x-grok-conv-id")).toBe("thread-abc");
+    expect(body.session_id).toBeUndefined();
+  });
+
+  it("anthropic → session_id body field (sticky-routing pin)", async () => {
+    const { headers, body } = await capture("anthropic/claude-sonnet-4.5", "thread-xyz");
+    expect(body.session_id).toBe("thread-xyz");
+    expect(headers.get("x-grok-conv-id")).toBeNull();
+  });
+
+  it("openai / google → no affinity injection (transparent sticky routing)", async () => {
+    const a = await capture("openai/gpt-5", "t1");
+    expect(a.headers.get("x-grok-conv-id")).toBeNull();
+    expect(a.body.session_id).toBeUndefined();
+    const g = await capture("google/gemini-2.5-flash", "t2");
+    expect(g.headers.get("x-grok-conv-id")).toBeNull();
+    expect(g.body.session_id).toBeUndefined();
+  });
+
+  it("no conversationId → no affinity signal at all", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    process.env.TRUSTED_TIER_MODELS = "x-ai/grok-4.3";
+    let capturedHeaders: Headers | undefined;
+    vi.stubGlobal("fetch", async (_url: unknown, init?: RequestInit) => {
+      capturedHeaders = new Headers(init?.headers);
+      return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const p = resolveOwnerProvider();
+    if (!p.model || typeof p.model === "string") throw new Error("expected model object");
+    try {
+      await p.model.doGenerate({
+        prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      });
+    } catch {
+      // forward
+    }
+    expect((capturedHeaders as Headers).get("x-grok-conv-id")).toBeNull();
   });
 });
 

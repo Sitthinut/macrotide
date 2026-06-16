@@ -147,12 +147,16 @@ surfaces via the dead-man. The job unit + monitor wiring are server-side ops.
 
 ### In-chat vision
 
-An image-bearing chat turn (the Advisor reads images you attach) routes to its
-**own** `VISION_CHAT_MODEL` (default `google/gemini-2.5-flash`), not the text
+On an image-bearing chat turn the chat driver stays on the turn (it can't see
+pixels) and reads the image by calling the Advisor's `examine_image` tool, which
+runs its **own** `VISION_CHAT_MODELS` (default
+`google/gemini-2.5-flash-lite,google/gemini-3.1-flash-lite`), not the text
 chains — for the same reason `PUBLIC_TIER_MODELS` is separate: public-tier vision
 derives from a dedicated var and can't widen `TRUSTED_TIER_MODELS`/`PUBLIC_TIER_MODELS`.
 Owner, trusted, and public all use it; public-tier image turns stay bounded by the
-same daily token + optional cents caps above. Set `VISION_CHAT_MODEL=off` to
+same daily token + optional cents caps above. A chart/factsheet the user is
+reasoning about can escalate to a stronger `VISION_CHAT_ESCALATE_MODELS` (owner/
+trusted only, unset by default). Set `VISION_CHAT_MODELS=off` to
 disable inline chat vision entirely (image turns then get a stub pointing at the
 Add-holdings importer). Demo image upload is **off** unless `DEMO_VISION` is set,
 and when on uses the demo key, bounded by the 10-turn demo cap. Attached images

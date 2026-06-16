@@ -256,6 +256,8 @@ describe("model pricing", () => {
     expect(modelPrice("openai/gpt-4.1-mini-2025-04-14")).toEqual({ in: 0.4, out: 1.6 });
     // …but a real variant (flash-lite) must NOT collapse onto its base (flash).
     expect(modelPrice("google/gemini-2.5-flash-lite")).toEqual({ in: 0.1, out: 0.4 });
+    // The vision/OCR EOL-proof fallback is priced so its turns aren't free $0.
+    expect(modelPrice("google/gemini-3.1-flash-lite")).toEqual({ in: 0.25, out: 1.5 });
   });
 
   it("estimateCostMicros = tokens × price (USD/Mtok == micro-USD/token)", () => {

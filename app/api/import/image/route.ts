@@ -7,6 +7,14 @@ import {
   rateLimit,
 } from "@/lib/api/rate-limit";
 import { withDb } from "@/lib/api/with-db";
+import { getUserId } from "@/lib/db/context";
+import {
+  estimateCostMicros,
+  getTier,
+  isOverDailyCap,
+  isOverDailyCostCap,
+  recordUsage,
+} from "@/lib/db/queries/usage";
 import { deriveRowsWithNav } from "@/lib/portfolio/derive-rows";
 import {
   classifyImportImage,
@@ -15,6 +23,7 @@ import {
   type ImportDocType,
   isAllowedMimeType,
   OcrProviderUnavailableError,
+  type OcrUsage,
   sniffImageMime,
 } from "@/lib/portfolio/ocr";
 
@@ -52,15 +61,6 @@ export async function POST(req: Request) {
       },
     );
   }
-  // Process-wide OCR ceiling — see lib/api/rate-limit.ts.
-  const breaker = globalRateLimit(OCR_GLOBAL_RATE_LIMIT);
-  if (!breaker.ok) {
-    return NextResponse.json(
-      { error: "rate_limited", retryAfterMs: breaker.resetMs },
-      { status: 429, headers: { "Retry-After": Math.ceil(breaker.resetMs / 1000).toString() } },
-    );
-  }
-
   if (!process.env.OPENROUTER_API_KEY) {
     return NextResponse.json(
       {
@@ -116,6 +116,21 @@ export async function POST(req: Request) {
   const override: ImportDocType | null =
     asRaw === "holdings" || asRaw === "transactions" ? asRaw : null;
 
+  // Process-wide OCR ceiling, charged PER MODEL CALL (not per request): the
+  // detect-then-route path makes two calls (classify + extract); an override
+  // skips classification → one. Consuming the right count keeps the breaker from
+  // under-counting (the real model-call rate could otherwise run ~2× the cap).
+  const plannedCalls = override ? 1 : 2;
+  for (let i = 0; i < plannedCalls; i++) {
+    const breaker = globalRateLimit(OCR_GLOBAL_RATE_LIMIT);
+    if (!breaker.ok) {
+      return NextResponse.json(
+        { error: "rate_limited", retryAfterMs: breaker.resetMs },
+        { status: 429, headers: { "Retry-After": Math.ceil(breaker.resetMs / 1000).toString() } },
+      );
+    }
+  }
+
   // Filename + saved-at timestamp ride as CONTEXT for the model's as-of-date
   // call — a fallback only; a date shown in the image wins. We never parse the
   // filename ourselves.
@@ -132,6 +147,33 @@ export async function POST(req: Request) {
   // Response carries `docType` + `confidence` so the client can confirm a
   // low-confidence guess with the user. The image is never persisted.
   return withDb(async () => {
+    // Meter + cap the spend. An authenticated non-owner is gated by the same
+    // daily token + cents caps as chat (owner = userId null → uncapped, like the
+    // owner chat path; demo → null, bounded by the IP + global-breaker limits
+    // above). The vision model here is the priciest paid path, so it must not be
+    // the one unbudgeted route. Usage is recorded in `finally` so a call that
+    // spent tokens before a later failure still counts.
+    const userId = getUserId();
+    if (userId !== null) {
+      const tier = getTier(userId);
+      if (isOverDailyCap(userId, tier) || isOverDailyCostCap(userId, tier)) {
+        return NextResponse.json(
+          {
+            error: "daily_limit",
+            message: "You've reached today's usage limit. It resets at midnight UTC.",
+          },
+          { status: 429, headers: { "x-daily-limit": "reached" } },
+        );
+      }
+    }
+
+    const acc = { input: 0, output: 0, costMicros: 0 };
+    const onUsage = (u: OcrUsage) => {
+      acc.input += u.inputTokens;
+      acc.output += u.outputTokens;
+      acc.costMicros += estimateCostMicros(u.modelId, u.inputTokens, u.outputTokens);
+    };
+
     try {
       let docType: ImportDocType;
       let confidence: "high" | "low";
@@ -140,18 +182,24 @@ export async function POST(req: Request) {
         docType = override;
         confidence = "high";
       } else {
-        const c = await classifyImportImage({ data: buffer, mimeType: sniffed }, ctx);
+        const c = await classifyImportImage({ data: buffer, mimeType: sniffed }, ctx, { onUsage });
         docType = c.docType;
         confidence = c.confidence;
         asOf = c.asOf;
       }
 
       if (docType === "transactions") {
-        const transactions = await extractTransactionRows({ data: buffer, mimeType: sniffed });
+        const transactions = await extractTransactionRows(
+          { data: buffer, mimeType: sniffed },
+          { onUsage },
+        );
         return NextResponse.json({ docType, confidence, asOf, transactions }, { status: 200 });
       }
 
-      const extracted = await extractStructuredHoldings({ data: buffer, mimeType: sniffed });
+      const extracted = await extractStructuredHoldings(
+        { data: buffer, mimeType: sniffed },
+        { onUsage },
+      );
       // Derive units/avgCost from the NAV on the snapshot's own date (#130),
       // falling back to the latest NAV (shared with the advisor's
       // propose_holdings_import tool — see lib/portfolio/derive-rows.ts).
@@ -165,6 +213,10 @@ export async function POST(req: Request) {
         );
       }
       throw err;
+    } finally {
+      // Record whatever was spent (no-op at 0). Owner/demo (null) aren't metered,
+      // matching the chat owner path; the global breaker bounds them.
+      if (userId !== null) recordUsage(userId, acc.input, acc.output, undefined, acc.costMicros);
     }
   });
 }
