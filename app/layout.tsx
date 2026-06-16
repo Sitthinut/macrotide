@@ -51,17 +51,20 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  // Tints the browser/PWA UI chrome per theme (the app defaults to system).
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#0c0d0f" },
-  ],
+  // A SINGLE theme-color meta, owned at runtime (seeded by the bootstrap below,
+  // kept live by App's theme effect via syncThemeColor). The in-app theme is
+  // data-theme/localStorage-driven and independent of the OS preference, so
+  // OS-media-scoped tags can't track the in-app toggle — the installed-PWA
+  // status bar would stay frozen on the OS-matched color. This is just the seed;
+  // the bootstrap corrects it to the resolved theme before first paint.
+  themeColor: "#0c0d0f",
 };
 
-// Runs before React hydrates so the saved theme is applied on first paint.
-// No-flash pattern used by next-themes; mutating <html> outside React avoids
-// hydration mismatches.
-const themeBootstrap = `(function(){try{var t=localStorage.getItem('macrotide-theme');if(t!=='light'&&t!=='dark'&&t!=='system')t='system';document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','system');}})();`;
+// Runs before React hydrates so the saved theme is applied on first paint: sets
+// data-theme AND the status-bar theme-color (resolving "system" via the OS
+// preference). No-flash pattern used by next-themes; mutating <html>/the meta
+// outside React avoids hydration mismatches.
+const themeBootstrap = `(function(){try{var t=localStorage.getItem('macrotide-theme');if(t!=='light'&&t!=='dark'&&t!=='system')t='system';document.documentElement.setAttribute('data-theme',t);var dark=t==='dark'||(t==='system'&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);var m=document.querySelector('meta[name="theme-color"]');if(!m){m=document.createElement('meta');m.setAttribute('name','theme-color');document.head.appendChild(m);}m.setAttribute('content',dark?'#0c0d0f':'#ffffff');}catch(e){document.documentElement.setAttribute('data-theme','system');}})();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

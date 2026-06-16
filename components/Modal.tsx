@@ -23,6 +23,7 @@ import { createPortal } from "react-dom";
 import "overlayscrollbars/overlayscrollbars.css";
 import { useOverlayScrollbars } from "overlayscrollbars-react";
 import { Icon } from "@/components/Icon";
+import { useBackDismiss } from "@/lib/nav/back-stack";
 import { useViewport } from "@/lib/useViewport";
 
 export type ModalVariant = "confirm" | "form" | "detail";
@@ -105,6 +106,11 @@ export function Modal({
   const panelRef = useRef<HTMLDivElement>(null);
   const [footerShadow, setFooterShadow] = useState(false);
   const [mounted, setMounted] = useState(false);
+
+  // Hardware/gesture Back (and the desktop Back button) closes the dialog before
+  // it pops the screen beneath — the native-app expectation. Stacked dialogs
+  // (a confirm over a form) unwind one Back at a time, LIFO.
+  useBackDismiss(open, onClose);
 
   // Portals need a DOM target; defer until mounted on the client.
   useEffect(() => setMounted(true), []);

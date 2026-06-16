@@ -186,17 +186,23 @@ html {
   --topbar-h: 50px;
 }
 .app-root {
-  min-height: calc(100vh - var(--demo-banner-h));
+  /* `dvh` (dynamic viewport), not `vh`: on iOS `100vh` is the LARGE viewport and
+     resolves ~32px taller than the actually-visible area (window.innerHeight),
+     so a `100vh` shell over-scrolls by that gap. `100dvh` tracks the visible
+     viewport and matches innerHeight. */
+  min-height: calc(100dvh - var(--demo-banner-h));
   display: flex;
   justify-content: center;
   background: var(--bg);
 }
 .app-frame {
   width: 100%;
-  min-height: calc(100vh - var(--demo-banner-h));
+  min-height: calc(100dvh - var(--demo-banner-h));
   background: var(--bg);
   position: relative;
-  padding-bottom: 96px;
+  /* Reserve the fixed bottom nav (96px) plus the home-indicator inset so the
+     last row of content clears both. env() is 0 where there's no inset. */
+  padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
   border-left: 1px solid var(--line-soft);
   border-right: 1px solid var(--line-soft);
 }
@@ -398,7 +404,9 @@ body[data-topbar-hidden="true"] .portfolio-switch {
 /* Bottom nav — iOS Liquid Glass: light material on light bg, dark material on dark bg */
 .bottom-nav {
   position: fixed;
-  bottom: 18px;
+  /* Float above the home indicator on devices that have one; stays at 18px
+     where there's no inset (env() resolves to 0). */
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
   left: 50%;
   transform: translateX(-50%);
   /* Near-opaque: a hint of glass without scrolling content (e.g. the Markets
@@ -2492,7 +2500,7 @@ button.chip {
 
 /* Connect / onboarding */
 .onboard-shell {
-  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -2786,7 +2794,7 @@ button.chip {
 .ra-shell {
   display: grid;
   width: 100%;
-  min-height: calc(100vh - var(--demo-banner-h));
+  min-height: calc(100dvh - var(--demo-banner-h));
   background: var(--bg);
   color: var(--ink);
 }
@@ -2850,7 +2858,7 @@ button.chip {
   flex-direction: column;
   position: sticky;
   top: 0;
-  height: calc(100vh - var(--demo-banner-h));
+  height: calc(100dvh - var(--demo-banner-h));
   z-index: 25;
 }
 
@@ -3114,7 +3122,7 @@ button.chip {
      the actual scrolling to a generated `[data-overlayscrollbars-viewport]`
      child; useScrollHide reads that child's scrollTop, not `.ra-main`'s. */
   overflow-y: auto;
-  height: calc(100vh - var(--demo-banner-h));
+  height: calc(100dvh - var(--demo-banner-h));
   /* `none` (vs `contain`) also disables the elastic bounce *within* the
      scroller itself, not just the chain to the parent. With a fixed overlay
      panel, the bounce moved the page while the panel stayed still. */
@@ -3203,7 +3211,7 @@ button.chip {
 .ra-panel {
   background: var(--paper);
   border-left: 1px solid var(--line-soft);
-  height: calc(100vh - var(--demo-banner-h));
+  height: calc(100dvh - var(--demo-banner-h));
   position: sticky;
   top: 0;
   display: flex;
@@ -3273,7 +3281,7 @@ button.chip {
   top: var(--demo-banner-h, 0px);
   right: 72px;
   width: min(var(--ra-panel-width, 380px), calc(100vw - 88px - 72px));
-  height: calc(100vh - var(--demo-banner-h, 0px));
+  height: calc(100dvh - var(--demo-banner-h, 0px));
   z-index: 50;
   border-left: 1px solid var(--line-soft);
   /* Subtle separation only — no heavy elevation. */
@@ -3525,7 +3533,7 @@ button.chip {
 .ra-apps-rail {
   background: var(--paper);
   border-left: 1px solid var(--line-soft);
-  height: calc(100vh - var(--demo-banner-h));
+  height: calc(100dvh - var(--demo-banner-h));
   position: sticky;
   top: 0;
   display: flex;
