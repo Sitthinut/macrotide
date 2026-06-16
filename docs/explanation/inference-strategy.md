@@ -69,7 +69,7 @@ A model / route / tool-schema switch invalidates the cached prefix everywhere. T
 correct, but budget input cost for a *cold* prefix on the fallback path, and keep
 the fallback's prompt structure byte-identical so it re-warms fast.
 
-### The current owner pick (2026-06-11 sweep)
+### The current suggested models (2026-06-11 sweep)
 
 `TRUSTED_TIER_MODELS=x-ai/grok-4.3,z-ai/glm-5.1` — the first decision made with the eval
 harness ([scripts/eval](../../scripts/eval); method + judge design in
@@ -100,6 +100,48 @@ cost runs **~$11–13/1k complex turns** — see § 2 and § 5 for the input-cos
 within noise. Re-run on a trigger (new model, price/deprecation change, prompt
 change) — never swap blind.
 
+### Suggested vision & OCR models (2026-06-16 sweep)
+
+The holdings-image OCR + in-chat vision surfaces are their own operator knobs
+(`OCR_MODELS`, `VISION_CHAT_MODELS`), migrating off the
+deprecating `gemini-2.5` family (`-flash` EOL 2026-10-16; implementation tracked
+in [#182](https://github.com/Sitthinut/macrotide/issues/182)). **Suggested
+default: `google/gemini-2.5-flash-lite` primary + `google/gemini-3.1-flash-lite`
+fallback** (operators can override) — measured by
+[`scripts/eval/ocr.ts`](../../scripts/eval/ocr.ts) against **real broker
+screenshots** (run locally via `EVAL_OCR_DIR`; such captures are personal data and
+are never committed) plus committed synthetic fixtures. $/Mtok is list price;
+worst-case is the lowest per-field score across the synthetic degradation tier.
+
+| Model | Real shots | Worst-case | Halluc | $/Mtok | |
+|---|---|---|---|---|---|
+| **gemini-2.5-flash-lite** | 100% | 90% | 0 | $0.10/$0.40 | cheapest + fastest ← primary |
+| **gemini-3.1-flash-lite** | 100% | **95%** | 0 | $0.25/$1.50 | current-gen ← fallback (survives EOL) |
+| gemini-2.5-flash | 100% | 100% | 0 | $0.30/$2.50 | prior default; robust but pricier |
+| x-ai/grok-4.3 | **7/8** | — | **1** | $1.25/$2.50 | only one to err on real data + slowest → NOT for vision |
+
+**Why this pair:** both flawless and zero-hallucination on real captures;
+flash-lite is the cheapest/fastest floor; **3.1-flash-lite is genuinely
+current-gen, so the fallback *is* the EOL guarantee** (it auto-takes-over when the
+2.5 family dies, and on any provider hiccup) and is marginally more robust on
+extreme degradation. grok reads holdings but errs more on real data at 2–3× the
+latency / 4× input cost — vision stays on a dedicated cheap model, never unified
+onto the chat model. **Caveat:** synthetic vector fixtures can't reproduce the
+photographic degradation that separates models — the real-screenshot run is the
+load-bearing evidence; the committed synthetic set is a regression net.
+
+**This model serves a TOOL, not a whole-turn swap.** The chat driver stays on
+every turn and reads an attachment by calling `examine_image` (which runs the
+model above), so its prompt cache stays warm and it keeps reasoning — a spike and
+a live route smoke confirmed the driver reliably calls the tool and answers
+correctly. Design: [advisor-vision.md](./advisor-vision.md). **Escalation measured
+and left OFF:** the tool can route a chart/factsheet to a stronger
+`VISION_CHAT_ESCALATE_MODELS` (owner/trusted only), but the `visual` eval journey
+found flash-lite scored 100% (8/8) on chart + factsheet Q&A — tying
+gemini-3.5-flash and gemini-3.1-pro-preview while 2.5–5× faster and far cheaper —
+so it stays **unset**; the hook + harness are ready if real-world charts later
+show a gap.
+
 ## 2. Prompt-cache strategy
 
 **The envelope split is correct — keep volatile data strictly AFTER the frozen
@@ -122,6 +164,19 @@ actually benefit from breakpoints, whereas the rest get nothing from them. So:
 keep the prefix stable, and add breakpoints only if you pin Claude or Qwen (then up
 to 4 — after tools, system, static context, last stable turn — on the default
 5-minute TTL; break-even is one read).
+
+**Pin cache affinity per provider family — a stable prefix isn't enough.**
+Through OpenRouter, automatic caching depends on requests landing on the *same*
+backend (sticky routing); a multi-turn chat that scatters across servers misses
+its own cache. The affinity *signal* differs by family, so it's attached by a
+small registry keyed on the model id (`cacheAffinity` in
+[lib/ai/provider.ts](../../lib/ai/provider.ts), fed the chat thread id as
+`conversationId`): **xAI/Grok** needs the `x-grok-conv-id` header (without it grok
+text turns can cache-miss under load — the app sent none before this); **Anthropic**
+takes a `session_id` body field; **OpenAI/Gemini/DeepSeek** are transparent (sticky
+routing + a stable prefix, nothing to inject). This is provider-agnostic by
+construction: swap the chat model via env and the right signal follows; adding
+explicit caching for a new family is one registry entry.
 
 **Clear the minimum cacheable-prefix floor.**
 A lean small-model system prompt can fall *under* 1,024 tokens and never cache at
@@ -371,6 +426,15 @@ the complex tier measured `medium` reasoning at +10pp quality for ~3.5× latency
 which is *why* the gate pays it only on the turns that earn it. The question set
 is a small **golden set**: frozen once baselined, extended (not loosened) over
 time — see [scripts/eval/README.md](../../../scripts/eval/README.md).
+
+**The OCR/vision sibling.** A second harness ([`scripts/eval/ocr.ts`](../../scripts/eval/ocr.ts),
+`npm run eval:ocr`) evaluates the holdings-image extractors the same way —
+committed **SVG fixtures rendered to PNG via sharp** (light/dark, ฿/paren
+hard-edges, RMF/SSF/ThaiESG section traps) plus the transaction-history journey
+(BE dates, สับเปลี่ยน→two rows), scored on per-field digit fidelity +
+hallucination + latency. Real broker screenshots run locally via `EVAL_OCR_DIR`
+(personal data, never committed) — the only input that discriminates models on
+true digit fidelity. The Vision & OCR pick in §1 was made with it.
 
 > Doc map: [research/agent-evals.md](./research/agent-evals.md) (the evidence) ↔
 > this section (the decision) ↔

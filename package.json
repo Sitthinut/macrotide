@@ -34,6 +34,7 @@
     "jobs:check-budget": "tsx --env-file=.env.local scripts/check-openrouter-budget.ts",
     "refresh:demo-history": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/refresh-demo-history.ts",
     "eval:advisor": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/eval/run.ts",
+    "eval:ocr": "tsx --tsconfig tsconfig.scripts.json scripts/eval/ocr.ts",
     "eval:judge:calibrate": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/eval/calibration.ts",
     "eval:diff": "tsx --tsconfig tsconfig.scripts.json scripts/eval/diff.ts",
     "smoke:sec": "tsx --env-file=.env.local scripts/smoke-sec-thailand.ts",
