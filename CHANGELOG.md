@@ -15,6 +15,10 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Holdings rows surface fee and weight at a glance.** Each holding now shows
+  its total expense ratio inline — muted when the fee is low, flagged amber/red
+  as it climbs — next to a labeled portfolio weight, so fee awareness no longer
+  requires opening a detail sheet.
 - **The fund screener reaches the whole catalog.** Explore no longer silently
   caps at 30 results — funds auto-load as you scroll (the next page is prefetched,
   so there's no loading flash), then a "Load more" button takes over for the long
