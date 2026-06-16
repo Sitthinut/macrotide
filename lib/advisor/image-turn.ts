@@ -22,13 +22,18 @@ export function attachmentLimitMessage(attempted: number): string {
   );
 }
 
-function isObj(v: unknown): v is Record<string, unknown> {
+export function isObj(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object";
 }
 
-function isImageFilePart(part: unknown): boolean {
+/**
+ * True for an AI SDK v6 UIMessage image file part: `{ type:'file',
+ * mediaType:'image/…', url }`. The single definition of "an attached image",
+ * shared by the turn counters here and the byte extractor in vision-tool.ts so
+ * the two can't drift.
+ */
+export function isImageFilePart(part: unknown): boolean {
   if (!isObj(part)) return false;
-  // AI SDK v6 UIMessage file part: { type:'file', mediaType:'image/...', url }.
   const mediaType = part.mediaType;
   return part.type === "file" && typeof mediaType === "string" && mediaType.startsWith("image/");
 }

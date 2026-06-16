@@ -79,7 +79,6 @@ or rename a route.
 | `/api/chat/threads/[id]/title` | POST | Auto-title a thread after its first exchange |
 | `/api/chat/threads/[id]/close` | POST | Close a session → extract memory + mark idle |
 | `/api/chat/search` | GET | Full-text search across the user's chats |
-| `/api/chat/transcribe` | POST | OCR a chat image attachment into plain text once; the Advisor carries the transcript in the conversation so follow-up turns can reference it without re-sending image bytes; image is never persisted; rate-limited (10 requests / 60 s per IP); needs `OPENROUTER_API_KEY` (503 without) |
 | `/api/import/image` | POST | OCR an import screenshot. Auto-classifies holdings-snapshot vs transaction-history, then runs the matching extractor; returns `{ docType, confidence, holdings? \| transactions? }` so the client can confirm a low-confidence guess. An optional `as=holdings\|transactions` form field skips detection (used when the user picks). Needs `OPENROUTER_API_KEY` (503 without) |
 | `/api/import/transactions-image` | POST | OCR a transaction-history image into ledger rows directly (same key + rate limit + 5 MB cap as `/api/import/image`) |
 | `/api/import/broker/connectors` | GET | Lists every configured broker connector (display name, host, login / open links, and install URL) for the Connect-a-broker picker; data-only — no token or secrets; 404 in a demo session |

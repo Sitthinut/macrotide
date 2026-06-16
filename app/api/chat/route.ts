@@ -34,9 +34,17 @@ import {
   type TurnCards,
 } from "@/lib/advisor/turn-persist";
 import {
+  createVisionTools,
+  extractTurnImages,
+  stripDriverImages,
+  type TurnImage,
+  VISION_TOOL_DIRECTIVE,
+} from "@/lib/advisor/vision-tool";
+import {
   resolveDemoProvider,
   resolveOwnerProvider,
   resolveTierProvider,
+  resolveVisionEscalateProvider,
   resolveVisionProvider,
 } from "@/lib/ai/provider";
 import { compressContext, estimateTokens } from "@/lib/ai/summarize";
@@ -488,13 +496,22 @@ export async function POST(req: Request) {
     // the per-user token budget.
     const userId = demoId ? null : getUserId();
     const system = composeSystemPrompt(userId);
-    // For an image turn, fold the model-facing attachment note (filename +
-    // EXIF/saved capture time as Bangkok ISO-8601) into the latest user message before
-    // converting to model messages — so the Advisor can date a snapshot from
-    // the photo. Composed fresh here from the validated metadata; never the
-    // persisted `content`. Text turns convert byte-identically to before.
+    // Vision-as-a-tool: the chat driver stays on the turn and never receives
+    // pixels. Decode this turn's image bytes from the raw body (data URLs, still
+    // intact before conversion) to capture in the examine_image tool closure, and
+    // strip the image parts from the driver's view. The model-facing note carries
+    // the filename + EXIF/saved capture time (so the Advisor can date a snapshot)
+    // plus the directive that the only way to read an attachment is the tool.
+    // Composed fresh here from validated metadata; never the persisted `content`.
+    // Text turns convert byte-identically to before.
+    const turnImages: TurnImage[] = hasImages ? extractTurnImages(body.messages) : [];
     const bodyMessages = hasImages
-      ? injectAttachmentNote(body.messages, composeAttachmentNote(attachments, imageCount))
+      ? stripDriverImages(
+          injectAttachmentNote(
+            body.messages,
+            `${composeAttachmentNote(attachments, imageCount)}\n${VISION_TOOL_DIRECTIVE}`,
+          ),
+        )
       : body.messages;
     const modelMessages = await toModelMessagesAsync(bodyMessages);
 
@@ -540,10 +557,20 @@ export async function POST(req: Request) {
     }
 
     if (demoId) {
-      // Image turn → demo-flavored vision provider (DEMO_OPENROUTER_API_KEY),
-      // gated behind the DEMO_VISION opt-in flag; reasoning pinned off (cost).
-      // Text turn → the usual demo chat provider.
-      let model: LanguageModel | null;
+      // The demo chat provider drives every turn (reasoning pinned off — cost).
+      // On an image turn it ALSO gets the examine_image vision tool (demo-flavored
+      // vision provider, DEMO_OPENROUTER_API_KEY), gated behind the DEMO_VISION
+      // opt-in; demo never escalates (cost). conversationId pins cache affinity.
+      const provider = resolveDemoProvider({ conversationId: threadId });
+      if (!provider.ready || !provider.model) {
+        return stubResponse(
+          "AI chat isn't configured for demo mode on this deployment yet — the operator needs to set DEMO_OPENROUTER_API_KEY (or share OPENROUTER_API_KEY). Everything else in the app is fully functional, give the buttons a try.",
+          threadId,
+        );
+      }
+      const model = provider.model;
+
+      let visionTools: ToolSet = {};
       if (hasImages) {
         const demoVisionEnabled = isDemoVisionEnabled();
         const vision = demoVisionEnabled
@@ -554,21 +581,16 @@ export async function POST(req: Request) {
           demoVisionEnabled,
         });
         if (decision === "stub") return stubResponse(VISION_DEMO_STUB, threadId);
-        model = vision.model;
-      } else {
-        const provider = resolveDemoProvider();
-        if (!provider.ready || !provider.model) {
-          return stubResponse(
-            "AI chat isn't configured for demo mode on this deployment yet — the operator needs to set DEMO_OPENROUTER_API_KEY (or share OPENROUTER_API_KEY). Everything else in the app is fully functional, give the buttons a try.",
-            threadId,
-          );
-        }
-        model = provider.model;
+        if (vision.model)
+          visionTools = createVisionTools({ images: turnImages, vision: vision.model });
       }
-      if (!model) return stubResponse(VISION_DISABLED_STUB, threadId);
       incrementChatTurn(demoId);
       const finalThreadId = threadId;
-      const tools = { ...createMemoryTools({ userId }), ...createAdvisorTools({ userId }) };
+      const tools = {
+        ...createMemoryTools({ userId }),
+        ...createAdvisorTools({ userId }),
+        ...visionTools,
+      };
       return streamAdvisorResponse({
         ctx,
         path: "demo",
@@ -619,11 +641,27 @@ export async function POST(req: Request) {
         return limit;
       }
 
-      // Image turn → the shared vision model (bounded by the daily token/cents
-      // caps already checked above). Public tier pins reasoning off; trusted
-      // keeps the intent-gated effort. The public-tier cost invariant holds:
-      // vision derives from VISION_CHAT_MODEL, never TRUSTED_TIER_MODELS. Text turn → tier chain.
-      let model: LanguageModel | null;
+      // The tier chat chain drives every turn (public pins reasoning off; trusted
+      // keeps the intent-gated effort), with cache affinity pinned by thread id.
+      // On an image turn it ALSO gets the examine_image vision tool. The public-
+      // tier cost invariant holds: the driver is PUBLIC_TIER_MODELS and the tool's
+      // vision model is VISION_CHAT_MODELS — never TRUSTED_TIER_MODELS — and public
+      // never escalates. Vision sub-model usage is a separate generation, so it's
+      // folded into recordUsage below to count against the daily caps.
+      const provider = resolveTierProvider(tier, {
+        reasoningEffort,
+        conversationId: finalThreadId,
+      });
+      if (!provider.ready || !provider.model) {
+        return stubResponse(
+          `AI chat isn't configured yet (${provider.label}). Set OPENROUTER_API_KEY in .env.local — see docs/reference/auth-and-providers.md.`,
+          finalThreadId,
+        );
+      }
+      const model = provider.model;
+
+      const visionExtra = { inputTokens: 0, outputTokens: 0, costMicros: 0 };
+      let visionTools: ToolSet = {};
       if (hasImages) {
         const vision = resolveVisionProvider({
           reasoningEffort: tier === "public" ? "none" : reasoningEffort,
@@ -633,20 +671,28 @@ export async function POST(req: Request) {
           demoVisionEnabled: false,
         });
         if (decision === "stub") return stubResponse(VISION_DISABLED_STUB, finalThreadId);
-        model = vision.model;
-      } else {
-        const provider = resolveTierProvider(tier, { reasoningEffort });
-        if (!provider.ready || !provider.model) {
-          return stubResponse(
-            `AI chat isn't configured yet (${provider.label}). Set OPENROUTER_API_KEY in .env.local — see docs/reference/auth-and-providers.md.`,
-            finalThreadId,
-          );
+        if (vision.model) {
+          // Escalation is owner/trusted only — public never escalates (cost).
+          const escalate =
+            tier === "trusted" ? resolveVisionEscalateProvider({ reasoningEffort }).model : null;
+          visionTools = createVisionTools({
+            images: turnImages,
+            vision: vision.model,
+            escalate,
+            onUsage: ({ inputTokens, outputTokens, modelId }) => {
+              visionExtra.inputTokens += inputTokens;
+              visionExtra.outputTokens += outputTokens;
+              visionExtra.costMicros += estimateCostMicros(modelId, inputTokens, outputTokens);
+            },
+          });
         }
-        model = provider.model;
       }
-      if (!model) return stubResponse(VISION_DISABLED_STUB, finalThreadId);
 
-      const tools = { ...createMemoryTools({ userId }), ...createAdvisorTools({ userId }) };
+      const tools = {
+        ...createMemoryTools({ userId }),
+        ...createAdvisorTools({ userId }),
+        ...visionTools,
+      };
       return streamAdvisorResponse({
         ctx,
         path: "tiered",
@@ -666,23 +712,34 @@ export async function POST(req: Request) {
             cards,
           }),
         // Log tokens (and estimated cost) regardless of whether prose came back
-        // — a tool-only turn still consumes budget. Cost is 0 for free/unpriced
-        // models, so this is additive and only bites a priced paid model.
+        // — a tool-only turn still consumes budget. The vision sub-model's tokens
+        // (a separate generation) are folded in so an image turn's vision cost
+        // counts. Cost is 0 for free/unpriced models, so this is additive.
         recordUsageFor: ({ inputTokens, outputTokens, modelId }) =>
           recordUsage(
             userId,
-            inputTokens,
-            outputTokens,
+            inputTokens + visionExtra.inputTokens,
+            outputTokens + visionExtra.outputTokens,
             undefined,
-            estimateCostMicros(modelId, inputTokens, outputTokens),
+            estimateCostMicros(modelId, inputTokens, outputTokens) + visionExtra.costMicros,
           ),
       });
     }
 
-    // Owner path — full chat, no cap (single-owner / pre-auth mode). Image turn
-    // → the shared vision model with the intent-gated effort; text turn → the
-    // owner chain.
-    let model: LanguageModel | null;
+    // Owner path — full chat, no cap (single-owner / pre-auth mode). The owner
+    // chain drives every turn with the intent-gated effort, cache affinity pinned
+    // by thread id; an image turn ALSO gets the examine_image vision tool, with
+    // escalation available (VISION_CHAT_ESCALATE_MODELS, dormant unless set).
+    const provider = resolveOwnerProvider({ reasoningEffort, conversationId: finalThreadId });
+    if (!provider.ready || !provider.model) {
+      return stubResponse(
+        `AI chat isn't configured yet (${provider.label}). Set OPENROUTER_API_KEY in .env.local — see docs/reference/auth-and-providers.md.`,
+        finalThreadId,
+      );
+    }
+    const model = provider.model;
+
+    let visionTools: ToolSet = {};
     if (hasImages) {
       const vision = resolveVisionProvider({ reasoningEffort });
       const decision = visionDecisionFor("owner", true, {
@@ -690,20 +747,20 @@ export async function POST(req: Request) {
         demoVisionEnabled: false,
       });
       if (decision === "stub") return stubResponse(VISION_DISABLED_STUB, finalThreadId);
-      model = vision.model;
-    } else {
-      const provider = resolveOwnerProvider({ reasoningEffort });
-      if (!provider.ready || !provider.model) {
-        return stubResponse(
-          `AI chat isn't configured yet (${provider.label}). Set OPENROUTER_API_KEY in .env.local — see docs/reference/auth-and-providers.md.`,
-          finalThreadId,
-        );
+      if (vision.model) {
+        visionTools = createVisionTools({
+          images: turnImages,
+          vision: vision.model,
+          escalate: resolveVisionEscalateProvider({ reasoningEffort }).model,
+        });
       }
-      model = provider.model;
     }
-    if (!model) return stubResponse(VISION_DISABLED_STUB, finalThreadId);
 
-    const tools = { ...createMemoryTools({ userId }), ...createAdvisorTools({ userId }) };
+    const tools = {
+      ...createMemoryTools({ userId }),
+      ...createAdvisorTools({ userId }),
+      ...visionTools,
+    };
     return streamAdvisorResponse({
       ctx,
       path: "owner",

@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 // The chat route is the source of truth (it stubs unavailable image turns); this
 // is purely so the UI can hide the attach button when vision is off or — in a
 // demo session — when DEMO_VISION isn't enabled. Computed server-side because
-// the relevant config (VISION_CHAT_MODEL, DEMO_VISION, the demo cookie) isn't
+// the relevant config (VISION_CHAT_MODELS, DEMO_VISION, the demo cookie) isn't
 // visible to the client.
 export async function GET() {
   const store = await cookies();
