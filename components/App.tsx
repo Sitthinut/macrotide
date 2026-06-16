@@ -40,6 +40,7 @@ import type { Portfolio } from "@/lib/static/types";
 import { type ImportSeedRow, useImportSeed } from "@/lib/stores/import-seed";
 import { setActiveId, usePortfolioUi } from "@/lib/stores/portfolio-ui";
 import { syncThemeColor } from "@/lib/theme-color";
+import { usePointer } from "@/lib/usePointer";
 import { useScrollHide } from "@/lib/useScrollHide";
 import { useViewport, type Viewport } from "@/lib/useViewport";
 
@@ -213,37 +214,59 @@ export function App({ isDemo }: { isDemo: boolean }) {
   const viewport = useViewport();
   const isWide = viewport !== "mobile";
   const isDesktop = viewport === "desktop";
+  // Custom scrollbars are gated by POINTER, not width: a mouse/trackpad (fine
+  // pointer) gets the OverlayScrollbars overlay everywhere — including a narrow
+  // desktop window in the mobile shell, where the native bar would show as a
+  // chunky lane; a touch device (coarse pointer) keeps native scroll, whose OS
+  // bar auto-hides and whose momentum/safe-area behavior must stay untouched.
+  const customScroll = usePointer();
   useScrollHide();
 
-  // OverlayScrollbars on the desktop/tablet content column. We initialize the
-  // hook against the EXISTING <main className="ra-main"> element (no wrapper
-  // DOM, so the CSS grid shell is untouched); OverlayScrollbars generates its
-  // own scroll viewport child. This replaces the native scrollbar with a thin
-  // overlay thumb that floats over the content and carves no layout space, so
-  // the sticky tab bars stay flush to the docked chat panel. `.ra-main` only
-  // exists in the wide shell, so we defer init until it is mounted. The mobile
-  // shell keeps native window scrolling (see useScrollHide).
-  const raMainRef = useRef<HTMLElement | null>(null);
-  const [initOverlayScrollbars] = useOverlayScrollbars({
-    defer: true,
-    options: {
-      scrollbars: {
-        // Mimic the prior macOS-overlay feel: invisible at rest, dim thumb that
-        // appears on hover and while scrolling, fading out once the pointer
-        // leaves the content column.
-        autoHide: "leave",
-        autoHideDelay: 600,
-        theme: "os-theme-macrotide",
-      },
+  // OverlayScrollbars on the content column. Two targets, never coexisting (the
+  // shells are mutually exclusive on `isWide`): the wide shell's
+  // <main className="ra-main">, and the mobile shell's <div className="app-scroll">
+  // (only rendered when `customScroll`). We init against the EXISTING element
+  // (no wrapper DOM); OverlayScrollbars generates its own scroll viewport child,
+  // replacing the native scrollbar with a thin overlay thumb that carves no
+  // layout space, so the sticky tab bars stay flush. Each target gets its own
+  // hook instance for an unambiguous getInstance()/destroy() on a pointer flip.
+  const osOptions = {
+    scrollbars: {
+      // Mimic the prior macOS-overlay feel: invisible at rest, dim thumb that
+      // appears on hover and while scrolling, fading out once the pointer
+      // leaves the content column.
+      autoHide: "leave",
+      autoHideDelay: 600,
+      theme: "os-theme-macrotide",
     },
+  } as const;
+  const raMainRef = useRef<HTMLElement | null>(null);
+  const [initRaMainScrollbars, getRaMainScrollbars] = useOverlayScrollbars({
+    defer: true,
+    options: osOptions,
+  });
+  const appScrollRef = useRef<HTMLDivElement | null>(null);
+  const [initAppScrollbars, getAppScrollbars] = useOverlayScrollbars({
+    defer: true,
+    options: osOptions,
   });
   useEffect(() => {
-    if (isWide && raMainRef.current) {
-      initOverlayScrollbars(raMainRef.current);
+    if (isWide && customScroll && raMainRef.current) {
+      initRaMainScrollbars(raMainRef.current);
+    } else {
+      // A pointer flip to native (or a swap to the mobile shell) needs an
+      // explicit destroy — the hook only auto-cleans on unmount — so `.ra-main`
+      // reverts to its CSS `overflow-y: auto` native scrolling.
+      getRaMainScrollbars()?.destroy();
     }
-    // useOverlayScrollbars cleans up its own instance on unmount; re-running on
-    // isWide handles the wide↔mobile shell swap.
-  }, [isWide, initOverlayScrollbars]);
+  }, [isWide, customScroll, initRaMainScrollbars, getRaMainScrollbars]);
+  useEffect(() => {
+    if (!isWide && customScroll && appScrollRef.current) {
+      initAppScrollbars(appScrollRef.current);
+    } else {
+      getAppScrollbars()?.destroy();
+    }
+  }, [isWide, customScroll, initAppScrollbars, getAppScrollbars]);
 
   // Rail identity. A signed-in owner shows their real name/email. With no
   // better-auth user we distinguish the two no-user modes: a real demo session
@@ -859,8 +882,20 @@ export function App({ isDemo }: { isDemo: boolean }) {
         <div className="app-frame" data-screen-label={screen}>
           {/* Mount-point: the persistent screen host (and the portaled
                 renderScreen() inside it) is re-parented here — see screenHost
-                note — so the screen survives the mobile↔wide remount. */}
-          <div ref={setScreenSlot} className="screen-slot" />
+                note — so the screen survives the mobile↔wide remount.
+
+                With a fine pointer we wrap it in a bounded .app-scroll container
+                that OverlayScrollbars takes over (the fixed .bottom-nav stays a
+                sibling OUTSIDE it, so it keeps positioning against the window).
+                With a coarse pointer the slot is a direct child as before, so
+                the native document-scroll path is byte-for-byte unchanged. */}
+          {customScroll ? (
+            <div className="app-scroll" ref={appScrollRef}>
+              <div ref={setScreenSlot} className="screen-slot" />
+            </div>
+          ) : (
+            <div ref={setScreenSlot} className="screen-slot" />
+          )}
           {!hideNav && (
             <nav className="bottom-nav">
               {MOBILE_NAV.map((item) => (

@@ -19,16 +19,22 @@
  *     session: every screen opens at the top again. (Deliberately NOT
  *     session/localStorage.)
  *
- * The scroll root differs by viewport, mirroring useScrollHide:
- *   - tablet/desktop: the OverlayScrollbars-generated viewport inside `.ra-main`
- *     (`.ra-main`'s own scrollTop stays 0 — the generated child scrolls).
- *   - mobile: the `window` (native scroll); `.ra-main` does not exist.
+ * The scroll root differs by POINTER, mirroring useScrollHide:
+ *   - custom scroll (mouse): the OverlayScrollbars-generated viewport inside the
+ *     active host — `.ra-main` (wide) or `.app-scroll` (mobile). The host's own
+ *     scrollTop stays 0 — the generated child scrolls.
+ *   - native scroll (touch): the `window`; no OverlayScrollbars host exists.
  *
  * `doc`/`win` are injectable so the root-selection logic is testable without a
  * real browser.
  */
 
-const VIEWPORT_SELECTOR = ".ra-main [data-overlayscrollbars-viewport]";
+// Direct-child (`>`): matches exactly the PAGE scroller's generated viewport
+// (OverlayScrollbars puts it as a direct child of the init target), never a
+// nested instance like ChatScreen's message list. Only one host exists at a
+// time, so first-match is unambiguous. Mirrors useScrollHide.
+const VIEWPORT_SELECTOR =
+  ".ra-main > [data-overlayscrollbars-viewport], .app-scroll > [data-overlayscrollbars-viewport]";
 
 // Minimal duck-typed roots so the read/write helpers work against either the
 // OverlayScrollbars viewport element or the window, and stay testable.
@@ -45,8 +51,8 @@ function getScrollRoot(
   doc: DocLike | undefined = typeof document !== "undefined" ? document : undefined,
   win: WinLike | undefined = typeof window !== "undefined" ? window : undefined,
 ): { get: () => number; set: (top: number) => void } | null {
-  // Tablet/desktop: scroll the OverlayScrollbars viewport. Mobile has no
-  // `.ra-main`, so this is null and we fall back to the window.
+  // Custom scroll (mouse): the OverlayScrollbars viewport. Native scroll (touch)
+  // has no host, so this is null and we fall back to the window.
   const viewport = doc?.querySelector?.<HTMLElement>(VIEWPORT_SELECTOR) ?? null;
   if (viewport) {
     return {

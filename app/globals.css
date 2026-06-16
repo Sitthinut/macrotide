@@ -207,6 +207,35 @@ html {
   border-right: 1px solid var(--line-soft);
 }
 
+/* Mouse/fine-pointer mobile shell: a bounded scroll container that
+   OverlayScrollbars takes over (see App.tsx), so a narrow desktop window shows
+   the thin overlay thumb instead of the chunky native lane. Only rendered for a
+   fine pointer; touch keeps the native document scroll (no .app-scroll). The
+   fixed .bottom-nav is a sibling OUTSIDE this container, so it still positions
+   against the window; the padding-bottom (moved off .app-frame for this branch)
+   keeps the last content row clear of the floating pill. */
+.app-scroll {
+  height: calc(100dvh - var(--demo-banner-h));
+  overflow-y: auto;
+  overscroll-behavior: none;
+  padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+}
+/* Don't double the bottom reservation: the scroller already carries it. */
+.app-frame:has(> .app-scroll) {
+  padding-bottom: 0;
+}
+/* Sticky descendants now pin to the scroller's top, not the window's. The demo
+   banner sits OUTSIDE .app-scroll (sibling above .app-root), so — like .ra-main
+   — the topbar uses top: 0 and the sub-tab bars derive from --topbar-h, with no
+   banner offset (that would double up). */
+.app-scroll .topbar {
+  top: 0;
+}
+.app-scroll .sub-tabs,
+.app-scroll .portfolio-switch {
+  top: calc(var(--topbar-h) - 2px);
+}
+
 /* Top bar */
 .topbar {
   position: sticky;
