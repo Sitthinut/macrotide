@@ -11,16 +11,22 @@ import { useEffect } from "react";
  * attribute is never set and the layout stays in its base sticky state —
  * topbar and sub-tabs both pinned, same across every screen.
  *
- * Scroll context varies by viewport: mobile scrolls `window`, tablet/desktop
- * scrolls the OverlayScrollbars viewport inside `.ra-main`. OverlayScrollbars
- * takes over `.ra-main`'s overflow and moves the actual scrolling to a
- * generated child element carrying `[data-overlayscrollbars-viewport]`, so
- * `.ra-main.scrollTop` stays 0 — we must read the viewport's scrollTop
+ * Scroll context varies by POINTER: native scroll (touch) scrolls `window`;
+ * custom scroll (mouse) scrolls the OverlayScrollbars viewport inside the
+ * active scroll host — `.ra-main` on the wide shell or `.app-scroll` on the
+ * mobile shell. OverlayScrollbars takes over the host's overflow and moves the
+ * actual scrolling to a generated child carrying `[data-overlayscrollbars-viewport]`,
+ * so the host's own scrollTop stays 0 — we read the viewport's scrollTop
  * instead. Scroll events don't bubble, but capture-phase delegation on
  * `document` catches both the window and the viewport scroll.
  */
 
-const VIEWPORT_SELECTOR = ".ra-main [data-overlayscrollbars-viewport]";
+// Direct-child (`>`): OverlayScrollbars' generated viewport is a direct child of
+// the element it's initialized on, so this hits exactly the PAGE scroller and
+// never a nested instance (e.g. ChatScreen's own message-list scroller). Only
+// one host exists at a time, so first-match is unambiguous.
+const VIEWPORT_SELECTOR =
+  ".ra-main > [data-overlayscrollbars-viewport], .app-scroll > [data-overlayscrollbars-viewport]";
 
 const HIDE_AFTER_PX = 60; // ignore tiny scrolls at the top
 const NOISE_PX = 4; // delta below this is treated as no movement
@@ -34,9 +40,9 @@ export function useScrollHide(): void {
 
     const update = () => {
       rafId = 0;
-      // Desktop/tablet: read the OverlayScrollbars viewport (the element that
-      // actually scrolls). Mobile has no `.ra-main`, so this is null and we
-      // fall back to the window scroll position.
+      // Custom scroll (mouse): read the OverlayScrollbars viewport (the element
+      // that actually scrolls). Native scroll (touch) has no such host, so this
+      // is null and we fall back to the window scroll position.
       const viewport = document.querySelector<HTMLElement>(VIEWPORT_SELECTOR);
       const y = viewport ? viewport.scrollTop : window.scrollY;
       const delta = y - lastY;

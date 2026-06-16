@@ -59,7 +59,10 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   ever leaving the app. The status bar tints to match the in-app light/dark
   theme (not just the OS preference). The shell is sized to the visible viewport
   (so an installed PWA on iOS/iPadOS no longer over-scrolls past the screen), and
-  the bottom nav is lifted clear of the home indicator.
+  the bottom nav is lifted clear of the home indicator. Scrollbars now follow the
+  input device, not the window width: a mouse gets the thin custom overlay
+  everywhere (including a narrowed desktop window, which no longer shows a chunky
+  native lane) while touch keeps native scrolling on every screen size.
 - **The JSON API is fail-closed (deny-by-default auth).** Every data route now
   rejects an anonymous request with `401` instead of silently serving the
   shared owner row set; the few intentionally-public routes are an explicit,
