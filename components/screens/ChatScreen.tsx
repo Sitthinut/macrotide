@@ -58,29 +58,15 @@ async function downscaleImage(file: File): Promise<ChatImage> {
   };
 }
 
-// Transcribe an attached image to plain text ONCE (on attach), so a follow-up
-// turn can reference it as cheap text instead of re-sending the bytes. Best
-// effort — returns "" on any failure and the caller proceeds without one.
-async function transcribeAttachment(dataUrl: string): Promise<string> {
-  try {
-    const blob = await (await fetch(dataUrl)).blob();
-    const fd = new FormData();
-    fd.append("image", blob, "image.jpg");
-    const res = await fetch("/api/chat/transcribe", { method: "POST", body: fd });
-    if (!res.ok) return "";
-    const body = (await res.json()) as { text?: string };
-    return body.text?.trim() ?? "";
-  } catch {
-    return "";
-  }
-}
-
-// Fold an image turn's transcription into its text for the model, so later turns
-// read the image as text without the bytes. Plain text when no transcript yet.
+// Fold a prior image turn's reading into its text for the model, so a later turn
+// references the image as cheap, cache-stable text without re-sending the bytes.
+// The reading is the examine_image observation captured when the image was first
+// read (see askLive); plain text when none was captured. De-duped because all of
+// a turn's images share the one combined reading.
 function imageText(m: Message): string {
-  const ts = (m.images ?? []).map((i) => i.transcript?.trim()).filter(Boolean);
+  const ts = [...new Set((m.images ?? []).map((i) => i.transcript?.trim()).filter(Boolean))];
   if (ts.length === 0) return m.text;
-  return `${m.text}\n\n[Attached image, transcribed so you can read it without the photo:]\n${ts.join("\n--- next image ---\n")}`;
+  return `${m.text}\n\n[Earlier image, as the Advisor read it:]\n${ts.join("\n--- next image ---\n")}`;
 }
 
 const ACTIVE_THREAD_KEY = "macrotide_chat_active_thread";
@@ -766,25 +752,6 @@ export function ChatScreen({
       );
       const processed = await Promise.all(images.slice(0, room).map(downscaleImage));
       setAttachments((prev) => [...prev, ...processed].slice(0, MAX_ATTACHMENTS));
-      // Transcribe each new image once, in the background, so a later follow-up
-      // can reference it as text. Patches the staged attachment and — once the
-      // turn is sent — the message carrying it.
-      for (const img of processed) {
-        void transcribeAttachment(img.dataUrl).then((transcript) => {
-          if (!transcript) return;
-          setAttachments((prev) => prev.map((a) => (a.id === img.id ? { ...a, transcript } : a)));
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.images?.some((i) => i.id === img.id)
-                ? {
-                    ...m,
-                    images: m.images.map((i) => (i.id === img.id ? { ...i, transcript } : i)),
-                  }
-                : m,
-            ),
-          );
-        });
-      }
     },
     [imageUploadEnabled, loading, attachments.length],
   );
@@ -894,11 +861,13 @@ export function ChatScreen({
     // Index of this user turn within the thread (for the image localStorage key).
     const userSeq = history.filter((m) => m.role === "user").length;
 
-    // Prior image turns carry their TRANSCRIPTION as text (imageText), not the
-    // bytes — so a follow-up reads the image without re-running the vision path
-    // or busting the prompt cache. Only THIS turn's freshly-attached images go as
-    // `file` parts. Text-only turns keep the compact `{role, content}` shape so
-    // the prefix cache stays warm.
+    // Prior image turns carry their READING as text (imageText) — the vision
+    // model's observation captured when the image was first read — never the
+    // bytes, so a follow-up references the image without re-running the vision
+    // path or busting the prompt cache. Only THIS turn's freshly-attached images
+    // go as `file` parts; the server strips them from the chat driver and reads
+    // them via the examine_image tool. Text-only turns keep the compact
+    // `{role, content}` shape so the prefix cache stays warm.
     // The model-facing attachment note (file name + EXIF/saved capture time) is
     // composed SERVER-SIDE from the structured `attachments` metadata below, so
     // it never leaks into the displayed bubble or the persisted message. Here
@@ -991,6 +960,10 @@ export function ChatScreen({
       // some cheaper models do this routinely. We surface the tool's own
       // message so the turn is never blank when work actually happened.
       const toolMessages: string[] = [];
+      // examine_image observations — the vision model's reading of this turn's
+      // image(s). Captured here and folded onto the turn's images after the
+      // stream (see below) so later turns can reference them as text.
+      const visionObservations: string[] = [];
       // propose_holding can fire multiple times in one turn (one per extracted
       // statement row). Accumulate them here and attach the growing list to the
       // streaming assistant message so each card appears as it arrives.
@@ -1116,10 +1089,33 @@ export function ChatScreen({
                 if (tidForImages) saveChatCard(tidForImages, userSeq, { transactionsImport });
               }
             }
+            // examine_image returns `{ observation }`: the vision model's reading
+            // of an attached image. Collect it as this turn's image reading.
+            if (toolOut && typeof toolOut === "object" && "observation" in toolOut) {
+              const obs = (toolOut as { observation?: unknown }).observation;
+              if (typeof obs === "string" && obs.trim()) visionObservations.push(obs.trim());
+            }
           } catch {
             // Some events are not JSON (heartbeats, [DONE]); ignore.
           }
         }
+      }
+
+      // Fold the vision model's reading onto this turn's image(s) as a transcript
+      // — persisted (browser-only) and re-sent as text on later turns (imageText)
+      // so the Advisor can reference the image without re-uploading the bytes.
+      if (hasImages && visionObservations.length && tidForImages && attached.length) {
+        const transcript = visionObservations.join("\n\n");
+        const withTranscript = attached.map((a) => ({ ...a, transcript }));
+        saveChatImages(tidForImages, userSeq, withTranscript);
+        const firstId = attached[0]?.id;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.role === "user" && m.images?.some((i) => i.id === firstId)
+              ? { ...m, images: withTranscript }
+              : m,
+          ),
+        );
       }
 
       // Fail-safe: if the model emitted no prose, fall back to the tool

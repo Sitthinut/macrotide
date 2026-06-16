@@ -15,10 +15,31 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **The Advisor reads chat images through a vision tool, keeping the conversation
+  fast.** The chat model now stays on every turn and reads an attached screenshot
+  by calling an `examine_image` tool (instead of swapping the whole turn onto a
+  vision model), so its prompt cache stays warm across the image turn and it keeps
+  reasoning. The tool returns a complete reading of the image, which is carried as
+  text on later turns — so the Advisor can answer follow-ups about an earlier
+  screenshot ("what was my other fund's value?") without you re-uploading it.
+  Cache affinity is pinned per provider family (so switching the chat
+  model keeps caching), the in-chat vision + holdings-OCR models moved to a
+  `gemini-flash-lite` chain (cheapest, with a current-gen fallback that survives
+  the `gemini-2.5` end-of-life), and a chart/factsheet can optionally escalate to
+  a stronger vision model. Env: `VISION_CHAT_MODELS` / `OCR_MODELS` (renamed from
+  the singular forms), new optional `VISION_CHAT_ESCALATE_MODELS`.
+
+- **Image-import OCR spend is now metered and capped.** A signed-in non-owner's
+  Add-holdings image imports count against the same daily usage limit as chat
+  (the priciest paid path is no longer the one unbudgeted route), and the
+  process-wide OCR breaker now counts each model call rather than each request
+  (a detect-then-route import is two). The owner stays uncapped.
+
 - **Holdings rows surface fee and weight at a glance.** Each holding now shows
   its total expense ratio inline — muted when the fee is low, flagged amber/red
   as it climbs — next to a labeled portfolio weight, so fee awareness no longer
   requires opening a detail sheet.
+
 - **The fund screener reaches the whole catalog.** Explore no longer silently
   caps at 30 results — funds auto-load as you scroll (the next page is prefetched,
   so there's no loading flash), then a "Load more" button takes over for the long

@@ -25,9 +25,10 @@ export interface ChatImage {
    */
   fullDataUrl?: string;
   /**
-   * Plain-text transcription of the image (from /api/chat/transcribe), computed
-   * once on attach. Carried in the conversation so follow-up turns reference the
-   * image as cheap text instead of re-sending the bytes. Small → persisted.
+   * The vision model's reading of this image, captured from the examine_image
+   * tool's observation on the turn it was attached (NOT a separate transcription
+   * call). Carried in the conversation so a later turn can reference the image as
+   * cheap text instead of re-sending the bytes. Small → persisted.
    */
   transcript?: string;
   /**
