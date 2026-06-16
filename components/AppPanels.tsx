@@ -301,13 +301,13 @@ function SortableBucketRow({
   );
 }
 
-export function PortfoliosPanel({
-  onClose,
-  maxed,
-  onToggleMax,
-}: { onClose: () => void } & PanelMaxProps) {
+// The portfolios manager — list + drag-reorder + activate + edit + new — shared
+// by the wide right-dock panel and the phone full-page screen. `onAfterSelect`
+// lets the phone screen pop back to the portfolio view once a bucket is picked;
+// the dock panel omits it (it stays open beside the screen).
+export function PortfoliosList({ onAfterSelect }: { onAfterSelect?: () => void }) {
   const { portfolios, isLoading } = usePortfolioView();
-  // Active id + edit/new intents flow through the shared store, so the sidebar
+  // Active id + edit/new intents flow through the shared store, so the list
   // highlight tracks whatever the PortfolioScreen shows — no event handshake.
   const { activeId, setActiveId, requestEdit, requestNew } = usePortfolioUi();
 
@@ -326,7 +326,7 @@ export function PortfoliosPanel({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ orderedIds: next.map((p) => p.id) }),
       });
-      // The panel feeds off /api/buckets (via usePortfolioView); invalidate so
+      // The list feeds off /api/buckets (via usePortfolioView); invalidate so
       // the persisted order reconciles with our optimistic local state.
       invalidate("/api/buckets");
     } catch (err) {
@@ -336,41 +336,54 @@ export function PortfoliosPanel({
 
   return (
     <>
+      {isLoading || !portfolios ? (
+        <SkeletonRows rows={3} height={56} padding={0} />
+      ) : order.length === 0 ? (
+        <div style={{ padding: 12, color: "var(--muted)", fontSize: 12.5 }}>No portfolios yet.</div>
+      ) : (
+        <DragDropProvider
+          onDragEnd={(event) => {
+            const next = move(order, event);
+            setOrder(next);
+            void persistOrder(next);
+          }}
+        >
+          {order.map((p, i) => (
+            <SortableBucketRow
+              key={p.id}
+              p={p}
+              index={i}
+              active={activeId === p.id}
+              onActivate={() => {
+                setActiveId(p.id);
+                onAfterSelect?.();
+              }}
+              onEdit={() => requestEdit(p.id)}
+            />
+          ))}
+        </DragDropProvider>
+      )}
+      <button
+        className="btn ghost sm"
+        style={{ width: "100%", marginTop: 10, display: "flex" }}
+        onClick={() => requestNew()}
+      >
+        <Icon name="plus" size={12} /> New portfolio
+      </button>
+    </>
+  );
+}
+
+export function PortfoliosPanel({
+  onClose,
+  maxed,
+  onToggleMax,
+}: { onClose: () => void } & PanelMaxProps) {
+  return (
+    <>
       <PanelHeader title="Portfolios" onClose={onClose} maxed={maxed} onToggleMax={onToggleMax} />
       <PanelScrollBody style={{ padding: "10px 14px 14px" }}>
-        {isLoading || !portfolios ? (
-          <SkeletonRows rows={3} height={56} padding={0} />
-        ) : order.length === 0 ? (
-          <div style={{ padding: 12, color: "var(--muted)", fontSize: 12.5 }}>
-            No portfolios yet.
-          </div>
-        ) : (
-          <DragDropProvider
-            onDragEnd={(event) => {
-              const next = move(order, event);
-              setOrder(next);
-              void persistOrder(next);
-            }}
-          >
-            {order.map((p, i) => (
-              <SortableBucketRow
-                key={p.id}
-                p={p}
-                index={i}
-                active={activeId === p.id}
-                onActivate={() => setActiveId(p.id)}
-                onEdit={() => requestEdit(p.id)}
-              />
-            ))}
-          </DragDropProvider>
-        )}
-        <button
-          className="btn ghost sm"
-          style={{ width: "100%", marginTop: 10, display: "flex" }}
-          onClick={() => requestNew()}
-        >
-          <Icon name="plus" size={12} /> New portfolio
-        </button>
+        <PortfoliosList />
       </PanelScrollBody>
     </>
   );

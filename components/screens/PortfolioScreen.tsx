@@ -503,6 +503,8 @@ export interface PortfolioScreenProps {
   onOpenActivity?: () => void;
   /** Open a holding's own record (the per-position drill-in screen). */
   onOpenPosition?: (ticker: string) => void;
+  /** Open the portfolios manager — the dock panel on wide, a full page on phone. */
+  onOpenPortfolios?: () => void;
   /** Show the top-right kebab that opens the account menu (mobile only). */
   showMenu?: boolean;
 }
@@ -513,6 +515,7 @@ export function PortfolioScreen({
   onOpenImport,
   onOpenActivity,
   onOpenPosition,
+  onOpenPortfolios,
   showMenu = true,
 }: PortfolioScreenProps) {
   // Active portfolio lives in the shared store so the right-rail PortfoliosPanel
@@ -929,9 +932,22 @@ export function PortfolioScreen({
       </div>
 
       <div className="portfolio-switch">
+        {onOpenPortfolios && (
+          <button
+            type="button"
+            className="pf-switch-menu"
+            onClick={onOpenPortfolios}
+            aria-label="Manage portfolios"
+            title="Portfolios"
+          >
+            <Icon name="menu" size={14} />
+          </button>
+        )}
         <button data-active={activePfId === "all"} onClick={() => setActiveId("all")}>
-          ☰ All
-          <span className="pf-sub">{portfolios.length} PORTFOLIOS</span>
+          <span className="pf-icon">
+            <Icon name="layers" size={12} />
+          </span>{" "}
+          All
         </button>
         {portfolios.map((p) => (
           <button key={p.id} data-active={activePfId === p.id} onClick={() => setActiveId(p.id)}>
