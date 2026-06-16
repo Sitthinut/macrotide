@@ -24,6 +24,7 @@ import { JournalScreen } from "@/components/screens/JournalScreen";
 import { MarketsScreen } from "@/components/screens/MarketsScreen";
 import { ModelPortfoliosScreen } from "@/components/screens/ModelPortfoliosScreen";
 import { PortfolioScreen } from "@/components/screens/PortfolioScreen";
+import { PortfoliosScreen } from "@/components/screens/PortfoliosScreen";
 import { PositionScreen } from "@/components/screens/PositionScreen";
 import { SettingsScreen, type Theme } from "@/components/screens/SettingsScreen";
 import { clearDemoSession } from "@/lib/auth/clear-demo";
@@ -58,6 +59,7 @@ type AddMode = "snapshot" | "activity";
 
 type Screen =
   | "portfolio"
+  | "portfolios"
   | "activity"
   | "position"
   | "markets"
@@ -471,13 +473,14 @@ export function App({ isDemo }: { isDemo: boolean }) {
     return () => window.removeEventListener("resize", reclamp);
   }, [viewport]);
 
-  // If we resize mobile → wide while on the Chat screen, the chat tab has no
-  // home in the wide rail, so navigate off it. We move the *screen* to the
-  // portfolio home, but we do NOT force the dock open — that would clobber a
-  // user who explicitly closed it. The persisted `activeApp` already holds
-  // their choice; leave it untouched so a closed dock stays closed.
+  // The Chat and Portfolios screens are mobile-only — on wide they live in the
+  // right dock, not as a full screen. If we resize mobile → wide while on one of
+  // them, the screen would otherwise persist in `main` alongside its dock panel
+  // (two of the same thing). Exit to the portfolio home (their parent tab). We
+  // do NOT force the dock open — that would clobber a user who explicitly closed
+  // it; the persisted `activeApp` already holds their choice.
   useEffect(() => {
-    if (isWide && screen === "chat") {
+    if (isWide && (screen === "chat" || screen === "portfolios")) {
       navigate("portfolio");
     }
   }, [isWide, screen, navigate]);
@@ -701,8 +704,12 @@ export function App({ isDemo }: { isDemo: boolean }) {
             setPositionTicker(t);
             navigate("position");
           }}
+          onOpenPortfolios={() => (isWide ? setActiveApp("portfolios") : navigate("portfolios"))}
         />
       );
+    }
+    if (screen === "portfolios") {
+      return <PortfoliosScreen onBack={goBack} />;
     }
     if (screen === "activity") {
       return (

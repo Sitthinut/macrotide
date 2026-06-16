@@ -2630,9 +2630,26 @@ button.chip {
   color: var(--bg);
   border-color: transparent;
 }
+/* The leading menu button — opens the portfolios manager (dock panel on wide,
+   full page on phone). An ACTION, not a selector: a borderless, muted icon
+   button. That borderless-vs-filled-pill contrast plus the gap reads it as a
+   leading tool rather than a stunted tab — no divider line needed. */
+.portfolio-switch .pf-switch-menu {
+  padding: 7px 8px;
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+}
+.portfolio-switch .pf-switch-menu:hover {
+  color: var(--ink);
+  background: var(--card-soft);
+  border-color: transparent;
+}
 .portfolio-switch .pf-icon {
-  font-family: var(--font-mono);
-  font-size: 11px;
+  /* Flex-center the icon: the old font-size/mono here was for a text glyph and
+     left the SVG sitting ~1.5px above the chip's centre line. */
+  display: inline-flex;
+  align-items: center;
   opacity: 0.7;
 }
 .portfolio-switch .pf-sub {

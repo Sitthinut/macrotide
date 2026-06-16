@@ -40,6 +40,11 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   as it climbs — next to a labeled portfolio weight, so fee awareness no longer
   requires opening a detail sheet.
 
+- **The portfolios manager is reachable on phone.** A menu button on the
+  portfolio switcher opens the full portfolios list — switch, reorder, rename, or
+  add — as the side panel on desktop/tablet and a dedicated full page on phone
+  (which has no side panel); picking one returns to its portfolio. The "All" chip
+  drops its decorative glyph and verbose count for a plain label.
 - **The fund screener reaches the whole catalog.** Explore no longer silently
   caps at 30 results — funds auto-load as you scroll (the next page is prefetched,
   so there's no loading flash), then a "Load more" button takes over for the long
