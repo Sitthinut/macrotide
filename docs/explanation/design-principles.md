@@ -78,3 +78,65 @@ SQLite — seeded with realistic mock data, swept after idle, and capped so it
 can't run up an AI bill. It shares **no** state with the owner database; the
 isolation is enforced at the DB-routing layer, not by convention. See
 [architecture § owner vs demo databases](./architecture.md#owner-vs-demo-databases).
+
+## Responsiveness — the performance budget
+
+A calm, anti-tinkering app should feel instant. The budget keeps two distinct
+levers apart — won by different tools: how fast the **server** answers (query
+work), and how little **loading** the user ever perceives (preload + optimism).
+
+### Server processing budget
+
+The aspirational target every **local** read and write is held to — to design and
+measure against, not a contractual SLO:
+
+> **p99 < 200ms for ~100 concurrent users**, measured server-side.
+
+Tiered, because requests aren't one cost class:
+
+| Tier | p99 target | Examples |
+| --- | --- | --- |
+| Point reads | **< 30ms** | a holding, a NAV, one fund detail, auth |
+| Heavy reads | **< 200ms** | the Explore screener, portfolio aggregates |
+| Writes (mutations) | **< 200ms** | add/edit a holding, record a transaction |
+| **Event-loop block per DB call** | **< 25ms** | *every* synchronous query — the binding constraint |
+
+The last row is load-bearing. On a [single process with synchronous
+`better-sqlite3`](./architecture.md#the-shape-one-process-local-sqlite) each query
+blocks the one event loop, so concurrent requests **serialize** — which is why the
+goal is framed as concurrent *users* (who think between requests), not 100
+*simultaneous in-flight* requests, which no amount of per-query tuning could keep
+under 200ms. Writes earn their place for a sharper reason than reads: a write
+takes SQLite's single writer lock, so a slow mutation serializes **every other
+writer** behind it — costing more concurrency than a slow read. A path that can't
+hold the ~25ms ceiling is the signal that its work belongs off the main thread (a
+worker pool) or behind a cache — the "real scaling trigger" the
+[single-VM / single-SQLite-writer decision](./decisions/README.md#ops--scale)
+defers until it actually appears.
+
+**Out of scope.** The budget governs what we control — SQLite-local work — not
+the network or the model. Two paths are deliberately excluded: **streaming / AI**
+(Advisor chat is inherently multi-second) and calls **bound by an external
+provider** (market data on a cache miss → FMP / EODHD / Thai SEC, rate-limited).
+For those, an honest loading state — see below — is correct, not a failure.
+
+### Perceived latency — preload-first, skeleton-as-fallback
+
+Server speed is only half of *feeling* fast; the other half is minimizing how
+often the user waits at all ([prior art](https://jjenzz.com/best-loading-states-are-no-loading-states/)).
+The two work together:
+
+- **Preload on intent.** Start the fetch before the user commits — on hover, on
+  viewport intersection, a page ahead — so the common path renders complete and
+  instant. The Explore screener already does this (a page is always prefetched
+  ahead of the scroll). Preload is what makes a loading state *rare*.
+- **Make writes feel instant with optimism, not speed.** An add/edit should land
+  in the UI immediately while the server reconciles behind it. The mutation still
+  owes the server budget above (it holds the write lock), but the *user-facing*
+  feel comes from the optimistic update — perceived latency ~0 even at 150ms
+  server time. Speed is the safety net; optimism is the experience.
+- **A skeleton is a fine fallback — everywhere.** When preload hasn't filled the
+  view yet (a first paint, a fast scroll, a cold cache), a skeleton is the honest,
+  graceful default — for **both** SQLite-local and external-provider paths, not a
+  failure to be banished. We deliberately don't adopt the prior art's stricter
+  "render null, never a skeleton" — a skeleton communicates better than a blank gap.
