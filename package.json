@@ -25,6 +25,7 @@
     "db:seed:presets": "tsx --tsconfig tsconfig.scripts.json scripts/seed-presets.ts",
     "market:refresh": "curl -s -X POST http://localhost:3000/api/admin/refresh-market | python3 -m json.tool",
     "jobs:close-stale": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/close-stale-sessions.ts",
+    "jobs:decay-extracted": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/decay-extracted.ts",
     "jobs:refresh-catalog": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/refresh-fund-catalog.ts",
     "jobs:transform-catalog": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/transform-catalog.ts",
     "jobs:refresh-share-classes": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/refresh-share-classes.ts",

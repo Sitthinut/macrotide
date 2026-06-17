@@ -201,3 +201,29 @@ describe("stripInjectedMemory", () => {
     expect(stripInjectedMemory(text)).toBe("User: hi");
   });
 });
+
+describe("progressive disclosure + pending", () => {
+  it("injects the short summary when present, falling back to content", () => {
+    withFresh(() => {
+      save({
+        category: "fact",
+        content: "a long elaboration the user gave about their situation",
+        summary: "prefers dividend funds",
+        source: "user_tool",
+      });
+      const block = buildMemoryBlock(null);
+      expect(block).toContain("- prefers dividend funds");
+      expect(block).not.toContain("a long elaboration");
+    });
+  });
+
+  it("excludes pending rows from the injected block (recall-only until confirmed)", () => {
+    withFresh(() => {
+      save({ category: "fact", content: "active one", source: "user_tool" });
+      save({ category: "fact", content: "pending one", source: "advisor_tool", status: "pending" });
+      const block = buildMemoryBlock(null);
+      expect(block).toContain("- active one");
+      expect(block).not.toContain("pending one");
+    });
+  });
+});

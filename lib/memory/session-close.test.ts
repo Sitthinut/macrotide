@@ -44,10 +44,13 @@ const result = (threadId: string, saved: number, lastTurnId?: number): Extractio
   summary: "",
   saved: Array.from({ length: saved }, (_, i) => ({
     id: i,
+    op: "add" as const,
+    targetId: null,
     category: "fact" as const,
     content: "x",
     confidence: 0.9,
     injected: true,
+    applied: "added" as const,
   })),
   provider: "stub",
   lastTurnId,

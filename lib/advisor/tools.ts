@@ -561,6 +561,7 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
           kind: r.kind,
           title: r.title,
           body: r.body,
+          url: r.url ?? null,
           tags: r.tags ?? [],
           createdAt: r.createdAt,
         })),
@@ -587,13 +588,19 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
         ),
       title: z.string().max(200).optional().describe("Optional short title."),
       body: z.string().min(1).max(4000).describe("The entry content."),
+      url: z
+        .string()
+        .url()
+        .optional()
+        .describe("Optional source link (e.g. the article URL for a reading entry)."),
       tags: z.array(z.string().min(1)).max(10).optional().describe("Optional tags."),
     }),
-    execute: async ({ kind, title, body, tags }) => {
+    execute: async ({ kind, title, body, url, tags }) => {
       const row = createJournalEntry({
         kind,
         title: title ?? null,
         body,
+        url: url ?? null,
         tags: tags ?? null,
         source: "advisor_tool",
         pinned: false,
