@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { freshMarketDb } from "@/tests/db-helpers";
 import { runWithDbContext } from "../db/context";
 import { appendMessage, createThread } from "../db/queries/chat";
-import { listActive } from "../db/queries/preferences";
+import { listActive, save } from "../db/queries/preferences";
 import * as schema from "../db/schema";
 
 // Mutable knobs shared with the hoisted module mocks below.
@@ -175,6 +175,88 @@ describe("extractSessionPreferences", () => {
     await withFresh(async () => {
       const result = await extractSessionPreferences(seedThread());
       expect(result.skipped).toBe("model_error");
+    });
+  });
+});
+
+describe("reconcile (add / update / skip)", () => {
+  it("update against an extracted row supersedes it", async () => {
+    await withFresh(async () => {
+      const existing = save({
+        category: "profile",
+        content: "risk tolerance: moderate",
+        source: "extracted",
+        confidence: 0.8,
+      });
+      h.text = JSON.stringify({
+        summary: "s",
+        facts: [
+          {
+            op: "update",
+            target_id: existing.id,
+            category: "profile",
+            content: "risk tolerance: aggressive",
+            confidence: 0.85,
+          },
+        ],
+      });
+      const result = await extractSessionPreferences(seedThread());
+      expect(result.saved[0]?.applied).toBe("updated");
+      expect(listActive().map((r) => r.content)).toEqual(["risk tolerance: aggressive"]);
+    });
+  });
+
+  it("update against an EXPLICIT row is captured as pending, not an override", async () => {
+    await withFresh(async () => {
+      const explicit = save({
+        category: "finance_context",
+        content: "funds only, no individual stocks",
+        source: "user_tool",
+      });
+      h.text = JSON.stringify({
+        summary: "s",
+        facts: [
+          {
+            op: "update",
+            target_id: explicit.id,
+            category: "finance_context",
+            content: "individual stocks are fine now",
+            confidence: 0.9,
+          },
+        ],
+      });
+      const result = await extractSessionPreferences(seedThread());
+      expect(result.saved[0]?.applied).toBe("pending");
+      // The explicit note is untouched and still injects; the pending one does not.
+      const block = buildMemoryBlock(null);
+      expect(block).toContain("funds only, no individual stocks");
+      expect(block).not.toContain("individual stocks are fine now");
+    });
+  });
+
+  it("skip is a no-op (counts as no new facts)", async () => {
+    await withFresh(async () => {
+      const existing = save({
+        category: "fact",
+        content: "owns a dog",
+        source: "extracted",
+        confidence: 0.8,
+      });
+      h.text = JSON.stringify({
+        summary: "s",
+        facts: [
+          {
+            op: "skip",
+            target_id: existing.id,
+            category: "fact",
+            content: "has a dog",
+            confidence: 0.9,
+          },
+        ],
+      });
+      const result = await extractSessionPreferences(seedThread());
+      expect(result.skipped).toBe("no_facts");
+      expect(listActive()).toHaveLength(1);
     });
   });
 });

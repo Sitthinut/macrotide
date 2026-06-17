@@ -39,8 +39,10 @@ export const MEMORY_BLOCK_HEADING = "## Your stored preferences";
 // docs/explanation/memory.md § open question (extracted < ~0.7 → recall-only).
 export const INJECT_CONFIDENCE_THRESHOLD = 0.7;
 
-// A preference is injectable unless it's a low-confidence auto-extracted row.
+// A preference is injectable unless it's awaiting confirmation ('pending', so
+// recall-only until the user confirms) or a low-confidence auto-extracted row.
 function isInjectable(row: Preference): boolean {
+  if (row.status === "pending") return false;
   if (row.source === "extracted" && row.confidence != null) {
     return row.confidence >= INJECT_CONFIDENCE_THRESHOLD;
   }
@@ -115,7 +117,9 @@ export function buildMemoryBlock(
     if (!bucket || bucket.length === 0) continue;
     lines.push(`### ${CATEGORY_HEADINGS[cat]}`);
     for (const row of bucket) {
-      lines.push(`- ${row.content}`);
+      // Inject the short index; the longer `body` is recalled on demand. Rows
+      // predating progressive disclosure have no summary → fall back to content.
+      lines.push(`- ${row.summary ?? row.content}`);
     }
     lines.push("");
   }
