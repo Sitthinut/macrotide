@@ -233,12 +233,29 @@ export function invalidateFundIndex(db: MarketDb = getMarketDb()): void {
  * query is alias-expanded before searching so index nicknames resolve.
  */
 export function searchFundIds(query: string, db: MarketDb = getMarketDb()): string[] {
+  return searchFundIdsScored(query, db).map((r) => r.id);
+}
+
+/** A search hit: candidate projId + its MiniSearch BM25-style relevance score. */
+export interface ScoredFundId {
+  id: string;
+  score: number;
+}
+
+/**
+ * Like {@link searchFundIds} but keeps each hit's relevance `score`. The
+ * screener uses the score to gate low-relevance, non-buyable funds (provident,
+ * institutional, fixed-term) — they surface only on a strong/exact match so a
+ * generic query isn't polluted with funds the user can't buy. Returned in
+ * descending score order.
+ */
+export function searchFundIdsScored(query: string, db: MarketDb = getMarketDb()): ScoredFundId[] {
   const trimmed = query.trim();
   if (!trimmed) return [];
   const index = getIndex(db);
   if (index.documentCount === 0) return [];
   const expanded = expandQuery(trimmed);
   // combineWith OR (default) + fuzzy/prefix gives recall; relevance ordering is
-  // MiniSearch's BM25-style score. Returned in descending score order.
-  return index.search(expanded).map((r) => r.id as string);
+  // MiniSearch's BM25-style score.
+  return index.search(expanded).map((r) => ({ id: r.id as string, score: r.score }));
 }

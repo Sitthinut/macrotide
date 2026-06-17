@@ -18,6 +18,7 @@ import { Icon } from "@/components/Icon";
 import { Skeleton, SkeletonRows } from "@/components/ui/Skeleton";
 import type { ShareClassListItem, TrackedIndexFamily } from "@/lib/db/queries/funds";
 import { prefetchResource, useResource } from "@/lib/fetchers/swr";
+import { RETAIL_TIER_BADGE } from "@/lib/market/retail-tier";
 import { matchIndexFamily } from "@/lib/search/index-alias";
 import { useFlipUp } from "@/lib/useFlipUp";
 import { useListboxKeyboard } from "@/lib/useListboxKeyboard";
@@ -28,6 +29,7 @@ type AssetClassFilter = "equity" | "bond" | "alternative" | "cash" | "";
 type TaxIncentiveFilter = "SSF" | "ThaiESG" | "RMF" | "";
 type RegionFilter = "foreign" | "domestic" | "mixed" | "";
 type IndexTypeFilter = "index" | "active" | "";
+type AccessFilter = "retail" | "accredited" | "ultra" | "both";
 
 const INDEX_TYPE_OPTIONS: { value: IndexTypeFilter; label: string; title: string }[] = [
   {
@@ -83,6 +85,7 @@ function buildUrl(
   taxIncentive: TaxIncentiveFilter,
   region: RegionFilter,
   trackingIndex: string,
+  access: AccessFilter,
   limit: number,
 ): string {
   const params = new URLSearchParams();
@@ -92,6 +95,7 @@ function buildUrl(
   if (taxIncentive) params.set("taxIncentive", taxIncentive);
   if (region) params.set("region", region);
   if (trackingIndex) params.set("trackingIndex", trackingIndex);
+  if (access && access !== "retail") params.set("access", access);
   params.set("limit", String(limit));
   return `/api/fund-classes?${params.toString()}`;
 }
@@ -112,9 +116,19 @@ function useFunds(
   taxIncentive: TaxIncentiveFilter,
   region: RegionFilter,
   trackingIndex: string,
+  access: AccessFilter,
   limit: number,
 ) {
-  const url = buildUrl(assetClass, query, indexType, taxIncentive, region, trackingIndex, limit);
+  const url = buildUrl(
+    assetClass,
+    query,
+    indexType,
+    taxIncentive,
+    region,
+    trackingIndex,
+    access,
+    limit,
+  );
   // keepPreviousData: typing, toggling a filter, or growing the limit via "Load
   // more" keeps the current rows on screen while the new window loads, instead of
   // flashing to empty. A larger limit returns a strict superset of the same
@@ -273,12 +287,21 @@ function FundClassTags({ cls }: { cls: ShareClassListItem }) {
   );
 }
 
-// Fund-type tags — asset class + feeder master. Their own row below the name.
+const RETAIL_TIER_TITLE: Record<string, string> = {
+  Accredited: "Accredited Investor (AI) fund — for qualifying high-net-worth investors",
+  Ultra: "Ultra-Accredited Investor (UI) fund — for qualifying ultra-high-net-worth investors",
+  Provident: "Provident fund — subscribed through an employer plan, not directly",
+  "Inst.": "Institutional fund — not offered to individual investors",
+};
+
+// Fund-type tags — asset class + feeder master + investor-eligibility/fixed-term.
+// Their own row below the name.
 function FundTypeTags({ cls }: { cls: ShareClassListItem }) {
   const isFeeder = cls.isFeederFund;
   const assetLabel = cls.assetClass ? (ASSET_CLASS_LABELS[cls.assetClass] ?? null) : null;
+  const tierLabel = RETAIL_TIER_BADGE[cls.retailTier];
 
-  if (!isFeeder && !assetLabel) return null;
+  if (!isFeeder && !assetLabel && !tierLabel && !cls.isFixedTerm) return null;
 
   return (
     <span style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 3, minWidth: 0 }}>
@@ -286,6 +309,22 @@ function FundTypeTags({ cls }: { cls: ShareClassListItem }) {
         <MiniTag
           label={assetLabel}
           title={`Asset class: ${assetLabel}`}
+          color="var(--muted)"
+          bg="var(--card-soft)"
+        />
+      )}
+      {tierLabel && (
+        <MiniTag
+          label={tierLabel}
+          title={RETAIL_TIER_TITLE[tierLabel]}
+          color="var(--amber, #f59e0b)"
+          bg="var(--amber-soft, rgba(245,158,11,0.1))"
+        />
+      )}
+      {cls.isFixedTerm && (
+        <MiniTag
+          label="Fixed-term"
+          title="Fixed-term fund — stops accepting new subscriptions once the offering closes"
           color="var(--muted)"
           bg="var(--card-soft)"
         />
@@ -641,6 +680,7 @@ function FacetDropdown({
   value,
   onChange,
   options,
+  defaultValue,
 }: {
   /** Facet name shown on the unset pill ("Class", "Region", …). */
   name: string;
@@ -654,6 +694,14 @@ function FacetDropdown({
   value: string;
   onChange: (value: string) => void;
   options: FacetOption[];
+  /**
+   * When set, the facet has no "unset" state — every value (including this
+   * neutral default) is a real, listed option, so the pill always shows a value
+   * instead of the facet name. Used by "Access", whose default ("Retail") is an
+   * actual filter, not "any". The clear row is dropped; pick the default option
+   * to reset.
+   */
+  defaultValue?: string;
 }) {
   const [open, setOpen] = useState(false);
   // Anchor the menu's RIGHT edge to the pill when the pill sits in the right
@@ -709,8 +757,15 @@ function FacetDropdown({
     onChange(v);
     setOpen(false);
   };
-  const active = !!value;
-  const pillText = active ? (options.find((o) => o.value === value)?.pill ?? value) : name;
+  // A defaultValue marks the neutral default (e.g. "Access" → "retail"): the
+  // facet has no unset "" state, but the default still styles muted and shows
+  // the facet name, like every other facet — only a non-default pick goes accent
+  // and shows its value pill. (The default is a real, highlighted menu option,
+  // not a plain clear row.)
+  const hasDefault = defaultValue !== undefined;
+  const selectedPill = options.find((o) => o.value === value)?.pill ?? value;
+  const active = hasDefault ? value !== defaultValue : !!value;
+  const pillText = active ? selectedPill : name;
 
   return (
     <div ref={ref} onKeyDown={onKeyDown} style={{ position: "relative", display: "inline-flex" }}>
@@ -719,7 +774,7 @@ function FacetDropdown({
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={`${menuLabel}: ${active ? pillText : "any"}`}
+        aria-label={`${menuLabel}: ${active ? selectedPill : hasDefault ? selectedPill : "any"}`}
         onClick={toggle}
         title={title}
         style={{
@@ -757,15 +812,17 @@ function FacetDropdown({
           data-up={up || undefined}
           style={alignRight ? { left: "auto", right: 0 } : undefined}
         >
-          <button
-            type="button"
-            role="option"
-            aria-selected={!value}
-            className="combobox__option"
-            onClick={() => pick("")}
-          >
-            {clearLabel}
-          </button>
+          {!hasDefault && (
+            <button
+              type="button"
+              role="option"
+              aria-selected={!value}
+              className="combobox__option"
+              onClick={() => pick("")}
+            >
+              {clearLabel}
+            </button>
+          )}
           {options.map((o) => (
             <button
               key={o.value}
@@ -836,6 +893,11 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
   // "Tracks" facet: canonical index family ("S&P 500") — index-style funds
   // tracking it, ranked cheapest-first by the browse ordering. "" = off.
   const [trackingIndex, setTrackingIndex] = useState("");
+  // "Access" facet: "retail" (default) = retail-buyable funds only; the other
+  // choices also list the chosen restricted audience — accredited and/or ultra
+  // (which qualifying high-net-worth investors can buy), or "all" (the entire
+  // active universe, including provident/institutional).
+  const [access, setAccess] = useState<AccessFilter>("retail");
   const [queryInput, setQueryInput] = useState("");
   // Debounce the search query so we don't fire on every keystroke.
   const [query, setQuery] = useState("");
@@ -855,7 +917,7 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: AUTO_STEP is a module constant; we reset only when the query shape changes.
   useEffect(() => {
     setLimit(AUTO_STEP);
-  }, [assetClass, query, indexType, taxIncentive, region, trackingIndex]);
+  }, [assetClass, query, indexType, taxIncentive, region, trackingIndex, access]);
 
   const { data, isLoading, isValidating } = useFunds(
     assetClass,
@@ -864,6 +926,7 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
     taxIncentive,
     region,
     trackingIndex,
+    access,
     limit,
   );
 
@@ -881,13 +944,20 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
 
   // One-tap reset of everything (facets + search text).
   const anyFilterActive =
-    !!assetClass || !!indexType || !!region || !!taxIncentive || !!trackingIndex || !!queryInput;
+    !!assetClass ||
+    !!indexType ||
+    !!region ||
+    !!taxIncentive ||
+    !!trackingIndex ||
+    access !== "retail" ||
+    !!queryInput;
   const clearAllFilters = () => {
     setAssetClass("");
     setIndexType("");
     setRegion("");
     setTaxIncentive("");
     setTrackingIndex("");
+    setAccess("retail");
     setQueryInput("");
     setQuery("");
   };
@@ -959,7 +1029,16 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
   useEffect(() => {
     if (!data || !moreExist || reachedServerCap) return;
     prefetchResource(
-      buildUrl(assetClass, query, indexType, taxIncentive, region, trackingIndex, limit + nextStep),
+      buildUrl(
+        assetClass,
+        query,
+        indexType,
+        taxIncentive,
+        region,
+        trackingIndex,
+        access,
+        limit + nextStep,
+      ),
     );
   }, [data, limit, nextStep, moreExist, reachedServerCap]);
 
@@ -1131,6 +1210,47 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
             {/* Tracking restricts to index-style funds by itself, so it
                 composes with (and doesn't need) the Style facet. */}
             <TracksFacet value={trackingIndex} onChange={setTrackingIndex} />
+            {/* Investor eligibility — "General investor" (default) lists funds
+                anyone can buy; the other choices filter EXCLUSIVELY to funds
+                restricted to qualifying high-net-worth (accredited) and/or
+                ultra-high-net-worth (ultra-accredited) investors. The default is
+                a real filter (the SEC's "general investors", value `retail`), so
+                it shows as an explicit pill rather than the neutral facet name. */}
+            <FacetDropdown
+              name="Access"
+              clearLabel="General investor"
+              menuLabel="Investor access"
+              title="Which investor audience to list funds for"
+              value={access}
+              defaultValue="retail"
+              onChange={(v) => setAccess(v as AccessFilter)}
+              options={[
+                {
+                  value: "retail",
+                  label: "General investor",
+                  pill: "General",
+                  title: "Funds open to all (general) investors",
+                },
+                {
+                  value: "accredited",
+                  label: "Accredited investor",
+                  pill: "Accredited",
+                  title: "Funds for qualifying high-net-worth investors",
+                },
+                {
+                  value: "ultra",
+                  label: "Ultra-accredited investor",
+                  pill: "Ultra",
+                  title: "Funds for qualifying ultra-high-net-worth investors",
+                },
+                {
+                  value: "both",
+                  label: "Accredited + Ultra",
+                  pill: "Accredited + Ultra",
+                  title: "Both accredited and ultra-accredited investor funds",
+                },
+              ]}
+            />
             {anyFilterActive && (
               // Clear-all as an icon pill — the app's dismiss affordance is the
               // close icon in a small bordered button, sized here to match the

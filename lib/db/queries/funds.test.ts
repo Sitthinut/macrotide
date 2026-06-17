@@ -646,7 +646,7 @@ describe("findShareClasses (search + popularity ranking)", () => {
     });
   });
 
-  it("hides insurance classes but keeps restricted ones, down-ranked below retail", () => {
+  it("search surfaces an insurance class but demotes it below retail/restricted; browse hides it", () => {
     withDb(() => {
       upsertFund(fund("MIX", { abbrName: "MIXF", englishName: "Mixed Audience Fund" }));
       upsertShareClasses([
@@ -657,8 +657,13 @@ describe("findShareClasses (search + popularity ranking)", () => {
       seedAum("MIXF-A", 100);
       seedAum("MIXF-R", 9999); // huge AUM must NOT lift it above retail
 
+      // Browse buy-list still hides the insurance class (kept restricted/retail).
+      const browse = findShareClasses({}).items.map((c) => c.ticker);
+      expect(browse).toEqual(expect.arrayContaining(["MIXF-A", "MIXF-R"]));
+      expect(browse).not.toContain("MIXF-IN");
+      // Search (exact abbr) finds all three; insurance is demoted to last.
       const tickers = findShareClasses({ query: "MIXF" }).items.map((c) => c.ticker);
-      expect(tickers).toEqual(["MIXF-A", "MIXF-R"]); // insurance hidden; restricted last
+      expect(tickers).toEqual(["MIXF-A", "MIXF-R", "MIXF-IN"]);
     });
   });
 });
@@ -817,32 +822,121 @@ describe("retail-availability gate + zero-TER sort (#117)", () => {
     });
   });
 
-  it("hides funds the SEC marks not-for-retail (proj_retail_type != 'R'); keeps R + unknown", () => {
+  it("browse buy-list keeps retail + unknown; hides accredited/ultra/provident/institutional", () => {
     withDb(() => {
       upsertFund(fund("RETAILF", { abbrName: "RTL", projRetailType: "R" }));
-      upsertFund(fund("PRIVF", { abbrName: "PRV", projRetailType: "X" })); // not for retail
+      upsertFund(fund("ACCF", { abbrName: "ACC", projRetailType: "A" })); // accredited (AI)
+      upsertFund(fund("ULTRAF", { abbrName: "ULT", projRetailType: "X" })); // ultra (UI)
+      upsertFund(fund("PVDF", { abbrName: "PVD", projRetailType: "V" })); // provident
+      upsertFund(fund("INSTF", { abbrName: "INS", projRetailType: "N" })); // institutional
       upsertFund(fund("UNKNOWNF", { abbrName: "UNK", projRetailType: null })); // pre-crawl
-      upsertShareClasses([
-        { projId: "RETAILF", className: "RTL", ticker: "RTL", investorType: "retail" },
-        { projId: "PRIVF", className: "PRV", ticker: "PRV", investorType: "retail" },
-        { projId: "UNKNOWNF", className: "UNK", ticker: "UNK", investorType: "retail" },
-      ]);
+      upsertShareClasses(
+        ["RETAILF", "ACCF", "ULTRAF", "PVDF", "INSTF", "UNKNOWNF"].map((p) => ({
+          projId: p,
+          className: p,
+          ticker: p.replace(/F$/, "").slice(0, 3),
+          investorType: "retail",
+        })),
+      );
       const tickers = findShareClasses({}).items.map((c) => c.ticker);
-      expect(tickers).toContain("RTL"); // retail kept
-      expect(tickers).toContain("UNK"); // null = unknown (pre-crawl) → kept (safe no-op)
-      expect(tickers).not.toContain("PRV"); // proj_retail_type=X → whole fund hidden
+      expect(tickers).toEqual(expect.arrayContaining(["RET", "UNK"])); // retail + unknown kept
+      for (const hidden of ["ACC", "ULT", "PVD", "INS"]) {
+        expect(tickers).not.toContain(hidden);
+      }
     });
   });
 
-  it("includeNonRetail surfaces a not-for-retail fund", () => {
+  it("the access facet filters browse to exactly the chosen audience (exclusive), badged", () => {
     withDb(() => {
-      upsertFund(fund("PRIVF", { abbrName: "PRV", projRetailType: "X" }));
+      upsertFund(fund("RETAILF", { abbrName: "RET", projRetailType: "R" }));
+      upsertFund(fund("ACCF", { abbrName: "ACC", projRetailType: "B" }));
+      upsertFund(fund("ULTRAF", { abbrName: "ULT", projRetailType: "X" }));
+      upsertFund(fund("PVDF", { abbrName: "PVD", projRetailType: "V" }));
       upsertShareClasses([
-        { projId: "PRIVF", className: "PRV", ticker: "PRV", investorType: "retail" },
+        { projId: "RETAILF", className: "RET", ticker: "RET", investorType: "retail" },
+        { projId: "ACCF", className: "ACC", ticker: "ACC", investorType: "retail" },
+        { projId: "ULTRAF", className: "ULT", ticker: "ULT", investorType: "retail" },
+        { projId: "PVDF", className: "PVD", ticker: "PVD", investorType: "retail" },
       ]);
-      expect(findShareClasses({ includeNonRetail: true }).items.map((c) => c.ticker)).toContain(
-        "PRV",
+      const tickers = (a?: "accredited" | "ultra" | "both") =>
+        findShareClasses({ access: a })
+          .items.map((c) => c.ticker)
+          .sort();
+      // Default = retail only. Each restricted choice shows ONLY that audience
+      // (exclusive — retail is filtered out, not added to).
+      expect(tickers()).toEqual(["RET"]);
+      expect(tickers("accredited")).toEqual(["ACC"]);
+      expect(tickers("ultra")).toEqual(["ULT"]);
+      expect(tickers("both")).toEqual(["ACC", "ULT"]);
+      // Provident is never a browse choice — search finds it instead.
+      for (const a of [undefined, "accredited", "ultra", "both"] as const) {
+        expect(tickers(a)).not.toContain("PVD");
+      }
+      // Tier badges resolve.
+      const byTicker = new Map(
+        findShareClasses({ access: "both" }).items.map((c) => [c.ticker, c]),
       );
+      expect(byTicker.get("ACC")?.retailTier).toBe("accredited");
+      expect(byTicker.get("ULT")?.retailTier).toBe("ultra");
+    });
+  });
+
+  it("search finds an ultra (UI) fund by exact code though browse hides it", () => {
+    withDb(() => {
+      upsertFund(
+        fund("ULTRAF", {
+          abbrName: "ASP-LEGACY-UI",
+          englishName: "ASP Legacy",
+          projRetailType: "X",
+        }),
+      );
+      upsertShareClasses([
+        { projId: "ULTRAF", className: "main", ticker: "ASP-LEGACY-UI", investorType: "retail" },
+      ]);
+      expect(findShareClasses({}).items).toHaveLength(0); // browse hides the UI fund
+      const hit = findShareClasses({ query: "ASP-LEGACY-UI" }).items;
+      expect(hit.map((c) => c.ticker)).toContain("ASP-LEGACY-UI");
+      expect(hit[0].retailTier).toBe("ultra");
+    });
+  });
+
+  it("search finds a fixed-term fund by exact code though browse excludes it", () => {
+    withDb(() => {
+      upsertFund(
+        fund("FIXF", {
+          abbrName: "BFIX6M1",
+          englishName: "B Fixed 6M",
+          isFixedTerm: true,
+          projRetailType: "R",
+        }),
+      );
+      upsertShareClasses([
+        { projId: "FIXF", className: "main", ticker: "BFIX6M1", investorType: "retail" },
+      ]);
+      expect(findShareClasses({}).items).toHaveLength(0); // fixed-term excluded from browse
+      const hit = findShareClasses({ query: "BFIX6M1" }).items;
+      expect(hit.map((c) => c.ticker)).toContain("BFIX6M1");
+      expect(hit[0].isFixedTerm).toBe(true);
+    });
+  });
+
+  it("search ranks a buyable retail hit above a demoted ultra hit on a shared term", () => {
+    withDb(() => {
+      upsertFund(
+        fund("RETAILF", { abbrName: "K-GOLD", englishName: "K Gold Fund", projRetailType: "R" }),
+      );
+      upsertFund(
+        fund("ULTRAF", { abbrName: "K-GOLD-UI", englishName: "K Gold UI", projRetailType: "X" }),
+      );
+      upsertShareClasses([
+        { projId: "RETAILF", className: "main", ticker: "K-GOLD", investorType: "retail" },
+        { projId: "ULTRAF", className: "main", ticker: "K-GOLD-UI", investorType: "retail" },
+      ]);
+      const tickers = findShareClasses({ query: "Gold" }).items.map((c) => c.ticker);
+      const retailIdx = tickers.indexOf("K-GOLD");
+      const ultraIdx = tickers.indexOf("K-GOLD-UI");
+      expect(retailIdx).toBeGreaterThanOrEqual(0); // buyable retail always kept
+      if (ultraIdx >= 0) expect(retailIdx).toBeLessThan(ultraIdx); // buyable above demoted
     });
   });
 

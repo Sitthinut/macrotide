@@ -11,8 +11,9 @@
 // '1' still accepted as a deprecated alias for indexType=index), taxIncentive
 // ('SSF'|'ThaiESG'|'RMF'), region ('foreign'|'domestic'|'mixed'),
 // trackingIndex (normalized index family, e.g. 'S&P 500' — index-style funds
-// tracking it), excludeFixedTerm ('0' to include), includeNonRetail ('1' to
-// show institutional/insurance classes).
+// tracking it), excludeFixedTerm ('0' to include), access ('accredited' |
+// 'ultra' | 'both' — the "Access" facet filters browse to that restricted
+// audience; absent = retail).
 //
 // Returns { items: ShareClassListItem[], total } — `total` is the full eligible
 // count so the client can show "Showing X of N" and stop paging at the end.
@@ -42,7 +43,11 @@ export async function GET(req: Request) {
   const regionParam = url.searchParams.get("region");
   const trackingIndex = url.searchParams.get("trackingIndex") ?? undefined;
   const excludeFixedTermParam = url.searchParams.get("excludeFixedTerm");
-  const includeNonRetail = url.searchParams.get("includeNonRetail") === "1";
+  const accessParam = url.searchParams.get("access");
+  const access =
+    accessParam === "accredited" || accessParam === "ultra" || accessParam === "both"
+      ? accessParam
+      : undefined;
 
   const limit = Math.min(
     limitParam ? Math.max(1, Number.parseInt(limitParam, 10) || 50) : 50,
@@ -76,7 +81,7 @@ export async function GET(req: Request) {
       region,
       trackingIndex,
       excludeFixedTerm,
-      includeNonRetail,
+      access,
     });
     return NextResponse.json(result);
   });

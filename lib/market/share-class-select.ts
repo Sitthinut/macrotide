@@ -22,8 +22,8 @@ export interface RankableClass extends ClassLike {
  *  1. **audience tier** — explicit retail first, then unknown (likely retail —
  *     differs only by distribution/channel), then `restricted` (provident /
  *     private / special-group) and any other non-retail. A provident-only class
- *     never outranks a retail one. (institutional/insurance are hidden upstream,
- *     so they surface here only under the includeNonRetail toggle.)
+ *     never outranks a retail one. (institutional/insurance are hidden from the
+ *     browse list upstream, so they surface here only via search.)
  *  2. **AUM (net_asset) descending** — the genuinely-popular class first. This is
  *     a no-op when AUM is missing (not yet warmed) OR identical across siblings
  *     (i.e. if the SEC reports net_asset per-fund rather than per-class), so the
