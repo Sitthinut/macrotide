@@ -49,30 +49,14 @@ describe("buildMemoryBlock", () => {
 
   it("renders the documented compact markdown format with category headings", () => {
     withFresh(() => {
+      save({ category: "profile", content: "risk tolerance: moderate", source: "user_tool" });
+      save({ category: "profile", content: "timezone: Asia/Bangkok", source: "user_tool" });
       save({
-        userId: null,
-        category: "profile",
-        content: "risk tolerance: moderate",
-        source: "user_tool",
-      });
-      save({
-        userId: null,
-        category: "profile",
-        content: "timezone: Asia/Bangkok",
-        source: "user_tool",
-      });
-      save({
-        userId: null,
         category: "response_style",
         content: "be concise; skip disclaimers",
         source: "user_tool",
       });
-      save({
-        userId: null,
-        category: "fact",
-        content: "wife's name is Sarah",
-        source: "user_tool",
-      });
+      save({ category: "fact", content: "wife's name is Sarah", source: "user_tool" });
 
       const block = buildMemoryBlock(null);
       // Section ordering is alphabetical by category name (fact, finance_context,
@@ -97,24 +81,9 @@ describe("buildMemoryBlock", () => {
 
   it("is byte-identical across calls with the same DB state (cache-discipline guarantee)", () => {
     withFresh(() => {
-      save({
-        userId: null,
-        category: "profile",
-        content: "risk tolerance: moderate",
-        source: "advisor_tool",
-      });
-      save({
-        userId: null,
-        category: "finance_context",
-        content: "401k at Fidelity",
-        source: "advisor_tool",
-      });
-      save({
-        userId: null,
-        category: "finance_context",
-        content: "Thai tax resident",
-        source: "advisor_tool",
-      });
+      save({ category: "profile", content: "risk tolerance: moderate", source: "advisor_tool" });
+      save({ category: "finance_context", content: "401k at Fidelity", source: "advisor_tool" });
+      save({ category: "finance_context", content: "Thai tax resident", source: "advisor_tool" });
 
       const a = buildMemoryBlock(null);
       const b = buildMemoryBlock(null);
@@ -131,13 +100,11 @@ describe("buildMemoryBlock", () => {
       // Insert in non-monotonic content order; ids will still be ascending in
       // insertion order, which is what we rely on for stable render output.
       const r1 = save({
-        userId: null,
         category: "profile",
         content: "z-last alphabetically",
         source: "user_tool",
       });
       const r2 = save({
-        userId: null,
         category: "profile",
         content: "a-first alphabetically",
         source: "user_tool",
@@ -158,10 +125,14 @@ describe("buildMemoryBlock", () => {
           userId: null,
           category: "profile",
           content: "stub",
+          summary: null,
+          body: null,
           source: "user_tool",
           sourceSessionId: null,
           sourceTurnIds: null,
           confidence: null,
+          status: "active",
+          lastConfirmedAt: null,
           validFrom: now,
           validUntil: null,
           createdAt: now,
@@ -174,15 +145,9 @@ describe("buildMemoryBlock", () => {
 
   it("excludes low-confidence auto-extracted rows from the injected block", () => {
     withFresh(() => {
-      save({
-        userId: null,
-        category: "profile",
-        content: "explicit fact",
-        source: "user_tool",
-      });
+      save({ category: "profile", content: "explicit fact", source: "user_tool" });
       // High-confidence extracted → injected.
       save({
-        userId: null,
         category: "fact",
         content: "high-conf extracted",
         source: "extracted",
@@ -190,7 +155,6 @@ describe("buildMemoryBlock", () => {
       });
       // Low-confidence extracted → recall-only, must not appear.
       save({
-        userId: null,
         category: "fact",
         content: "low-conf extracted",
         source: "extracted",

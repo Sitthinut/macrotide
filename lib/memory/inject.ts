@@ -87,9 +87,12 @@ export function buildMemoryBlock(
   userId: string | null,
   opts: BuildMemoryBlockOptions = {},
 ): string {
+  // userId is carried for call-site symmetry; the query layer scopes to the
+  // request user via ownedBy() context (see lib/db/queries/scope.ts).
+  void userId;
   // Low-confidence auto-extracted rows are recall-only — keep them out of the
   // always-on injected block.
-  const rows = (opts.rows ?? listActive(userId)).filter(isInjectable);
+  const rows = (opts.rows ?? listActive()).filter(isInjectable);
   if (rows.length === 0) return "";
 
   // Group by category. listActive already orders by (category, id), but we
