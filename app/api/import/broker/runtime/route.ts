@@ -41,6 +41,7 @@ export async function GET(req: Request) {
       {
         source: connector.sourceTag,
         host: connector.host,
+        displayName: connector.displayName,
         planPath: connector.planPath,
         historyPath: connector.historyPath,
         pendingPath: connector.pendingPath ?? null,

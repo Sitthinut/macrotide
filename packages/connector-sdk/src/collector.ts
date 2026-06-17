@@ -82,7 +82,11 @@ const COLLECTOR_GETPATH = `var GP=function(o,p){if(p==null)return undefined;var 
 const COLLECTOR_TOAST = `var MTMARK='<svg width="30" height="30" viewBox="0 0 22 22" style="display:block;flex-shrink:0"><rect width="22" height="22" rx="6" fill="#0a0a0b"></rect><path d="M 0 11 Q 5.5 5 11 11 T 22 11 L 22 16 A 6 6 0 0 1 16 22 L 6 22 A 6 6 0 0 1 0 16 Z" fill="#0aa694"></path></svg>';
   function card(sticky){var W=document.getElementById("__mt_toasts__");if(!W){W=document.createElement("div");W.id="__mt_toasts__";W.style.cssText="position:fixed;z-index:2147483647;left:50%;top:20px;transform:translateX(-50%);display:flex;flex-direction:column;gap:10px;align-items:center;max-width:92vw;pointer-events:none";document.body.appendChild(W)}var d=document.createElement("div");d.style.cssText="display:flex;gap:11px;align-items:flex-start;width:340px;max-width:92vw;box-sizing:border-box;padding:12px 14px;border-radius:16px;background:#fff;color:#0a0a0b;font:13px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;box-shadow:0 10px 40px rgba(0,0,0,.18);border:1px solid #e6e7ea";if(sticky)d.style.pointerEvents="auto";var ic=document.createElement("div");ic.style.cssText="flex-shrink:0;margin-top:4px";ic.innerHTML=MTMARK;var col=document.createElement("div");col.style.cssText="display:flex;flex-direction:column;gap:3px;min-width:0";var ti=document.createElement("div");ti.textContent="Macrotide Connector";ti.style.cssText="font-weight:700;font-size:13px;letter-spacing:-.01em";col.appendChild(ti);d.appendChild(ic);d.appendChild(col);W.appendChild(d);function close(){d.remove();if(!W.children.length)W.remove()}return{d:d,col:col,close:close}}
   function toast(m,bad){var k=card(false);var bo=document.createElement("div");bo.textContent=m;bo.style.cssText="font-size:12.5px;line-height:1.45;color:"+(bad?"#b00020":"#3a3d43");k.col.appendChild(bo);setTimeout(k.close,6000);return k.d}
-  function busyToast(m){var k=card(true);var bo=document.createElement("div");bo.textContent=m;bo.style.cssText="font-size:12.5px;line-height:1.45;color:#3a3d43";k.col.appendChild(bo);return{remove:k.close}}
+  // A single sticky badge whose ONE line transitions across a sync: collecting →
+  // (retrying) → success (auto-closes) or failure (stays, with Retry/Dismiss). So a
+  // long sync never auto-vanishes, and a failure shows a clear state instead of a
+  // stuck "Collecting…". set()=progress, ok()=success+auto-close, fail()=red+actions.
+  function statusToast(m){var k=card(true);var bo=document.createElement("div");bo.textContent=m;bo.style.cssText="font-size:12.5px;line-height:1.45;color:#3a3d43";k.col.appendChild(bo);var act=null;function clr(){if(act){act.remove();act=null}}return{set:function(msg){clr();bo.style.color="#3a3d43";bo.textContent=msg},ok:function(msg){clr();bo.style.color="#3a3d43";bo.textContent=msg;setTimeout(k.close,5000)},fail:function(msg){clr();bo.style.color="#b00020";bo.textContent=msg;act=document.createElement("div");act.style.cssText="display:flex;gap:8px;margin-top:9px;align-items:center";var r=document.createElement("button");r.type="button";r.textContent="Retry";r.style.cssText="border:0;border-radius:6px;background:#0a0a0b;color:#f8f8f9;font:500 12.5px system-ui;padding:7px 12px;cursor:pointer";r.onclick=function(){try{location.reload()}catch(e){}};var x=document.createElement("button");x.type="button";x.textContent="Dismiss";x.style.cssText="border:0;border-radius:9px;background:transparent;color:#5f6368;font:600 12px system-ui;padding:7px 11px;cursor:pointer";x.onclick=k.close;act.appendChild(r);act.appendChild(x);k.col.appendChild(act)},remove:k.close}}
   function nudge(url){var k=card(true);var bo=document.createElement("div");bo.textContent="A newer version is available. Update it here, or from Settings → Connections.";bo.style.cssText="font-size:12.5px;line-height:1.45;color:#3a3d43";k.col.appendChild(bo);var ac=document.createElement("div");ac.style.cssText="display:flex;gap:8px;margin-top:9px;align-items:center";var u=document.createElement("button");u.type="button";u.textContent="Update";u.style.cssText="border:0;border-radius:6px;background:#0a0a0b;color:#f8f8f9;font:500 12.5px system-ui;padding:7px 12px;cursor:pointer";u.onclick=function(){try{window.open(url,"_blank")}catch(e){}};var x=document.createElement("button");x.type="button";x.textContent="Dismiss";x.style.cssText="border:0;border-radius:9px;background:transparent;color:#5f6368;font:600 12px system-ui;padding:7px 11px;cursor:pointer";x.onclick=k.close;ac.appendChild(u);ac.appendChild(x);k.col.appendChild(ac)}`;
 
 // JSON GET via GM_xmlhttpRequest (the manager's privileged request) so the
@@ -119,19 +123,21 @@ const COLLECTOR_CAPTURE = `var CAPH=null,HOOKED=false,CAPATTR="data-mt-caph";
 
 // The gather: list portfolios, paginate every history + pending list, build the
 // export object. Every broker-specific field path is read from SH (the injected
-// shape) via GP. Assumes H/PLAN/HIST/PEND/SRC/SH, GP(), toast() and J() in scope.
-const COLLECTOR_GATHER = `if(location.hostname!==H){toast("Open "+H+" (your orders page), then run this again.",true);return "host"}
+// shape) via GP. Assumes H/PLAN/HIST/PEND/SRC/SH, GP(), J() and the caller's `st`
+// (the status badge) in scope. A thrown error (e.g. a broker 5xx) propagates to
+// attempt()'s catch → "transient", leaving `st` for drive() to retry/fail.
+const COLLECTOR_GATHER = `if(location.hostname!==H){st.fail("Log in to "+DN+" and open your portfolio or orders page to sync.");return "host"}
   var TR=SH.transport||{},APIBASE=TR.apiBase||"",CRED=TR.credentials||"include",CAPN=TR.captureHeaders||[];
   // GM_xmlhttpRequest needs ABSOLUTE urls; a same-origin (cookie) broker has no
   // apiBase, so anchor its relative paths to the page origin.
   var BASE=APIBASE||location.origin;
-  if(CAPN.length){ensureHook(APIBASE,CAPN);var waited=0;while(!readCap()&&waited<15000){await sleep(250);waited+=250}CAPH=readCap();if(!CAPH){toast("Open your portfolio or history page on "+H+", then it'll sync.",true);return "noauth"}}
-  var busy=busyToast("Collecting your history…");
+  if(CAPN.length){ensureHook(APIBASE,CAPN);var waited=0;while(!readCap()&&waited<15000){await sleep(250);waited+=250}CAPH=readCap();if(!CAPH){st.fail("Log in to "+DN+" and open your portfolio or orders page to sync.");return "noauth"}}
+  st.set("Collecting your history…");
   var PL=SH.plan,HS=SH.history,PD=SH.pending;
   var plan=await J(BASE+PLAN,CAPH,CRED);
   var LABEL="";for(var li=0;li<PL.labelPaths.length;li++){var lv=GP(plan,PL.labelPaths[li]);if(lv){LABEL=""+lv;break}}
   var accts=(GP(plan,PL.accountsPath)||[]).map(function(a){return{account_code:GP(a,PL.accountCode),name:GP(a,PL.accountName),type:GP(a,PL.accountType)}});
-  if(!accts.length){busy.remove();toast("Couldn't find your accounts. Make sure you're logged in to "+H+" and on your portfolio or orders page, then reopen it to sync.",true);return "noauth"}
+  if(!accts.length){st.fail("Log in to "+DN+" and open your portfolio or orders page to sync.");return "noauth"}
   for(var i=0;i<accts.length;i++){
     var a=accts[i],hist=[];
     if(HS.mode==="dateRange"){
@@ -171,18 +177,18 @@ const USERSCRIPT_TEMPLATE = `(function(){
   ${COLLECTOR_CAPTURE}
   function cfg(){return new Promise(function(res,rej){try{GM_xmlhttpRequest({method:"GET",url:O+"/api/import/broker/runtime?host="+encodeURIComponent(location.hostname),headers:{"X-Import-Token":T},onload:function(r){if(r.status>=200&&r.status<300){try{res(JSON.parse(r.responseText))}catch(e){rej(e)}}else rej(new Error("status "+r.status))},onerror:function(){rej(new Error("network"))},ontimeout:function(){rej(new Error("timeout"))}})}catch(e){rej(e)}})}
   function send(s){return new Promise(function(res){try{GM_xmlhttpRequest({method:"POST",url:O+"/api/import/broker/ingest",headers:{"Content-Type":"application/json","X-Import-Token":T},data:s,onload:function(r){res(r.status>=200&&r.status<300)},onerror:function(){res(false)},ontimeout:function(){res(false)}})}catch(e){res(false)}})}
-  // One collection attempt against resolved config C. Returns an outcome:
-  //   "ok" | "noauth" (not logged in) | "host" (wrong page) | "transient" (retry).
-  async function attempt(C){
+  // One collection attempt against resolved config C, driving the status badge st.
+  // Returns: ok | noauth (not logged in) | host (wrong page) | transient (retry).
+  // Terminal states (noauth/host/ok) finalize st here; a transient leaves st
+  // mid-flight for drive() to turn into a retry or a failure.
+  async function attempt(C,st){
     try{
-      var H=C.host,PLAN=C.planPath,HIST=C.historyPath,PEND=C.pendingPath,SRC=C.source,SH=C.shape;
+      var H=C.host,DN=C.displayName||C.host,PLAN=C.planPath,HIST=C.historyPath,PEND=C.pendingPath,SRC=C.source,SH=C.shape;
       ${COLLECTOR_GATHER}
       var ok=await send(JSON.stringify(payload));
-      busy.remove();
-      if(ok){toast("Synced "+n+" orders ✓");return "ok"}
+      if(ok){st.ok(n?("Synced "+n+" orders ✓"):"You're up to date ✓");return "ok"}
       return "transient"
     }catch(e){
-      try{busy&&busy.remove()}catch(_){}
       return "transient"
     }
   }
@@ -192,12 +198,18 @@ const USERSCRIPT_TEMPLATE = `(function(){
     catch(e){try{C=JSON.parse(localStorage.getItem(CFGKEY)||"null")}catch(e2){C=null}}
     if(!C){toast("Open Macrotide once to finish connecting your broker.",true);return}
     if(C.collectorVersion>LV){try{var ng=(localStorage.getItem(NKEY)||"").split("|");if(ng[0]!==(""+C.collectorVersion)||Date.now()-(+ng[1]||0)>NAGMIN){localStorage.setItem(NKEY,C.collectorVersion+"|"+Date.now());nudge(C.installUrl||O)}}catch(e){nudge(C.installUrl||O)}}
+    // One badge for the whole run: it shows "Collecting…", survives retries, and
+    // ends as a clear success or a sticky failure — never a vanished/stuck spinner.
+    var st=statusToast("Collecting your history…");
+    var DN=C.displayName||C.host;
     var BACKOFF=[3000,8000,20000];
     var drive=async function(i){
-      var r=await attempt(C);
+      var r=await attempt(C,st);
       if(r==="ok"){try{localStorage.setItem(SKEY,""+Date.now())}catch(e){}return}
-      if(r==="transient"&&i<BACKOFF.length){var d=Math.round(BACKOFF[i]*(0.8+0.4*Math.random()));setTimeout(function(){drive(i+1)},d);return}
-      if(r==="transient")toast("Couldn't reach Macrotide. Reopen this page to retry.",true)
+      // noauth/host already left a clear failure on the badge.
+      if(r!=="transient")return;
+      if(i<BACKOFF.length){st.set("Couldn't sync. Retrying…");var d=Math.round(BACKOFF[i]*(0.8+0.4*Math.random()));setTimeout(function(){drive(i+1)},d);return}
+      st.fail("Couldn't sync from "+DN+". It may be temporarily unavailable.");
     };
     drive(0);
   }

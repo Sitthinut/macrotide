@@ -616,13 +616,17 @@ describe("buildUserscript (self-updating loader)", () => {
     expect(us).toContain(`// @version      1.0.${COLLECTOR_PROTOCOL_VERSION}`);
   });
 
-  it("shows the 'Collecting…' badge as a sticky toast that stays until the sync ends", () => {
+  it("uses one sticky status badge that ends in success or a failure state", () => {
     const us = buildUserscript(endpoints, "https://macrotide.example", "x");
-    // busyToast has no auto-close timer, so a sync longer than the 6s generic toast
-    // window doesn't make the badge vanish-then-reappear (which reads as a stall and
-    // tempts users to close the tab mid-sync).
-    expect(us).toContain("function busyToast(");
-    expect(us).toContain('busyToast("Collecting your history');
+    // statusToast is sticky (no auto-close) and transitions in place, so a long sync
+    // never vanishes mid-run and a failure shows a clear state instead of a stuck
+    // "Collecting…". It ends as st.ok (auto-close) or st.fail (sticky + Retry).
+    expect(us).toContain("function statusToast(");
+    expect(us).toContain('statusToast("Collecting your history');
+    expect(us).toContain("st.ok(");
+    expect(us).toContain("st.fail(");
+    // The old auto-closing badge and its 6s-vanish behavior are gone.
+    expect(us).not.toContain("busyToast");
   });
 
   it("emits @downloadURL/@updateURL only when update URLs are supplied", () => {
