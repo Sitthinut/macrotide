@@ -17,16 +17,10 @@ import type { BrokerEndpoints, ConnectorShape } from "./types";
 // The loader fetches its broker config (endpoints + shape) from the app at run
 // time, so endpoint/shape changes need no reinstall — but the gather ALGORITHM
 // itself lives in the installed loader. Bump this ONLY when that algorithm changes
-// in a way that needs a reinstall; the runtime endpoint reports the current value
-// and the loader nudges the user to reinstall when its baked version is older.
-// v2: outcome-driven retries — throttle only after a successful sync, and retry
-// transient failures in-page with backoff (so a not-logged-in attempt no longer
-// blocks the post-login sync for 5 minutes).
-// v3: pluggable transport — a cross-origin `apiBase`, header-capture auth (grab
-// the page's own Authorization/api-key headers and replay them), and a dateRange
-// history mode (one bounded request, no cursor). Cookie/same-origin/cursor stays
-// the default, so a v2 manifest behaves identically after the reinstall nudge.
-export const COLLECTOR_PROTOCOL_VERSION = 3;
+// in a way that needs a new script; the runtime endpoint reports the current
+// value, and an older baked version both nudges the user to reinstall and lets a
+// manager auto-update via @updateURL.
+export const COLLECTOR_PROTOCOL_VERSION = 4;
 
 // The collector-side default response shape (the reference broker the defaults
 // were modeled on). The parser owns its own order/value defaults; these are only
@@ -90,25 +84,36 @@ const COLLECTOR_TOAST = `var MTMARK='<svg width="30" height="30" viewBox="0 0 22
   function toast(m,bad){var k=card(false);var bo=document.createElement("div");bo.textContent=m;bo.style.cssText="font-size:12.5px;line-height:1.45;color:"+(bad?"#b00020":"#3a3d43");k.col.appendChild(bo);setTimeout(k.close,6000);return k.d}
   function nudge(url){var k=card(true);var bo=document.createElement("div");bo.textContent="A newer version is available. Update it here, or from Settings → Connections.";bo.style.cssText="font-size:12.5px;line-height:1.45;color:#3a3d43";k.col.appendChild(bo);var ac=document.createElement("div");ac.style.cssText="display:flex;gap:8px;margin-top:9px;align-items:center";var u=document.createElement("button");u.type="button";u.textContent="Update";u.style.cssText="border:0;border-radius:6px;background:#0a0a0b;color:#f8f8f9;font:500 12.5px system-ui;padding:7px 12px;cursor:pointer";u.onclick=function(){try{window.open(url,"_blank")}catch(e){}};var x=document.createElement("button");x.type="button";x.textContent="Dismiss";x.style.cssText="border:0;border-radius:9px;background:transparent;color:#5f6368;font:600 12px system-ui;padding:7px 11px;cursor:pointer";x.onclick=k.close;ac.appendChild(u);ac.appendChild(x);k.col.appendChild(ac)}`;
 
-// JSON fetch. Default: rides the page's cookies (same-origin broker). A connector
-// with header auth passes captured headers + credentials:"omit" per call.
+// JSON GET via GM_xmlhttpRequest (the manager's privileged request) so the
+// broker's cookies are sent reliably even where a content-script fetch wouldn't
+// carry them (Safari/Userscripts isolates the userscript world). Default rides
+// those cookies; a header-auth connector passes captured headers + cred "omit"
+// (anonymous → no cookies). Needs the broker host in @connect.
 const COLLECTOR_FETCH = `var sleep=function(ms){return new Promise(function(r){setTimeout(r,ms)})};
-  var J=function(u,hdrs,cred){return fetch(u,{credentials:cred||"include",headers:Object.assign({"Content-Type":"application/json"},hdrs||{})}).then(function(r){return r.json()})};`;
+  var J=function(u,hdrs,cred){return new Promise(function(res,rej){try{var o={method:"GET",url:u,headers:Object.assign({},hdrs||{}),onload:function(r){if(r.status>=200&&r.status<300){try{res(JSON.parse(r.responseText))}catch(e){rej(e)}}else rej(new Error("status "+r.status))},onerror:function(){rej(new Error("network"))},ontimeout:function(){rej(new Error("timeout"))}};if(cred==="omit")o.anonymous=true;GM_xmlhttpRequest(o)}catch(e){rej(e)}})};`;
 
 // Header-capture (for brokers whose data API uses request-header auth the page
-// holds only in memory). Wraps the PAGE's fetch + XHR (via unsafeWindow, set up at
-// document-start) to record the named request headers off the app's OWN calls to
-// `apiBase`, so the gather can replay them. CAPH accumulates the latest values;
-// ensureHook is idempotent. No-op for cookie brokers (captureHeaders empty).
-const COLLECTOR_CAPTURE = `var CAPH=null,HOOKED=false;
-  function pick(h,names){if(!h)return null;var out={},got=false;for(var i=0;i<names.length;i++){var n=names[i],v=null;if(typeof h.get==="function"){v=h.get(n)}else{for(var k in h){if((""+k).toLowerCase()===n){v=h[k];break}}}if(v!=null){out[n]=v;got=true}}return got?out:null}
-  function mergeCap(c){if(c)CAPH=Object.assign(CAPH||{},c)}
+// holds only in memory). The auth headers live in the page's JS, NOT in any
+// readable cookie/storage, so the gather has to record them off the app's OWN
+// requests. The userscript runs in an isolated world whose `window.fetch` is NOT
+// the page's, and Safari's Userscripts has no `unsafeWindow` to reach across — so
+// instead we inject a `<script>` (page world, CSP-permitting) that wraps the page's
+// REAL fetch/XHR and writes the named headers from `apiBase` calls onto a shared-DOM
+// attribute. The isolated world reads that attribute back (the DOM is shared). This
+// needs no `unsafeWindow`, so it works on every manager incl. Safari/Userscripts.
+// `pageHook` is serialized via toString() and injected — keep it self-contained.
+const COLLECTOR_CAPTURE = `var CAPH=null,HOOKED=false,CAPATTR="data-mt-caph";
+  function readCap(){try{var v=document.documentElement.getAttribute(CAPATTR);if(!v)return null;var o=JSON.parse(v);for(var k in o){return o}return null}catch(e){return null}}
+  function pageHook(AB,NS,AT){
+    function pick(h){if(!h)return null;var o={},g=false;for(var i=0;i<NS.length;i++){var n=NS[i],v=null;if(typeof h.get==="function"){v=h.get(n)}else{for(var k in h){if((""+k).toLowerCase()===n){v=h[k];break}}}if(v!=null){o[n]=v;g=true}}return g?o:null}
+    function stash(c){if(!c)return;var cur={};try{cur=JSON.parse(document.documentElement.getAttribute(AT)||"{}")}catch(e){}for(var k in c)cur[k]=c[k];document.documentElement.setAttribute(AT,JSON.stringify(cur))}
+    try{var of=window.fetch;if(of)window.fetch=function(i,n){try{var u=(typeof i==="string")?i:(i&&i.url);if(u&&(""+u).indexOf(AB)===0){stash(pick(n&&n.headers));if(i&&i.headers)stash(pick(i.headers))}}catch(e){}return of.apply(this,arguments)}}catch(e){}
+    try{var X=window.XMLHttpRequest,op=X&&X.prototype.open,sh=X&&X.prototype.setRequestHeader,sn=X&&X.prototype.send;if(X&&op&&sh&&sn){X.prototype.open=function(m,u){this.__u=u;this.__h={};return op.apply(this,arguments)};X.prototype.setRequestHeader=function(k,v){try{if(this.__h)this.__h[(""+k).toLowerCase()]=v}catch(e){}return sh.apply(this,arguments)};X.prototype.send=function(){try{if(this.__u&&(""+this.__u).indexOf(AB)===0)stash(pick(this.__h))}catch(e){}return sn.apply(this,arguments)}}}catch(e){}
+  }
   function ensureHook(apiBase,names){
     if(HOOKED||!names||!names.length||!apiBase)return;HOOKED=true;
-    var W;try{W=unsafeWindow}catch(e){W=window}if(!W)W=window;
     var lower=names.map(function(s){return(""+s).toLowerCase()});
-    try{var of=W.fetch;if(of)W.fetch=function(input,init){try{var url=(typeof input==="string")?input:(input&&input.url);if(url&&(""+url).indexOf(apiBase)===0){mergeCap(pick(init&&init.headers,lower));if(input&&input.headers)mergeCap(pick(input.headers,lower))}}catch(e){}return of.apply(this,arguments)}}catch(e){}
-    try{var OX=W.XMLHttpRequest,oop=OX&&OX.prototype.open,osr=OX&&OX.prototype.setRequestHeader,os=OX&&OX.prototype.send;if(OX&&oop&&osr&&os){OX.prototype.open=function(m,u){this.__mtu=u;this.__mth={};return oop.apply(this,arguments)};OX.prototype.setRequestHeader=function(k,v){try{if(this.__mth)this.__mth[(""+k).toLowerCase()]=v}catch(e){}return osr.apply(this,arguments)};OX.prototype.send=function(){try{if(this.__mtu&&(""+this.__mtu).indexOf(apiBase)===0)mergeCap(pick(this.__mth,lower))}catch(e){}return os.apply(this,arguments)}}}catch(e){}
+    try{var s=document.createElement("script");s.textContent="("+pageHook.toString()+")("+JSON.stringify(apiBase)+","+JSON.stringify(lower)+","+JSON.stringify(CAPATTR)+");";(document.head||document.documentElement||document).appendChild(s);if(s.parentNode)s.parentNode.removeChild(s)}catch(e){}
   }`;
 
 // The gather: list portfolios, paginate every history + pending list, build the
@@ -116,24 +121,27 @@ const COLLECTOR_CAPTURE = `var CAPH=null,HOOKED=false;
 // shape) via GP. Assumes H/PLAN/HIST/PEND/SRC/SH, GP(), toast() and J() in scope.
 const COLLECTOR_GATHER = `if(location.hostname!==H){toast("Open "+H+" (your orders page), then run this again.",true);return "host"}
   var TR=SH.transport||{},APIBASE=TR.apiBase||"",CRED=TR.credentials||"include",CAPN=TR.captureHeaders||[];
-  if(CAPN.length){ensureHook(APIBASE,CAPN);var waited=0;while(!CAPH&&waited<15000){await sleep(250);waited+=250}if(!CAPH){toast("Open your portfolio or history page on "+H+", then it'll sync.",true);return "noauth"}}
+  // GM_xmlhttpRequest needs ABSOLUTE urls; a same-origin (cookie) broker has no
+  // apiBase, so anchor its relative paths to the page origin.
+  var BASE=APIBASE||location.origin;
+  if(CAPN.length){ensureHook(APIBASE,CAPN);var waited=0;while(!readCap()&&waited<15000){await sleep(250);waited+=250}CAPH=readCap();if(!CAPH){toast("Open your portfolio or history page on "+H+", then it'll sync.",true);return "noauth"}}
   var busy=toast("Collecting your history…");
   var PL=SH.plan,HS=SH.history,PD=SH.pending;
-  var plan=await J(APIBASE+PLAN,CAPH,CRED);
+  var plan=await J(BASE+PLAN,CAPH,CRED);
   var LABEL="";for(var li=0;li<PL.labelPaths.length;li++){var lv=GP(plan,PL.labelPaths[li]);if(lv){LABEL=""+lv;break}}
   var accts=(GP(plan,PL.accountsPath)||[]).map(function(a){return{account_code:GP(a,PL.accountCode),name:GP(a,PL.accountName),type:GP(a,PL.accountType)}});
-  if(!accts.length){busy.remove();toast("Log in to your broker and it'll sync automatically.",true);return "noauth"}
+  if(!accts.length){busy.remove();toast("Couldn't find your accounts. Make sure you're logged in to "+H+" and on your portfolio or orders page, then reopen it to sync.",true);return "noauth"}
   for(var i=0;i<accts.length;i++){
     var a=accts[i],hist=[];
     if(HS.mode==="dateRange"){
       var end=new Date().toISOString();
-      var u=APIBASE+HIST+"?"+HS.accountParam+"="+encodeURIComponent(a.account_code)+"&"+HS.startParam+"="+encodeURIComponent(HS.startValue||"")+"&"+HS.endParam+"="+encodeURIComponent(end)+(HS.extraQuery?("&"+HS.extraQuery):"");
+      var u=BASE+HIST+"?"+HS.accountParam+"="+encodeURIComponent(a.account_code)+"&"+HS.startParam+"="+encodeURIComponent(HS.startValue||"")+"&"+HS.endParam+"="+encodeURIComponent(end)+(HS.extraQuery?("&"+HS.extraQuery):"");
       var j=await J(u,CAPH,CRED);hist=GP(j,HS.itemsPath)||[];
     }else{
       var cur=null,g=0;
-      do{var uu=APIBASE+HIST+"?"+HS.accountParam+"="+a.account_code+(cur?("&"+HS.cursorParam+"="+cur):"");var jj=await J(uu,CAPH,CRED);hist=hist.concat(GP(jj,HS.itemsPath)||[]);cur=GP(jj,HS.hasNextPath)?GP(jj,HS.nextCursorPath):null;g++}while(cur&&g<HS.maxPages);
+      do{var uu=BASE+HIST+"?"+HS.accountParam+"="+a.account_code+(cur?("&"+HS.cursorParam+"="+cur):"");var jj=await J(uu,CAPH,CRED);hist=hist.concat(GP(jj,HS.itemsPath)||[]);cur=GP(jj,HS.hasNextPath)?GP(jj,HS.nextCursorPath):null;g++}while(cur&&g<HS.maxPages);
     }
-    if(PEND){var pj=await J(APIBASE+PEND+"?"+PD.accountParam+"="+a.account_code,CAPH,CRED);a.pending=GP(pj,PD.itemsPath)||[]}else{a.pending=[]}
+    if(PEND){var pj=await J(BASE+PEND+"?"+PD.accountParam+"="+a.account_code,CAPH,CRED);a.pending=GP(pj,PD.itemsPath)||[]}else{a.pending=[]}
     a.history=hist;
   }
   var n=accts.reduce(function(s,a){return s+a.history.length},0);
@@ -246,12 +254,16 @@ export function buildUserscriptHeader(
     // leave as-is if origin isn't a full URL (e.g. empty in tests)
   }
 
-  // @connect = the app origin + every broker's data-API host (deduped). A
-  // header-auth broker reads a cross-origin API and captures the page's headers,
-  // so if ANY connector does, the loader runs at document-start with unsafeWindow.
+  // @connect = the app origin + every broker host + every broker's data-API host
+  // (deduped). The gather reaches the broker over GM_xmlhttpRequest, so the broker's
+  // own host must be connectable too — not just a cross-origin apiBase. A header-auth
+  // broker reads a cross-origin API and captures the page's headers, so if ANY
+  // connector does, the loader runs at document-start to inject the capture hook
+  // before the app's first request.
   const connectHosts = new Set<string>([originHost]);
   let capture = false;
   for (const c of connectors) {
+    connectHosts.add(c.host);
     const transport = c.shape?.transport;
     if (transport?.captureHeaders?.length) capture = true;
     if (transport?.apiBase) {
@@ -272,8 +284,13 @@ export function buildUserscriptHeader(
     ...connectors.map((c) => `// @match        https://${c.host}/*`),
     ...[...connectHosts].map((h) => `// @connect      ${h}`),
     "// @grant        GM_xmlhttpRequest",
-    ...(capture ? ["// @grant        unsafeWindow"] : []),
+    // Capture brokers run at document-start so the page-world header hook is in
+    // place before the app's first authed request (it injects a <script>, no
+    // unsafeWindow — that's what lets capture work on Safari's Userscripts).
     `// @run-at       ${capture ? "document-start" : "document-idle"}`,
+    // Top frame only — never run the gather inside an embedded iframe on the
+    // broker host (ad/widget/OAuth frames), which would sync redundantly.
+    "// @noframes",
     ...(updateUrls
       ? [`// @downloadURL  ${updateUrls.downloadUrl}`, `// @updateURL    ${updateUrls.updateUrl}`]
       : []),

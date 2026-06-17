@@ -155,17 +155,24 @@ headers the page only holds in memory** (common in SPA brokers), cookies can't
 reach it. Set `transport.captureHeaders` to the header names the broker's own
 requests carry. The loader then:
 
-- installs a hook (via `unsafeWindow`, at `document-start`) that records those
-  headers off the **app's own** calls to `apiBase` — nothing is guessed or
-  stored; the value never leaves the browser, and never reaches Macrotide;
+- at `document-start`, injects a `<script>` into the **page world** that wraps the
+  page's real `fetch`/`XHR` and records those headers off the **app's own** calls to
+  `apiBase`, relaying them to the isolated world through a shared-DOM attribute —
+  nothing is guessed or stored; the value never leaves the browser, and never
+  reaches Macrotide;
 - waits (up to ~15s) for the page to make an authed request, then replays the
   captured headers on its own calls with `credentials: "omit"`.
 
-This needs a userscript manager that exposes `unsafeWindow` (Tampermonkey,
-Violentmonkey — the recommended ones do). The collector reaches `apiBase`
-cross-origin via the page's `fetch` (CORS), so the broker's CORS policy must
-already allow the page origin — which it does, since the app makes the same
-calls.
+The page-world injection needs no `unsafeWindow`, so capture works on **every**
+manager including **Safari's Userscripts** (which has no `unsafeWindow`). Its one
+requirement is that the broker page's CSP allow an inline `<script>` (`script-src`
+with `'unsafe-inline'` or a usable nonce) — true for the brokers we support; a
+strict-CSP broker can't be captured on a manager without `unsafeWindow`. The gather
+itself reaches the broker (and `apiBase`) over `GM_xmlhttpRequest`, the manager's
+privileged request — so it is **not** subject to CORS and sends the broker's
+cookies even where a content-script `fetch` wouldn't (Safari isolates the
+userscript world). Every broker host and `apiBase` host is listed in `@connect` so
+the manager permits those calls.
 
 ### Date-range history
 

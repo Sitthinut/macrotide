@@ -541,6 +541,8 @@ describe("buildUserscript (self-updating loader)", () => {
     expect(us).toContain("// @match        https://orders.example.com/*");
     expect(us).toContain("// @connect      macrotide.example");
     expect(us).toContain("// @grant        GM_xmlhttpRequest");
+    // Top frame only — the gather must not fire inside broker iframes.
+    expect(us).toContain("// @noframes");
   });
 
   it("bakes in only origin + token + loader version, no placeholders left", () => {
@@ -567,12 +569,24 @@ describe("buildUserscript (self-updating loader)", () => {
     expect(us).not.toContain("agent_account_id");
   });
 
-  it("a cookie broker runs at document-idle with no unsafeWindow grant", () => {
+  it("a cookie broker runs at document-idle", () => {
     const us = buildUserscript(endpoints, "https://macrotide.example", "x");
     expect(us).toContain("// @run-at       document-idle");
-    // The capture helper (which references unsafeWindow) ships in every loader,
-    // but the GRANT — what actually exposes it — is only for capture brokers.
-    expect(us).not.toContain("// @grant        unsafeWindow");
+    // unsafeWindow is gone entirely — capture uses a DOM-injected page-world hook
+    // instead, so the script installs on Safari's Userscripts (which lacks it).
+    expect(us).not.toContain("unsafeWindow");
+  });
+
+  it("@connects the broker host (the gather reaches it over GM_xmlhttpRequest)", () => {
+    const us = buildUserscript(endpoints, "https://macrotide.example", "x");
+    // Cookie brokers have no apiBase, so the broker host itself must be in
+    // @connect for the manager to allow the GM_xmlhttpRequest gather calls.
+    expect(us).toContain("// @connect      orders.example.com");
+    // The broker gather no longer uses the page's fetch.
+    expect(us).not.toContain("fetch(u,{credentials");
+    // GM_xmlhttpRequest needs absolute URLs; a same-origin broker anchors to the
+    // page origin (a relative "/api/plan" would otherwise break the gather).
+    expect(us).toContain("location.origin");
   });
 
   it("resolves its connector by the page hostname at run time", () => {
@@ -581,14 +595,18 @@ describe("buildUserscript (self-updating loader)", () => {
     expect(us).toContain("location.hostname");
   });
 
-  it("a header-capture broker runs at document-start, grants unsafeWindow, and @connects the API host", () => {
+  it("a header-capture broker runs at document-start, captures via a DOM page-world hook (no unsafeWindow), and @connects the API host", () => {
     const us = buildUserscript(
       { ...endpoints, id: "examplebroker", shape: NESTED_SHAPE },
       "https://macrotide.example",
       "x",
     );
     expect(us).toContain("// @run-at       document-start");
-    expect(us).toContain("// @grant        unsafeWindow");
+    // Capture works without unsafeWindow — a <script> injected into the page world
+    // hooks fetch/XHR and relays headers through a shared-DOM attribute.
+    expect(us).not.toContain("unsafeWindow");
+    expect(us).toContain("data-mt-caph");
+    expect(us).toContain('createElement("script")');
     expect(us).toContain("// @connect      api.example-broker.com");
     expect(us).not.toMatch(/__[A-Z_]+__/);
   });
@@ -648,8 +666,8 @@ describe("buildUserscript (self-updating loader)", () => {
     // @connect unions the app origin + the header broker's API host.
     expect(us).toContain("// @connect      macrotide.example");
     expect(us).toContain("// @connect      api.example-broker.com");
-    // Capture needed by ANY connector → document-start + unsafeWindow for all.
+    // Capture needed by ANY connector → document-start for all (no unsafeWindow).
     expect(us).toContain("// @run-at       document-start");
-    expect(us).toContain("// @grant        unsafeWindow");
+    expect(us).not.toContain("unsafeWindow");
   });
 });
