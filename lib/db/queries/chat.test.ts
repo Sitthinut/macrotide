@@ -134,10 +134,13 @@ describe("closeStaleSessions backstop", () => {
           summary: "",
           saved: Array.from({ length: savedPerThread }, (_, i) => ({
             id: i,
+            op: "add" as const,
+            targetId: null,
             category: "fact" as const,
             content: "x",
             confidence: 0.9,
             injected: true,
+            applied: "added" as const,
           })),
           provider: "stub",
         },

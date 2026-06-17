@@ -7,13 +7,18 @@ import { freshMarketDb } from "@/tests/db-helpers";
 import { runWithDbContext } from "../context";
 import * as schema from "../schema";
 import {
+  confirm,
+  createLink,
+  decayExtracted,
   forget,
   listActive,
+  listLinks,
   listRecentlyForgotten,
   recall,
   restore,
   save,
   update,
+  updateFromExtraction,
 } from "./preferences";
 
 function freshDb() {
@@ -246,6 +251,102 @@ describe("cross-user isolation", () => {
     });
     as(null, () => {
       expect(listActive().map((r) => r.content)).toEqual(["legacy owner note"]);
+    });
+  });
+});
+
+describe("pending capture + confirm", () => {
+  it("confirm activates a pending row and stamps last_confirmed_at", () => {
+    withFresh(() => {
+      const r = save({
+        category: "finance_context",
+        content: "no crypto",
+        source: "advisor_tool",
+        status: "pending",
+      });
+      expect(r.status).toBe("pending");
+      expect(r.lastConfirmedAt).toBeNull();
+      const result = confirm(String(r.id));
+      expect(result.kind).toBe("match");
+      expect(result.row?.status).toBe("active");
+      expect(result.row?.lastConfirmedAt).toBeTruthy();
+    });
+  });
+});
+
+describe("updateFromExtraction trust-tier guard", () => {
+  it("supersedes an extracted row but refuses to override an explicit one", () => {
+    withFresh(() => {
+      const extracted = save({
+        category: "profile",
+        content: "risk tolerance: moderate",
+        source: "extracted",
+        confidence: 0.8,
+      });
+      const ok = updateFromExtraction(extracted.id, "risk tolerance: aggressive", 0.85);
+      expect(ok.ok).toBe(true);
+      expect(listActive().map((r) => r.content)).toEqual(["risk tolerance: aggressive"]);
+
+      const explicit = save({
+        category: "finance_context",
+        content: "funds only, no individual stocks",
+        source: "user_tool",
+      });
+      const rejected = updateFromExtraction(explicit.id, "individual stocks are fine now", 0.9);
+      expect(rejected.ok).toBe(false);
+      if (!rejected.ok) expect(rejected.rejected).toBe("not_extracted");
+      // The explicit note is untouched.
+      expect(listActive().some((r) => r.content === "funds only, no individual stocks")).toBe(true);
+    });
+  });
+});
+
+describe("memory links", () => {
+  it("lists live links, re-points on supersede, and drops a forgotten target", () => {
+    withFresh(() => {
+      const a = save({ category: "fact", content: "A", source: "user_tool" });
+      const b = save({ category: "fact", content: "B", source: "user_tool" });
+      createLink(a.id, b.id, "relates_to");
+      expect(listLinks(a.id).map((l) => l.preference.content)).toEqual(["B"]);
+
+      // Superseding A re-points the link to the new row.
+      const upd = update(String(a.id), "A2");
+      const newAId = upd.newRow?.id as number;
+      expect(listLinks(newAId).map((l) => l.preference.content)).toEqual(["B"]);
+
+      // Forgetting B (the target) drops it from the validity-aware read.
+      forget(String(b.id));
+      expect(listLinks(newAId)).toEqual([]);
+    });
+  });
+});
+
+describe("decayExtracted", () => {
+  it("decays unconfirmed extracted rows but leaves explicit and confirmed ones", () => {
+    withFresh(() => {
+      const extracted = save({
+        category: "fact",
+        content: "likes gold",
+        source: "extracted",
+        confidence: 0.9,
+      });
+      const explicit = save({ category: "fact", content: "explicit", source: "user_tool" });
+      const confirmed = save({
+        category: "fact",
+        content: "confirmed extracted",
+        source: "extracted",
+        confidence: 0.9,
+      });
+      confirm(String(confirmed.id));
+
+      const n = decayExtracted({ step: 0.1, minAgeDays: 0 });
+      expect(n).toBe(1);
+      const byContent = (c: string) => listActive().find((r) => r.content === c);
+      expect(byContent("likes gold")?.confidence).toBeCloseTo(0.8);
+      expect(byContent("explicit")?.confidence).toBeNull();
+      expect(byContent("confirmed extracted")?.confidence).toBe(0.9);
+      void extracted;
+      void explicit;
     });
   });
 });
