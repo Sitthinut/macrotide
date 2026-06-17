@@ -77,12 +77,11 @@ restate the issue list, colors, or IDs here; they'd go stale. The conventions:
   detail (prod paths, infra topology, deploy/secrets mechanics, host hardening),
   which is managed separately. A host-only finding gets no issue — and an
   existing one that turns out host-only is removed, not described.
-- **Priority** = tier: **P0** now (launch, small/high-trust, or visible fixes),
-  **P1** next, **P2** later. Stay within P0 unless told otherwise.
+- **Priority** = P0–P3 — **always** set it on a new issue: **P0** urgent /
+  blocking, **P1** next iteration, **P2** active backlog, **P3** deferred backlog.
 - **Status** = `Backlog → Todo → In Progress → Done`. File new planned work in
   **Backlog**.
-- **Labels** = one `area:*` + one type (`bug` / `enhancement` / `documentation`);
-  `parked` = revisit only on a real need.
+- **Labels** = one `area:*` + one type (`bug` / `enhancement` / `documentation`).
 - **Lifecycle:** on "what's next", lead with Todo (by Priority) but scan all of
   Backlog first — surface anything relevant to the task or higher-impact than the
   Todo items. Move to In Progress on start. Move to Done when merged to `origin/main`, then
