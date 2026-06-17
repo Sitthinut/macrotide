@@ -213,19 +213,10 @@ export interface ReadingItem {
   savedDate: string;
 }
 
-export interface FeedbackItem {
-  id: string;
-  topic: string;
-  rating: "up" | "down";
-  note: string;
-  date: string;
-}
-
 export interface UserJournal {
   notes: Note[];
   plan: JournalPlan;
   reading: ReadingItem[];
-  feedback: FeedbackItem[];
   savedModels: string[];
 }
 

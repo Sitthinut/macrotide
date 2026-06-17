@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatThreadList } from "@/components/ChatThreadList";
-import { FeedbackRow } from "@/components/FeedbackRow";
 import { Icon } from "@/components/Icon";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
+import { SaveNoteButton } from "@/components/SaveNoteButton";
 import type { EntryContext } from "@/lib/advisor/entry-context";
 import { MAX_CHAT_ATTACHMENTS, withImageMarker } from "@/lib/advisor/image-turn";
 import {
@@ -190,11 +190,6 @@ function makeId(): string {
 // "openai/gpt-5.5-20260423" → "gpt-5.5", "z-ai/glm-4.6" → "glm-4.6".
 function prettyModel(id: string): string {
   return (id.split("/").pop() ?? id).replace(/-\d{4}-\d{2}-\d{2}$/, "").replace(/-\d{8}$/, "");
-}
-
-interface MsgFeedback {
-  rating?: "up" | "down" | null;
-  saved?: boolean;
 }
 
 // A seed message can be a plain string (shown verbatim as the user turn) or a
@@ -547,7 +542,7 @@ export function ChatScreen({
   // can never expose the badge in a production bundle.
   const { data: adminStatus } = useResource<{ isOwner: boolean }>("/api/admin/status");
   const showModelBadge = (adminStatus?.isOwner ?? false) || process.env.NODE_ENV === "development";
-  const [msgFeedback, setMsgFeedback] = useState<Record<number, MsgFeedback>>({});
+  const [savedMsgs, setSavedMsgs] = useState<Record<number, boolean>>({});
   const [showThreads, setShowThreads] = useState(false);
   // Set when the server signals it crossed ~80% of the model context budget
   // (header `x-context-summarized`). Earlier turns are summarized in the
@@ -687,7 +682,7 @@ export function ChatScreen({
                 } as Message;
               }),
         );
-        setMsgFeedback({});
+        setSavedMsgs({});
         setContextNotice(false);
         return true;
       } catch {
@@ -725,7 +720,7 @@ export function ChatScreen({
     }
     setThreadId(null);
     setMessages(initial);
-    setMsgFeedback({});
+    setSavedMsgs({});
     setContextNotice(false);
     setAttachments([]);
     setAttachNotice(null);
@@ -1536,22 +1531,30 @@ export function ChatScreen({
                   !m.holdings?.length &&
                   !m.holdingsImport &&
                   !m.transactionsImport && (
-                    <FeedbackRow
-                      label="HELPFUL?"
-                      value={msgFeedback[i]?.rating ?? null}
-                      saved={msgFeedback[i]?.saved}
-                      onChange={(rating) =>
-                        setMsgFeedback({
-                          ...msgFeedback,
-                          [i]: { ...msgFeedback[i], rating },
-                        })
-                      }
-                      onSave={() =>
-                        setMsgFeedback({
-                          ...msgFeedback,
-                          [i]: { ...msgFeedback[i], saved: !msgFeedback[i]?.saved },
-                        })
-                      }
+                    <SaveNoteButton
+                      saved={savedMsgs[i] ?? false}
+                      onSave={() => {
+                        if (savedMsgs[i]) return;
+                        void (async () => {
+                          try {
+                            const res = await fetch("/api/journal", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                kind: "note",
+                                body: m.text,
+                                source: "user_tool",
+                              }),
+                            });
+                            if (res.ok) {
+                              setSavedMsgs((s) => ({ ...s, [i]: true }));
+                              void invalidate("/api/journal");
+                            }
+                          } catch {
+                            // best-effort; leave unsaved on failure
+                          }
+                        })();
+                      }}
                     />
                   )}
               </div>

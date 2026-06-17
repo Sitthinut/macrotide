@@ -16,10 +16,10 @@ import {
   parsePlan,
   parseQuestions,
 } from "@/lib/portfolio/plan-parser";
-import type { FeedbackItem, ModelPortfolio, Note, ReadingItem } from "@/lib/static/types";
+import type { ModelPortfolio, Note, ReadingItem } from "@/lib/static/types";
 import { onActivate } from "@/lib/ui-events";
 
-type Tab = "plan" | "notes" | "models" | "reading" | "feedback";
+type Tab = "plan" | "notes" | "models" | "reading";
 
 export interface JournalScreenProps {
   onOpenChat: () => void;
@@ -62,7 +62,6 @@ export function JournalScreen({
             { id: "notes", label: "Notes" },
             { id: "models", label: "Templates" },
             { id: "reading", label: "Reading" },
-            { id: "feedback", label: "Feedback" },
           ] as { id: Tab; label: string }[]
         ).map((t) => (
           <button key={t.id} data-active={tab === t.id} onClick={() => setTab(t.id)}>
@@ -77,7 +76,6 @@ export function JournalScreen({
         <JournalModels saved={journal?.savedModels ?? []} onOpenModels={onOpenModels} />
       )}
       {tab === "reading" && <JournalReading reading={journal?.reading ?? []} />}
-      {tab === "feedback" && <JournalFeedback feedback={journal?.feedback ?? []} />}
     </div>
   );
 }
@@ -895,132 +893,6 @@ function JournalReading({ reading }: { reading: ReadingItem[] }) {
             <div className="a-blurb">{r.summary}</div>
             <div style={{ marginTop: 8, fontSize: 11, color: "var(--muted)" }}>
               Saved {r.savedDate}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function JournalFeedback({ feedback }: { feedback: FeedbackItem[] }) {
-  if (feedback.length === 0) {
-    return (
-      <EmptyTab
-        title="No feedback yet"
-        body="Once you start chatting with the advisor, your 👍 / 👎 reactions land here so the advisor can avoid repeating advice you didn't like."
-      />
-    );
-  }
-  const ups = feedback.filter((f) => f.rating === "up").length;
-  const downs = feedback.filter((f) => f.rating === "down").length;
-  return (
-    <div>
-      <div className="section" style={{ marginTop: 0 }}>
-        <p
-          style={{
-            fontSize: 12.5,
-            color: "var(--muted)",
-            margin: "0 4px 14px",
-            lineHeight: 1.5,
-          }}
-        >
-          What you&apos;ve agreed and disagreed with. The advisor avoids repeating advice
-          you&apos;ve already rejected.
-        </p>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 8,
-            marginBottom: 14,
-          }}
-        >
-          <div className="card-soft" style={{ padding: 14, textAlign: "center" }}>
-            <div className="num" style={{ fontSize: 22, fontWeight: 500, color: "var(--gain)" }}>
-              {ups}
-            </div>
-            <div
-              style={{
-                fontSize: 11,
-                color: "var(--muted)",
-                fontFamily: "var(--font-mono)",
-                letterSpacing: "0.04em",
-              }}
-            >
-              AGREED
-            </div>
-          </div>
-          <div className="card-soft" style={{ padding: 14, textAlign: "center" }}>
-            <div className="num" style={{ fontSize: 22, fontWeight: 500, color: "var(--loss)" }}>
-              {downs}
-            </div>
-            <div
-              style={{
-                fontSize: 11,
-                color: "var(--muted)",
-                fontFamily: "var(--font-mono)",
-                letterSpacing: "0.04em",
-              }}
-            >
-              DISAGREED
-            </div>
-          </div>
-        </div>
-
-        {feedback.map((f) => (
-          <div key={f.id} className="card" style={{ marginBottom: 6, padding: "12px 14px" }}>
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-              <span
-                style={{
-                  width: 24,
-                  height: 24,
-                  borderRadius: 6,
-                  background:
-                    f.rating === "up"
-                      ? "var(--accent-soft)"
-                      : "color-mix(in oklab, var(--loss) 14%, transparent)",
-                  color: f.rating === "up" ? "var(--accent-ink)" : "var(--loss)",
-                  display: "grid",
-                  placeItems: "center",
-                  fontSize: 13,
-                  flexShrink: 0,
-                }}
-              >
-                {f.rating === "up" ? "👍" : "👎"}
-              </span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 500,
-                    letterSpacing: "-0.01em",
-                  }}
-                >
-                  {f.topic}
-                </div>
-                {f.note && (
-                  <div
-                    style={{
-                      fontSize: 11.5,
-                      color: "var(--muted)",
-                      marginTop: 2,
-                    }}
-                  >
-                    &quot;{f.note}&quot;
-                  </div>
-                )}
-              </div>
-              <div
-                style={{
-                  fontSize: 10.5,
-                  color: "var(--muted)",
-                  fontFamily: "var(--font-mono)",
-                  flexShrink: 0,
-                }}
-              >
-                {f.date.split(" ")[0]} {f.date.split(" ")[1]}
-              </div>
             </div>
           </div>
         ))}

@@ -475,30 +475,6 @@ export const USER_JOURNAL: UserJournal = {
       savedDate: "2 weeks ago",
     },
   ],
-  feedback: [
-    {
-      id: "f1",
-      topic: "Rebalance to All-Weather",
-      rating: "down",
-      note: "Too conservative for my horizon",
-      date: "18 May 2026",
-    },
-    { id: "f2", topic: "Add monthly DCA to K-WORLDX", rating: "up", note: "", date: "16 May 2026" },
-    {
-      id: "f3",
-      topic: "Reduce KFGBRAND-A exposure",
-      rating: "up",
-      note: "Agree, TER too high",
-      date: "15 May 2026",
-    },
-    {
-      id: "f4",
-      topic: "Bogleheads 3-Fund as target",
-      rating: "up",
-      note: "Simple and proven",
-      date: "12 May 2026",
-    },
-  ],
   savedModels: ["bogle3", "allweather"],
 };
 

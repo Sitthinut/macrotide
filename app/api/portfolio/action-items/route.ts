@@ -8,9 +8,10 @@
 // the finding's current magnitude (savingsPp) so the resurface check has a
 // baseline and the ratchet re-baselines on re-suppression.
 //
-// A "Not for me" also writes a Journal ▸ Feedback entry (kind:"feedback") in the
-// same withDb transaction, so the rejection — with its reason — is reviewable in
-// the Journal and feeds the Advisor's "don't repeat rejected advice" context.
+// A "Not for me" with a preference-expressing reason also captures a PENDING
+// memory candidate (recall-only until the user confirms) in the same withDb
+// transaction, so the Advisor learns the preference instead of writing a dead
+// feedback row. The suppression ratchet (action_item_states) is unchanged.
 
 import { NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
@@ -20,15 +21,15 @@ import {
   listHidden,
   recordActionItem,
 } from "@/lib/db/queries/action-items";
-import { createFeedbackEntry } from "@/lib/db/queries/journal";
-import { isReasonChip } from "@/lib/portfolio/action-item-resurface";
+import { save } from "@/lib/db/queries/preferences";
 
-// Human-readable labels for the reason chips, used in the Journal feedback note.
-const REASON_CHIP_LABELS: Record<string, string> = {
-  too_small: "Too small to matter",
-  tax_switching: "Tax & switching cost",
-  prefer_this_fund: "I prefer this fund",
-  already_considered: "Already considered",
+// Reject reasons that express a DURABLE preference worth remembering — captured
+// as a pending memory candidate. Situational reasons (too_small) and free text
+// are not auto-remembered (the suppression ratchet still hides the item).
+const REASON_PREFERENCE: Record<string, (topic: string) => string> = {
+  prefer_this_fund: (t) => `prefers to keep their current fund over a cheaper alternative (${t})`,
+  already_considered: (t) => `has already considered and declined a cheaper alternative (${t})`,
+  tax_switching: () => "avoids switching funds when it triggers tax or switching costs",
 };
 
 export const runtime = "nodejs";
@@ -81,12 +82,16 @@ export async function POST(req: Request) {
   return withDb(() => {
     const row = recordActionItem({ itemType, itemKey, state, reason, snapshotSavingsPp });
 
-    // A rejection writes a Journal feedback entry (rating "down") in the same
-    // transaction. The note prefers the chip's human label, falling back to the
-    // free text the user typed. A no-reason reject still records the topic.
-    if (state === "not_for_me") {
-      const note = reason ? (isReasonChip(reason) ? REASON_CHIP_LABELS[reason] : reason) : null;
-      createFeedbackEntry({ topic, rating: "down", note, source: "action_item" });
+    // A rejection with a preference-expressing reason captures a pending memory
+    // candidate in the same transaction — routed into memory (for the Advisor to
+    // confirm) instead of a dead feedback row.
+    if (state === "not_for_me" && reason && REASON_PREFERENCE[reason]) {
+      save({
+        category: "finance_context",
+        content: REASON_PREFERENCE[reason](topic),
+        source: "advisor_tool",
+        status: "pending",
+      });
     }
 
     return NextResponse.json(row, { status: 201 });

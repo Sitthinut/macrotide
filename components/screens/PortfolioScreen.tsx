@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { BrandMark } from "@/components/BrandMark";
 import { ModelDonut } from "@/components/charts";
-import { FeedbackRow } from "@/components/FeedbackRow";
 import { FundDetailSheet } from "@/components/FundDetailSheet";
 import { type HoldingFormValues, HoldingSheet } from "@/components/HoldingSheet";
 import { RecentActivityPeek } from "@/components/history/RecentActivityPeek";
@@ -524,7 +523,6 @@ export function PortfolioScreen({
   const [range, setRange] = useState<string>("6M");
   const [filter, setFilter] = useState<AssetClass | "all">("all");
   const [benchmark, setBenchmark] = useState<string>("none");
-  const [feedback, setFeedback] = useState<Record<string, "up" | "down" | null>>({});
   const { hidden: valuesHidden, toggle: togglePrivacy } = usePrivacy();
   // Tapping a holding row opens a read-only detail view (detailHolding); the
   // per-row Edit affordance opens the edit form (holdingSheet). Reading a
@@ -1415,13 +1413,6 @@ export function PortfolioScreen({
                 Plan the rebalance <Icon name="arrowRight" size={12} />
               </button>
             </div>
-
-            <FeedbackRow
-              topic="rebalance"
-              label="HELPFUL?"
-              value={feedback.rebalance ?? null}
-              onChange={(rating) => setFeedback({ ...feedback, rebalance: rating })}
-            />
           </div>
         </div>
       )}
