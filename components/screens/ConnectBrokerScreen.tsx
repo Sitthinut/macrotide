@@ -75,7 +75,8 @@ export function ConnectBrokerScreen({ onBack, onOrganize }: ConnectBrokerScreenP
   const [recheck, setRecheck] = useState(0);
 
   useEffect(() => {
-    if (typeof navigator !== "undefined") setOs(detectOS(navigator.userAgent));
+    if (typeof navigator !== "undefined")
+      setOs(detectOS(navigator.userAgent, navigator.maxTouchPoints));
   }, []);
 
   // List the configured brokers (for the "open your broker" links). Empty → not

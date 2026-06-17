@@ -12,10 +12,18 @@ export interface UserscriptApp {
   note: string;
 }
 
-/** Coarse OS bucket from a UA string. Defaults to desktop. */
-export function detectOS(ua: string): DeviceOS {
+/**
+ * Coarse OS bucket from a UA string (+ optional touch-point count). Defaults to
+ * desktop. iPadOS — and an iPhone set to "Request Desktop Website" — report a plain
+ * desktop Mac UA with no `iPad`/`Mobile` token, so a Mac UA that also reports touch
+ * points (a real Mac has 0; iPad/iPhone report 5) is treated as iOS. Pass
+ * `navigator.maxTouchPoints` for that; the UA-only path still catches devices that
+ * do carry a mobile token.
+ */
+export function detectOS(ua: string, maxTouchPoints = 0): DeviceOS {
   const s = ua.toLowerCase();
-  if (/iphone|ipad|ipod/.test(s) || (/macintosh/.test(s) && /mobile/.test(s))) return "ios";
+  const macWithTouch = /macintosh/.test(s) && (maxTouchPoints > 1 || /mobile/.test(s));
+  if (/iphone|ipad|ipod/.test(s) || macWithTouch) return "ios";
   if (/android/.test(s)) return "android";
   return "desktop";
 }
