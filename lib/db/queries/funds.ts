@@ -13,9 +13,16 @@ import "server-only";
 import { and, eq, getTableColumns, inArray, isNotNull, isNull, not, or, sql } from "drizzle-orm";
 import { indexTypeFromManagementStyle, isIndexStyle } from "../../market/fund-classify";
 import { type FeeType, TER_FEE_TYPE } from "../../market/fund-fees";
+import {
+  type AccessTier,
+  browseTiers,
+  isTierBuyable,
+  type RetailTier,
+  retailTier,
+} from "../../market/retail-tier";
 import { compareClassesForList } from "../../market/share-class-select";
 import { type QuoteSource, quoteCacheKey } from "../../market/sources";
-import { searchFundIds } from "../../search/fund-index";
+import { searchFundIds, searchFundIdsScored } from "../../search/fund-index";
 import { getMarketDb } from "../context";
 import { fundCatalog, fundFees, fundQuotes, fundShareClasses, navHistory } from "../schema";
 import { listShareClassesByProj } from "./share-classes";
@@ -502,6 +509,14 @@ export interface ShareClassListItem {
   taxIncentiveType: string | null;
   /** Per-class TER (falls back to the parent's derived TER). */
   ter: number | null;
+  /**
+   * Investor-eligibility tier (from the parent's SEC `proj_retail_type`):
+   * 'retail' | 'accredited' | 'ultra' | 'provident' | 'institutional'. Drives
+   * the row badge and the buy-list vs search gating.
+   */
+  retailTier: RetailTier;
+  /** True when the parent fund is fixed-term (deprioritized in search). */
+  isFixedTerm: boolean;
   /** Latest cached NAV for this class, if any. */
   nav: number | null;
   navAsOf: string | null;
@@ -512,23 +527,42 @@ export interface ShareClassListItem {
 }
 
 /**
+ * A demoted search hit (non-buyable tier, fixed-term, or institutional class)
+ * survives only if its relevance score clears this fraction of the top hit's
+ * score — i.e. it's a near-exact match, not generic-query noise. Tuned so an
+ * exact code/name finds the fund while a broad query ("gold") doesn't surface
+ * funds the user can't buy. Exact ticker/abbr matches bypass it entirely.
+ */
+const SEARCH_STRONG_FRACTION = 0.5;
+
+/**
  * Screener variant of {@link findFunds} that returns priceable SHARE CLASSES
  * rather than parent funds (decision D2b — NAV/fees/tax are per class). Reuses
  * findFunds for parent matching/ordering (relevance or cheapest-TER), then
- * expands each parent to its classes and applies class-level filters: the tax
- * wrapper is matched per class, and institutional/insurance classes are hidden
- * unless `includeNonRetail` is set (individuals can't subscribe to them).
+ * expands each parent to its classes and applies class-level filters.
+ *
+ * The browse list and search diverge by intent (each fund's investor-eligibility
+ * tier comes from {@link retailTier}):
+ *   • BROWSE (no query) filters to exactly the audience the `access` facet
+ *     selects ({@link browseTiers}) — default = the retail buy list; "accredited"
+ *     / "ultra" / "both" show only those restricted tiers. Institutional/insurance
+ *     CLASSES are hidden. Fixed-term funds stay excluded (`excludeFixedTerm`
+ *     default).
+ *   • SEARCH (query) finds ANY active fund — a user may hold a fixed-term,
+ *     accredited, or provident fund — but DEPRIORITIZES the non-buyable ones:
+ *     they surface only on a strong/exact match (so a generic query isn't
+ *     polluted with funds the user can't buy), and rank below buyable hits.
  *
  * findFunds is left untouched — the advisor `find_funds` tool still gets parents.
  */
-export function findShareClasses(filter: FindFundsFilter & { includeNonRetail?: boolean } = {}): {
+export function findShareClasses(filter: FindFundsFilter & { access?: AccessTier } = {}): {
   items: ShareClassListItem[];
   total: number;
   /** Breakdown over the FULL eligible set (not the returned window). */
   withTer: number;
   indexCount: number;
 } {
-  const { limit = 50, taxIncentive, includeNonRetail = false, ...rest } = filter;
+  const { limit = 50, taxIncentive, access, ...rest } = filter;
   const hasQuery = !!filter.query?.trim();
   // Expand EVERY eligible parent into its classes, rank the whole set, then window
   // it with `limit`. The requested `limit` slices the final list only — it must
@@ -541,6 +575,10 @@ export function findShareClasses(filter: FindFundsFilter & { includeNonRetail?: 
   const parents = findFunds({
     ...rest,
     taxIncentive: undefined,
+    // Search finds any ACTIVE fund the user might hold, so don't drop fixed-term
+    // parents up front — they're deprioritized below instead. Browse keeps the
+    // caller's excludeFixedTerm (default-on: a buy list, not a holdings search).
+    excludeFixedTerm: hasQuery ? false : rest.excludeFixedTerm,
     limit: hasQuery ? Math.max(limit * 4, 200) : Number.MAX_SAFE_INTEGER,
   });
 
@@ -551,24 +589,21 @@ export function findShareClasses(filter: FindFundsFilter & { includeNonRetail?: 
   const out: ShareClassListItem[] = [];
   const parentOrder = new Map<string, number>();
   let order = 0;
+  // Browse filters to exactly the chosen audience (exclusive, like every facet);
+  // search keeps every tier and deprioritizes the non-buyable ones below.
+  const shownTiers = browseTiers(access);
   for (const p of parents) {
-    // Fund-level retail gate: the SEC marks accredited / institutional-only
-    // private funds with proj_retail_type != 'R' (their class detail describes
-    // hedging, not audience, so the per-class filter can't catch them). Hide the
-    // whole fund. NULL = unknown (pre-crawl) → keep, so this is a safe no-op until
-    // the catalog is re-crawled.
-    if (!includeNonRetail && p.projRetailType && p.projRetailType !== "R") continue;
+    const tier = retailTier(p.projRetailType);
+    if (!hasQuery && !shownTiers.has(tier)) continue;
     const classes = listShareClassesByProj(p.projId).filter((c) => {
-      // Hide only the classes individuals genuinely can't buy directly —
+      if (taxIncentive && c.taxIncentiveType !== taxIncentive) return false;
+      // Browse hides classes an individual genuinely can't buy directly —
       // institutional and insurance (unit-linked). `restricted` (provident /
       // private / special-group) is KEPT and down-ranked by the comparator
-      // (it's investable in principle); null (unknown) is kept too.
-      if (
-        !includeNonRetail &&
-        (c.investorType === "institutional" || c.investorType === "insurance")
-      )
+      // (it's investable in principle); null (unknown) is kept too. Search keeps
+      // even institutional/insurance classes (demoted) so an exact code finds them.
+      if (!hasQuery && (c.investorType === "institutional" || c.investorType === "insurance"))
         return false;
-      if (taxIncentive && c.taxIncentiveType !== taxIncentive) return false;
       return true;
     });
     if (classes.length === 0) continue;
@@ -592,6 +627,8 @@ export function findShareClasses(filter: FindFundsFilter & { includeNonRetail?: 
         investorType: c.investorType,
         taxIncentiveType: c.taxIncentiveType,
         ter: c.currentTer ?? p.ter ?? null,
+        retailTier: tier,
+        isFixedTerm: !!p.isFixedTerm,
         nav: null,
         navAsOf: null,
         y1Pct: null,
@@ -600,11 +637,7 @@ export function findShareClasses(filter: FindFundsFilter & { includeNonRetail?: 
     }
   }
 
-  // Counts over the full eligible set (not the returned window).
-  const withTer = out.filter((o) => o.ter != null).length;
-  const indexCount = out.filter((o) => o.indexType === "index").length;
-
-  if (out.length === 0) return { items: out, total: 0, withTer: 0, indexCount: 0 };
+  if (out.length === 0) return { items: [], total: 0, withTer: 0, indexCount: 0 };
 
   // ── Search (query) ──────────────────────────────────────────────────────────
   // Relevance first, so a great name match isn't buried by a cheaper unrelated
@@ -614,7 +647,39 @@ export function findShareClasses(filter: FindFundsFilter & { includeNonRetail?: 
   // set, so attaching it all is cheap (unlike browse, which spans the catalog).
   if (hasQuery) {
     attachQuotesAndAum(out);
-    out.sort((a, b) => {
+    const q = filter.query?.trim().toLowerCase() ?? "";
+
+    // A row is "demoted" when it wouldn't show in the buy list at this access
+    // level (restricted tier, or an institutional/insurance class) or it's
+    // fixed-term. Demoted rows are kept only on a strong/exact match and always
+    // rank below buyable hits.
+    const isDemoted = (o: ShareClassListItem) =>
+      !isTierBuyable(o.retailTier, access) ||
+      o.isFixedTerm ||
+      o.investorType === "institutional" ||
+      o.investorType === "insurance";
+
+    // Relevance scores (per parent fund) gate the demoted rows: keep one only if
+    // it's an exact ticker/abbr match or scores near the top hit.
+    const scored = searchFundIdsScored(filter.query?.trim() ?? "");
+    const topScore = scored[0]?.score ?? 0;
+    const scoreByProj = new Map(scored.map((s) => [s.id, s.score]));
+    const strongMatch = (o: ShareClassListItem) =>
+      o.ticker.toLowerCase() === q ||
+      o.abbrName?.toLowerCase() === q ||
+      (scoreByProj.get(o.projId) ?? 0) >= SEARCH_STRONG_FRACTION * topScore;
+
+    const demotedOf = new Map<ShareClassListItem, boolean>();
+    const eligible = out.filter((o) => {
+      const dem = isDemoted(o);
+      demotedOf.set(o, dem);
+      return dem ? strongMatch(o) : true;
+    });
+
+    eligible.sort((a, b) => {
+      const da = demotedOf.get(a) ? 1 : 0;
+      const dbn = demotedOf.get(b) ? 1 : 0;
+      if (da !== dbn) return da - dbn; // buyable hits above demoted ones
       const pa = parentOrder.get(a.projId) ?? Number.MAX_SAFE_INTEGER;
       const pb = parentOrder.get(b.projId) ?? Number.MAX_SAFE_INTEGER;
       if (pa !== pb) return pa - pb;
@@ -623,12 +688,13 @@ export function findShareClasses(filter: FindFundsFilter & { includeNonRetail?: 
     });
     // The user typed a specific class code (e.g. "SCBGOLDP") → float that exact
     // ticker to the very top, ahead of its siblings and every other family.
-    const q = filter.query?.trim().toLowerCase();
     if (q) {
-      const idx = out.findIndex((x) => x.ticker.toLowerCase() === q);
-      if (idx > 0) out.unshift(out.splice(idx, 1)[0]);
+      const idx = eligible.findIndex((x) => x.ticker.toLowerCase() === q);
+      if (idx > 0) eligible.unshift(eligible.splice(idx, 1)[0]);
     }
-    return { items: out.slice(0, limit), total: out.length, withTer, indexCount };
+    const withTer = eligible.filter((o) => o.ter != null).length;
+    const indexCount = eligible.filter((o) => o.indexType === "index").length;
+    return { items: eligible.slice(0, limit), total: eligible.length, withTer, indexCount };
   }
 
   // ── Browse (no query) ───────────────────────────────────────────────────────
@@ -660,6 +726,9 @@ export function findShareClasses(filter: FindFundsFilter & { includeNonRetail?: 
     if (at !== 0) return at; // retail before restricted
     return a.ticker.localeCompare(b.ticker);
   });
+  // Counts over the full eligible set (not the returned window).
+  const withTer = out.filter((o) => o.ter != null).length;
+  const indexCount = out.filter((o) => o.indexType === "index").length;
   // `total` is the full eligible count; `items` is the requested window — a strict
   // prefix of the full sorted list, so growing `limit` only appends.
   return { items: out.slice(0, limit), total: out.length, withTer, indexCount };

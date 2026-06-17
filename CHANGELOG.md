@@ -15,6 +15,16 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **The Explore screener separates browsing from searching by investor eligibility.**
+  Browsing is now a buy list — retail funds by default, with an **"Access"** facet
+  that filters to accredited or ultra (high-net-worth) investor funds. Searching, by contrast, finds any
+  *active* fund — including accredited/ultra/provident/institutional and
+  fixed-term funds a user might already hold — but deprioritizes the non-buyable
+  ones so they surface only on a strong or exact match, never as noise in a
+  generic query. Each restricted fund now carries an eligibility badge
+  (Accredited / Ultra / Provident / Inst. / Fixed-term). Replaces the old blunt
+  retail gate that hid ~110 individually-buyable accredited/ultra funds.
+
 - **The Advisor reads chat images through a vision tool, keeping the conversation
   fast.** The chat model now stays on every turn and reads an attached screenshot
   by calling an `examine_image` tool (instead of swapping the whole turn onto a

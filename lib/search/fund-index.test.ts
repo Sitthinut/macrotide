@@ -15,7 +15,7 @@ import { upsertFeederMasterMap } from "../db/queries/feeder-enrichment";
 import { type FundInsert, upsertFund } from "../db/queries/funds";
 import { upsertShareClasses } from "../db/queries/share-classes";
 import * as schema from "../db/schema";
-import { expandQuery, searchFundIds } from "./fund-index";
+import { expandQuery, searchFundIds, searchFundIdsScored } from "./fund-index";
 
 function freshDb() {
   const sqlite = new Database(":memory:");
@@ -128,6 +128,33 @@ describe("searchFundIds", () => {
       expect(searchFundIds("anything")).toEqual([]);
       upsertFund(fund("M1"));
       expect(searchFundIds("   ")).toEqual([]);
+    });
+  });
+});
+
+describe("searchFundIdsScored", () => {
+  it("returns hits with descending scores; searchFundIds matches its id order", () => {
+    withDb(() => {
+      upsertFund(fund("EXACT", { abbrName: "K-GOLD", englishName: "K Gold Fund" }));
+      upsertFund(fund("LOOSE", { abbrName: "K-GOLD-RMF", englishName: "K Gold for Retirement" }));
+      upsertFund(fund("OTHER", { abbrName: "K-FIXED", englishName: "K Fixed Income" }));
+
+      const scored = searchFundIdsScored("K-GOLD");
+      expect(scored.length).toBeGreaterThan(0);
+      // descending score order
+      for (let i = 1; i < scored.length; i++) {
+        expect(scored[i - 1].score).toBeGreaterThanOrEqual(scored[i].score);
+      }
+      // wrapper parity: same ids, same order
+      expect(searchFundIds("K-GOLD")).toEqual(scored.map((r) => r.id));
+    });
+  });
+
+  it("returns [] for an empty catalog and blank query", () => {
+    withDb(() => {
+      expect(searchFundIdsScored("anything")).toEqual([]);
+      upsertFund(fund("M1"));
+      expect(searchFundIdsScored("   ")).toEqual([]);
     });
   });
 });

@@ -61,7 +61,7 @@ or rename a route.
 | Route | Methods | Purpose |
 |---|---|---|
 | `/api/funds` | GET | Parent fund catalog, filtered + cheapest-TER first (the advisor `find_funds` view) |
-| `/api/fund-classes` | GET | Priceable **share classes** for the Explore screener (per-class fee / tax / NAV / 1Y return / fund size; searchable by class ticker; `trackingIndex` filters to index-style funds tracking a normalized index family, e.g. `S&P 500`; ranked most-popular-first; hides institutional/insurance by default) |
+| `/api/fund-classes` | GET | Priceable **share classes** for the Explore screener (per-class fee / tax / NAV / 1Y return / fund size; `trackingIndex` filters to index-style funds tracking a normalized index family, e.g. `S&P 500`). **Browse** is a buy list filtered to one audience — default retail; `access` (the "Access" facet: `accredited` \| `ultra` \| `both`) instead shows **only** that restricted tier. **Search** (`query`) finds any *active* fund, including ones an individual can't subscribe to (accredited/ultra/provident/institutional/fixed-term), but deprioritizes them — they surface only on a strong/exact match and rank below buyable hits |
 | `/api/fund-classes/resolve` | GET | Validate a ticker — is it a priceable class, or a parent with multiple classes |
 | `/api/funds/index-families` | GET | The live "Tracks" facet menu — every index family with at least one active index-style tracker, most-tracked first, with tracker counts |
 | `/api/quote-source` | GET | Resolve each `tickers=A,B,C` symbol's price source against the real catalog — the single authority: in the catalog → `thai_mutual_fund`, otherwise → `manual` (custom). No shape guessing. Powers the importer's on-the-fly source badge |
