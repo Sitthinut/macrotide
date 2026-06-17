@@ -199,10 +199,14 @@ the JSON behind `BROKER_CONNECTOR_URL`).
 The one exception is the collector's **gather algorithm** itself (the code in
 `packages/connector-sdk/src/collector.ts`). It lives in the installed loader, so a
 change there is gated by `COLLECTOR_PROTOCOL_VERSION`: bump it when the algorithm
-changes in a way that needs a reinstall, and the loader — seeing the runtime
-endpoint report a newer version than the one it was built with — toasts the user
-to reinstall from **Settings → Connections**. Plain shape/endpoint edits don't
-need a bump.
+changes in a way that needs a new script. The bump drives the served userscript's
+`@version` (`1.0.${COLLECTOR_PROTOCOL_VERSION}`), so a userscript manager that
+honors `@updateURL`/`@downloadURL` **auto-updates** the loader on its next update
+poll — no user action. As a fallback for managers whose auto-update is unreliable
+(e.g. Userscripts on Safari/iOS), the loader also self-detects: seeing the runtime
+endpoint report a newer version than the one it was built with, it toasts the user
+to update from **Settings → Connections**. Plain shape/endpoint edits don't need a
+bump.
 
 ## Where things live
 

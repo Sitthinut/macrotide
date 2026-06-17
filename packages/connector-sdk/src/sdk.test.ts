@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   type BrokerExport,
   buildUserscript,
+  buildUserscriptHeader,
   COLLECTOR_PROTOCOL_VERSION,
   type ConnectorShape,
   looksLikeBrokerExport,
@@ -590,6 +591,45 @@ describe("buildUserscript (self-updating loader)", () => {
     expect(us).toContain("// @grant        unsafeWindow");
     expect(us).toContain("// @connect      api.example-broker.com");
     expect(us).not.toMatch(/__[A-Z_]+__/);
+  });
+
+  it("@version tracks the collector protocol version", () => {
+    const us = buildUserscript(endpoints, "https://macrotide.example", "x");
+    expect(us).toContain(`// @version      1.0.${COLLECTOR_PROTOCOL_VERSION}`);
+  });
+
+  it("emits @downloadURL/@updateURL only when update URLs are supplied", () => {
+    const without = buildUserscript(endpoints, "https://macrotide.example", "x");
+    expect(without).not.toContain("@downloadURL");
+    expect(without).not.toContain("@updateURL");
+
+    const withUrls = buildUserscript(endpoints, "https://macrotide.example", "tok", {
+      downloadUrl: "https://macrotide.example/dl/tok/macrotide-connector.user.js",
+      updateUrl: "https://macrotide.example/dl/tok/macrotide-connector.meta.js",
+    });
+    expect(withUrls).toContain(
+      "// @downloadURL  https://macrotide.example/dl/tok/macrotide-connector.user.js",
+    );
+    expect(withUrls).toContain(
+      "// @updateURL    https://macrotide.example/dl/tok/macrotide-connector.meta.js",
+    );
+  });
+
+  it("buildUserscriptHeader is the metadata block alone, same @version as the full script", () => {
+    const urls = {
+      downloadUrl: "https://macrotide.example/dl/tok/macrotide-connector.user.js",
+      updateUrl: "https://macrotide.example/dl/tok/macrotide-connector.meta.js",
+    };
+    const header = buildUserscriptHeader(endpoints, "https://macrotide.example", urls);
+    expect(header.startsWith("// ==UserScript==")).toBe(true);
+    expect(header.trimEnd().endsWith("// ==/UserScript==")).toBe(true);
+    // Metadata only — no loader body.
+    expect(header).not.toContain("GM_xmlhttpRequest(");
+    expect(header).not.toContain("location.hostname");
+    // Agrees with the full script's version so the manager's update check is sound.
+    const full = buildUserscript(endpoints, "https://macrotide.example", "tok", urls);
+    expect(full).toContain(`// @version      1.0.${COLLECTOR_PROTOCOL_VERSION}`);
+    expect(header).toContain(`// @version      1.0.${COLLECTOR_PROTOCOL_VERSION}`);
   });
 
   it("ONE global script @matches every broker host + unions @connect across connectors", () => {

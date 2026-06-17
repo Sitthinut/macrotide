@@ -24,16 +24,16 @@ export async function GET(req: Request) {
   const connector = await getConnector(connectorId);
   if (!connector) return NextResponse.json({ error: "not_configured" }, { status: 404 });
 
-  const installUrl = brokerInstallUrl(req);
-
   return withDb(() => {
     if (isDemoRequest()) return NextResponse.json({ error: "not_available" }, { status: 404 });
+    // The install URL carries the token in its path, so mint the token first.
+    const token = getOrCreateBrokerImportToken();
     return NextResponse.json({
       id: connector.id,
-      token: getOrCreateBrokerImportToken(),
+      token,
       displayName: connector.displayName,
       accountLabel: getSetting<string>(`broker_login_label:${connector.sourceTag}`) ?? null,
-      installUrl,
+      installUrl: brokerInstallUrl(req, token),
       openUrl: connector.openUrl ?? null,
       loginUrl: connector.loginUrl ?? connector.openUrl ?? null,
     });

@@ -46,7 +46,7 @@ export async function GET(req: Request) {
         pendingPath: connector.pendingPath ?? null,
         openUrl: connector.openUrl ?? null,
         // Where the loader's "Update" button points (the .user.js → manager reinstall).
-        installUrl: brokerInstallUrl(req),
+        installUrl: brokerInstallUrl(req, token),
         // Fully-resolved collector shape (defaults merged) so the loader has no gaps.
         shape: resolveCollectorShape(connector.shape),
         collectorVersion: COLLECTOR_PROTOCOL_VERSION,

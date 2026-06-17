@@ -209,26 +209,35 @@ const USERSCRIPT_TEMPLATE = `(function(){
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",boot);else boot();
 })();`;
 
+// The `@updateURL` (a `.meta.js` — metadata only, for the cheap version check) and
+// `@downloadURL` (the full `.user.js`) a userscript manager re-fetches on its
+// update interval. Both carry the per-user token in their path, so the manager's
+// cookie-less background fetch authenticates (see the app's serving route). Pass
+// them in — the app owns the install-URL shape, the SDK stays framework-free.
+export interface UserscriptUpdateUrls {
+  downloadUrl: string;
+  updateUrl: string;
+}
+
 /**
- * Build the ONE global userscript (the `// ==UserScript==` text a manager
- * installs from a `.user.js` URL). A thin self-updating loader: only the app
- * `macrotideOrigin`, the per-user `token`, and this loader's protocol version are
- * baked in. It `@match`es every configured broker's host and, at run time,
- * resolves which connector applies from the page's hostname (`/runtime?host=`) —
- * so a single install covers all brokers and endpoint/shape changes need no
- * reinstall. Accepts one connector or the full list.
+ * The `// ==UserScript== … // ==/UserScript==` metadata block. Shared by the full
+ * `.user.js` and the `.meta.js` (which is JUST this block, for the manager's
+ * version check), so both always agree on `@version` and the rest.
+ *
+ * `@version` tracks `COLLECTOR_PROTOCOL_VERSION` — the gather ALGORITHM version,
+ * the only thing a reinstall/auto-update must deliver (endpoints + shape resolve
+ * at run time and never need one). Bumping the protocol bumps `@version`, so a
+ * manager that honors `@updateURL` pulls the new script on its own; the loader's
+ * in-page reinstall nudge stays as the fallback for managers that don't.
  */
-export function buildUserscript(
+export function buildUserscriptHeader(
   connectorOrList:
     | (BrokerEndpoints & { id?: string; shape?: ConnectorShape })
     | Array<BrokerEndpoints & { id?: string; shape?: ConnectorShape }>,
   macrotideOrigin: string,
-  token: string,
+  updateUrls?: UserscriptUpdateUrls,
 ): string {
   const connectors = Array.isArray(connectorOrList) ? connectorOrList : [connectorOrList];
-  const body = USERSCRIPT_TEMPLATE.replace("__TOKEN__", JSON.stringify(token))
-    .replace("__ORIGIN__", JSON.stringify(macrotideOrigin))
-    .replace("__LOADER_VERSION__", JSON.stringify(COLLECTOR_PROTOCOL_VERSION));
 
   let originHost = macrotideOrigin;
   try {
@@ -254,19 +263,45 @@ export function buildUserscript(
     }
   }
 
-  const header = [
+  return [
     "// ==UserScript==",
     "// @name         Macrotide Connector",
     "// @namespace    macrotide",
-    "// @version      1.0.0",
+    `// @version      1.0.${COLLECTOR_PROTOCOL_VERSION}`,
     "// @description  Sync your broker order history into Macrotide automatically",
     ...connectors.map((c) => `// @match        https://${c.host}/*`),
     ...[...connectHosts].map((h) => `// @connect      ${h}`),
     "// @grant        GM_xmlhttpRequest",
     ...(capture ? ["// @grant        unsafeWindow"] : []),
     `// @run-at       ${capture ? "document-start" : "document-idle"}`,
+    ...(updateUrls
+      ? [`// @downloadURL  ${updateUrls.downloadUrl}`, `// @updateURL    ${updateUrls.updateUrl}`]
+      : []),
     "// ==/UserScript==",
     "",
   ].join("\n");
-  return header + body;
+}
+
+/**
+ * Build the ONE global userscript (the `// ==UserScript==` text a manager
+ * installs from a `.user.js` URL). A thin self-updating loader: only the app
+ * `macrotideOrigin`, the per-user `token`, and this loader's protocol version are
+ * baked in. It `@match`es every configured broker's host and, at run time,
+ * resolves which connector applies from the page's hostname (`/runtime?host=`) —
+ * so a single install covers all brokers and endpoint/shape changes need no
+ * reinstall. Accepts one connector or the full list. Pass `updateUrls` to emit
+ * `@downloadURL`/`@updateURL` so managers auto-update on a protocol bump.
+ */
+export function buildUserscript(
+  connectorOrList:
+    | (BrokerEndpoints & { id?: string; shape?: ConnectorShape })
+    | Array<BrokerEndpoints & { id?: string; shape?: ConnectorShape }>,
+  macrotideOrigin: string,
+  token: string,
+  updateUrls?: UserscriptUpdateUrls,
+): string {
+  const body = USERSCRIPT_TEMPLATE.replace("__TOKEN__", JSON.stringify(token))
+    .replace("__ORIGIN__", JSON.stringify(macrotideOrigin))
+    .replace("__LOADER_VERSION__", JSON.stringify(COLLECTOR_PROTOCOL_VERSION));
+  return buildUserscriptHeader(connectorOrList, macrotideOrigin, updateUrls) + body;
 }

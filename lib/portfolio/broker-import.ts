@@ -10,9 +10,11 @@ export type {
   BrokerImportStats,
   BrokerOrder,
   ExtractedTxnRow,
+  UserscriptUpdateUrls,
 } from "@macrotide/connector-sdk";
 export {
   buildUserscript,
+  buildUserscriptHeader,
   looksLikeBrokerExport,
   parseBrokerExport,
 } from "@macrotide/connector-sdk";
