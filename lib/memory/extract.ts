@@ -159,7 +159,9 @@ export async function extractSessionPreferences(
   threadId: string,
   opts: ExtractSessionOptions = {},
 ): Promise<ExtractionResult> {
-  const userId = opts.userId ?? null;
+  // Row scoping is by ownedBy() context — set by the close route's withDb or
+  // the backstop job's runWithUserScope; the threaded userId is not re-read.
+  void opts.userId;
   const provider = resolveExtractorProvider();
   const base: ExtractionResult = { threadId, summary: "", saved: [], provider: provider.label };
 
@@ -208,7 +210,6 @@ export async function extractSessionPreferences(
 
   const saved: SavedExtraction[] = facts.map((fact) => {
     const row = save({
-      userId,
       category: fact.category,
       content: fact.content,
       source: "extracted",

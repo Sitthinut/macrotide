@@ -88,7 +88,7 @@ describe("extractSessionPreferences", () => {
       expect(saved.content).toBe("retirement age: 50");
       expect(saved.injected).toBe(true); // 0.9 >= 0.7
 
-      const active = listActive(null);
+      const active = listActive();
       expect(active).toHaveLength(1);
       expect(active[0].source).toBe("extracted");
       expect(active[0].confidence).toBe(0.9);
@@ -109,7 +109,7 @@ describe("extractSessionPreferences", () => {
       expect(result.saved[0].injected).toBe(false); // 0.5 < 0.7
 
       // Saved (recallable) but kept OUT of the always-on injected block.
-      expect(listActive(null)).toHaveLength(1);
+      expect(listActive()).toHaveLength(1);
       expect(buildMemoryBlock(null)).toBe("");
     });
   });
@@ -123,7 +123,7 @@ describe("extractSessionPreferences", () => {
       const result = await extractSessionPreferences(seedThread());
       expect(result.saved).toHaveLength(0);
       expect(result.skipped).toBe("no_facts");
-      expect(listActive(null)).toHaveLength(0);
+      expect(listActive()).toHaveLength(0);
     });
   });
 
@@ -149,7 +149,7 @@ describe("extractSessionPreferences", () => {
       const result = await extractSessionPreferences(seedThread());
       expect(result.skipped).toBe("no_provider");
       expect(result.saved).toHaveLength(0);
-      expect(listActive(null)).toHaveLength(0);
+      expect(listActive()).toHaveLength(0);
     });
   });
 
@@ -166,7 +166,7 @@ describe("extractSessionPreferences", () => {
     await withFresh(async () => {
       const result = await extractSessionPreferences(seedThread());
       expect(result.skipped).toBe("model_error");
-      expect(listActive(null)).toHaveLength(0);
+      expect(listActive()).toHaveLength(0);
     });
   });
 

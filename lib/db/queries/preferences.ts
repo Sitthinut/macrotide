@@ -1,10 +1,14 @@
 // Long-term memory queries. Bitemporal: updates add a new row and
 // supersede; nothing is mutated in place. `valid_until IS NULL` is the
 // active set. See docs/explanation/memory.md for the full design.
+//
+// Row scoping is fail-closed via {@link ownedBy} (reads the request user from
+// context — see lib/db/queries/scope.ts), identical to journal/buckets/chat.
 import "server-only";
 import { and, desc, eq, gt, isNull, like, or, sql } from "drizzle-orm";
 import { getDb } from "../context";
 import { userPreferences } from "../schema";
+import { ownedBy, ownerId } from "./scope";
 
 export type Preference = typeof userPreferences.$inferSelect;
 export type PreferenceCategory = "profile" | "finance_context" | "response_style" | "fact";
@@ -21,15 +25,14 @@ export function isCategory(value: string): value is PreferenceCategory {
   return (CATEGORIES as readonly string[]).includes(value);
 }
 
-function activeFilter(userId: string | null) {
-  // userId NULL in single-owner mode; treat all-NULL as the single owner namespace.
-  const userMatch =
-    userId === null ? isNull(userPreferences.userId) : eq(userPreferences.userId, userId);
-  return and(userMatch, isNull(userPreferences.validUntil));
+// The active set for the current request's user: their own rows (or the
+// single-owner NULL set when no user is in context), not yet superseded.
+function activeScope() {
+  return and(ownedBy(userPreferences.userId), isNull(userPreferences.validUntil));
 }
 
-export function listActive(userId: string | null, category?: PreferenceCategory): Preference[] {
-  const conds = [activeFilter(userId)];
+export function listActive(category?: PreferenceCategory): Preference[] {
+  const conds = [activeScope()];
   if (category) conds.push(eq(userPreferences.category, category));
   return getDb()
     .select()
@@ -47,37 +50,38 @@ export function listActive(userId: string | null, category?: PreferenceCategory)
  * across tokens so recall is generous). Ordered by (category, id) like
  * listActive; empty/blank queries return []. Optionally capped by `limit`.
  */
-export function recall(userId: string | null, query: string, limit = 20): Preference[] {
+export function recall(query: string, limit = 20): Preference[] {
   const tokens = query.toLowerCase().match(/[\p{L}\p{N}]+/gu);
   if (!tokens || tokens.length === 0) return [];
   const tokenMatches = tokens.map((t) => like(userPreferences.content, `%${t}%`));
   const rows = getDb()
     .select()
     .from(userPreferences)
-    .where(and(activeFilter(userId), or(...tokenMatches)))
+    .where(and(activeScope(), or(...tokenMatches)))
     .orderBy(userPreferences.category, userPreferences.id)
     .all();
   return rows.slice(0, limit);
 }
 
-export function listRecentlyForgotten(userId: string | null, days = 30): Preference[] {
+export function listRecentlyForgotten(days = 30): Preference[] {
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-  const userMatch =
-    userId === null ? isNull(userPreferences.userId) : eq(userPreferences.userId, userId);
   return getDb()
     .select()
     .from(userPreferences)
-    .where(and(userMatch, gt(userPreferences.validUntil, cutoff)))
+    .where(and(ownedBy(userPreferences.userId), gt(userPreferences.validUntil, cutoff)))
     .orderBy(desc(userPreferences.validUntil))
     .all();
 }
 
 export function getById(id: number): Preference | undefined {
-  return getDb().select().from(userPreferences).where(eq(userPreferences.id, id)).get();
+  return getDb()
+    .select()
+    .from(userPreferences)
+    .where(and(eq(userPreferences.id, id), ownedBy(userPreferences.userId)))
+    .get();
 }
 
 export interface SaveInput {
-  userId: string | null;
   category: PreferenceCategory;
   content: string;
   source: PreferenceSource;
@@ -91,7 +95,7 @@ export function save(input: SaveInput): Preference {
   return getDb()
     .insert(userPreferences)
     .values({
-      userId: input.userId,
+      userId: ownerId(),
       category: input.category,
       content: input.content,
       source: input.source,
@@ -116,13 +120,13 @@ export interface ResolveResult {
 // Resolve an `id_or_substring` reference against the active set. Tries
 // numeric id first, then case-insensitive substring on content. Exactly
 // one active row must match for `kind: 'match'`.
-export function resolveActive(userId: string | null, idOrSubstring: string): ResolveResult {
+export function resolveActive(idOrSubstring: string): ResolveResult {
   const asInt = Number.parseInt(idOrSubstring, 10);
   if (Number.isFinite(asInt) && String(asInt) === idOrSubstring.trim()) {
     const row = getDb()
       .select()
       .from(userPreferences)
-      .where(and(activeFilter(userId), eq(userPreferences.id, asInt)))
+      .where(and(activeScope(), eq(userPreferences.id, asInt)))
       .get();
     return row ? { kind: "match", row } : { kind: "none" };
   }
@@ -130,7 +134,7 @@ export function resolveActive(userId: string | null, idOrSubstring: string): Res
   const matches = getDb()
     .select()
     .from(userPreferences)
-    .where(and(activeFilter(userId), like(userPreferences.content, pattern)))
+    .where(and(activeScope(), like(userPreferences.content, pattern)))
     .all();
   if (matches.length === 0) return { kind: "none" };
   if (matches.length === 1) return { kind: "match", row: matches[0] };
@@ -138,8 +142,8 @@ export function resolveActive(userId: string | null, idOrSubstring: string): Res
 }
 
 // Forget: soft-delete via valid_until = now. Row stays for audit.
-export function forget(userId: string | null, idOrSubstring: string): ResolveResult {
-  const resolved = resolveActive(userId, idOrSubstring);
+export function forget(idOrSubstring: string): ResolveResult {
+  const resolved = resolveActive(idOrSubstring);
   if (resolved.kind !== "match" || !resolved.row) return resolved;
   const now = new Date().toISOString();
   const updated = getDb()
@@ -160,12 +164,8 @@ export interface UpdateResult {
   candidates?: Preference[];
 }
 
-export function update(
-  userId: string | null,
-  idOrSubstring: string,
-  newContent: string,
-): UpdateResult {
-  const resolved = resolveActive(userId, idOrSubstring);
+export function update(idOrSubstring: string, newContent: string): UpdateResult {
+  const resolved = resolveActive(idOrSubstring);
   if (resolved.kind !== "match" || !resolved.row) {
     return { kind: resolved.kind, candidates: resolved.candidates };
   }
@@ -199,13 +199,20 @@ export function update(
   });
 }
 
-// Restore a recently-forgotten row by clearing valid_until.
+// Restore a recently-forgotten row by clearing valid_until. Scoped to the
+// current user so one account can't restore another's forgotten row.
 export function restore(id: number): Preference | undefined {
   const now = new Date().toISOString();
   return getDb()
     .update(userPreferences)
     .set({ validUntil: null, updatedAt: now })
-    .where(and(eq(userPreferences.id, id), sql`${userPreferences.validUntil} IS NOT NULL`))
+    .where(
+      and(
+        eq(userPreferences.id, id),
+        ownedBy(userPreferences.userId),
+        sql`${userPreferences.validUntil} IS NOT NULL`,
+      ),
+    )
     .returning()
     .get();
 }

@@ -441,17 +441,31 @@ export const userPreferences = sqliteTable(
   "user_preferences",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    userId: text("user_id"), // NULL in single-owner mode; FK after
+    // Owner. NULL pre-backfill / single-owner mode. Scoped via ownedBy().
+    userId: text("user_id").references(() => user.id),
     category: text("category", {
       enum: ["profile", "finance_context", "response_style", "fact"],
     }).notNull(),
     content: text("content").notNull(),
+    // Short index injected into the hot block; the longer `body` is recalled on
+    // demand. NULL for rows predating progressive disclosure → injection falls
+    // back to `content`.
+    summary: text("summary"),
+    body: text("body"),
     source: text("source", { enum: ["user_tool", "advisor_tool", "extracted"] }).notNull(),
     sourceSessionId: text("source_session_id").references(() => chatThreads.id, {
       onDelete: "set null",
     }),
     sourceTurnIds: text("source_turn_ids", { mode: "json" }).$type<number[]>(),
     confidence: real("confidence"), // NULL for explicit; 0..1 for extracted
+    // Capture state: 'active' injects normally; 'pending' is recall-only until
+    // the user confirms it (money-sensitive / contradicting / weak-signal write).
+    status: text("status", { enum: ["active", "pending"] })
+      .notNull()
+      .default("active"),
+    // Bumped only when the user affirms the fact (never on recall/inject) — the
+    // anti-stale reinforcement signal. NULL = never explicitly confirmed.
+    lastConfirmedAt: text("last_confirmed_at"),
     validFrom: text("valid_from").notNull(),
     validUntil: text("valid_until"), // NULL = active
     createdAt: text("created_at").notNull(),
@@ -460,6 +474,35 @@ export const userPreferences = sqliteTable(
   (table) => [
     index("idx_user_pref_active").on(table.userId, table.validUntil),
     index("idx_user_pref_category").on(table.userId, table.category, table.validUntil),
+  ],
+);
+
+// Typed links between memory rows (e.g. a hard constraint ↔ the correction that
+// set it). The FK guarantees a link can't point at a nonexistent row; "target
+// still valid" (not superseded / soft-deleted) is enforced at READ time by
+// joining the target on `valid_until IS NULL`. On a bitemporal update the
+// supersede transaction re-points links to the new row so an edit can't orphan
+// them. The model proposes links (meaning); the schema guarantees integrity.
+export const memoryLinks = sqliteTable(
+  "memory_links",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    // Owner. NULL pre-backfill / single-owner mode. Scoped via ownedBy().
+    userId: text("user_id").references(() => user.id),
+    fromId: integer("from_id")
+      .notNull()
+      .references(() => userPreferences.id),
+    toId: integer("to_id")
+      .notNull()
+      .references(() => userPreferences.id),
+    // Free TEXT (validated at the boundary): 'relates_to' | 'supersedes' |
+    // 'contradicts' | … — a new relation needs no migration.
+    relation: text("relation").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    index("idx_memory_links_from").on(table.userId, table.fromId),
+    index("idx_memory_links_to").on(table.userId, table.toId),
   ],
 );
 

@@ -36,6 +36,7 @@ import {
   modelPortfolios,
   plans,
   user,
+  userPreferences,
 } from "../lib/db/schema";
 
 const DB_PATH = resolve(process.env.DB_PATH ?? "data/app.db");
@@ -111,6 +112,11 @@ function main(): void {
     .set({ userId: ownerId })
     .where(and(isNull(modelPortfolios.userId), eq(modelPortfolios.builtIn, false)))
     .run().changes;
+  const prefsN = db
+    .update(userPreferences)
+    .set({ userId: ownerId })
+    .where(isNull(userPreferences.userId))
+    .run().changes;
 
   // 3. Owner gets the 'trusted' tier (full model chain), idempotently.
   db.insert(accountTier)
@@ -120,7 +126,8 @@ function main(): void {
 
   console.log(
     `[backfill-owner] done. buckets=${bucketsN} journal=${journalN} plans=${plansN} ` +
-      `chat_threads=${threadsN} model_portfolios=${modelsN} (built-ins left NULL).`,
+      `chat_threads=${threadsN} model_portfolios=${modelsN} user_preferences=${prefsN} ` +
+      `(built-ins left NULL).`,
   );
 }
 

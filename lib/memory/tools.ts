@@ -49,6 +49,9 @@ export interface MemoryToolOptions {
 }
 
 export function createMemoryTools({ userId }: MemoryToolOptions) {
+  // Row scoping is enforced by ownedBy() context (see lib/db/queries/scope.ts);
+  // userId is kept on the options for call-site symmetry but not re-threaded.
+  void userId;
   const save_preference = tool({
     description:
       "Save a durable preference about the user so it loads automatically " +
@@ -78,7 +81,6 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
     }),
     execute: async ({ category, content }) => {
       const row = save({
-        userId,
         category,
         content,
         source: "advisor_tool",
@@ -114,7 +116,7 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
         .describe("The replacement content for the preference."),
     }),
     execute: async ({ id_or_substring, new_content }) => {
-      const result = update(userId, id_or_substring, new_content);
+      const result = update(id_or_substring, new_content);
       if (result.kind === "none") {
         return {
           ok: false as const,
@@ -166,7 +168,7 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
         .describe("Numeric id or a distinctive substring of the content."),
     }),
     execute: async ({ id_or_substring }) => {
-      const result = forget(userId, id_or_substring);
+      const result = forget(id_or_substring);
       if (result.kind === "none") {
         return {
           ok: false as const,
@@ -215,7 +217,7 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
     }),
     execute: async ({ category }) => {
       const filter = category && isCategory(category) ? category : undefined;
-      const rows = listActive(userId, filter);
+      const rows = listActive(filter);
       return {
         ok: true as const,
         count: rows.length,
@@ -255,7 +257,7 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
         ),
     }),
     execute: async ({ query }) => {
-      const rows = recall(userId, query);
+      const rows = recall(query);
       return {
         ok: true as const,
         count: rows.length,
