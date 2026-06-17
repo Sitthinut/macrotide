@@ -15,6 +15,14 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Broker connector updates split into silent vs. reinstall.** The installed
+  userscript now versions on two axes (`@version` = `1.<protocol>.<revision>`): a
+  backward-compatible tweak (badge copy, a cosmetic fix) bumps the revision and
+  reaches managers via silent auto-update with no prompt, while only a breaking
+  change to the gather contract bumps the protocol and surfaces the reinstall
+  nudge. A test tripwire pins a hash of the generated script, so the version can't
+  silently go stale when the script changes.
+
 - **The Explore screener separates browsing from searching by investor eligibility.**
   Browsing is now a buy list — retail funds by default, with an **"Access"** facet
   that filters to accredited or ultra (high-net-worth) investor funds. Searching, by contrast, finds any

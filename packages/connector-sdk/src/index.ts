@@ -14,6 +14,7 @@ export {
   buildUserscriptHeader,
   COLLECTOR_PROTOCOL_VERSION,
   resolveCollectorShape,
+  SCRIPT_REVISION,
 } from "./collector";
 export { EXAMPLE_CONNECTOR } from "./example.connector";
 export { looksLikeBrokerExport, parseBrokerExport } from "./parser";

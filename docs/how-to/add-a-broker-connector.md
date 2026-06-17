@@ -203,17 +203,25 @@ user's import token in a header). So changing a manifest's **endpoints or shape*
 takes effect on the next sync with **no reinstall** — just edit the manifest (or
 the JSON behind `BROKER_CONNECTOR_URL`).
 
-The one exception is the collector's **gather algorithm** itself (the code in
-`packages/connector-sdk/src/collector.ts`). It lives in the installed loader, so a
-change there is gated by `COLLECTOR_PROTOCOL_VERSION`: bump it when the algorithm
-changes in a way that needs a new script. The bump drives the served userscript's
-`@version` (`1.0.${COLLECTOR_PROTOCOL_VERSION}`), so a userscript manager that
-honors `@updateURL`/`@downloadURL` **auto-updates** the loader on its next update
-poll — no user action. As a fallback for managers whose auto-update is unreliable
-(e.g. Userscripts on Safari/iOS), the loader also self-detects: seeing the runtime
-endpoint report a newer version than the one it was built with, it toasts the user
-to update from **Settings → Connections**. Plain shape/endpoint edits don't need a
-bump.
+The one exception is the **baked script** itself (the loader code in
+`packages/connector-sdk/src/collector.ts`), which lives in the installed
+userscript. Its `@version` is `1.<protocol>.<revision>`, built from two constants
+that map to two update behaviors:
+
+- **`COLLECTOR_PROTOCOL_VERSION`** (minor slot) — bump for a **breaking** change to
+  the gather contract. The runtime endpoint then reports the higher
+  `collectorVersion`, so any still-old loader shows an in-page nudge to update from
+  **Settings → Connections** (the fallback for managers whose auto-update is
+  unreliable, e.g. Userscripts on Safari/iOS).
+- **`SCRIPT_REVISION`** (patch slot) — bump for **any other** baked change (badge
+  or UI copy, a cosmetic tweak, a backward-compatible fix). It moves `@version` so
+  managers **auto-update silently** on their next poll, with **no** reinstall nudge.
+  Reset it to `0` when you bump the protocol.
+
+Either bump raises `@version`, so a manager honoring `@updateURL`/`@downloadURL`
+pulls the new loader on its own. Plain shape/endpoint edits don't touch `@version`
+and need no bump. (A hash tripwire in `sdk.test.ts` fails CI if you change the
+baked script without bumping one of the two — see the SDK README § Versioning.)
 
 ## Where things live
 

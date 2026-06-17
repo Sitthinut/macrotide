@@ -63,9 +63,33 @@ lib/portfolio/connector.ts — loads + validates the manifest at runtime
 
 The **collector** (the userscript) fetches config from `/api/import/broker/runtime`
 on each run, so endpoint and shape changes take effect immediately — no reinstall
-needed. Only a change to the gather *algorithm* (bumping
-`COLLECTOR_PROTOCOL_VERSION`) requires a reinstall, which the loader detects and
-prompts for.
+needed. Only a change to the gather *algorithm* requires a new script to reach
+installed loaders; how that propagates is the versioning story below.
+
+### Versioning — two axes, two jobs
+
+The installed userscript carries one semver `@version` of the form
+`1.<protocol>.<revision>`, built from **two** constants in `src/collector.ts`.
+They exist because two independent things can change, and they call for opposite
+update behaviors:
+
+| Constant | Slot | Bump when… | Effect |
+| --- | --- | --- | --- |
+| `COLLECTOR_PROTOCOL_VERSION` | minor | the gather **contract** changes in a way an installed loader must take on (**breaking**) | `@version` rises → managers auto-update; **and** the runtime endpoint reports the higher `collectorVersion`, so any still-old loader fires the in-page **reinstall nudge** (the fallback for managers that don't honor `@updateURL`, e.g. Safari's Userscripts) |
+| `SCRIPT_REVISION` | patch | **anything else** in the baked script changes — badge/UI copy, a cosmetic tweak, a backward-compatible fix | `@version` rises → managers auto-update **silently** on their next poll; **no** reinstall nudge (it keys off the protocol alone) |
+
+Why not one number? A single version can't both *always* propagate *and* nudge
+only on breaking changes — those are two separate signals (did the bytes change?
+vs. is it breaking?). Splitting them lets a cosmetic fix ship via silent
+auto-update without interrupting anyone, while a contract change still forces a
+visible reinstall on managers that can't auto-update.
+
+Endpoints and `shape` resolve at run time and **never** move `@version` — they
+need no reinstall at all.
+
+Reset `SCRIPT_REVISION` to `0` whenever you bump `COLLECTOR_PROTOCOL_VERSION`. A
+test tripwire (`sdk.test.ts`) pins a hash of the generated script, so editing the
+baked script without bumping one of the two versions fails CI — see § 6.3.
 
 ---
 
@@ -647,6 +671,13 @@ expect(script).toContain(`// @match        https://${EXAMPLE_CONNECTOR.host}/*`)
 expect(script).toContain('"test-token"');
 expect(script).not.toMatch(/__[A-Z]+__/); // no unfilled template slots
 ```
+
+A **hash tripwire** (`the baked script matches its pinned hash`) guards the SDK's
+own loader: it pins a SHA-256 of the generated script, so any edit to the baked
+userscript — gather code, badge copy, the `@version` line — fails the test until
+you make a deliberate version decision (bump `SCRIPT_REVISION` for a compatible
+change, or `COLLECTOR_PROTOCOL_VERSION` for a breaking one — see § Versioning) and
+re-pin the printed hash. This is what keeps `@version` from going stale.
 
 ### 6.4 Coverage checklist
 

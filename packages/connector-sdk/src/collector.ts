@@ -13,14 +13,27 @@
 
 import type { BrokerEndpoints, ConnectorShape } from "./types";
 
-// The gather-logic contract version baked into each installed userscript loader.
-// The loader fetches its broker config (endpoints + shape) from the app at run
-// time, so endpoint/shape changes need no reinstall — but the gather ALGORITHM
-// itself lives in the installed loader. Bump this ONLY when that algorithm changes
-// in a way that needs a new script; the runtime endpoint reports the current
-// value, and an older baked version both nudges the user to reinstall and lets a
-// manager auto-update via @updateURL.
+// Two version axes, two jobs (see § Versioning in the SDK README).
+//
+// COLLECTOR_PROTOCOL_VERSION — the gather-logic CONTRACT version. The loader
+// fetches its broker config (endpoints + shape) from the app at run time, so
+// endpoint/shape changes need no reinstall — but the gather ALGORITHM itself lives
+// in the installed loader. Bump this ONLY when that algorithm changes in a way an
+// installed loader must take on (a BREAKING change). The runtime endpoint reports
+// it as `collectorVersion`; an installed loader that bakes a lower value shows the
+// intrusive in-page "reinstall" nudge — the fallback for managers (e.g. Safari's
+// Userscripts) that don't honor @updateURL.
 export const COLLECTOR_PROTOCOL_VERSION = 4;
+
+// SCRIPT_REVISION — the BAKED-SCRIPT content revision. Bump on ANY change to the
+// installed script that ISN'T a protocol bump: badge/UI copy, a cosmetic tweak, a
+// backward-compatible fix in the gather code. It moves the userscript `@version`
+// (`1.<protocol>.<revision>`) so managers auto-update SILENTLY on their interval,
+// WITHOUT firing the reinstall nudge (the nudge keys off protocol only). Reset to
+// 0 whenever COLLECTOR_PROTOCOL_VERSION bumps. A test tripwire (sdk.test.ts) pins a
+// hash of the generated script body, so editing the script without bumping one of
+// these two fails CI — you can't ship a baked change unversioned.
+export const SCRIPT_REVISION = 0;
 
 // The collector-side default response shape (the reference broker the defaults
 // were modeled on). The parser owns its own order/value defaults; these are only
@@ -245,11 +258,12 @@ export interface UserscriptUpdateUrls {
  * `.user.js` and the `.meta.js` (which is JUST this block, for the manager's
  * version check), so both always agree on `@version` and the rest.
  *
- * `@version` tracks `COLLECTOR_PROTOCOL_VERSION` — the gather ALGORITHM version,
- * the only thing a reinstall/auto-update must deliver (endpoints + shape resolve
- * at run time and never need one). Bumping the protocol bumps `@version`, so a
- * manager that honors `@updateURL` pulls the new script on its own; the loader's
- * in-page reinstall nudge stays as the fallback for managers that don't.
+ * `@version` is `1.<COLLECTOR_PROTOCOL_VERSION>.<SCRIPT_REVISION>` — the protocol
+ * in the minor slot, the baked-script revision in the patch slot. ANY bump of
+ * either raises `@version`, so a manager that honors `@updateURL` pulls the new
+ * script on its own; a `SCRIPT_REVISION`-only bump therefore propagates SILENTLY
+ * (no reinstall nudge — that keys off the protocol alone). Endpoints + shape
+ * resolve at run time and never move `@version`.
  */
 export function buildUserscriptHeader(
   connectorOrList:
@@ -292,7 +306,7 @@ export function buildUserscriptHeader(
     "// ==UserScript==",
     "// @name         Macrotide Connector",
     "// @namespace    macrotide",
-    `// @version      1.0.${COLLECTOR_PROTOCOL_VERSION}`,
+    `// @version      1.${COLLECTOR_PROTOCOL_VERSION}.${SCRIPT_REVISION}`,
     "// @description  Sync your broker order history into Macrotide automatically",
     ...connectors.map((c) => `// @match        https://${c.host}/*`),
     ...[...connectHosts].map((h) => `// @connect      ${h}`),
@@ -320,7 +334,8 @@ export function buildUserscriptHeader(
  * resolves which connector applies from the page's hostname (`/runtime?host=`) —
  * so a single install covers all brokers and endpoint/shape changes need no
  * reinstall. Accepts one connector or the full list. Pass `updateUrls` to emit
- * `@downloadURL`/`@updateURL` so managers auto-update on a protocol bump.
+ * `@downloadURL`/`@updateURL` so managers auto-update when `@version` moves (a
+ * protocol or script-revision bump).
  */
 export function buildUserscript(
   connectorOrList:

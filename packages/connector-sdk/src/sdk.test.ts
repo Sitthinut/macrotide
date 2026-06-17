@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   type BrokerExport,
@@ -8,6 +9,7 @@ import {
   looksLikeBrokerExport,
   parseBrokerExport,
   resolveCollectorShape,
+  SCRIPT_REVISION,
 } from "./index";
 
 // Synthetic fixture mirroring the SDK's DEFAULT wire shape (no real account
@@ -611,9 +613,28 @@ describe("buildUserscript (self-updating loader)", () => {
     expect(us).not.toMatch(/__[A-Z_]+__/);
   });
 
-  it("@version tracks the collector protocol version", () => {
+  it("@version is 1.<protocol>.<revision> — protocol in the minor slot, script revision in the patch slot", () => {
     const us = buildUserscript(endpoints, "https://macrotide.example", "x");
-    expect(us).toContain(`// @version      1.0.${COLLECTOR_PROTOCOL_VERSION}`);
+    expect(us).toContain(`// @version      1.${COLLECTOR_PROTOCOL_VERSION}.${SCRIPT_REVISION}`);
+  });
+
+  // Tripwire: pins a hash of the generated script (token/origin are fixed here, so
+  // only the BAKED content + @version vary). ANY edit to the installed userscript —
+  // badge copy, UI, gather code, or the version line — changes this hash and fails
+  // the test. The fix is a conscious version decision, NOT just re-pinning:
+  //   • compatible/cosmetic change → bump SCRIPT_REVISION (collector.ts)
+  //   • breaking gather-contract change → bump COLLECTOR_PROTOCOL_VERSION, reset
+  //     SCRIPT_REVISION to 0
+  // then update PINNED_SCRIPT_HASH to the value this test prints. This is what makes
+  // it impossible to ship a baked-script change with a stale @version.
+  it("the baked script matches its pinned hash (bump a version + re-pin on any change)", () => {
+    const PINNED_SCRIPT_HASH = "7fb98fce554991fe782de50933735dd2c2ad1bd4be6095793b91a18eb51abd36";
+    const us = buildUserscript(endpoints, "https://h", "TOKEN");
+    const hash = createHash("sha256").update(us).digest("hex");
+    expect(
+      hash,
+      `baked userscript changed — see the comment above this test, then set PINNED_SCRIPT_HASH = "${hash}"`,
+    ).toBe(PINNED_SCRIPT_HASH);
   });
 
   it("uses one sticky status badge that ends in success or a failure state", () => {
@@ -659,8 +680,9 @@ describe("buildUserscript (self-updating loader)", () => {
     expect(header).not.toContain("location.hostname");
     // Agrees with the full script's version so the manager's update check is sound.
     const full = buildUserscript(endpoints, "https://macrotide.example", "tok", urls);
-    expect(full).toContain(`// @version      1.0.${COLLECTOR_PROTOCOL_VERSION}`);
-    expect(header).toContain(`// @version      1.0.${COLLECTOR_PROTOCOL_VERSION}`);
+    const version = `// @version      1.${COLLECTOR_PROTOCOL_VERSION}.${SCRIPT_REVISION}`;
+    expect(full).toContain(version);
+    expect(header).toContain(version);
   });
 
   it("ONE global script @matches every broker host + unions @connect across connectors", () => {
