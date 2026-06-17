@@ -46,6 +46,12 @@ function open(path: string): Database.Database {
   const dir = dirname(path);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const sqlite = new Database(path);
+  // Wait for a held lock instead of throwing SQLITE_BUSY immediately. `next build`
+  // collects page data in PARALLEL worker processes that each open this file and
+  // take a brief write lock (even just to set WAL mode), so without a busy timeout
+  // the losers error out and fail the build non-deterministically. Set it FIRST so
+  // it covers the journal_mode switch itself.
+  sqlite.pragma("busy_timeout = 5000");
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
   sqlite.pragma("synchronous = NORMAL");
