@@ -65,6 +65,12 @@ order.
 | Contribution line ≠ `reduceLots().netInvested` | The chart's "net invested" is cumulative *external* cash flow from the settlement-cash fold; `netInvested` (proceeds-based, for XIRR sign) stays XIRR-only — [ADR 0005](./0005-value-over-time-ledger-replay.md) | A sell reducing contribution by *proceeds* phantom-swings the line ±the gain on every fund switch, even though no external money moved |
 | Hero "all-time" = total return on contributed capital | The headline is (value − net contributions) ÷ contributions — the same money-weighted figure as the chart's "All" pill, from one shared helper ([returns-breakdown.ts](../../../lib/portfolio/returns-breakdown.ts)) so they can't drift; the older return-on-current-holdings'-cost-basis number moves into a tap-to-open breakdown sheet, labeled "unrealized" | A 9.7% headline (unrealized on current holdings — reset toward 0 by every fund switch banking gains into new cost basis) sitting directly above a 32.66% chart pill read as a bug; both were correct but answered different questions with no label saying which |
 
+### Advisor & memory
+
+| Decision | Picked | Why not the alternative |
+| --- | --- | --- |
+| Feedback mechanism | Corrections-as-memory, not a 👍/👎 ratings bar — a correction routes into the bitemporal preference store with a visible status line + undo (the Portfolio "Not for me" reject reroutes in as a confirm-first candidate); the store gains progressive disclosure (summary/body), consolidate-on-write, and DB-integrity-enforced cross-links — [ADR 0006](./0006-feedback-by-memory.md) | Thumbs are low-signal (~13% coverage, no "why") and tying them to reward bred sycophancy industry-wide; a from-scratch typed-knowledge-graph rebuild with per-turn scored retrieval breaks prefix caching (~5–10× on long chats) and rewrites memory outside the user-visible trail; embeddings are premature at this scale (keyword recall fits the in-prompt active set) |
+
 ### Ops & scale
 
 | Decision | Picked | Why not the alternative |

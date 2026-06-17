@@ -10,6 +10,7 @@ is the evidence ("what's out there"), not the verdict.
 | Survey | Behind |
 |---|---|
 | [memory-systems.md](./memory-systems.md) | The long-term memory design |
+| [feedback-mechanisms.md](./feedback-mechanisms.md) | Feedback-by-memory ([ADR 0006](../decisions/0006-feedback-by-memory.md)) — corrections vs. ratings |
 | [context-engineering.md](./context-engineering.md) | The Advisor context model + tool-using loop |
 | [llm-platform-primitives.md](./llm-platform-primitives.md) | Provider tool-calling / system-prompt / reasoning / structured-output choices |
 | [context-and-caching.md](./context-and-caching.md) | Prompt caching + context-window management / progressive loading |
