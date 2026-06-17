@@ -49,6 +49,7 @@ root so they resolve when browsing the source.
 - [Roadmap (GitHub Project)](https://github.com/users/Sitthinut/projects/2): Forward-looking work as issues grouped by Priority. Product intent + out-of-scope notes live in [product-direction.md](./docs/explanation/product-direction.md). For what's *done*, see the README Features list and the changelog.
 - [Changelog](./CHANGELOG.md): Notable changes per release, Keep a Changelog format.
 - [Memory-systems research](./docs/explanation/research/memory-systems.md): Prior-art survey behind the memory design.
+- [Feedback-mechanisms research](./docs/explanation/research/feedback-mechanisms.md): Prior-art survey behind feedback-by-memory (ADR 0006) — why corrections, not thumbs.
 - [Context-engineering research](./docs/explanation/research/context-engineering.md): Prior-art survey on context engineering for tool-using agents — the Advisor loop, failure modes, and recovery.
 - [LLM-platform-primitives research](./docs/explanation/research/llm-platform-primitives.md): Prior-art survey of how Anthropic/OpenAI/Gemini/OpenRouter expose tool calling, system prompts, reasoning tokens, and citations/structured output.
 - [Context-and-caching research](./docs/explanation/research/context-and-caching.md): Prior-art survey on prompt caching (cost/latency math) and context-window management / progressive context loading.
