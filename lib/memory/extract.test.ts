@@ -206,7 +206,7 @@ describe("reconcile (add / update / skip)", () => {
     });
   });
 
-  it("update against an EXPLICIT row is captured as pending, not an override", async () => {
+  it("update against an EXPLICIT row is skipped, not an override", async () => {
     await withFresh(async () => {
       const explicit = save({
         category: "finance_context",
@@ -226,8 +226,10 @@ describe("reconcile (add / update / skip)", () => {
         ],
       });
       const result = await extractSessionPreferences(seedThread());
-      expect(result.saved[0]?.applied).toBe("pending");
-      // The explicit note is untouched and still injects; the pending one does not.
+      // Trust-tier guard: an extracted fact can't supersede an explicit one, and
+      // with no pending lane it's simply skipped — nothing saved.
+      expect(result.saved).toHaveLength(0);
+      // The explicit note is untouched and still injects.
       const block = buildMemoryBlock(null);
       expect(block).toContain("funds only, no individual stocks");
       expect(block).not.toContain("individual stocks are fine now");

@@ -27,6 +27,10 @@ export interface TurnCards {
   transactionsImport?: unknown;
   holdings?: unknown[];
   proposal?: unknown;
+  // Memory writes (save/update/forget/confirm) the Advisor made this turn, so
+  // the in-chat status chip survives reload AND crosses devices (the durable
+  // record is Journal → Memory). Mirrors the client `Message.memoryEvents`.
+  memoryEvents?: unknown[];
 }
 
 /**
@@ -64,6 +68,10 @@ export function extractCards(steps: ReadonlyArray<StepLike>): TurnCards | null {
       if (o.holding) {
         cards.holdings ??= [];
         cards.holdings.push(o.holding);
+      }
+      if (o.memoryEvent) {
+        cards.memoryEvents ??= [];
+        cards.memoryEvents.push(o.memoryEvent);
       }
     }
   }

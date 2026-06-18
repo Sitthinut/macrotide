@@ -39,10 +39,9 @@ export const MEMORY_BLOCK_HEADING = "## Your stored preferences";
 // docs/explanation/memory.md § open question (extracted < ~0.7 → recall-only).
 export const INJECT_CONFIDENCE_THRESHOLD = 0.7;
 
-// A preference is injectable unless it's awaiting confirmation ('pending', so
-// recall-only until the user confirms) or a low-confidence auto-extracted row.
+// A preference is injectable unless it's a low-confidence auto-extracted row
+// (recall-only). Explicit rows always inject.
 function isInjectable(row: Preference): boolean {
-  if (row.status === "pending") return false;
   if (row.source === "extracted" && row.confidence != null) {
     return row.confidence >= INJECT_CONFIDENCE_THRESHOLD;
   }

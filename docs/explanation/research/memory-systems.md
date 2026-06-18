@@ -458,6 +458,35 @@ Sources:
 [github.com/volcengine/OpenViking](https://github.com/volcengine/OpenViking),
 [OpenViking explained (Medium)](https://medium.com/@techlatest.net/openviking-explained-reinventing-memory-and-context-for-ai-agents-c189b2bea61b).
 
+## Academic landmarks (the patterns the products inherit)
+
+Two research systems aren't shipping products but coined the mechanics the
+libraries above implement; a third strand is a 2026 framing worth naming.
+
+- **Stanford Generative Agents (2023, arXiv 2304.03442)** — the canonical
+  **memory stream**: an append-only log of observations, each
+  `{content, created, last_accessed, importance(1–10, LLM-scored), embedding}`.
+  Two ideas the field absorbed: **reflection** (when summed recent importance
+  crosses a threshold, the agent synthesizes 2–3 higher-level conclusions and
+  stores them back as memories — consolidation as a write-time event), and the
+  **recency · importance · relevance** retrieval score that every ranked store
+  since cites as its baseline.
+- **A-MEM (NeurIPS 2025, arXiv 2502.12110)** — a **Zettelkasten** for agents:
+  each `MemoryNote {content, keywords, tags, context, links:{id→relation},
+  evolution_history}` links to its nearest neighbors on write *and* can
+  **evolve** them (a new note rewrites the tags/context of the notes it
+  connects to). The closest prior art to a typed, cross-linked store — but with
+  no multi-user scoping and no temporal model, so links can dangle as the graph
+  churns. Macrotide takes the linking idea (`memory_links`) but enforces
+  integrity in the schema (FK + validity-aware reads) rather than trusting the
+  model to keep it clean.
+- **Provenance-aware tiered memory** ("From Lossy to Verified", arXiv 2602.17913;
+  survey arXiv 2606.04990) — the 2026 framing that a memory's **source tier**
+  (raw / extracted / inferred / revised) is first-class metadata: **supersede,
+  don't overwrite**, and on a cross-tier conflict **emit the uncertainty rather
+  than silently picking a winner**. This is the published basis for Macrotide's
+  trust-tier guard (an `extracted` note may never supersede an explicit one).
+
 ## At a glance: the pattern matrix
 
 How the surveyed systems compare across the dimensions that mattered — store,
@@ -512,6 +541,42 @@ actively decide; the next section resolves each:
 - **Storage shape** — single `created_at` vs bitemporal validity windows, and a
   single store vs a vector+graph+KV hybrid.
 
+## Token efficiency and retrieval economics
+
+The survey above is about *correctness*; this is about *cost*, which for a
+prefix-cached chat advisor drives as many decisions. The recurring findings:
+
+- **Progressive disclosure beats a fat context.** A tiny always-injected core
+  plus on-demand detail (MemGPT core-vs-archival, OKF/LLM-wiki `index.md`,
+  TiMem's L1–L5 hierarchy) reports large savings — TiMem ~511 tokens/query vs
+  mem0 ~1,070 on LoCoMo. The always-injected core should stay ~500–2k tokens.
+  Macrotide's `summary` (injected) vs `body` (recall-only) split is exactly this.
+- **Consolidate on write, not just on read.** The triggers seen in the wild:
+  every-write reconcile (mem0 ADD/UPDATE/DELETE), importance-threshold
+  (Generative Agents reflection), and capacity-saturation. Periodic "lint"
+  sweeps are recommended but under-implemented in production.
+- **Decay the score, not the data.** A production retrieval rank looks like
+  `similarity · recency · reinforcement · confidence`, where **reinforcement
+  bumps only on confirmation, not on retrieval** — otherwise a frequently-recalled
+  stale fact entrenches itself. This is the basis for Macrotide's
+  `last_confirmed_at` (reinforce on affirmation) and the extracted-only decay job.
+- **Prompt caching inverts the usual retrieval math.** A *stable* injected prefix
+  caches at ~0.1× on the next turn, so per-turn re-scored injection (which mutates
+  the prefix every turn) is a net *loss* despite fetching "more relevant" context —
+  the cache miss costs more than the relevance gain. This is the single biggest
+  reason Macrotide froze the injected block per session rather than re-ranking it.
+- **More memory is not better.** Lost-in-the-middle drops accuracy >30 points for
+  facts buried mid-context; append-only stores bloat; over-summarization is lossy
+  (~60% of facts irrecoverable at ~37× compression). A widely-cited mem0 audit
+  found **97.8% of 10,134 auto-extracted entries were junk** with a weak model
+  (fabrications plus 808 duplicate "prefers Vim" rows from a re-extraction loop).
+  Mitigations the field converged on, all of which Macrotide implements: a
+  quality/confidence gate, a REJECT/skip op, **strip already-injected memories
+  before re-extracting** (`stripInjectedMemory`), and treat recalled notes as
+  untrusted data. Sources: arXiv 2504.19413 (mem0), 2501.13956 (Zep),
+  2304.03442 (Generative Agents); mem0 issue #4573; the LoCoMo and
+  lost-in-the-middle benchmarks.
+
 ## Patterns Macrotide adopted
 
 Macrotide is a single-VM, SQLite, TypeScript personal finance advisor — no
@@ -565,9 +630,9 @@ call:
   temporal-knowledge-graph cost: "I switched from aggressive to moderate risk
   tolerance" supersedes the old fact with a validity window rather than erasing
   it.
-- **Visible, auditable writes** are surfaced on a Settings → Memory page —
-  content, category, source, validity window, delete control, supersession shown
-  rather than hidden. Each row records provenance: who saved it (`user_tool` /
+- **Visible, auditable writes** are surfaced on a Journal → Memory page (plus a
+  quiet in-chat status line on every write) — content, category, source,
+  validity window, delete control, supersession shown rather than hidden. Each row records provenance: who saved it (`user_tool` /
   `advisor_tool`, with `extracted` reserved for any later background extraction),
   the originating session, the source turns, and a nullable `confidence` (NULL
   for explicit tool calls, which are always trusted).
@@ -586,5 +651,10 @@ May 2026. The Hermes section comes from `WebFetch` against the official Nous
 Research docs; OpenHuman from reading the `tinyhumansai/openhuman` repo directly
 via the GitHub API (file paths are cited inline); OpenClaw from the
 `coolmanns/openclaw-memory-architecture` README plus web search; the rest from a
-2025–2026 web survey. Where a claim couldn't be verified beyond a single
-secondary source, that is flagged. Source URLs are linked per-section.
+2025–2026 web survey. The *Academic landmarks* and *Token efficiency and
+retrieval economics* sections were added in June 2026 from a follow-up
+web-search pass (the feedback-by-memory work, [ADR 0006](../decisions/0006-feedback-by-memory.md))
+to close a noted gap on retrieval cost and the data models the products inherit;
+quantitative claims there are directional unless a primary arXiv id is linked.
+Where a claim couldn't be verified beyond a single secondary source, that is
+flagged. Source URLs are linked per-section.

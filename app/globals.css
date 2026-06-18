@@ -609,53 +609,105 @@ body[data-topbar-hidden="true"] .portfolio-switch {
   color: var(--ink-soft);
 }
 
-/* Feedback thumbs (under AI messages and suggestions) */
-.feedback-row {
+/* Below-bubble affordances (memory chip + save) — rendered OUTSIDE the Advisor
+   speech bubble, left-aligned to the AI side, so they read as system actions
+   on the turn rather than part of what the Advisor said. */
+.msg-aside {
+  align-self: flex-start;
+  max-width: 86%;
   display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 8px;
-  padding-top: 6px;
-  border-top: 1px dashed var(--line-soft);
-  font-size: 11px;
-  color: var(--muted);
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 0;
 }
-.feedback-row .fb-label {
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.04em;
-  flex: 1;
-}
-.feedback-row button {
+/* Quiet per-message "save to notes" — a muted bookmark glyph that brightens on
+   hover (no background box, no label, ChatGPT/Claude-style). Lives at the foot
+   of the Advisor bubble; small top margin separates it from the reply text. No
+   left padding so the glyph aligns with the text paragraph. */
+.msg-save {
+  margin-top: 10px;
   background: transparent;
-  border: 1px solid var(--line);
+  border: 0;
   color: var(--muted);
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
+  opacity: 0.5;
   cursor: pointer;
-  display: grid;
-  place-items: center;
-  padding: 0;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 4px 3px 0;
+  transition:
+    opacity 0.15s ease,
+    color 0.15s ease;
 }
-.feedback-row button:hover {
-  background: var(--card-soft);
+.msg-save:hover {
+  opacity: 1;
   color: var(--ink);
 }
-.feedback-row button[data-rating="up"][data-active="true"] {
-  background: var(--accent-soft);
-  color: var(--accent-ink);
-  border-color: transparent;
+.msg-save[data-active="true"] {
+  opacity: 1;
+  color: var(--accent);
 }
-.feedback-row button[data-rating="down"][data-active="true"] {
-  background: color-mix(in oklab, var(--loss) 14%, transparent);
-  color: var(--loss);
-  border-color: transparent;
+.msg-save:disabled {
+  cursor: default;
 }
-.feedback-row button[data-rating="save"][data-active="true"] {
-  background: var(--ink);
-  color: var(--bg);
-  border-color: transparent;
+
+/* Memory-write notice under an Advisor reply — a quiet grey status line
+   (no chip/border/icon, ChatGPT/Claude style) that expands on click to reveal
+   what changed + a "Manage memories" link. See ChatScreen MemoryEventLine. */
+.memory-event {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.memory-event .me-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: transparent;
+  border: 0;
+  padding: 2px 0;
+  color: var(--muted);
+  /* Match the chat text typeface/size — a <button> otherwise renders in the UA
+     default font, which read as a different face from the reply above it. */
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.memory-event .me-line:hover {
+  color: var(--ink-soft);
+}
+.memory-event .me-caret {
+  opacity: 0.7;
+  transition: transform 0.15s ease;
+}
+.memory-event[data-open] .me-caret {
+  transform: rotate(90deg);
+}
+.memory-event .me-detail {
+  margin: 2px 0 2px 2px;
+  padding-left: 8px;
+  border-left: 2px solid var(--line-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.memory-event .me-content {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+.memory-event .me-manage {
+  align-self: flex-start;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.memory-event .me-manage:hover {
+  text-decoration: underline;
 }
 
 /* Dialog open/close animations, shared by the Modal primitive below. */
@@ -1997,12 +2049,14 @@ button.private-amt:focus-visible {
   padding: 10px 14px;
   font-size: 13.5px;
 }
+/* Advisor replies are borderless prose (ChatGPT/Claude-style) — only the user's
+   own messages get a chat bubble. The meta line + accent dot mark the turn. */
 .msg.ai {
   align-self: flex-start;
-  background: var(--paper);
-  border: 1px solid var(--line-soft);
-  border-radius: 16px 16px 16px 4px;
-  padding: 12px 14px;
+  max-width: 100%;
+  background: transparent;
+  border: 0;
+  padding: 2px 2px 2px 0;
   font-size: 13.5px;
   line-height: 1.5;
 }
@@ -2210,23 +2264,55 @@ button.chip {
      the text input gets its own left inset below so it isn't flush. */
   padding: 5px;
   display: flex;
-  align-items: center;
+  /* Bottom-aligned so the attach/send buttons stay pinned to the bottom as the
+     textarea grows taller. */
+  align-items: flex-end;
   gap: 6px;
   z-index: 20;
   flex-shrink: 0;
 }
-.composer:not(:has(.attach-btn)) input {
+.composer:not(:has(.attach-btn)) textarea {
   padding-left: 9px;
 }
-.composer input {
+.composer textarea {
   flex: 1;
   border: 0;
   outline: 0;
   font-family: var(--font-sans);
   font-size: 13.5px;
-  padding: 8px 0;
+  line-height: 1.45;
+  /* Vertical padding tuned so a single empty line is the same height as the
+     32px send button — bottom-aligned, that makes the space above and below the
+     button symmetric. */
+  padding: 6px 0;
   background: transparent;
   color: var(--ink);
+  /* Auto-grows via JS (height set to scrollHeight); grows to ~10 lines of text
+     (line-height 1.45 × 13.5px × 10 + 12px padding) then scrolls. */
+  resize: none;
+  max-height: 208px;
+  overflow-y: auto;
+}
+/* Fine pointer (desktop): a thin overlay-style scrollbar matching the app's
+   custom scroll. Touch keeps the native auto-hiding bar (no class → no rule).
+   A textarea can't host OverlayScrollbars, so this is the closest faithful
+   match (a 6px lane rather than a true zero-area overlay). */
+.composer textarea.composer-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.composer textarea.composer-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.composer textarea.composer-scroll::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 3px;
+}
+.composer textarea.composer-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+.composer textarea.composer-scroll::-webkit-scrollbar-track {
+  background: transparent;
 }
 .composer button {
   width: 32px;

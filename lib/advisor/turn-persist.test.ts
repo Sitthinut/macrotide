@@ -47,6 +47,19 @@ describe("turn-persist — extractCards", () => {
     expect(extractCards(result({ ok: true, proposal }))).toEqual({ proposal });
   });
 
+  it("accumulates memory events so the chip persists cross-device", () => {
+    const steps = [
+      { toolResults: [{ output: { ok: true, memoryEvent: { kind: "save", id: 1 } } }] },
+      { toolResults: [{ output: { ok: true, memoryEvent: { kind: "forget", id: 1 } } }] },
+    ];
+    expect(extractCards(steps)).toEqual({
+      memoryEvents: [
+        { kind: "save", id: 1 },
+        { kind: "forget", id: 1 },
+      ],
+    });
+  });
+
   it("reads the legacy `result` field when `output` is absent", () => {
     const payload = { rows: [], source: null, note: null };
     expect(extractCards([{ toolResults: [{ result: { holdingsImport: payload } }] }])).toEqual({

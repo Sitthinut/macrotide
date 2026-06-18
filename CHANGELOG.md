@@ -15,6 +15,19 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Feedback is memory, not a ratings bar.** The 👍/👎 row is gone. You shape the
+  Advisor by correcting it in words, and the correction becomes a remembered
+  note: every write shows a quiet status line in the chat (click it to see what
+  changed), and **Journal → Memory** is the browsable, reversible record of
+  everything the Advisor has learned (review, forget/restore, or ask the Advisor
+  to change a note). The store is self-maintaining — each write reconciles
+  against what's already saved (add / update / skip) instead of piling up
+  duplicates; inferred notes that go unreinforced decay to recall-only while
+  explicit ones never do; and an extracted note can never silently override
+  something you said explicitly. Bookmarking an Advisor reply saves it as a
+  journal note. Notes are scoped per user (fail-closed). See
+  [ADR 0006](./docs/explanation/decisions/0006-feedback-by-memory.md).
+
 - **Broker connector updates split into silent vs. reinstall.** The installed
   userscript now versions on two axes (`@version` = `1.<protocol>.<revision>`): a
   backward-compatible tweak (badge copy, a cosmetic fix) bumps the revision and

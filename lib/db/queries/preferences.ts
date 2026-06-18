@@ -102,6 +102,17 @@ export interface SaveInput {
 
 export function save(input: SaveInput): Preference {
   const now = new Date().toISOString();
+  // Idempotency guard: if an identical note already exists in this category
+  // (trimmed, case-insensitive), return it instead of inserting a duplicate.
+  // TRULY-identical only — fuzzy/semantic dedup stays the model's job
+  // (update_preference) and the extraction reconcile. This closes the
+  // frozen-session blind spot: the injected memory block is frozen per session,
+  // so within one chat the Advisor can't see a fact it already saved this
+  // session and may re-save the exact same line. Without this, repeated
+  // "remember X" in one session piles up identical rows.
+  const norm = (s: string) => s.trim().toLowerCase();
+  const dup = listActive(input.category).find((r) => norm(r.content) === norm(input.content));
+  if (dup) return dup;
   return getDb()
     .insert(userPreferences)
     .values({
