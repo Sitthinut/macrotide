@@ -11,7 +11,7 @@ interface PreferenceRow {
   category: "profile" | "finance_context" | "response_style" | "fact";
   content: string;
   // The longer recall-only detail (never injected). When present, it's the rest
-  // of the memory beyond the short `content` line — shown under the note here so
+  // of the memory beyond the short `content` line — shown under the memory here so
   // the whole thing is visible without leaving the page.
   body?: string | null;
   source: "user_tool" | "advisor_tool" | "extracted";
@@ -62,20 +62,20 @@ function fmtForgottenAt(iso: string): string {
   return `${parts} (${tz})`;
 }
 
-// Notes have no direct edit field by design (like ChatGPT/Claude web memory) —
+// Memories have no direct edit field by design —
 // a change flows through Advisor so it stays concise, consistent, and provenance-
 // tracked (ADR 0006). "Edit" opens a NEW chat (so it doesn't land in whatever
 // conversation was open): the visible bubble shows a short reference (the
-// `content` line, never the long body), while the hidden `send` carries the note
+// `content` line, never the long body), while the hidden `send` carries the memory
 // id so the Advisor targets the right row via update_preference and asks what to
 // change before touching anything.
 function askAdvisorToEdit(row: PreferenceRow) {
   // A clean, natural message (no internal id, no bracketed directive) — it's
   // both shown to the user AND persisted/titled, so it must read like real
-  // speech. The Advisor identifies the note by its content (update_preference
+  // speech. The Advisor identifies the memory by its content (update_preference
   // matches by substring) and follows the system-prompt rules: never reveal the
   // id, summarize rather than quote, ask before changing anything.
-  const prompt = `I'd like to update my saved note: "${row.content}". Help me change it.`;
+  const prompt = `I'd like to update my saved memory: "${row.content}". Help me change it.`;
   window.dispatchEvent(
     new CustomEvent("ai-prompt", { detail: { display: prompt, send: prompt, newChat: true } }),
   );
@@ -99,7 +99,7 @@ export function MemoryNotes() {
     // (30-day window) with a restore button — that's the undo.
     const res = await fetch(`${MEMORY_KEY}/${row.id}`, { method: "DELETE" });
     if (!res.ok) {
-      window.alert(`Failed to forget note (${res.status})`);
+      window.alert(`Failed to forget memory (${res.status})`);
       return;
     }
     await invalidate(MEMORY_KEY);
@@ -108,7 +108,7 @@ export function MemoryNotes() {
   const handleRestore = async (row: PreferenceRow) => {
     const res = await fetch(`${MEMORY_KEY}/${row.id}`, { method: "POST" });
     if (!res.ok) {
-      window.alert(`Failed to restore note (${res.status})`);
+      window.alert(`Failed to restore memory (${res.status})`);
       return;
     }
     await invalidate(MEMORY_KEY);
@@ -125,24 +125,24 @@ export function MemoryNotes() {
         }}
       >
         What Advisor has learned about you, loaded into context at the start of each new chat. To
-        change a note, ask Advisor in chat — edits apply to your next chat, not the current one.
+        change a memory, ask Advisor in chat — edits apply to your next chat, not the current one.
       </p>
 
       {isLoading && (
         <div className="card" style={{ fontSize: 12.5, color: "var(--muted)" }}>
-          Loading saved notes…
+          Loading saved memories…
         </div>
       )}
 
       {error && !isLoading && (
         <div className="card" style={{ fontSize: 12.5, color: "var(--loss, #c33)" }}>
-          Couldn't load your saved notes. Try refreshing.
+          Couldn't load your saved memories. Try refreshing.
         </div>
       )}
 
       {!isLoading && !error && grouped.length === 0 && (
         <div className="card" style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55 }}>
-          No saved notes yet. Try saying{" "}
+          No saved memories yet. Try saying{" "}
           <em style={{ color: "var(--ink-soft)" }}>"remember I prefer concise responses"</em> in
           chat.
         </div>
@@ -173,7 +173,7 @@ export function MemoryNotes() {
                       borderTop: idx === 0 ? "none" : "1px solid var(--line-soft)",
                     }}
                   >
-                    {/* Header row: the note line + actions, vertically centered.
+                    {/* Header row: the memory line + actions, vertically centered.
                         The body (if any) renders BELOW this row at full width, so
                         Edit/✕ stay put when "Show more" expands the body. */}
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -200,7 +200,7 @@ export function MemoryNotes() {
                       <button
                         type="button"
                         onClick={() => handleForget(row)}
-                        aria-label="Forget this note"
+                        aria-label="Forget this memory"
                         title="Forget"
                         style={{
                           background: "transparent",
@@ -291,7 +291,7 @@ export function MemoryNotes() {
 }
 
 // The longer recall-only detail, clamped to a few lines with a Show more/less
-// toggle so a long note doesn't dominate the list. Bodies are capped at ~2k
+// toggle so a long memory doesn't dominate the list. Bodies are capped at ~2k
 // chars upstream (recall-only), so this stays in-list rather than a modal.
 function MemoryBody({ body }: { body: string }) {
   const [open, setOpen] = useState(false);

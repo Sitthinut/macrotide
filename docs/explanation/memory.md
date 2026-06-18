@@ -11,7 +11,7 @@ Memory is:
   with its source, validity window, and a delete button. Nothing is hidden in
   embeddings.
 - **Feedback is correction, not a rating** — you shape the Advisor by correcting
-  it in words ("actually I prefer funds only"), which becomes a remembered note;
+  it in words ("actually I prefer funds only"), which becomes a remembered memory;
   there is no 👍/👎 bar. See [ADR 0006](./decisions/0006-feedback-by-memory.md).
 - **Bitemporal** — updating a fact adds a new row and supersedes the old one;
   history is kept, never silently overwritten.
@@ -37,7 +37,7 @@ it as a journal note.
 Captures save immediately and are always visible and deletable — there's no
 hidden "held" state. The safety net is the Advisor's fixed influence order
 (safety > facts > style): a remembered fact can shape *how* advice reads but
-never override an honest risk/fee caveat, so a misheard note is visible and
+never override an honest risk/fee caveat, so a misheard memory is visible and
 harmless rather than silently steering advice.
 
 ### Loading
@@ -50,7 +50,7 @@ open **Journal → Memory**.
 
 *"Actually, change that to age 55"* calls `update_preference`: the
 old row is stamped with an end date and a new row takes its place (and any links
-re-point to the new row in the same transaction). On the Memory page, notes
+re-point to the new row in the same transaction). On the Memory page, memories
 aren't edited in a text box — that would lose the provenance trail; instead
 **Edit** seeds a chat turn so the change flows through the Advisor and is
 captured like any other correction.
@@ -68,18 +68,18 @@ the row is end-dated and never injected again, but kept for audit. The Memory
 page also has a per-row delete (→ 30-day trash → hard delete) and an inline
 **Undo** on the in-chat status line right after a write.
 
-### Auto-saved notes
+### Auto-saved memories
 
 When a chat ends (see [Sessions](#sessions-and-continuity)),
 the Advisor scans it for durable facts you stated and saves them as
-`extracted` notes with a confidence score, attributed to the source chat so you
-can trace and correct them. Low-confidence notes are kept for recall but not
+`extracted` memories with a confidence score, attributed to the source chat so you
+can trace and correct them. Low-confidence memories are kept for recall but not
 auto-loaded.
 
 ### Seeing and editing everything
 
 Journal → Memory lists every active entry
-grouped by category, shows recently-forgotten notes with a restore button, and
+grouped by category, shows recently-forgotten memories with a restore button, and
 lets you forget or ask the Advisor to change one. It is the single source of
 truth for "what does the Advisor know about me?"
 
@@ -105,7 +105,7 @@ A session **closes** when you move on — start a New Chat, switch to another
 thread, or close the window/tab. On close the Advisor, in real time:
 
 1. **Extracts durable facts** from the conversation into memory (the auto-saved
-   notes above), and
+   memories above), and
 2. marks the chat `idle`.
 
 There's no timer — closing is driven by what you actually do. (A background
@@ -174,7 +174,7 @@ CREATE TABLE user_preferences (
   updated_at        TEXT NOT NULL
 );
 
--- Typed relationships between notes (e.g. a constraint and the correction that
+-- Typed relationships between memories (e.g. a constraint and the correction that
 -- set it). Integrity is enforced by the schema, not the model: both ends FK to
 -- user_preferences, and reads join on validity so a link to a superseded row
 -- drops out rather than dangling.
@@ -197,7 +197,7 @@ transaction. Timestamps are UTC; the UI renders them in the user's timezone
 `user_preferences` is scoped fail-closed: queries default to the request user
 via `ownedBy()` (see `lib/db/queries/scope.ts`) rather than threading a `userId`
 parameter, and inserts stamp the owner. A logged-in user can never read or write
-another user's notes, and demo sessions get their own in-memory namespace.
+another user's memories, and demo sessions get their own in-memory namespace.
 
 Chat sessions live in `chat_threads`, which carries the lifecycle columns:
 `status` (`active`/`idle`/`archived`), `archived_at`, `deleted_at` (trash), and
@@ -227,9 +227,9 @@ Seven tools, exposed to the chat model via the Vercel AI SDK shape used across
 | `update_preference` | `{ id_or_substring, new_content, detail? }` | Supersede a fact with a new value. |
 | `forget_preference` | `{ id_or_substring }` | End-date a fact (kept for audit). |
 | `confirm_preference` | `{ id_or_substring }` | Reinforce a re-affirmed fact (`last_confirmed_at`; resists decay). |
-| `link_preferences` | `{ from_id, to_id, relation }` | Record a typed relationship between two notes. |
+| `link_preferences` | `{ from_id, to_id, relation }` | Record a typed relationship between two memories. |
 | `list_preferences` | `{ category? }` | List active facts. |
-| `recall_preferences` | `{ query, limit? }` | Cold-recall the long tail — including low-confidence extracted notes the always-on block omits. |
+| `recall_preferences` | `{ query, limit? }` | Cold-recall the long tail — including low-confidence extracted memories the always-on block omits. |
 
 `update`/`forget`/`confirm` match by `id`, then by a unique `content` substring
 (erroring with candidates if ambiguous) — short, natural tool calls. Each write
@@ -291,12 +291,12 @@ conversation, so a refresh or a read-only revisit never spends a model call.
    the **running summary** as compressed context for what came before.
 3. Strips the Advisor's own injected memory block from the transcript first, so
    re-injected facts aren't "re-learned" (recursive-pollution guard).
-4. **Reconciles** each candidate against the notes already saved (passed to the
+4. **Reconciles** each candidate against the memories already saved (passed to the
    extractor as delimited, untrusted data): the model returns an `op` —
-   **add** a new note, **update** an existing one (by id), or **skip** a
+   **add** a new memory, **update** an existing one (by id), or **skip** a
    duplicate — in a single pass (the mem0 token-efficient pattern). Target ids
    are validated in code, an `update` is held to the trust-tier guard below, and
-   a candidate that *contradicts* an explicit note is **skipped** rather than
+   a candidate that *contradicts* an explicit memory is **skipped** rather than
    silently overriding it.
 5. Saves facts with `source='extracted'` + confidence + provenance, then
    advances the watermark and marks the thread `idle`.
@@ -313,23 +313,23 @@ session abandoned without a clean exit and hard-deletes trashed threads whose
 Two rules keep the store self-maintaining without letting automation quietly
 rewrite what you said explicitly:
 
-- **Trust-tier guard.** An `extracted` note may only supersede another
-  `extracted` note — it can never overwrite an explicit (`user_tool` /
-  `advisor_tool`) fact. An extraction that conflicts with an explicit note is
-  **skipped** (the explicit note stands; the user can change it via the Advisor),
+- **Trust-tier guard.** An `extracted` memory may only supersede another
+  `extracted` memory — it can never overwrite an explicit (`user_tool` /
+  `advisor_tool`) fact. An extraction that conflicts with an explicit memory is
+  **skipped** (the explicit memory stands; the user can change it via the Advisor),
   never applied silently (`updateFromExtraction` enforces this in code).
 - **Consolidate-on-write — model first.** The real defence against duplicates is
   the Advisor checking before it saves. The injected memory block is a *frozen*
-  snapshot from the start of the chat, so it can't show a note saved earlier in
+  snapshot from the start of the chat, so it can't show a memory saved earlier in
   the **same** session; the system prompt therefore tells the Advisor to call
   `list_preferences`/`recall_preferences` (which query the **live** set) before
-  `save_preference`, and to `update_preference` an existing note rather than add a
+  `save_preference`, and to `update_preference` an existing memory rather than add a
   near-duplicate — the same "check memory first, prefer editing over creating"
   pattern Anthropic's memory tool bakes into its system prompt. Semantic
   consolidation stays the model's job (and the extraction reconcile's), because
-  free-text notes are almost never byte-identical.
+  free-text memories are almost never byte-identical.
 - **Idempotency net.** Below that, `save()` itself collapses a *truly identical*
-  re-save: an active note with the same category and content (trimmed,
+  re-save: an active memory with the same category and content (trimmed,
   case-insensitive) returns the existing row instead of inserting a copy. This is
   only a cheap backstop for the degenerate case (a model re-saving the exact same
   line within a frozen session) — it does nothing for near-duplicates, which is
@@ -338,7 +338,7 @@ rewrite what you said explicitly:
 ### Decay and staleness
 
 A background `jobs:decay-extracted` sweep (`lib/jobs/decay-extracted.ts`) nudges
-`source='extracted'` rows' confidence down over time, so an inferred note that's
+`source='extracted'` rows' confidence down over time, so an inferred memory that's
 never reinforced eventually drops below the 0.7 inject floor and becomes
 recall-only — it **decays the score, not the data** (the row is kept, still
 searchable). Explicit rows (`confidence` NULL) never decay. `last_confirmed_at`

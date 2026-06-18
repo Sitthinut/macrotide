@@ -523,9 +523,9 @@ function TransactionsImportCard({
   );
 }
 
-// A quiet grey status line under a turn — "Memory updated" etc. — in the
-// ChatGPT/Claude style: no chip, no border, no leading icon. Clicking it expands
-// to reveal what changed, with a "Manage memories" link to the durable record in
+// A quiet grey status line under a turn — "Memory updated" etc. Deliberately
+// minimal: no chip, no border, no leading icon. Clicking it expands
+// to reveal what changed, with a "View in Memory" link to the durable record in
 // Journal → Memory. The visible audit surface ADR 0006 calls for, kept minimal.
 const MEMORY_VERB: Record<MemoryEvent["kind"], string> = {
   save: "saved",
@@ -558,7 +558,7 @@ function MemoryEventLine({ event }: { event: MemoryEvent }) {
               window.dispatchEvent(new CustomEvent("open-journal", { detail: "memory" }))
             }
           >
-            Manage memories →
+            View in Memory →
           </button>
         </div>
       )}
@@ -842,7 +842,7 @@ export function ChatScreen({
       const skipped = images.length - room;
       setAttachNotice(
         skipped > 0
-          ? `Added ${room} — Advisor reads up to ${MAX_ATTACHMENTS} images per message, so ${skipped} ${skipped === 1 ? "was" : "were"} skipped. For a larger batch, use Add holdings → Image.`
+          ? `Added ${room} — Advisor reads up to ${MAX_ATTACHMENTS} images per message, so ${skipped} ${skipped === 1 ? "was" : "were"} skipped. For a larger batch, use Add to portfolio → Images.`
           : null,
       );
       const processed = await Promise.all(images.slice(0, room).map(downscaleImage));
