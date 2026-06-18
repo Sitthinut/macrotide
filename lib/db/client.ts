@@ -20,18 +20,28 @@ function runtimePath(envPath: string | undefined, ...fallbackSegments: string[])
   return join(/*turbopackIgnore: true*/ process.cwd(), ...fallbackSegments);
 }
 
-const APP_DB_PATH = runtimePath(process.env.DB_PATH, "data", "app.db");
-const MARKET_DB_PATH = runtimePath(process.env.MARKET_DB_PATH, "data", "market.db");
+// `next build` collects page data for routes in PARALLEL worker processes, each
+// of which imports this module. Routes are imported for static analysis only —
+// handlers never run, so the DB is never queried during the build. Opening the
+// real file anyway caused two build-time failures:
+//   1. every worker ran migrate() against the same fresh data/*.db, racing on
+//      CREATE TABLE ("table `buckets` already exists"); and
+//   2. even just opening the file and switching to WAL takes a brief write lock,
+//      so N workers contending on one file failed the build non-deterministically
+//      ("Failed to collect page data") — a busy_timeout only narrows that window,
+//      it doesn't close it.
+// Fix: during the build phase each worker gets its OWN private in-memory DB. No
+// shared file, no lock, no contention — and nothing reads it, so migrations are
+// unnecessary. The real file-backed DB + migrations are used at server startup
+// (BUILD_PHASE === false), unchanged.
+const BUILD_PHASE = process.env.NEXT_PHASE === "phase-production-build";
+
+const APP_DB_PATH = BUILD_PHASE ? ":memory:" : runtimePath(process.env.DB_PATH, "data", "app.db");
+const MARKET_DB_PATH = BUILD_PHASE
+  ? ":memory:"
+  : runtimePath(process.env.MARKET_DB_PATH, "data", "market.db");
 const APP_MIGRATIONS_DIR = runtimePath(undefined, "lib", "db", "migrations", "app");
 const MARKET_MIGRATIONS_DIR = runtimePath(undefined, "lib", "db", "migrations", "market");
-
-// `next build` collects page data for routes in parallel worker processes, each
-// of which imports this module and would run `migrate()` against the same fresh
-// data/*.db — racing on CREATE TABLE ("table `buckets` already exists"). The
-// globalThis pin only dedupes within one process, not across build workers. At
-// build time routes are imported for static analysis only (never served), so we
-// skip migrations + the backup entirely; they run normally at server startup.
-const BUILD_PHASE = process.env.NEXT_PHASE === "phase-production-build";
 
 // Next.js hot-reload reimports server modules — pin the connections on
 // globalThis so we don't leak SQLite file handles across reloads in dev.
@@ -46,11 +56,13 @@ function open(path: string): Database.Database {
   const dir = dirname(path);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const sqlite = new Database(path);
-  // Wait for a held lock instead of throwing SQLITE_BUSY immediately. `next build`
-  // collects page data in PARALLEL worker processes that each open this file and
-  // take a brief write lock (even just to set WAL mode), so without a busy timeout
-  // the losers error out and fail the build non-deterministically. Set it FIRST so
-  // it covers the journal_mode switch itself.
+  // Wait for a held lock instead of throwing SQLITE_BUSY immediately. At runtime
+  // more than one process opens these files concurrently — the server, the
+  // systemd `jobs:refresh-market` timer (writes the quote cache), and one-off
+  // `db:*` CLIs / the in-process backup reader — so a writer can briefly hold the
+  // lock (including the journal_mode=WAL switch on open). Set it FIRST so it
+  // covers that switch. (Build workers no longer contend: each gets its own
+  // private :memory: DB — see BUILD_PHASE above.)
   sqlite.pragma("busy_timeout = 5000");
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
