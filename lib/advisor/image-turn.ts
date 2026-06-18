@@ -9,7 +9,7 @@
 // silently dropped), and the chat route rejects an over-limit turn as a backstop
 // (a client that bypasses the cap, or a future non-browser caller). One source of
 // truth so the two can't drift. The ceiling bounds per-turn vision tile/token cost
-// — for a larger batch of holdings screenshots, the Add holdings → Image importer
+// — for a larger batch of holdings screenshots, the Add to portfolio → Images importer
 // has no per-turn cap. Lives here (no "use client") so client + server share it.
 export const MAX_CHAT_ATTACHMENTS = 10;
 
@@ -17,7 +17,7 @@ export const MAX_CHAT_ATTACHMENTS = 10;
 export function attachmentLimitMessage(attempted: number): string {
   return (
     `Advisor reads up to ${MAX_CHAT_ATTACHMENTS} images per message — you attached ${attempted}. ` +
-    `Please remove ${attempted - MAX_CHAT_ATTACHMENTS} and send again, or use Add holdings → Image ` +
+    `Please remove ${attempted - MAX_CHAT_ATTACHMENTS} and send again, or use Add to portfolio → Images ` +
     `to import a larger batch at once.`
   );
 }
@@ -138,7 +138,7 @@ export type VisionDecision = "text" | "vision" | "stub";
  * Decide how to handle a turn:
  *   - no images → `text` (the existing text chat paths, unchanged).
  *   - images, but vision unavailable for this path → `stub` (the route serves a
- *     friendly message pointing at the Add-holdings image importer).
+ *     friendly message pointing at the Add-to-portfolio image importer).
  *   - images + available → `vision`.
  *
  * `visionReady` is the path-appropriate vision provider's readiness (demo uses
