@@ -257,7 +257,7 @@ export function resolveDemoProvider(opts: { conversationId?: string } = {}): Res
 //     token + optional cents caps enforced in the route before this is reached.
 //   - Setting `VISION_CHAT_MODELS=off` (or empty) disables inline chat vision
 //     entirely — the resolver returns not-ready and the route serves a stub that
-//     points the user at the Add-holdings image importer.
+//     points the user at the Add-to-portfolio image importer.
 const VISION_DEFAULT = ["google/gemini-2.5-flash-lite", "google/gemini-3.1-flash-lite"];
 
 /** True when a vision var explicitly disables that vision path. */

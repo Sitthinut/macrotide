@@ -517,7 +517,7 @@ export function ChatThreadList({
             )}
             {!deletedLoading && deletedData && deletedData.length === 0 && (
               <div style={{ padding: "8px 16px", fontSize: 12, color: "var(--muted)" }}>
-                Nothing in the trash.
+                No deleted chats.
               </div>
             )}
             {deletedData?.map((t) => {

@@ -244,13 +244,13 @@ const RECOVER_DIRECTIVE =
   "answer my previous question now, in plain language. Do not call any tools.";
 
 // Served when a turn carries images but inline vision isn't available for it.
-// Both point the user at the always-on Add-holdings image importer so they're
+// Both point the user at the always-on Add-to-portfolio image importer so they're
 // never stuck — the chat just can't look at the image on this path.
 const VISION_DEMO_STUB =
-  "Reading images in chat isn't available in the demo. Sign in with a passkey to chat about " +
-  "screenshots — or use Add holdings → Image to import holdings from one.";
+  "Reading images in chat isn't available in the demo. Sign up to chat about " +
+  "screenshots — or use Add to portfolio → Images to import holdings from one.";
 const VISION_DISABLED_STUB =
-  "Reading images in chat isn't enabled on this deployment yet. Use Add holdings → Image to " +
+  "Reading images in chat isn't enabled on this deployment yet. Use Add to portfolio → Images to " +
   "import holdings from a screenshot.";
 
 interface AdvisorStreamOptions {
@@ -426,7 +426,7 @@ export async function POST(req: Request) {
     }
     if (session.chatTurnsUsed >= DEMO_CHAT_TURN_CAP) {
       return stubResponse(
-        `You've used all ${DEMO_CHAT_TURN_CAP} demo chat turns. Sign in with a passkey to keep chatting — your demo data won't carry over.`,
+        `You've used all ${DEMO_CHAT_TURN_CAP} demo chat turns. Sign up to keep chatting — your demo data won't carry over.`,
       );
     }
   }
