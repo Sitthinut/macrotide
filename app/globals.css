@@ -621,7 +621,7 @@ body[data-topbar-hidden="true"] .portfolio-switch {
   margin-top: 0;
 }
 /* Quiet per-message "save to notes" — a muted bookmark glyph that brightens on
-   hover (no background box, no label, ChatGPT/Claude-style). Lives at the foot
+   hover (no background box, no label). Lives at the foot
    of the Advisor bubble; small top margin separates it from the reply text. No
    left padding so the glyph aligns with the text paragraph. */
 .msg-save {
@@ -652,8 +652,8 @@ body[data-topbar-hidden="true"] .portfolio-switch {
 }
 
 /* Memory-write notice under an Advisor reply — a quiet grey status line
-   (no chip/border/icon, ChatGPT/Claude style) that expands on click to reveal
-   what changed + a "Manage memories" link. See ChatScreen MemoryEventLine. */
+   (no chip/border/icon) that expands on click to reveal
+   what changed + a "View in Memory" link. See ChatScreen MemoryEventLine. */
 .memory-event {
   font-size: 11.5px;
   color: var(--muted);
@@ -2049,7 +2049,7 @@ button.private-amt:focus-visible {
   padding: 10px 14px;
   font-size: 13.5px;
 }
-/* Advisor replies are borderless prose (ChatGPT/Claude-style) — only the user's
+/* Advisor replies are borderless prose — only the user's
    own messages get a chat bubble. The meta line + accent dot mark the turn. */
 .msg.ai {
   align-self: flex-start;

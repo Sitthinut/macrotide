@@ -1,8 +1,8 @@
 "use client";
 
 // A subtle "save this reply to your notes" affordance under a finished Advisor
-// message — a muted bookmark icon (no label), in the spirit of ChatGPT/Claude's
-// quiet per-message actions. Deliberate user save, distinct from memory: it
+// message — a muted bookmark icon (no label), a quiet per-message action.
+// Deliberate user save, distinct from memory: it
 // persists a journal note. It's a TOGGLE — click again to remove the note it
 // created. Shown only once the message has finished streaming.
 export interface SaveNoteButtonProps {
