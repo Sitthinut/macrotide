@@ -15,6 +15,16 @@ import type { ImportSeedRow } from "@/lib/stores/import-seed";
 export interface ChatCard {
   holdingsImport?: { rows: ImportSeedRow[]; source: string | null; note: string | null };
   transactionsImport?: { rows: ExtractedTxnRow[]; source: string | null; note: string | null };
+  // Memory writes the Advisor made on this turn — persisted so the in-chat
+  // status chip survives reload (the durable record is Journal → Memory).
+  memoryEvents?: {
+    kind: string;
+    id: number;
+    oldId?: number;
+    category: string;
+    status?: string;
+    content?: string;
+  }[];
 }
 
 const KEY = "macrotide_chat_cards_v1";
@@ -58,11 +68,18 @@ function writeStore(store: Store): void {
 
 const composeKey = (threadId: string, seq: number) => `${threadId}:${seq}`;
 
-/** Persist the import card produced by one user turn. No-op when empty. */
+/** Persist the card(s) produced by one user turn. No-op when empty. Merges with
+ *  any existing entry so a turn can carry both an import table and memory events. */
 export function saveChatCard(threadId: string, seq: number, card: ChatCard): void {
-  if (!threadId || (!card.holdingsImport && !card.transactionsImport)) return;
+  if (
+    !threadId ||
+    (!card.holdingsImport && !card.transactionsImport && !card.memoryEvents?.length)
+  ) {
+    return;
+  }
   const store = readStore();
-  store[composeKey(threadId, seq)] = { ts: Date.now(), card };
+  const key = composeKey(threadId, seq);
+  store[key] = { ts: Date.now(), card: { ...store[key]?.card, ...card } };
   writeStore(store);
 }
 

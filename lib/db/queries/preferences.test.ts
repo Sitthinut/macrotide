@@ -61,6 +61,28 @@ describe("preferences queries", () => {
     });
   });
 
+  it("save is idempotent on identical (category, content) — no duplicate row", () => {
+    withFresh(() => {
+      const a = save({
+        category: "finance_context",
+        content: "funds only",
+        source: "advisor_tool",
+      });
+      // Re-saving the same fact (e.g. the frozen-session blind spot) returns the
+      // existing row instead of piling up duplicates. Case/whitespace-insensitive.
+      const b = save({
+        category: "finance_context",
+        content: "  Funds Only ",
+        source: "advisor_tool",
+      });
+      expect(b.id).toBe(a.id);
+      expect(listActive("finance_context")).toHaveLength(1);
+      // A genuinely different fact in the same category still inserts.
+      save({ category: "finance_context", content: "no crypto", source: "advisor_tool" });
+      expect(listActive("finance_context")).toHaveLength(2);
+    });
+  });
+
   it("listActive filters by category and orders by category then id", () => {
     withFresh(() => {
       save({ category: "profile", content: "p1", source: "user_tool" });

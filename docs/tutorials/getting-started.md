@@ -106,7 +106,7 @@ you accept or reject, and remember durable facts you tell it across chats.
 - Without it, you get a clearly-labeled stub so the UI is still explorable.
 
 Tell it something durable — *"remember I only invest in funds, not individual
-stocks"* — and it saves that to memory, visible under **Settings → Memory**.
+stocks"* — and it saves that to memory, visible under **Journal → Memory**.
 See the [memory feature guide](../explanation/memory.md) for how that works.
 
 ## Where to go next

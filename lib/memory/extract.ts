@@ -68,8 +68,8 @@ export interface SavedExtraction extends ExtractedFact {
   id: number;
   /** True if confidence cleared the injection threshold (vs recall-only). */
   injected: boolean;
-  /** What actually happened: a new row, a supersede, or a pending candidate. */
-  applied: "added" | "updated" | "pending";
+  /** What actually happened: a new row or a supersede of an existing one. */
+  applied: "added" | "updated";
 }
 
 export interface ExtractionResult {
@@ -269,19 +269,9 @@ export async function extractSessionPreferences(
         continue;
       }
       // Trust-tier guard: an extracted fact may not silently supersede an
-      // EXPLICIT (user/advisor) note. Capture it as a pending candidate so the
-      // user is asked to confirm the change rather than it landing silently.
-      if (ext.rejected === "not_extracted") {
-        const row = save({
-          ...common,
-          category: fact.category,
-          content: fact.content,
-          confidence: fact.confidence,
-          status: "pending",
-        });
-        saved.push({ ...fact, id: row.id, injected: false, applied: "pending" });
-        continue;
-      }
+      // EXPLICIT (user/advisor) note. Skip it — the explicit note stands; the
+      // user can change it themselves via the Advisor.
+      if (ext.rejected === "not_extracted") continue;
       // not_found → fall through and add as new.
     }
 

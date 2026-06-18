@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatThreadList } from "@/components/ChatThreadList";
 import { Icon } from "@/components/Icon";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
@@ -28,6 +28,7 @@ import {
   requestTxnImportWithRows,
 } from "@/lib/stores/import-seed";
 import { useOverlayScrollbar } from "@/lib/useOverlayScrollbar";
+import { usePointer } from "@/lib/usePointer";
 
 // Per-message attachment cap — the single source of truth lives in
 // lib/advisor/image-turn (the chat route enforces the same number as a backstop).
@@ -100,6 +101,7 @@ function parseCards(json: string | null | undefined): {
   transactionsImport?: TransactionsImport;
   holdings?: HoldingProposal[];
   proposal?: PlanProposal;
+  memoryEvents?: MemoryEvent[];
 } | null {
   if (!json) return null;
   try {
@@ -150,6 +152,23 @@ interface TransactionsImport {
   note: string | null;
 }
 
+// A memory write the Advisor made this turn, surfaced as a muted status line
+// with an Undo. Derived from the memory tools' structured `memoryEvent` output
+// (lib/memory/tools.ts) — the audit surface ADR 0006 calls for. `undone` flips
+// once the user reverses it.
+interface MemoryEvent {
+  kind: "save" | "update" | "forget" | "confirm";
+  id: number;
+  oldId?: number;
+  category: string;
+  // The short declarative note (the `content` line, not the long `body`).
+  content?: string;
+  // True when the write happened BEFORE any prose this turn (the Advisor saved,
+  // then explained) — render the line ABOVE the bubble. False/undefined → after
+  // the prose, render below. Keeps it in the order things actually occurred.
+  beforeText?: boolean;
+}
+
 interface Message {
   role: "user" | "ai";
   text: string;
@@ -172,6 +191,10 @@ interface Message {
   // state tracked by index.
   holdings?: HoldingProposal[];
   holdingStatus?: Record<number, "applied" | "rejected">;
+  // Memory writes the Advisor made this turn (save/update/forget/confirm) —
+  // rendered as muted status lines with Undo. Live-session only (the durable
+  // record is Journal → Memory), so not persisted across reload.
+  memoryEvents?: MemoryEvent[];
   // Set on a failed/empty assistant turn so the UI can offer a "Try again"
   // button that re-sends the preceding user message.
   canRetry?: boolean;
@@ -199,7 +222,11 @@ function prettyModel(id: string): string {
 // The split form may also carry a structured `context` envelope (the screen +
 // intent + a few pre-computed facts) so the server can answer without a tool
 // round-trip — never shown in the bubble. See lib/advisor/entry-context.ts.
-export type SeedPrompt = string | { display: string; send: string; context?: EntryContext };
+export type SeedPrompt =
+  | string
+  // `newChat` opens a fresh thread before sending — used by the Journal → Memory
+  // "Edit" action so an edit request doesn't land in the conversation you're in.
+  | { display: string; send: string; context?: EntryContext; newChat?: boolean };
 
 export interface ChatScreenProps {
   persona?: string;
@@ -496,6 +523,49 @@ function TransactionsImportCard({
   );
 }
 
+// A quiet grey status line under a turn — "Memory updated" etc. — in the
+// ChatGPT/Claude style: no chip, no border, no leading icon. Clicking it expands
+// to reveal what changed, with a "Manage memories" link to the durable record in
+// Journal → Memory. The visible audit surface ADR 0006 calls for, kept minimal.
+const MEMORY_VERB: Record<MemoryEvent["kind"], string> = {
+  save: "saved",
+  update: "updated",
+  forget: "removed",
+  confirm: "confirmed",
+};
+
+function MemoryEventLine({ event }: { event: MemoryEvent }) {
+  const [open, setOpen] = useState(false);
+  const label = `Memory ${MEMORY_VERB[event.kind]}`;
+  return (
+    <div className="memory-event" data-open={open || undefined}>
+      <button
+        type="button"
+        className="me-line"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        <span>{label}</span>
+        <Icon name="chevron-right" size={13} className="me-caret" />
+      </button>
+      {open && (
+        <div className="me-detail">
+          {event.content && <div className="me-content">{event.content}</div>}
+          <button
+            type="button"
+            className="me-manage"
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent("open-journal", { detail: "memory" }))
+            }
+          >
+            Manage memories →
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ChatScreen({
   persona = "advisor",
   seedPrompt,
@@ -521,6 +591,13 @@ export function ChatScreen({
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
+  // A new-chat seed (Journal → Memory "Edit") queued until newChat() resets the
+  // history, so it sends into the fresh thread rather than the one we left.
+  const [pendingNewChatSeed, setPendingNewChatSeed] = useState<{
+    display: string;
+    send: string;
+    context?: EntryContext;
+  } | null>(null);
   // Pending image attachments for the next turn (downscaled), plus a click-to-
   // enlarge lightbox. Whether the attach affordance shows at all is gated by the
   // server-computed capability below (vision on + demo allows it).
@@ -542,7 +619,19 @@ export function ChatScreen({
   // can never expose the badge in a production bundle.
   const { data: adminStatus } = useResource<{ isOwner: boolean }>("/api/admin/status");
   const showModelBadge = (adminStatus?.isOwner ?? false) || process.env.NODE_ENV === "development";
-  const [savedMsgs, setSavedMsgs] = useState<Record<number, boolean>>({});
+  // "Saved to notes" is DERIVED from the durable journal notes — a bookmark
+  // stores the reply text as a note body — so the bookmark reflects reality and
+  // survives tab switches, reloads, and other devices (no ephemeral per-session
+  // flag to reset). Keyed by body text → the note id (for the un-save toggle).
+  const { data: journalNotes } =
+    useResource<{ id: number; kind: string; body: string }[]>("/api/journal");
+  const savedNoteIdByBody = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const n of journalNotes ?? []) {
+      if (n.kind === "note" && n.body) map.set(n.body, n.id);
+    }
+    return map;
+  }, [journalNotes]);
   const [showThreads, setShowThreads] = useState(false);
   // Set when the server signals it crossed ~80% of the model context budget
   // (header `x-context-summarized`). Earlier turns are summarized in the
@@ -561,6 +650,11 @@ export function ChatScreen({
   // so the children live under one stable `.chat-stream-content` wrapper (below)
   // and auto-scroll targets that viewport (see the scroll effect).
   const streamOsRef = useOverlayScrollbar();
+  // The composer textarea can't host OverlayScrollbars (it re-parents child DOM;
+  // a textarea has none), so it gets a thin overlay-style scrollbar on a fine
+  // pointer and the native one on touch — gated by the same signal the rest of
+  // the app uses, so behavior matches.
+  const customScroll = usePointer();
   const setStreamRef = useCallback(
     (node: HTMLDivElement | null) => {
       streamRef.current = node;
@@ -679,10 +773,13 @@ export function ChatScreen({
                   transactionsImport: dbCards?.transactionsImport ?? card?.transactionsImport,
                   holdings: dbCards?.holdings,
                   proposal: dbCards?.proposal,
+                  // Prefer the server-persisted events (cross-device) and fall
+                  // back to the browser cache, like the import cards above.
+                  memoryEvents:
+                    dbCards?.memoryEvents ?? (card?.memoryEvents as MemoryEvent[] | undefined),
                 } as Message;
               }),
         );
-        setSavedMsgs({});
         setContextNotice(false);
         return true;
       } catch {
@@ -695,8 +792,12 @@ export function ChatScreen({
   // Hydrate the most recently active thread on mount. If the server doesn't
   // know about the stored id (e.g. demo session restarted, DB wiped), we silently
   // discard the stale id and start fresh.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only restore; reading seedPrompt at mount is intentional and must not retrigger
   useEffect(() => {
     if (typeof window === "undefined") return;
+    // A pending "edit in a new chat" seed (Journal → Memory) must win over thread
+    // restoration — don't load the last thread, or it would clobber the fresh chat.
+    if (seedPrompt && typeof seedPrompt === "object" && seedPrompt.newChat) return;
     const stored = window.localStorage.getItem(ACTIVE_THREAD_KEY);
     if (!stored) return;
     let cancelled = false;
@@ -720,7 +821,6 @@ export function ChatScreen({
     }
     setThreadId(null);
     setMessages(initial);
-    setSavedMsgs({});
     setContextNotice(false);
     setAttachments([]);
     setAttachNotice(null);
@@ -963,6 +1063,9 @@ export function ChatScreen({
       // statement row). Accumulate them here and attach the growing list to the
       // streaming assistant message so each card appears as it arrives.
       const holdingProposals: HoldingProposal[] = [];
+      // Memory writes this turn (save/update/forget/confirm) — surfaced as
+      // muted status lines with Undo on the assistant message.
+      const memoryEvents: MemoryEvent[] = [];
 
       while (true) {
         const { value, done } = await reader.read();
@@ -1003,6 +1106,36 @@ export function ChatScreen({
             if (toolOut && typeof toolOut === "object" && "message" in toolOut) {
               const msg = (toolOut as { message?: unknown }).message;
               if (typeof msg === "string" && msg.trim()) toolMessages.push(msg.trim());
+            }
+            // Memory write (save/update/forget/confirm) — the tool returns a
+            // structured `memoryEvent` we turn into a muted status line + Undo.
+            if (toolOut && typeof toolOut === "object" && "memoryEvent" in toolOut) {
+              const ev = (toolOut as { memoryEvent?: unknown }).memoryEvent;
+              if (ev && typeof ev === "object" && "kind" in ev && "id" in ev) {
+                const raw = ev as Partial<MemoryEvent>;
+                const memEvent: MemoryEvent = {
+                  kind: raw.kind ?? "save",
+                  id: Number(raw.id),
+                  oldId: raw.oldId,
+                  category: String(raw.category ?? "fact"),
+                  content: typeof raw.content === "string" ? raw.content : undefined,
+                  // Order the line relative to the prose: empty `accumulated`
+                  // means no text yet → the save preceded the reply → render above.
+                  beforeText: !accumulated.trim(),
+                };
+                memoryEvents.push(memEvent);
+                const snapshot = [...memoryEvents];
+                setMessages((prev) =>
+                  prev.map((m) => (m.id === placeholderId ? { ...m, memoryEvents: snapshot } : m)),
+                );
+                // Persist (browser fallback to the server-side `cards` column) so
+                // the line survives reload. Strip the transient ordering flag.
+                if (tidForImages) {
+                  saveChatCard(tidForImages, userSeq, {
+                    memoryEvents: snapshot.map(({ beforeText, ...e }) => e),
+                  });
+                }
+              }
             }
             // propose_plan_edit emits a `proposal` in its tool output (the
             // PlanProposal shape the card expects). Attach it to the streaming
@@ -1197,6 +1330,18 @@ export function ChatScreen({
     void askLive(send, messages, context, attached);
   };
 
+  // The composer is an auto-growing textarea: reset to one line, then grow to fit
+  // the content. CSS caps the height and adds a scrollbar past the cap, and the
+  // composer is bottom-aligned so the send/attach buttons stay put as it grows.
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-fit whenever the text changes (incl. programmatic clears on send / seed)
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [input]);
+
   // Send the composer's current text + staged attachments, then clear them.
   const sendComposer = () => {
     if (loading) return;
@@ -1252,12 +1397,35 @@ export function ChatScreen({
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: fire once per seed — `ask`/`onPromptConsumed` are intentionally unmemoized and must not retrigger the effect
   useEffect(() => {
-    if (seedPrompt) {
-      if (typeof seedPrompt === "string") ask(seedPrompt);
-      else ask(seedPrompt.display, seedPrompt.send, seedPrompt.context);
-      onPromptConsumed?.();
+    if (!seedPrompt) return;
+    if (typeof seedPrompt !== "string" && seedPrompt.newChat) {
+      // Open a fresh thread first, then send once newChat() has reset the
+      // history (see the deferred effect below) — so the edit request doesn't
+      // append to whatever conversation was open.
+      newChat();
+      setPendingNewChatSeed({
+        display: seedPrompt.display,
+        send: seedPrompt.send,
+        context: seedPrompt.context,
+      });
+    } else if (typeof seedPrompt === "string") {
+      ask(seedPrompt);
+    } else {
+      ask(seedPrompt.display, seedPrompt.send, seedPrompt.context);
     }
+    onPromptConsumed?.();
   }, [seedPrompt]);
+
+  // Fire a queued new-chat seed once newChat() has reset `messages` to `initial`
+  // (reference equality holds — newChat does setMessages(initial)). Deferring to
+  // this render guarantees `ask` closes over the empty history, not the old chat.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `ask`/`initial` are unmemoized; fire only when the reset has landed
+  useEffect(() => {
+    if (pendingNewChatSeed && messages === initial) {
+      ask(pendingNewChatSeed.display, pendingNewChatSeed.send, pendingNewChatSeed.context);
+      setPendingNewChatSeed(null);
+    }
+  }, [pendingNewChatSeed, messages]);
 
   const applyProposal = async (idx: number, proposal: PlanProposal) => {
     // Optimistic: mark applied immediately, roll back on failure.
@@ -1435,144 +1603,201 @@ export function ChatScreen({
             const proposal = m.proposal;
             const holdingsImport = m.holdingsImport;
             const transactionsImport = m.transactionsImport;
+            // The actively-streaming assistant message is the last one while
+            // loading — don't offer "save to notes" until it's finished writing.
+            const isStreaming = loading && i === messages.length - 1;
+            const showSave =
+              m.role === "ai" &&
+              i > 0 &&
+              !!m.text &&
+              !m.proposal &&
+              !m.holdings?.length &&
+              !m.holdingsImport &&
+              !m.transactionsImport &&
+              !isStreaming;
+            const aboveEvents = m.memoryEvents?.some((e) => e.beforeText);
+            const belowEvents = m.memoryEvents?.some((e) => !e.beforeText);
+            // The AI bubble renders only when it has visible content; an empty
+            // streaming placeholder shows nothing here — the single thinking
+            // indicator at the bottom of the stream conveys "working", so a
+            // memory chip or streamed text appears ABOVE it, never under empty dots.
+            const aiHasContent =
+              !!m.text ||
+              !!proposal ||
+              !!m.holdings?.length ||
+              !!holdingsImport ||
+              !!transactionsImport ||
+              !!m.canRetry ||
+              !!m.images?.length;
             return (
-              <div key={m.id} className={`msg ${m.role}`}>
-                {m.role === "ai" && (
-                  <div className="meta">
-                    Advisor ·{" "}
-                    {new Date(m.ts).toLocaleTimeString("en-US", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                    {showModelBadge && m.model && <> · {prettyModel(m.model)}</>}
+              <Fragment key={m.id}>
+                {/* Memory writes that happened BEFORE any prose this turn render
+                  above the reply — the order they actually occurred. */}
+                {m.role === "ai" && aboveEvents && (
+                  <div className="msg-aside">
+                    {m.memoryEvents?.map((evt, eIdx) =>
+                      evt.beforeText ? (
+                        <MemoryEventLine
+                          // biome-ignore lint/suspicious/noArrayIndexKey: events are append-only within a message
+                          key={`${m.id}-mem-${eIdx}`}
+                          event={evt}
+                        />
+                      ) : null,
+                    )}
                   </div>
                 )}
-                {m.role === "ai" && !m.text && loading ? (
-                  <div className="typing">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                  </div>
-                ) : m.role === "ai" ? (
-                  // Advisor replies are Markdown — render them styled. User bubbles
-                  // stay plain text (below) so nothing the user typed is reinterpreted
-                  // as markup.
-                  m.text && <MarkdownMessage text={m.text} />
-                ) : (
-                  m.text && <div style={{ whiteSpace: "pre-wrap" }}>{m.text}</div>
-                )}
-                {m.images && m.images.length > 0 && (
-                  <div className="chat-attachments">
-                    {m.images.map((img) => (
+                {(m.role !== "ai" || aiHasContent) && (
+                  <div className={`msg ${m.role}`}>
+                    {m.role === "ai" && (
+                      <div className="meta">
+                        Advisor ·{" "}
+                        {new Date(m.ts).toLocaleTimeString("en-US", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                        {showModelBadge && m.model && <> · {prettyModel(m.model)}</>}
+                      </div>
+                    )}
+                    {m.role === "ai"
+                      ? // Advisor replies are Markdown — render them styled. User bubbles
+                        // stay plain text (below) so nothing the user typed is reinterpreted
+                        // as markup.
+                        m.text && <MarkdownMessage text={m.text} />
+                      : m.text && <div style={{ whiteSpace: "pre-wrap" }}>{m.text}</div>}
+                    {m.images && m.images.length > 0 && (
+                      <div className="chat-attachments">
+                        {m.images.map((img) => (
+                          <button
+                            type="button"
+                            key={img.id}
+                            className="thumb"
+                            onClick={() => setLightbox(img.fullDataUrl ?? img.dataUrl)}
+                            title={img.name}
+                            aria-label={`View ${img.name}`}
+                          >
+                            {/* biome-ignore lint/performance/noImgElement: data-URL thumbnail, not a remote asset */}
+                            <img src={img.dataUrl} alt={img.name} />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {m.canRetry && (
                       <button
                         type="button"
-                        key={img.id}
-                        className="thumb"
-                        onClick={() => setLightbox(img.fullDataUrl ?? img.dataUrl)}
-                        title={img.name}
-                        aria-label={`View ${img.name}`}
+                        className="btn ghost sm"
+                        onClick={() => retry(m.id)}
+                        disabled={loading}
+                        style={{ marginTop: 6 }}
                       >
-                        {/* biome-ignore lint/performance/noImgElement: data-URL thumbnail, not a remote asset */}
-                        <img src={img.dataUrl} alt={img.name} />
+                        Try again
                       </button>
+                    )}
+                    {proposal && (
+                      <PlanProposalCard
+                        proposal={proposal}
+                        applied={m.applied}
+                        onApply={() => applyProposal(i, proposal)}
+                        onReject={() => {
+                          setMessages((prev) =>
+                            prev.map((x, idx) =>
+                              idx === i ? { ...x, applied: false, rejected: true } : x,
+                            ),
+                          );
+                        }}
+                      />
+                    )}
+                    {m.holdings?.map((h, hIdx) => (
+                      <HoldingProposalCard
+                        // biome-ignore lint/suspicious/noArrayIndexKey: proposals are append-only within a message; hIdx also indexes holdingStatus
+                        key={`${m.id}-holding-${hIdx}`}
+                        holding={h}
+                        status={m.holdingStatus?.[hIdx]}
+                        onApply={() => applyHolding(i, hIdx, h)}
+                        onReject={() => rejectHolding(i, hIdx)}
+                      />
                     ))}
+                    {holdingsImport && (
+                      <HoldingsImportCard
+                        data={holdingsImport}
+                        onOpen={() => requestImportWithRows(holdingsImport.rows)}
+                      />
+                    )}
+                    {transactionsImport && (
+                      <TransactionsImportCard
+                        data={transactionsImport}
+                        onOpen={() => requestTxnImportWithRows(transactionsImport.rows)}
+                      />
+                    )}
+                    {/* The save affordance belongs to the message — it lives at
+                        the foot of the bubble, not in the system aside below. */}
+                    {showSave && (
+                      <SaveNoteButton
+                        saved={savedNoteIdByBody.has(m.text)}
+                        onSave={() => {
+                          void (async () => {
+                            try {
+                              const existingId = savedNoteIdByBody.get(m.text);
+                              if (existingId != null) {
+                                // Toggle off: remove the note for this reply. A 404
+                                // (already deleted in Journal) is fine.
+                                const res = await fetch(`/api/journal/${existingId}`, {
+                                  method: "DELETE",
+                                });
+                                if (res.ok || res.status === 404) void invalidate("/api/journal");
+                                return;
+                              }
+                              const res = await fetch("/api/journal", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  kind: "note",
+                                  body: m.text,
+                                  source: "user_tool",
+                                }),
+                              });
+                              if (res.ok) void invalidate("/api/journal");
+                            } catch {
+                              // best-effort; the derived state self-corrects on refetch
+                            }
+                          })();
+                        }}
+                      />
+                    )}
                   </div>
                 )}
-                {m.canRetry && (
-                  <button
-                    type="button"
-                    className="btn ghost sm"
-                    onClick={() => retry(m.id)}
-                    disabled={loading}
-                    style={{ marginTop: 6 }}
-                  >
-                    Try again
-                  </button>
+                {/* Memory line(s) whose write came AFTER the prose — OUTSIDE the
+                  bubble, a system note distinct from what the Advisor said. */}
+                {m.role === "ai" && belowEvents && (
+                  <div className="msg-aside">
+                    {m.memoryEvents?.map((evt, eIdx) =>
+                      evt.beforeText ? null : (
+                        <MemoryEventLine
+                          // biome-ignore lint/suspicious/noArrayIndexKey: events are append-only within a message
+                          key={`${m.id}-mem-${eIdx}`}
+                          event={evt}
+                        />
+                      ),
+                    )}
+                  </div>
                 )}
-                {proposal && (
-                  <PlanProposalCard
-                    proposal={proposal}
-                    applied={m.applied}
-                    onApply={() => applyProposal(i, proposal)}
-                    onReject={() => {
-                      setMessages((prev) =>
-                        prev.map((x, idx) =>
-                          idx === i ? { ...x, applied: false, rejected: true } : x,
-                        ),
-                      );
-                    }}
-                  />
-                )}
-                {m.holdings?.map((h, hIdx) => (
-                  <HoldingProposalCard
-                    // biome-ignore lint/suspicious/noArrayIndexKey: proposals are append-only within a message; hIdx also indexes holdingStatus
-                    key={`${m.id}-holding-${hIdx}`}
-                    holding={h}
-                    status={m.holdingStatus?.[hIdx]}
-                    onApply={() => applyHolding(i, hIdx, h)}
-                    onReject={() => rejectHolding(i, hIdx)}
-                  />
-                ))}
-                {holdingsImport && (
-                  <HoldingsImportCard
-                    data={holdingsImport}
-                    onOpen={() => requestImportWithRows(holdingsImport.rows)}
-                  />
-                )}
-                {transactionsImport && (
-                  <TransactionsImportCard
-                    data={transactionsImport}
-                    onOpen={() => requestTxnImportWithRows(transactionsImport.rows)}
-                  />
-                )}
-                {m.role === "ai" &&
-                  i > 0 &&
-                  !m.proposal &&
-                  !m.holdings?.length &&
-                  !m.holdingsImport &&
-                  !m.transactionsImport && (
-                    <SaveNoteButton
-                      saved={savedMsgs[i] ?? false}
-                      onSave={() => {
-                        if (savedMsgs[i]) return;
-                        void (async () => {
-                          try {
-                            const res = await fetch("/api/journal", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({
-                                kind: "note",
-                                body: m.text,
-                                source: "user_tool",
-                              }),
-                            });
-                            if (res.ok) {
-                              setSavedMsgs((s) => ({ ...s, [i]: true }));
-                              void invalidate("/api/journal");
-                            }
-                          } catch {
-                            // best-effort; leave unsaved on failure
-                          }
-                        })();
-                      }}
-                    />
-                  )}
-              </div>
+              </Fragment>
             );
           })}
-          {/* Standalone "thinking" bubble only when there's no streaming
-            placeholder yet — i.e. proposal flow with 700ms setTimeout. The
-            stream flow renders typing dots inline inside the empty AI msg. */}
-          {loading && messages[messages.length - 1]?.role !== "ai" && (
-            <div className="msg ai">
-              <div className="meta">Advisor · thinking</div>
-              <div className="typing">
-                <span></span>
-                <span></span>
-                <span></span>
+          {/* One "thinking" indicator pinned at the bottom of the stream while
+            the Advisor works (no bubble) — memory chips and streamed text appear
+            ABOVE it. Hidden the moment the assistant message starts streaming text. */}
+          {loading &&
+            !(
+              messages[messages.length - 1]?.role === "ai" && !!messages[messages.length - 1]?.text
+            ) && (
+              <div className="msg ai">
+                <div className="typing">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
               </div>
-            </div>
-          )}
+            )}
         </div>
       </div>
 
@@ -1727,10 +1952,20 @@ export function ChatScreen({
             </button>
           </>
         )}
-        <input
-          type="text"
+        <textarea
+          ref={composerRef}
+          rows={1}
+          className={customScroll ? "composer-scroll" : undefined}
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            // Enter sends; Shift+Enter inserts a newline. Skip while an IME is
+            // composing (e.g. Thai input) so Enter commits the candidate instead.
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              sendComposer();
+            }
+          }}
           onPaste={(e) => {
             if (!imageUploadEnabled) return;
             const files = Array.from(e.clipboardData.files).filter((f) =>

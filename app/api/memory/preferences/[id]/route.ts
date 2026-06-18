@@ -5,7 +5,7 @@ import { forget, restore } from "@/lib/db/queries/preferences";
 export const runtime = "nodejs";
 
 // Soft-delete (sets valid_until = now). The row stays for 30 days so the user
-// can restore it from Settings → Memory. See docs/explanation/memory.md § Forgetting.
+// can restore it from Journal → Memory. See docs/explanation/memory.md § Forgetting.
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   return withDb(() => {

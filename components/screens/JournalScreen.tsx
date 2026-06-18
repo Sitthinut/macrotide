@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ModelDonut } from "@/components/charts";
 import { Icon } from "@/components/Icon";
+import { MemoryNotes } from "@/components/MemoryNotes";
 import { Modal } from "@/components/Modal";
 import { SkeletonRows } from "@/components/ui/Skeleton";
 import { authClient } from "@/lib/auth/client";
@@ -19,7 +21,7 @@ import {
 import type { ModelPortfolio, Note, ReadingItem } from "@/lib/static/types";
 import { onActivate } from "@/lib/ui-events";
 
-type Tab = "plan" | "notes" | "models" | "reading";
+export type JournalTab = "plan" | "notes" | "memory" | "models" | "reading";
 
 export interface JournalScreenProps {
   onOpenChat: () => void;
@@ -27,6 +29,10 @@ export interface JournalScreenProps {
   onOpenSettings: () => void;
   /** Show the top-right kebab that opens the account menu (mobile only). */
   showMenu?: boolean;
+  /** Deep-link the screen to a subtab (e.g. from the chat memory chip). */
+  initialTab?: JournalTab | null;
+  /** Called once `initialTab` has been applied so the parent can clear it. */
+  onTabConsumed?: () => void;
 }
 
 export function JournalScreen({
@@ -34,8 +40,17 @@ export function JournalScreen({
   onOpenModels,
   onOpenSettings,
   showMenu = true,
+  initialTab,
+  onTabConsumed,
 }: JournalScreenProps) {
-  const [tab, setTab] = useState<Tab>("plan");
+  const [tab, setTab] = useState<JournalTab>("plan");
+  // Apply a deep-link (e.g. the chat "view in Memory" chevron) then clear it.
+  useEffect(() => {
+    if (initialTab) {
+      setTab(initialTab);
+      onTabConsumed?.();
+    }
+  }, [initialTab, onTabConsumed]);
   const { journal } = useJournalView();
   // No better-auth user ⇒ demo / AUTH_DISABLED session. Real accounts don't
   // get the "DEMO" chip.
@@ -60,9 +75,10 @@ export function JournalScreen({
           [
             { id: "plan", label: "Plan" },
             { id: "notes", label: "Notes" },
+            { id: "memory", label: "Memory" },
             { id: "models", label: "Templates" },
             { id: "reading", label: "Reading" },
-          ] as { id: Tab; label: string }[]
+          ] as { id: JournalTab; label: string }[]
         ).map((t) => (
           <button key={t.id} data-active={tab === t.id} onClick={() => setTab(t.id)}>
             {t.label}
@@ -72,6 +88,7 @@ export function JournalScreen({
 
       {tab === "plan" && <JournalPlan onOpenModels={onOpenModels} onOpenChat={onOpenChat} />}
       {tab === "notes" && <JournalNotes notes={journal?.notes ?? []} />}
+      {tab === "memory" && <MemoryNotes />}
       {tab === "models" && (
         <JournalModels saved={journal?.savedModels ?? []} onOpenModels={onOpenModels} />
       )}
@@ -689,7 +706,40 @@ function EmptyTab({ title, body }: { title: string; body: string }) {
   );
 }
 
+// Friendly labels for a note's provenance. A reply you bookmark from chat is
+// stored source `user_tool` → "CHAT"; keep others readable rather than raw enum.
+const NOTE_SOURCE_LABEL: Record<string, string> = {
+  user_tool: "CHAT",
+  advisor_tool: "ADVISOR",
+  manual: "NOTE",
+};
+const noteSourceLabel = (s: string) => NOTE_SOURCE_LABEL[s] ?? s.toUpperCase();
+
 function JournalNotes({ notes }: { notes: Note[] }) {
+  // Deleting a note is permanent (no trash), so confirm via the shared dialog
+  // (same one holdings use). `pendingDelete` holds the note awaiting confirm.
+  const [pendingDelete, setPendingDelete] = useState<Note | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+
+  // Notes carry a `j`-prefixed id (adapter); strip it for the numeric DELETE.
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    setDeleteBusy(true);
+    try {
+      const res = await fetch(`/api/journal/${pendingDelete.id.replace(/^j/, "")}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        window.alert(`Failed to delete note (${res.status})`);
+        return;
+      }
+      invalidate("/api/journal");
+      setPendingDelete(null);
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
   if (notes.length === 0) {
     return (
       <EmptyTab
@@ -718,7 +768,8 @@ function JournalNotes({ notes }: { notes: Note[] }) {
               style={{
                 display: "flex",
                 justifyContent: "space-between",
-                alignItems: "baseline",
+                alignItems: "center",
+                gap: 8,
                 marginBottom: 6,
               }}
             >
@@ -730,14 +781,31 @@ function JournalNotes({ notes }: { notes: Note[] }) {
                   letterSpacing: "0.04em",
                 }}
               >
-                {n.source.toUpperCase()} · {n.date.toUpperCase()}
+                {noteSourceLabel(n.source)} · {n.date.toUpperCase()}
               </div>
-              <div style={{ display: "flex", gap: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 {n.tags.map((t) => (
                   <span key={t} className="tag" style={{ fontSize: 9 }}>
                     {t}
                   </span>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => setPendingDelete(n)}
+                  aria-label="Delete note"
+                  title="Delete note"
+                  style={{
+                    background: "transparent",
+                    border: 0,
+                    color: "var(--muted)",
+                    cursor: "pointer",
+                    padding: "2px 4px",
+                    fontSize: 14,
+                    lineHeight: 1,
+                  }}
+                >
+                  ✕
+                </button>
               </div>
             </div>
             <div
@@ -762,6 +830,15 @@ function JournalNotes({ notes }: { notes: Note[] }) {
           </div>
         ))}
       </div>
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="Delete note?"
+        message="This note will be permanently deleted. This can't be undone."
+        confirmLabel="Delete"
+        busy={deleteBusy}
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

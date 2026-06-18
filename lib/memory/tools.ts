@@ -91,36 +91,27 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
             "chat — keep `content` as the short line). Use only when there's " +
             "genuinely more nuance worth keeping.",
         ),
-      flow: z
-        .enum(["save_now", "save_pending"])
-        .default("save_now")
-        .describe(
-          "save_now = the fact takes effect (activates next chat). " +
-            "save_pending = capture it but DON'T let it influence advice until " +
-            "the user confirms. Use save_pending for money-sensitive facts " +
-            "(risk tolerance, hard constraints like 'no crypto', retirement " +
-            "horizon), anything that CONTRADICTS something already saved, or a " +
-            "weak/inferred signal. Use save_now for low-stakes statements " +
-            "(tone, format) or when the user explicitly says to remember.",
-        ),
     }),
-    execute: async ({ category, content, detail, flow }) => {
-      const pending = flow === "save_pending";
+    execute: async ({ category, content, detail }) => {
       const row = save({
         category,
         content,
         body: detail ?? null,
-        status: pending ? "pending" : "active",
         source: "advisor_tool",
       });
       return {
         ok: true as const,
         id: row.id,
         category: row.category,
-        status: row.status,
-        message: pending
-          ? `Noted: ${content}. I'll confirm with you before relying on it.`
-          : `Saved: ${content}. Active in your next chat.`,
+        // Structured signal the chat UI turns into the muted status line
+        // (see ChatScreen). The natural-language `message` is for the model.
+        memoryEvent: {
+          kind: "save" as const,
+          id: row.id,
+          category: row.category,
+          content: row.content,
+        },
+        message: `Saved: ${content}. Active in your next chat.`,
       };
     },
   });
@@ -185,6 +176,18 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
         old_id: oldRow?.id,
         new_id: newRow?.id,
         category: newRow?.category,
+        // The update created `new_id` (now active) and superseded `old_id`;
+        // Undo restores the old row and forgets the new one.
+        memoryEvent:
+          newRow && oldRow
+            ? {
+                kind: "update" as const,
+                id: newRow.id,
+                oldId: oldRow.id,
+                category: newRow.category,
+                content: newRow.content,
+              }
+            : undefined,
         message: `Updated: "${oldRow?.content}" → "${newRow?.content}". Active in your next chat.`,
       };
     },
@@ -195,7 +198,7 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
       "Forget (soft-delete) a preference so it no longer loads in future " +
       "chats. Pass either the numeric id or a distinctive substring. " +
       "The row stays for 30 days in case the user changes their mind " +
-      "(restorable from Settings → Memory). If the substring is " +
+      "(restorable from Journal → Memory). If the substring is " +
       "ambiguous, the tool returns the candidates so you can disambiguate.",
     inputSchema: z.object({
       id_or_substring: z
@@ -235,9 +238,12 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
         ok: true as const,
         id: row?.id,
         category: row?.category,
+        memoryEvent: row
+          ? { kind: "forget" as const, id: row.id, category: row.category, content: row.content }
+          : undefined,
         message:
           `Forgotten: ${row?.content}. It won't load in future chats ` +
-          "(restorable from Settings → Memory for 30 days).",
+          "(restorable from Journal → Memory for 30 days).",
       };
     },
   });
@@ -313,11 +319,11 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
 
   const confirm_preference = tool({
     description:
-      "Confirm a preference the user has affirmed or re-stated. Use this when " +
-      "you saved something with save_pending and the user has now confirmed it, " +
-      "OR when the user re-affirms an existing fact (it reinforces that the fact " +
-      "is still current). Activates a pending capture and records the " +
-      "confirmation. Pass the numeric id or a distinctive substring.",
+      "Reinforce a saved preference the user has just re-affirmed or re-stated " +
+      "(e.g. they repeat a constraint, or say 'yes, still true'). Records the " +
+      "confirmation so the fact reads as current and resists decay. Optional — " +
+      "use only on a clear re-affirmation. Pass the numeric id or a distinctive " +
+      "substring.",
     inputSchema: z.object({
       id_or_substring: z
         .string()
@@ -353,6 +359,9 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
         ok: true as const,
         id: row?.id,
         category: row?.category,
+        memoryEvent: row
+          ? { kind: "confirm" as const, id: row.id, category: row.category, content: row.content }
+          : undefined,
         message: `Confirmed: ${row?.content}. Active in your next chat.`,
       };
     },

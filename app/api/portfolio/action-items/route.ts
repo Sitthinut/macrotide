@@ -8,10 +8,14 @@
 // the finding's current magnitude (savingsPp) so the resurface check has a
 // baseline and the ratchet re-baselines on re-suppression.
 //
-// A "Not for me" with a preference-expressing reason also captures a PENDING
-// memory candidate (recall-only until the user confirms) in the same withDb
-// transaction, so the Advisor learns the preference instead of writing a dead
-// feedback row. The suppression ratchet (action_item_states) is unchanged.
+// The reason chip drives ONLY the deterministic resurface policy
+// (action-item-resurface.ts). It is deliberately NOT auto-captured into memory:
+// the fee-creep suggestion it rejects is sometimes a genuine like-for-like swap
+// (e.g. two S&P 500 trackers) but not reliably — it matches on asset class +
+// region, not the tracked index, so it can pair funds that aren't comparable.
+// Minting a durable preference from a reject is therefore too noisy to trust. A
+// trustworthy reject→Advisor signal can return once suggestion quality + a "not
+// comparable" reason exist (tracked separately).
 
 import { NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
@@ -21,16 +25,6 @@ import {
   listHidden,
   recordActionItem,
 } from "@/lib/db/queries/action-items";
-import { save } from "@/lib/db/queries/preferences";
-
-// Reject reasons that express a DURABLE preference worth remembering — captured
-// as a pending memory candidate. Situational reasons (too_small) and free text
-// are not auto-remembered (the suppression ratchet still hides the item).
-const REASON_PREFERENCE: Record<string, (topic: string) => string> = {
-  prefer_this_fund: (t) => `prefers to keep their current fund over a cheaper alternative (${t})`,
-  already_considered: (t) => `has already considered and declined a cheaper alternative (${t})`,
-  tax_switching: () => "avoids switching funds when it triggers tax or switching costs",
-};
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -77,23 +71,9 @@ export async function POST(req: Request) {
   const itemType = body.itemType!;
   // biome-ignore lint/style/noNonNullAssertion: validated above
   const itemKey = body.itemKey!;
-  const topic = typeof body.topic === "string" && body.topic.length > 0 ? body.topic : itemKey;
 
   return withDb(() => {
     const row = recordActionItem({ itemType, itemKey, state, reason, snapshotSavingsPp });
-
-    // A rejection with a preference-expressing reason captures a pending memory
-    // candidate in the same transaction — routed into memory (for the Advisor to
-    // confirm) instead of a dead feedback row.
-    if (state === "not_for_me" && reason && REASON_PREFERENCE[reason]) {
-      save({
-        category: "finance_context",
-        content: REASON_PREFERENCE[reason](topic),
-        source: "advisor_tool",
-        status: "pending",
-      });
-    }
-
     return NextResponse.json(row, { status: 201 });
   });
 }

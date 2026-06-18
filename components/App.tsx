@@ -20,7 +20,7 @@ import { AdminScreen } from "@/components/screens/AdminScreen";
 import { ChatScreen, type SeedPrompt } from "@/components/screens/ChatScreen";
 import { ConnectBrokerScreen } from "@/components/screens/ConnectBrokerScreen";
 import { HistoryScreen } from "@/components/screens/HistoryScreen";
-import { JournalScreen } from "@/components/screens/JournalScreen";
+import { JournalScreen, type JournalTab } from "@/components/screens/JournalScreen";
 import { MarketsScreen } from "@/components/screens/MarketsScreen";
 import { ModelPortfoliosScreen } from "@/components/screens/ModelPortfoliosScreen";
 import { PortfolioScreen } from "@/components/screens/PortfolioScreen";
@@ -322,6 +322,9 @@ export function App({ isDemo }: { isDemo: boolean }) {
   // was opened from so Back returns there.
   const openConnect = () => navigate("connect");
   const [pendingPrompt, setPendingPrompt] = useState<SeedPrompt | null>(null);
+  // Deep-link target for the Journal screen's subtab (e.g. the chat memory
+  // chip's "view in Memory" chevron). Cleared once JournalScreen applies it.
+  const [journalTab, setJournalTab] = useState<JournalTab | null>(null);
   // One "Add to portfolio" sheet with a Holdings (snapshot) / Activity (ledger)
   // toggle — both write to the same ledger (ADR 0004). `addMode` picks the entry
   // form; the seeds carry rows handed in by the Advisor importer or the
@@ -652,13 +655,20 @@ export function App({ isDemo }: { isDemo: boolean }) {
       const article = (e as CustomEvent<unknown>).detail;
       setSavedReading((prev) => [...prev, article]);
     };
+    // Open the Journal screen on a specific subtab (chat memory chip → Memory).
+    const openJournalHandler = (e: Event) => {
+      setJournalTab((e as CustomEvent<JournalTab>).detail);
+      navigate("journal");
+    };
     window.addEventListener("nav", navHandler);
     window.addEventListener("ai-prompt", promptHandler);
     window.addEventListener("save-reading", saveReadingHandler);
+    window.addEventListener("open-journal", openJournalHandler);
     return () => {
       window.removeEventListener("nav", navHandler);
       window.removeEventListener("ai-prompt", promptHandler);
       window.removeEventListener("save-reading", saveReadingHandler);
+      window.removeEventListener("open-journal", openJournalHandler);
     };
   }, [isWide, navigate]);
 
@@ -781,6 +791,8 @@ export function App({ isDemo }: { isDemo: boolean }) {
           onOpenModels={() => navigate("models")}
           onOpenSettings={openMobileMenu}
           showMenu={!isWide}
+          initialTab={journalTab}
+          onTabConsumed={() => setJournalTab(null)}
         />
       );
     }
