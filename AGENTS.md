@@ -270,8 +270,14 @@ copy. Reuse it verbatim anywhere else a similar disclaimer is needed.
 Not dismissible; not a banner.
 
 **Memory / chat-session vocabulary:** "Archived" (not "Compressed"/"Wrapped up"),
-"Summarizing…" (not "Compressing…"), "notes" (not "facts"/"memories"), "Deleted
-chats" (not "Trash"). Full table: [memory.md](./docs/explanation/memory.md).
+"Summarizing…" (not "Compressing…"), "Deleted chats" (not "Trash"). The Advisor's
+learned items are **"memories"** — surfaced in **Journal → Memory** with a "Memory
+updated" status chip and a browsable list of saved memories. Never call them
+"notes" or "facts" in user-facing copy. **"Notes"** is reserved for the user's own saved
+entries in **Journal → Notes** (`read_journal`) — a distinct surface (and a future
+Advisor context source), so the two names must not collide. "preference" stays
+internal-only (the `save_preference` tool family, the `fact` category enum). Full
+table: [memory.md](./docs/explanation/memory.md).
 
 **Timestamps:** store UTC, render in the user's IANA timezone. Timezone
 itself is a `profile`-category preference in `user_preferences` (set

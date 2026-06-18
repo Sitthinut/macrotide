@@ -291,7 +291,7 @@ export function SettingsScreen({
         <div className="card" style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
           What Advisor remembers about you lives in{" "}
           <strong style={{ fontWeight: 500, color: "var(--ink-soft)" }}>Journal → Memory</strong> —
-          review, forget, or ask Advisor to change a note there.
+          review, forget, or ask Advisor to change a memory there.
         </div>
       </div>
 
