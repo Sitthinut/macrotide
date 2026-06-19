@@ -10,6 +10,7 @@ behind it. Read these to build a mental model, not to complete a task.
 | [Product direction](./product-direction.md) | Why Macrotide exists: north star, who it's for, the Learn → Analyze → Research → Select loop, the index-purist stance, and success signals |
 | [Architecture](./architecture.md) | The system's overall shape, the request lifecycle, owner/demo DB routing, and where every kind of code lives |
 | [Balances and History](./balances-and-history.md) | How stating a Balance and logging a trade fit together — the one-ledger model, the cost-basis-delta math with worked examples, self-healing edits, and custom-asset pricing |
+| [Cash](./cash.md) | How cash is tracked as a first-class asset — the three-roles split, the boundary model, the no-deduct rule, the Purpose (Role + Label) earmark, and the Include/Exclude-cash return basis |
 | [Design principles](./design-principles.md) | Secure-by-default, the "Advisor" voice, and the single-owner → multi-user evolution |
 | [Portfolio health](./portfolio-health.md) | Why the Portfolio screen leads with named checks (not a 0–100 grade) and how the look-through diversification check stays honest on partial data |
 | [Market data pipeline](./market-data-pipeline.md) | How market.db is fed and kept fresh — the fund-catalog crawl (ELT) vs the NAV/quote series cache, the freshness-vs-coverage jobs, the upsert-only invariant, and the coverage limits (SEC ~5.4y fund depth; indices/FX still shallow) |
