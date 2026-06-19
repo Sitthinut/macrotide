@@ -103,14 +103,17 @@ export function EventLine({
   const verb = VERB[kind] ?? txn.kind;
   // Under the "Starting balances" header the verb is redundant — show just the
   // fund (or, when the fund is implicit too, fall back to the verb).
+  // Cash accounts carry their display NAME in englishName (the ticker is the
+  // upper-cased ledger identity); funds show their ticker symbol as-is.
+  const label = txn.quoteSource === "cash" ? (txn.englishName ?? txn.ticker) : txn.ticker;
   const name =
     anchor && hideVerb
       ? hideTicker
         ? verb
-        : txn.ticker
+        : label
       : hideTicker
         ? verb
-        : `${verb}${anchor ? " · " : " "}${txn.ticker}`;
+        : `${verb}${anchor ? " · " : " "}${label}`;
 
   const sub: string[] = [fmtDate(txn.tradeDate)];
   if (anchor) {
