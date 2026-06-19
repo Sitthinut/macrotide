@@ -17,8 +17,8 @@ export function SaveNoteButton({ saved = false, onSave }: SaveNoteButtonProps) {
       className="msg-save"
       data-active={saved}
       onClick={onSave}
-      aria-label={saved ? "Saved to your notes — click to remove" : "Save to your notes"}
-      title={saved ? "Saved to your notes — click to remove" : "Save to your notes"}
+      aria-label={saved ? "Saved — click to remove from your notes" : "Save"}
+      title={saved ? "Saved" : "Save"}
     >
       <svg
         width="14"

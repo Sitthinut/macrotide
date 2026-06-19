@@ -9,14 +9,19 @@
 // produced it (computed identically on the send and reload paths) — so it
 // re-attaches to that turn's reply. Bounded with oldest-first eviction.
 
+import type { TurnPart } from "@/lib/advisor/turn-persist";
 import type { ExtractedTxnRow } from "@/lib/portfolio/ocr";
 import type { ImportSeedRow } from "@/lib/stores/import-seed";
 
 export interface ChatCard {
   holdingsImport?: { rows: ImportSeedRow[]; source: string | null; note: string | null };
   transactionsImport?: { rows: ExtractedTxnRow[]; source: string | null; note: string | null };
-  // Memory writes the Advisor made on this turn — persisted so the in-chat
-  // status chip survives reload (the durable record is Journal → Memory).
+  // The assistant turn's ordered body (prose + memory indicators) — a browser
+  // fallback so the interleaved render survives a reload before / without the
+  // server-persisted `cards.parts`. The durable record is server-side.
+  parts?: TurnPart[];
+  // Legacy: pre-parts caches held memory events unordered. Read on hydrate and
+  // synthesized into parts when `parts` is absent; never written anymore.
   memoryEvents?: {
     kind: string;
     id: number;
@@ -73,7 +78,10 @@ const composeKey = (threadId: string, seq: number) => `${threadId}:${seq}`;
 export function saveChatCard(threadId: string, seq: number, card: ChatCard): void {
   if (
     !threadId ||
-    (!card.holdingsImport && !card.transactionsImport && !card.memoryEvents?.length)
+    (!card.holdingsImport &&
+      !card.transactionsImport &&
+      !card.parts?.length &&
+      !card.memoryEvents?.length)
   ) {
     return;
   }

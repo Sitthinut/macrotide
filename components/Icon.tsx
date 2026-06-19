@@ -40,6 +40,8 @@ const CUSTOM_PATHS: Record<string, string> = {
   check: "M5 12l5 5 9-11",
   info: "M12 16v-4M12 8h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
   refresh: "M3 12a9 9 0 015-8 9 9 0 0114 5M21 12a9 9 0 01-5 8 9 9 0 01-14-5M21 4v6h-6M3 20v-6h6",
+  copy: "M9 9h10v10a2 2 0 01-2 2H9zM5 15H3V5a2 2 0 012-2h10v2",
+  "rotate-cw": "M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8M21 3v5h-5",
   pulse: "M22 12h-4l-3 9L9 3l-3 9H2",
   search: "M11 19a8 8 0 100-16 8 8 0 000 16zM21 21l-4.3-4.3",
   lock: "M5 11h14v10H5zM7 11V7a5 5 0 0110 0v4",
