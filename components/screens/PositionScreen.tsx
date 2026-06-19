@@ -10,8 +10,14 @@ import { FundDetailSheet } from "@/components/FundDetailSheet";
 import { HistoryList } from "@/components/history/HistoryList";
 import { Icon } from "@/components/Icon";
 import { NavChart } from "@/components/InteractiveCharts";
+import { PrivateAmount } from "@/components/PrivateAmount";
 import { Stat } from "@/components/ui/Stat";
-import { type SeriesRange, useHoldingSeries, useHoldings } from "@/lib/fetchers/portfolio";
+import {
+  type SeriesRange,
+  useEarmarks,
+  useHoldingSeries,
+  useHoldings,
+} from "@/lib/fetchers/portfolio";
 import { useResource } from "@/lib/fetchers/swr";
 import { fmtPct, fmtRatioPct, fmtTHBClean, fmtTHBSigned } from "@/lib/format";
 import { NAV_CHART_HEIGHT } from "@/lib/portfolio/adapter";
@@ -49,6 +55,14 @@ export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps
   const { data: vs } = useHoldingSeries(ticker, range);
 
   const holding = (holdings ?? []).find((h) => h.ticker === ticker);
+  // Cash accounts (#149) get a balance-focused view, not the fund metrics (avg
+  // cost / NAV / unrealised / cost basis / realized all collapse to noise).
+  const isCash = holding?.quoteSource === "cash";
+  const { data: earmarks } = useEarmarks();
+  const cashMark = (earmarks ?? []).find(
+    (e) => e.scope === "account" && (e.ticker ?? "").toUpperCase() === ticker.toUpperCase(),
+  );
+  const cashReserved = cashMark?.role === "reserved";
   const pos = a?.positions.find((p) => p.ticker === ticker) ?? a?.positions[0];
   const value = a?.marketValue ?? null;
   const costBasis = pos?.costBasis ?? null;
@@ -91,7 +105,7 @@ export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps
             2–3 lines. It now headlines the hero block below at full width; keep a
             spacer so the buttons stay right-aligned. */}
         <div style={{ flex: 1 }} />
-        {holding && (
+        {holding && holding.quoteSource !== "cash" && (
           <button className="btn ghost sm" onClick={() => setFundOpen(true)}>
             Fund details
           </button>
@@ -112,6 +126,8 @@ export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps
         <div className="hero-block" style={{ padding: "6px 4px 4px" }}>
           {/* Ticker headlines the position at full width (it no longer fits in the
               topbar), with the fund's full name muted beneath it. */}
+          {/* Same 3-line hero for cash + funds: mono headline, muted subtitle, value.
+              Cash headlines its account name and shows its role in the subtitle slot. */}
           <div
             style={{
               fontFamily: "var(--font-mono)",
@@ -122,25 +138,35 @@ export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps
               lineHeight: 1.2,
             }}
           >
-            {ticker}
+            {isCash ? holding?.englishName || ticker : ticker}
           </div>
-          {holding?.englishName && holding.englishName !== ticker && (
+          {isCash ? (
             <div style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 2, marginBottom: 4 }}>
-              {holding.englishName}
+              {cashReserved ? "Reserved Cash" : "Investable Cash"}
+              {cashMark?.purpose ? ` · ${cashMark.purpose}` : ""}
             </div>
+          ) : (
+            holding?.englishName &&
+            holding.englishName !== ticker && (
+              <div
+                style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 2, marginBottom: 4 }}
+              >
+                {holding.englishName}
+              </div>
+            )
           )}
           <div className="hero-value">
             {value != null ? (
-              <>
+              <PrivateAmount wide>
                 ฿{Math.floor(value).toLocaleString("en-US")}
                 <span className="cents">.{value.toFixed(2).split(".")[1] || "00"}</span>
-              </>
+              </PrivateAmount>
             ) : (
               "—"
             )}
           </div>
           <div className="hero-sub">
-            {unrealised != null ? (
+            {isCash ? null : unrealised != null ? (
               <span className={`delta-pill${unrealised < 0 ? " down" : ""}`}>
                 <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
                   <path
@@ -162,61 +188,69 @@ export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps
             the bordered performance cards below. units × avg ≈ cost basis and
             units × NAV ≈ value, so the trio is self-checking. Rounded here; full
             precision lives on the History rows. */}
-        <div
-          className="stats-strip"
-          style={{ gridTemplateColumns: "1fr 1fr 1fr", margin: "12px 4px 6px" }}
-        >
-          <div>
-            <div className="lbl">UNITS</div>
-            <div className="val">{num(units)}</div>
-          </div>
-          <div>
-            <div className="lbl">AVG COST</div>
-            <div className="val">{avgCost != null ? `฿${num(avgCost)}` : "—"}</div>
-          </div>
-          <div>
-            <div className="lbl">NAV</div>
-            <div className="val">{navPerUnit != null ? `฿${num(navPerUnit)}` : "—"}</div>
-          </div>
-        </div>
+        {!isCash && (
+          <>
+            <div
+              className="stats-strip"
+              style={{ gridTemplateColumns: "1fr 1fr 1fr", margin: "12px 4px 6px" }}
+            >
+              <div>
+                <div className="lbl">UNITS</div>
+                <div className="val">{num(units)}</div>
+              </div>
+              <div>
+                <div className="lbl">AVG COST</div>
+                <div className="val">{avgCost != null ? `฿${num(avgCost)}` : "—"}</div>
+              </div>
+              <div>
+                <div className="lbl">NAV</div>
+                <div className="val">{navPerUnit != null ? `฿${num(navPerUnit)}` : "—"}</div>
+              </div>
+            </div>
 
-        <div className="stat-cards-cq">
-          <div className="stat-cards">
-            <Stat
-              label="RETURN"
-              value={irr != null ? fmtRatioPct(irr) : "—"}
-              tone={irr == null ? "neutral" : irr >= 0 ? "up" : "down"}
-              caption={
-                irr != null
-                  ? "money-weighted"
-                  : (a?.irrUnavailable ?? "Return appears after about a month of activity.")
-              }
-            />
-            <Stat
-              label="INVESTED"
-              value={fmtTHBClean(a?.costBasisTotal ?? 0)}
-              caption="cost basis"
-            />
-            <Stat
-              label="REALIZED"
-              value={fmtTHBSigned(a?.realizedTotal ?? 0)}
-              tone={
-                (a?.realizedTotal ?? 0) > 0
-                  ? "up"
-                  : (a?.realizedTotal ?? 0) < 0
-                    ? "down"
-                    : "neutral"
-              }
-              caption="from sells"
-            />
-            <Stat label="INCOME" value={fmtTHBClean(a?.incomeTotal ?? 0)} caption="dividends" />
-          </div>
-        </div>
+            <div className="stat-cards-cq">
+              <div className="stat-cards">
+                <Stat
+                  label="RETURN"
+                  value={irr != null ? fmtRatioPct(irr) : "—"}
+                  tone={irr == null ? "neutral" : irr >= 0 ? "up" : "down"}
+                  caption={
+                    irr != null
+                      ? "money-weighted"
+                      : (a?.irrUnavailable ?? "Return appears after about a month of activity.")
+                  }
+                />
+                <Stat
+                  label="INVESTED"
+                  value={<PrivateAmount>{fmtTHBClean(a?.costBasisTotal ?? 0)}</PrivateAmount>}
+                  caption="cost basis"
+                />
+                <Stat
+                  label="REALIZED"
+                  value={<PrivateAmount>{fmtTHBSigned(a?.realizedTotal ?? 0)}</PrivateAmount>}
+                  tone={
+                    (a?.realizedTotal ?? 0) > 0
+                      ? "up"
+                      : (a?.realizedTotal ?? 0) < 0
+                        ? "down"
+                        : "neutral"
+                  }
+                  caption="from sells"
+                />
+                <Stat
+                  label="INCOME"
+                  value={<PrivateAmount>{fmtTHBClean(a?.incomeTotal ?? 0)}</PrivateAmount>}
+                  caption="dividends"
+                />
+              </div>
+            </div>
+          </>
+        )}
 
         {valueData.length > 1 && (
           <div style={{ marginTop: 16 }}>
             <div className="section-header" style={{ padding: "0 4px", marginBottom: 6 }}>
-              <h3 style={{ fontSize: 13 }}>Value over time</h3>
+              <h3 style={{ fontSize: 13 }}>{isCash ? "Balance over time" : "Value over time"}</h3>
               <div className="range-pills">
                 {VALUE_RANGES.map((r) => (
                   <button
@@ -233,9 +267,9 @@ export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps
             <div style={{ padding: "0 4px" }}>
               <NavChart
                 data={valueData}
-                investedData={costData}
+                investedData={isCash ? [] : costData}
                 height={NAV_CHART_HEIGHT}
-                seriesLabel="Value"
+                seriesLabel={isCash ? "Balance" : "Value"}
                 valuesHidden={valuesHidden}
               />
             </div>

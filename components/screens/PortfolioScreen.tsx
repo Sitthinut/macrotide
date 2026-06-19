@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BrandMark } from "@/components/BrandMark";
 import { ModelDonut } from "@/components/charts";
 import { FundDetailSheet } from "@/components/FundDetailSheet";
@@ -27,11 +27,12 @@ import {
   restoreActionItem,
   type SeriesRange,
   useBenchmarkSeries,
+  useEarmarks,
   useFeeCreep,
   useHiddenActionItems,
   useLookThrough,
 } from "@/lib/fetchers/portfolio";
-import { invalidate } from "@/lib/fetchers/swr";
+import { invalidate, useResource } from "@/lib/fetchers/swr";
 import { fmtPct } from "@/lib/format";
 import { BENCHMARK_TR_OPTIONS } from "@/lib/market/benchmark-options";
 import { DEFAULT_QUOTE_SOURCE, isQuoteSource } from "@/lib/market/sources";
@@ -43,6 +44,12 @@ import {
   seriesReturnPct,
   windowStartIso,
 } from "@/lib/portfolio/adapter";
+import {
+  applyCashMode,
+  type CashMode,
+  returnValue as cashReturnValue,
+  uninvestedCash,
+} from "@/lib/portfolio/cash-mode";
 import { buildNamedChecks, type NamedCheck } from "@/lib/portfolio/checks";
 import {
   feeCheckInlineIntro,
@@ -487,10 +494,149 @@ interface ViewPortfolio {
   holdings: Holding[];
   series: { d: string; v: number }[];
   netInvested: { d: string; v: number }[];
+  cashDecomp?: Portfolio["cashDecomp"];
   totalValue: number;
   initialInvestment: number;
   perfPct: Portfolio["perfPct"];
   asOf: string;
+}
+
+// "+ Add" split button (#149): the main button opens the Add modal on Investment (the
+// frequent case, one click); the caret offers "Cash" for the occasional bank-balance entry
+// — keeping the common path fastest while making cash an explicit, discoverable choice.
+// Reuses the shared `.kebab__menu` popover (background + shadow) and its outside-click.
+function AddSplitButton({
+  onInvestment,
+  onCash,
+}: {
+  onInvestment: () => void;
+  onCash?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  return (
+    <div className="add-split kebab" ref={ref}>
+      <button type="button" className="btn ghost sm add-split__main" onClick={onInvestment}>
+        <Icon name="plus" size={12} /> Add
+      </button>
+      <button
+        type="button"
+        className="btn ghost sm add-split__caret"
+        aria-label="More add options"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Icon name="chevron-down" size={14} />
+      </button>
+      {open ? (
+        <div className="kebab__menu" role="menu">
+          <button
+            type="button"
+            role="menuitem"
+            className="kebab__item"
+            onClick={() => {
+              setOpen(false);
+              onInvestment();
+            }}
+          >
+            Investment
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="kebab__item"
+            onClick={() => {
+              setOpen(false);
+              onCash?.();
+            }}
+          >
+            Cash
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// Return-basis kebab (#149): the "Include cash / Exclude cash" lever in the shared
+// kebab popover, so it lives ON the page (its effect is visible) instead of inside
+// a modal. Only the non-default choice gets a check + the hero tag, keeping the
+// default quiet. Reuses the same .kebab__menu pattern as the "+ Add" split button.
+function CashModeKebab({
+  mode,
+  onChange,
+  hasReserved,
+}: {
+  mode: CashMode;
+  onChange: (m: CashMode) => void;
+  hasReserved: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  return (
+    <div className="kebab cash-mode-kebab" ref={ref}>
+      <button
+        type="button"
+        className="icon-btn quiet"
+        aria-label="Return basis"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Return basis"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Icon name="ellipsis-vertical" size={16} />
+      </button>
+      {open ? (
+        <div className="kebab__menu" role="menu">
+          <div className="kebab__head">Return basis</div>
+          {(
+            [
+              ["incl", "Include cash"],
+              ["funds", "Exclude cash"],
+            ] as [CashMode, string][]
+          ).map(([m, label]) => (
+            <button
+              key={m}
+              type="button"
+              role="menuitemradio"
+              aria-checked={mode === m}
+              className="kebab__item kebab__item--check"
+              data-active={mode === m}
+              onClick={() => {
+                onChange(m);
+                setOpen(false);
+              }}
+            >
+              <Icon name="check" size={13} /> {label}
+            </button>
+          ))}
+          <p className="kebab__note">
+            {mode === "incl"
+              ? "Idle cash counts toward your return."
+              : "Idle cash sits out of your return."}
+            {hasReserved && " Reserved cash always sits out."}
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export interface PortfolioScreenProps {
@@ -498,6 +644,8 @@ export interface PortfolioScreenProps {
   onOpenModels: () => void;
   onOpenChat: () => void;
   onOpenImport: () => void;
+  /** Open the Add modal straight into the Cash family (#149 split button). */
+  onOpenCash?: () => void;
   /** Open the full Activity (transaction history) screen. */
   onOpenActivity?: () => void;
   /** Open a holding's own record (the per-position drill-in screen). */
@@ -512,6 +660,7 @@ export function PortfolioScreen({
   onOpenSettings,
   onOpenModels,
   onOpenImport,
+  onOpenCash,
   onOpenActivity,
   onOpenPosition,
   onOpenPortfolios,
@@ -519,10 +668,31 @@ export function PortfolioScreen({
 }: PortfolioScreenProps) {
   // Active portfolio lives in the shared store so the right-rail PortfoliosPanel
   // stays in sync without a window-event handshake.
-  const { activeId: activePfId, setActiveId, requestNew, requestEdit } = usePortfolioUi();
+  const {
+    activeId: activePfId,
+    setActiveId,
+    filter: filterRaw,
+    setFilter,
+    requestNew,
+    requestEdit,
+  } = usePortfolioUi();
+  const filter = filterRaw as AssetClass | "all";
   const [range, setRange] = useState<string>("6M");
-  const [filter, setFilter] = useState<AssetClass | "all">("all");
   const [benchmark, setBenchmark] = useState<string>("none");
+  // Contribution-mode (#149): does idle investable cash drag the return ("incl",
+  // mode A, default) or sit out ("funds", mode B)? Persisted in the settings
+  // store so it follows the user; the pill IS the setting (design-log §3g).
+  const { data: settingsMap, mutate: mutateSettings } =
+    useResource<Record<string, unknown>>("/api/settings");
+  const cashMode: CashMode = settingsMap?.cashReturnMode === "funds" ? "funds" : "incl";
+  const setCashMode = (m: CashMode) => {
+    mutateSettings({ ...(settingsMap ?? {}), cashReturnMode: m }, { revalidate: false });
+    void fetch("/api/settings", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cashReturnMode: m }),
+    });
+  };
   const { hidden: valuesHidden, toggle: togglePrivacy } = usePrivacy();
   // Tapping a holding row opens a read-only detail view (detailHolding); the
   // per-row Edit affordance opens the edit form (holdingSheet). Reading a
@@ -627,6 +797,7 @@ export function PortfolioScreen({
         holdings: aggregate.holdings,
         series: aggregate.series,
         netInvested: aggregate.netInvested ?? [],
+        cashDecomp: aggregate.cashDecomp,
         totalValue: aggregate.totalValue,
         initialInvestment: aggregate.initialInvestment,
         perfPct: aggregate.perfPct,
@@ -640,6 +811,7 @@ export function PortfolioScreen({
       holdings: activePf.holdings,
       series: activePf.series,
       netInvested: activePf.netInvested ?? [],
+      cashDecomp: activePf.cashDecomp,
       totalValue: activePf.totalValue,
       initialInvestment: activePf.initialInvestment,
       perfPct: activePf.perfPct,
@@ -652,6 +824,17 @@ export function PortfolioScreen({
     if (filter === "all") return view.holdings;
     return view.holdings.filter((h) => h.class === filter);
   }, [view, filter]);
+
+  // Cash earmarks (#149) → per-account designation (Investable | Reserved + label),
+  // keyed by ticker for the holding-row tag.
+  const { data: earmarks } = useEarmarks();
+  const markByTicker = useMemo(() => {
+    const m = new Map<string, { role: string; purpose: string | null }>();
+    for (const e of earmarks ?? []) {
+      if (e.ticker) m.set(e.ticker.toUpperCase(), { role: e.role, purpose: e.purpose });
+    }
+    return m;
+  }, [earmarks]);
 
   const byClass = useMemo(() => {
     if (!view || view.totalValue <= 0) {
@@ -860,9 +1043,21 @@ export function PortfolioScreen({
   // lives in the returns breakdown, labeled "unrealized". One shared helper drives
   // both so they can't drift apart. Falls back to cost basis when there's no
   // ledger-derived contribution series (static placeholder).
-  const netContributed = view.netInvested.at(-1)?.v ?? null;
+  // Contribution-mode return view (#149): drop reserved cash always, and ALL cash
+  // in "Funds only". The hero BALANCE (view.totalValue) stays full net worth; only
+  // these return figures + the chart's value/contribution lines follow the mode.
+  const retView = applyCashMode(cashMode, view.series, view.netInvested, view.cashDecomp);
+  const retSeries = retView.series;
+  const retNetInvested = retView.netInvested;
+  const retTotalValue = cashReturnValue(cashMode, view.totalValue, view.cashDecomp);
+  // Whether the pill is worth showing: there's cash that the mode could move.
+  const cashInPlay = (view.cashDecomp?.cashValue.at(-1)?.v ?? 0) > 0.5;
+  const idleCash = uninvestedCash(view.cashDecomp);
+  const hasReserved = (view.cashDecomp?.reservedCashValue.at(-1)?.v ?? 0) > 0.5;
+
+  const netContributed = retNetInvested.at(-1)?.v ?? null;
   const { pnl, pnlPct, usesContribution } = heroReturn(
-    view.totalValue,
+    retTotalValue,
     netContributed,
     view.initialInvestment,
   );
@@ -873,9 +1068,9 @@ export function PortfolioScreen({
   // a book younger than the window) keeps absolute wealth levels — the lifetime
   // story.
   const since = windowStartIso(seriesRange);
-  const clipped = since !== null && view.series.length > 0 && view.series[0].d <= since;
-  const baselineValue = clipped ? view.series[0].v : 0;
-  const baselineInvested = clipped ? (view.netInvested[0]?.v ?? 0) : 0;
+  const clipped = since !== null && retSeries.length > 0 && retSeries[0].d <= since;
+  const baselineValue = clipped ? retSeries[0].v : 0;
+  const baselineInvested = clipped ? (retNetInvested[0]?.v ?? 0) : 0;
 
   // % return for the range pill — MONEY-WEIGHTED (gain ÷ invested), matching the
   // chart tooltip's Gain %. The value line now includes contributions, so a
@@ -884,17 +1079,29 @@ export function PortfolioScreen({
   // the change in gain over the window ÷ the wealth held at window start. Falls
   // back to the price-ratio when net-invested data is absent (static placeholder).
   const periodReturn = ((): number | null => {
-    const lastV = view.series.at(-1)?.v;
+    const lastV = retSeries.at(-1)?.v;
     if (lastV == null) return null;
-    if (view.netInvested.length === 0) return seriesReturnPct(view.series);
-    const lastInv = view.netInvested.at(-1)?.v ?? 0;
-    const gain = lastV - baselineValue - (lastInv - baselineInvested);
-    const denom = clipped ? baselineValue : lastInv;
+    if (retNetInvested.length === 0) return seriesReturnPct(retSeries);
+    const lastInv = retNetInvested.at(-1)?.v ?? 0;
+    // A clipped window divides the window's gain by the wealth held at its start.
+    // But if nothing was held then (e.g. "Exclude cash" before any fund was bought),
+    // that base is 0 and there's nothing to divide by — fall back to the lifetime
+    // base (contributions) so the figure still shows instead of vanishing.
+    const useClipped = clipped && baselineValue > 0;
+    const baseV = useClipped ? baselineValue : 0;
+    const baseI = useClipped ? baselineInvested : 0;
+    const gain = lastV - baseV - (lastInv - baseI);
+    const denom = useClipped ? baseV : lastInv;
     return denom > 0 ? (gain / denom) * 100 : null;
   })();
   // In-transit cash is reported for the whole book; per-portfolio views skip
-  // the tooltip note rather than implying a per-bucket number we don't have.
-  const chartCash = activePf ? null : (cashSeries?.map((p) => ({ d: p.date, v: p.value })) ?? null);
+  // the tooltip note rather than implying a per-bucket number we don't have. In
+  // "Funds only" the cash is OUT of the value line, so the note would contradict
+  // the chart — drop it.
+  const chartCash =
+    activePf || cashMode === "funds"
+      ? null
+      : (cashSeries?.map((p) => ({ d: p.date, v: p.value })) ?? null);
 
   const showAnalysis = activePfId === "all" || activePf?.targetModelId;
 
@@ -997,7 +1204,7 @@ export function PortfolioScreen({
           </button>
         </div>
         <div className="hero-value">
-          <PrivateAmount tappable wide>
+          <PrivateAmount wide>
             ฿{Math.floor(view.totalValue).toLocaleString("en-US")}
             <span className="cents">.{view.totalValue.toFixed(2).split(".")[1] || "00"}</span>
           </PrivateAmount>
@@ -1021,7 +1228,13 @@ export function PortfolioScreen({
               {fmtPct(pnlPct)}
             </span>
             <span className="muted">
-              {usesContribution ? "total return" : "all-time"}
+              {/* In the non-default basis the label itself names it (plain text, no
+                  badge) — keeps the default hero clean and the line short (#149). */}
+              {cashInPlay && cashMode === "funds"
+                ? "excluding cash"
+                : usesContribution
+                  ? "total return"
+                  : "all-time"}
               <Icon name="chevron-right" size={11} />
             </span>
           </button>
@@ -1058,18 +1271,23 @@ export function PortfolioScreen({
               </button>
             ))}
           </div>
-          {periodReturn != null && (
-            <span
-              className={`delta-pill${periodReturn < 0 ? " down" : ""}`}
-              style={{ fontSize: 13 }}
-            >
-              {fmtPct(periodReturn)}
-            </span>
-          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            {periodReturn != null && (
+              <span
+                className={`delta-pill${periodReturn < 0 ? " down" : ""}`}
+                style={{ fontSize: 13 }}
+              >
+                {fmtPct(periodReturn)}
+              </span>
+            )}
+            {cashInPlay && (
+              <CashModeKebab mode={cashMode} onChange={setCashMode} hasReserved={hasReserved} />
+            )}
+          </div>
         </div>
         <NavChart
-          data={view.series}
-          investedData={view.netInvested}
+          data={retSeries}
+          investedData={retNetInvested}
           cashData={chartCash}
           valuesHidden={valuesHidden}
           baselineValue={baselineValue}
@@ -1089,6 +1307,38 @@ export function PortfolioScreen({
           }
         />
         <BenchmarkPicker value={benchmark} onChange={setBenchmark} />
+        {/* Excluding cash is most wanted exactly here: an index is fully invested, so a
+            blended return (incl. idle cash) is an unfair comparison. Surface the lever at
+            the moment of need rather than as permanent chrome (#149). Symmetric — offer to
+            fold cash back in once excluded. */}
+        {benchmark !== "none" && cashInPlay && idleCash > 0.5 && (
+          <p
+            style={{
+              fontSize: 11,
+              color: "var(--muted)",
+              lineHeight: 1.45,
+              margin: "6px 4px 0",
+            }}
+          >
+            {cashMode === "incl" ? (
+              <>
+                Your return counts idle cash, but an index is fully invested.{" "}
+                <button type="button" className="link-btn" onClick={() => setCashMode("funds")}>
+                  Exclude cash
+                  <Icon name="chevron-right" size={11} />
+                </button>
+              </>
+            ) : (
+              <>
+                You're comparing investments only, for a fair read against the index.{" "}
+                <button type="button" className="link-btn" onClick={() => setCashMode("incl")}>
+                  Include cash
+                  <Icon name="chevron-right" size={11} />
+                </button>
+              </>
+            )}
+          </p>
+        )}
         {(() => {
           // Caveat copy depends on which sources drop dividends: the benchmark
           // overlay (when one is selected) and/or any held dividend-paying fund.
@@ -1099,7 +1349,7 @@ export function PortfolioScreen({
                 fontSize: 11,
                 color: "var(--muted)",
                 lineHeight: 1.45,
-                margin: "3px 4px 0",
+                margin: "6px 4px 0",
               }}
             >
               {disclaimer}
@@ -1111,12 +1361,12 @@ export function PortfolioScreen({
             style={{
               fontSize: 11,
               color: "var(--muted)",
-              lineHeight: 1.5,
-              padding: "8px 4px 0",
+              lineHeight: 1.45,
+              margin: "6px 4px 0",
             }}
           >
-            Values up to {formatTooltipDate(estimatedThrough)} are estimated from your recorded
-            prices — exact fund prices weren't available that far back.
+            Values before {formatTooltipDate(estimatedThrough)} are estimated from your recorded
+            prices.
           </p>
         )}
       </div>
@@ -1590,13 +1840,7 @@ export function PortfolioScreen({
         <h3>Holdings</h3>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span className="link">{view.holdings.length} holdings</span>
-          <button
-            className="btn ghost sm"
-            onClick={onOpenImport}
-            style={{ gap: 4, borderColor: "var(--accent)", color: "var(--accent)" }}
-          >
-            <Icon name="plus" size={12} /> Add
-          </button>
+          <AddSplitButton onInvestment={onOpenImport} onCash={onOpenCash} />
         </div>
       </div>
       <div className="filter-chips">
@@ -1732,7 +1976,9 @@ export function PortfolioScreen({
                 <div style={{ minWidth: 0 }}>
                   <div className="name" style={{ display: "flex", alignItems: "center", gap: 5 }}>
                     <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {h.ticker}
+                      {/* Cash shows its account name in the user's case; the ticker stays
+                          the upper-cased identity used everywhere else (#149). */}
+                      {h.quoteSource === "cash" ? h.name || h.ticker : h.ticker}
                     </span>
                     {h.syncedBroker && <SyncedIcon broker={h.syncedBroker} />}
                   </div>
@@ -1744,8 +1990,20 @@ export function PortfolioScreen({
                         <span style={{ color: terRowColor(h.ter) }}>TER {h.ter.toFixed(2)}%</span>
                       </>
                     )}
-                    {" · "}
-                    {h.category}
+                    {(() => {
+                      const mark = markByTicker.get(h.ticker.toUpperCase());
+                      // The label (purpose) leads when set; otherwise "Reserved" flags a
+                      // reserved account, and an investable one just shows its category.
+                      // Always the row's own text color — no special tint (#149).
+                      const tag =
+                        mark?.purpose || (mark?.role === "reserved" ? "Reserved" : h.category);
+                      return (
+                        <>
+                          {" · "}
+                          {tag}
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
                 <div className="stack-xs" style={{ alignItems: "flex-end" }}>
@@ -1764,7 +2022,10 @@ export function PortfolioScreen({
                   <KebabMenu
                     label={`${h.ticker} actions`}
                     items={[
-                      { label: "Fund details", onClick: () => setDetailHolding(h) },
+                      // Fund details don't apply to a cash account.
+                      ...(h.quoteSource === "cash"
+                        ? []
+                        : [{ label: "Fund details", onClick: () => setDetailHolding(h) }]),
                       { label: "Edit holding", onClick: () => setHoldingSheet(h) },
                     ]}
                   />
@@ -1844,8 +2105,12 @@ export function PortfolioScreen({
         onClose={() => setBreakdownOpen(false)}
         bucketId={activePfId}
         portfolioName={activePfId === "all" ? "All portfolios" : view.name}
-        totalValue={view.totalValue}
+        totalValue={retTotalValue}
         netContributed={netContributed}
+        cashMode={cashMode}
+        onCashModeChange={setCashMode}
+        showCashToggle={cashInPlay}
+        idleCash={idleCash}
       />
 
       <FundDetailSheet

@@ -35,6 +35,7 @@ const CUSTOM_PATHS: Record<string, string> = {
   arrowUp: "M12 19V5M5 12l7-7 7 7",
   arrowDown: "M12 5v14M5 12l7 7 7-7",
   plus: "M12 5v14M5 12h14",
+  "chevron-down": "M6 9l6 6 6-6",
   close: "M18 6L6 18M6 6l12 12",
   check: "M5 12l5 5 9-11",
   info: "M12 16v-4M12 8h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z",

@@ -331,6 +331,9 @@ export function App({ isDemo }: { isDemo: boolean }) {
   // scope-guard so the user needn't re-enter them.
   const [addOpen, setAddOpen] = useState(false);
   const [addMode, setAddMode] = useState<AddMode>("snapshot");
+  // Which family the Add modal opens in (#149 split button): "investment" (default)
+  // or "cash" (the "+ Add ▾ → Add cash" path).
+  const [addEntryMode, setAddEntryMode] = useState<"investment" | "cash">("investment");
   // Rows the Advisor's in-chat holdings table hands to the importer (via the
   // import-seed store), copied into local state so the sheet keeps them after
   // the consumable store intent is cleared.
@@ -754,6 +757,12 @@ export function App({ isDemo }: { isDemo: boolean }) {
           onOpenModels={() => navigate("models")}
           onOpenChat={openChat}
           onOpenImport={() => {
+            setAddEntryMode("investment");
+            setAddMode("snapshot");
+            setAddOpen(true);
+          }}
+          onOpenCash={() => {
+            setAddEntryMode("cash");
             setAddMode("snapshot");
             setAddOpen(true);
           }}
@@ -885,12 +894,14 @@ export function App({ isDemo }: { isDemo: boolean }) {
       <RecordSheet
         open={addOpen}
         defaultKind={addMode === "activity" ? "buy" : "opening"}
+        defaultMode={addEntryMode}
         holdingsSeed={importSeed}
         txnSeed={txnSeed}
         onClose={() => {
           setAddOpen(false);
           setImportSeed(null);
           setTxnSeed(null);
+          setAddEntryMode("investment"); // next open defaults to Investment
         }}
         onConnectBroker={() => {
           setAddOpen(false);

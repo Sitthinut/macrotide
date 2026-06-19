@@ -168,6 +168,11 @@ body {
 html {
   background: var(--bg);
 }
+/* Bold emphasis at the app's 600, not the browser default (700). Scoped
+   `strong` rules keep their own weight by specificity. */
+strong {
+  font-weight: 600;
+}
 
 /* ===== App shell =====
    --demo-banner-h is read by every full-viewport container (.app-frame,
@@ -1065,6 +1070,12 @@ textarea.sheet-input {
   .modal.modal--txnwide {
     max-width: 880px;
   }
+  /* Fixed body floor ≥ the Investment default (paste box + a row) so BOTH families render
+     at the same height — toggling Investment|Cash doesn't jump the modal — and a short
+     Cash form still gives its Account/Label suggestion dropdown room (not clipped). (#149) */
+  .modal.modal--txnwide .modal-body {
+    min-height: 500px;
+  }
 }
 
 /* ─── Modal primitive ─────────────────────────────────────────────────────────
@@ -1756,6 +1767,13 @@ button.private-amt:focus-visible {
   font-size: 12px;
   color: var(--muted);
 }
+/* Basis note inside the returns-breakdown sheet (#149). */
+.rb-cash-mode-note {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+  margin: 2px 0 0;
+}
 .rb-group {
   display: flex;
   flex-direction: column;
@@ -1921,6 +1939,23 @@ button.private-amt:focus-visible {
   color: var(--ink);
   font-weight: 500;
   box-shadow: var(--chip-shadow);
+}
+
+/* Inline action: accent text + a trailing chevron (the affordance), matching the
+   hero's "total return ›". No underline, no pill (pills read as labels here). Used
+   by the cash-basis switches in the breakdown + benchmark nudge (#149). */
+.link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
 /* Filter chips (horizontal scroll) */
@@ -3930,6 +3965,65 @@ button.chip {
 .rec-intake[data-drag] {
   box-shadow: 0 0 0 2px var(--accent);
 }
+/* Investment | Cash family selector (#149) — pill segment, mirrors .portfolio-switch. */
+.rec-segment {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.rec-segment button {
+  flex: 1;
+  background: var(--card-soft);
+  border: 1px solid var(--line-soft);
+  color: var(--ink-soft);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  padding: 8px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.18s;
+}
+.rec-segment button[data-active="true"] {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: transparent;
+}
+/* Compact variant — the family toggle in the modal header's top-right action slot. */
+.rec-segment--compact {
+  margin-bottom: 0;
+  gap: 3px;
+}
+.rec-segment--compact button {
+  flex: 0 0 auto;
+  padding: 5px 11px;
+  font-size: 12px;
+}
+/* "+ Add" split button (#149) — the Material 3 split-button structure adapted to our
+   accent/ghost tokens: TWO buttons with a small gap (not a shared border). OUTER corners
+   use the app's button radius (--r-sm, not a full pill — full pills are reserved for the
+   toggle controls) and the facing INNER corners a tighter radius — the M3 split-button
+   asymmetry, kept in the app's shape language. A static down-chevron (no rotation). The
+   popover reuses .kebab__menu (background + shadow + outside-click). */
+.add-split {
+  display: inline-flex;
+  gap: 2px;
+}
+.add-split .btn.ghost {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* Two-class selectors so these beat .btn.sm (padding + border-radius) — see the border
+   fix above; a single .add-split__* class loses the specificity tie to .btn.sm. */
+.add-split .add-split__main {
+  gap: 4px;
+  border-radius: var(--r-sm) 2px 2px var(--r-sm);
+}
+.add-split .add-split__caret {
+  border-radius: 2px var(--r-sm) var(--r-sm) 2px;
+  padding: 7px 8px;
+}
 
 /* One-click broker import panel */
 .broker-import__toggle {
@@ -4373,6 +4467,40 @@ button.chip {
 }
 .kebab__item[data-danger] {
   color: var(--loss);
+}
+/* Menu header + footnote (e.g. the "Return basis" return-mode menu, #149). */
+/* Head top + note bottom match the items' 14px side inset (menu 4px + 10px) so the
+   menu's content is equally padded on all four sides. */
+.kebab__head {
+  padding: 10px 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.kebab__note {
+  margin: 4px 10px 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+  white-space: normal;
+  max-width: 200px;
+}
+/* A radio-style menu item: leading check, hidden until that option is active so
+   labels stay aligned. */
+.kebab__item--check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.kebab__item--check svg {
+  visibility: hidden;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.kebab__item--check[data-active="true"] svg {
+  visibility: visible;
 }
 
 /* Paste box as an input group: a borderless textarea with an action bar pinned

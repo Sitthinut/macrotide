@@ -20,6 +20,7 @@ const TYPE_BADGE_CODES: Record<QuoteSource, string> = {
   thai_mutual_fund: "Fund",
   market: "ETF",
   manual: "Custom",
+  cash: "Cash",
 };
 
 // One dropdown row — a holdings suggestion or a live catalog class.

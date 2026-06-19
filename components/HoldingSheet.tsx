@@ -4,9 +4,11 @@ import { useEffect, useState } from "react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
+import { Combobox } from "@/components/ui/Combobox";
+import { mergeCashPurposes } from "@/lib/data/cash-purposes";
 import { mergeSourceSuggestions } from "@/lib/data/sources";
 import type { ShareClassListItem } from "@/lib/db/queries/funds";
-import { useHoldings } from "@/lib/fetchers/portfolio";
+import { saveEarmark, useEarmarks, useHoldings } from "@/lib/fetchers/portfolio";
 import { useResource } from "@/lib/fetchers/swr";
 import { QUOTE_SOURCE_LABELS, QUOTE_SOURCES, type QuoteSource } from "@/lib/market/sources";
 import type { AssetClass } from "@/lib/static/types";
@@ -97,11 +99,51 @@ export function HoldingSheet({
 
   const update = (patch: Partial<HoldingFormValues>) => setValues((v) => ({ ...v, ...patch }));
 
+  // ── Cash Purpose (#149): per-account Role + optional Label, stored as an earmark.
+  const isCash = values.quoteSource === "cash";
+  const { data: earmarks } = useEarmarks();
+  const mark = (earmarks ?? []).find(
+    (e) =>
+      e.scope === "account" &&
+      e.bucketId === values.bucketId &&
+      (e.ticker ?? "").toUpperCase() === values.ticker.trim().toUpperCase(),
+  );
+  const [cashRole, setCashRole] = useState<"investable" | "reserved">("investable");
+  const [cashLabel, setCashLabel] = useState("");
+  // Seed the controls from the stored designation when the sheet opens (or once the
+  // earmark resolves), matching the values reset above.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: seed on open / when the row's mark first resolves
+  useEffect(() => {
+    if (!open) return;
+    setCashRole((mark?.role as "investable" | "reserved") ?? "investable");
+    setCashLabel(mark?.purpose ?? "");
+  }, [open, mark?.id]);
+  // Label suggestions = the user's used labels + curated presets; Account suggestions =
+  // the cash accounts they already track.
+  const purposeOptions = mergeCashPurposes((earmarks ?? []).map((e) => e.purpose));
+  const cashAccounts = [
+    ...new Set(
+      (allHoldings ?? [])
+        .filter((h) => h.quoteSource === "cash")
+        .map((h) => h.englishName || h.ticker),
+    ),
+  ];
+
   const doSave = async (vals: HoldingFormValues) => {
     setSubmitting(true);
     setError(null);
     try {
       await onSave(vals);
+      // Persist the cash Purpose alongside the holding (a no-op designation DELETEs).
+      if (vals.quoteSource === "cash") {
+        await saveEarmark({
+          bucketId: vals.bucketId,
+          ticker: vals.ticker,
+          role: cashRole,
+          amount: null, // "All" for a reserved account; ignored when investable
+          purpose: cashLabel,
+        });
+      }
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save");
@@ -112,20 +154,24 @@ export function HoldingSheet({
 
   const submit = async () => {
     if (!values.ticker.trim()) {
-      setError("Symbol is required");
-      return;
-    }
-    if (!values.englishName.trim()) {
-      setError("Name is required");
+      setError(isCash ? "Account name is required" : "Symbol is required");
       return;
     }
     if (!values.bucketId) {
       setError("Portfolio is required");
       return;
     }
-    if (!Number.isFinite(values.units) || values.units <= 0) {
-      setError("Quantity must be a positive number");
-      return;
+    // A cash account has no fund name / cost basis to validate — its balance comes
+    // from the ledger (Set balance), not this form.
+    if (!isCash) {
+      if (!values.englishName.trim()) {
+        setError("Name is required");
+        return;
+      }
+      if (!Number.isFinite(values.units) || values.units <= 0) {
+        setError("Quantity must be a positive number");
+        return;
+      }
     }
     // A custom asset whose symbol now matches the catalog → confirm promotion.
     if (canPromote) {
@@ -165,39 +211,70 @@ export function HoldingSheet({
     <>
       <Modal open={open} onClose={onClose} variant="form" labelledBy="hs-title">
         <Modal.Header
-          title={isEdit ? "Edit holding" : "Add holding"}
+          title={isCash ? "Edit cash account" : isEdit ? "Edit holding" : "Add holding"}
           subtitle={
-            isEdit
-              ? "Update quantity, cost basis, or move to another portfolio."
-              : "Add a single holding. Use the import sheet for multiple at once."
+            isCash
+              ? "Rename the account, set its purpose, or move it to another portfolio."
+              : isEdit
+                ? "Update quantity, cost basis, or move to another portfolio."
+                : "Add a single holding. Use the import sheet for multiple at once."
           }
           id="hs-title"
         />
         <Modal.Body gap={14}>
-          <FormRow label="Type" hint="Determines where we fetch this holding's price">
-            <select
-              className="sheet-input"
-              value={values.quoteSource}
-              onChange={(e) => update({ quoteSource: e.target.value as QuoteSource })}
-              disabled={lockTicker || known}
-            >
-              {QUOTE_SOURCES.map((s) => (
-                <option key={s} value={s}>
-                  {QUOTE_SOURCE_LABELS[s]}
-                </option>
-              ))}
-            </select>
-          </FormRow>
+          {isCash ? (
+            <FormRow label="Type">
+              {/* A cash account is just cash — locked, no price source / asset class. */}
+              <input className="sheet-input" value="Cash" disabled />
+            </FormRow>
+          ) : (
+            <FormRow label="Type" hint="Determines where we fetch this holding's price">
+              <select
+                className="sheet-input"
+                value={values.quoteSource}
+                onChange={(e) => update({ quoteSource: e.target.value as QuoteSource })}
+                disabled={lockTicker || known}
+              >
+                {/* Cash is entered through the transactions sheet (deposit / cash
+                    balance), not as a fund holding — keep it out of this picker. */}
+                {QUOTE_SOURCES.filter((s) => s !== "cash").map((s) => (
+                  <option key={s} value={s}>
+                    {QUOTE_SOURCE_LABELS[s]}
+                  </option>
+                ))}
+              </select>
+            </FormRow>
+          )}
 
-          <FormRow label="Symbol">
-            <input
-              className="sheet-input"
-              value={values.ticker}
-              onChange={(e) => update({ ticker: e.target.value.toUpperCase() })}
-              disabled={lockTicker || known}
-              placeholder="Symbol"
-              style={{ textTransform: "uppercase" }}
-            />
+          <FormRow label={isCash ? "Account" : "Symbol"}>
+            {isCash ? (
+              // Always renameable (the rename cascades the ledger + earmark); Combobox
+              // suggests the cash accounts you already track, matching the Add modal.
+              <Combobox<string>
+                // Edit/show the account NAME in the user's case; the ticker stays the
+                // upper-cased identity, kept in sync so matching/rename still work (#149).
+                value={values.englishName || values.ticker}
+                onChange={(text) =>
+                  update({ englishName: text, ticker: text.trim().toUpperCase() })
+                }
+                onPick={(s) => update({ englishName: s, ticker: s.trim().toUpperCase() })}
+                items={cashAccounts}
+                getKey={(s) => s}
+                renderItem={(s) => s}
+                label="Cash account"
+                placeholder="e.g. SCB Savings"
+                inputClassName="sheet-input"
+              />
+            ) : (
+              <input
+                className="sheet-input"
+                value={values.ticker}
+                onChange={(e) => update({ ticker: e.target.value.toUpperCase() })}
+                disabled={lockTicker || known}
+                placeholder="Symbol"
+                style={{ textTransform: "uppercase" }}
+              />
+            )}
           </FormRow>
 
           {known && (
@@ -222,25 +299,29 @@ export function HoldingSheet({
             </div>
           )}
 
-          <FormRow label="Name (English)">
-            <input
-              className="sheet-input"
-              value={values.englishName}
-              onChange={(e) => update({ englishName: e.target.value })}
-              placeholder="SCB S&P 500 Index Fund"
-              disabled={known}
-            />
-          </FormRow>
+          {!isCash && (
+            <>
+              <FormRow label="Name (English)">
+                <input
+                  className="sheet-input"
+                  value={values.englishName}
+                  onChange={(e) => update({ englishName: e.target.value })}
+                  placeholder="SCB S&P 500 Index Fund"
+                  disabled={known}
+                />
+              </FormRow>
 
-          <FormRow label="Name (Thai)" hint="Optional">
-            <input
-              className="sheet-input"
-              value={values.thaiName}
-              onChange={(e) => update({ thaiName: e.target.value })}
-              placeholder="เอสซีบี เอสแอนด์พี 500"
-              disabled={known}
-            />
-          </FormRow>
+              <FormRow label="Name (Thai)" hint="Optional">
+                <input
+                  className="sheet-input"
+                  value={values.thaiName}
+                  onChange={(e) => update({ thaiName: e.target.value })}
+                  placeholder="เอสซีบี เอสแอนด์พี 500"
+                  disabled={known}
+                />
+              </FormRow>
+            </>
+          )}
 
           {bucketOptions && bucketOptions.length > 0 && (
             <FormRow label="Portfolio">
@@ -258,106 +339,143 @@ export function HoldingSheet({
             </FormRow>
           )}
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <FormRow label="Quantity">
-              <input
-                className="sheet-input"
-                type="number"
-                step="0.0001"
-                value={Number.isFinite(values.units) ? values.units : ""}
-                onChange={(e) => update({ units: Number.parseFloat(e.target.value) || 0 })}
-                placeholder="0"
-                disabled={known}
-              />
-            </FormRow>
-            <FormRow label="Avg cost" hint="THB per unit/share">
-              <input
-                className="sheet-input"
-                type="number"
-                step="0.01"
-                value={Number.isFinite(values.avgCost) ? values.avgCost : ""}
-                onChange={(e) => update({ avgCost: Number.parseFloat(e.target.value) || 0 })}
-                placeholder="0"
-                disabled={known}
-              />
-            </FormRow>
-          </div>
-
-          <FormRow label="Asset class">
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {ASSET_CLASSES.map((a) => (
-                <button
-                  key={a.value}
-                  type="button"
-                  onClick={() => update({ assetClass: a.value })}
+          {!isCash && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <FormRow label="Quantity">
+                <input
+                  className="sheet-input"
+                  type="number"
+                  step="0.0001"
+                  value={Number.isFinite(values.units) ? values.units : ""}
+                  onChange={(e) => update({ units: Number.parseFloat(e.target.value) || 0 })}
+                  placeholder="0"
                   disabled={known}
-                  style={{
-                    padding: "6px 12px",
-                    borderRadius: 8,
-                    border: "1px solid",
-                    borderColor:
-                      values.assetClass === a.value ? "var(--accent)" : "var(--line-soft)",
-                    background:
-                      values.assetClass === a.value ? "var(--accent-soft)" : "var(--paper)",
-                    fontSize: 12.5,
-                    cursor: known ? "not-allowed" : "pointer",
-                    opacity: known && values.assetClass !== a.value ? 0.5 : 1,
-                  }}
-                >
-                  {a.label}
-                </button>
-              ))}
+                />
+              </FormRow>
+              <FormRow label="Avg cost" hint="THB per unit/share">
+                <input
+                  className="sheet-input"
+                  type="number"
+                  step="0.01"
+                  value={Number.isFinite(values.avgCost) ? values.avgCost : ""}
+                  onChange={(e) => update({ avgCost: Number.parseFloat(e.target.value) || 0 })}
+                  placeholder="0"
+                  disabled={known}
+                />
+              </FormRow>
             </div>
-          </FormRow>
+          )}
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <FormRow label="Category" hint="e.g. US Equity">
-              <input
-                className="sheet-input"
-                value={values.category}
-                onChange={(e) => update({ category: e.target.value })}
-                placeholder="US Equity"
-                disabled={known}
-              />
-            </FormRow>
-            <FormRow label="Region" hint="US / TH / Global / EM">
-              <input
-                className="sheet-input"
-                value={values.region}
-                onChange={(e) => update({ region: e.target.value })}
-                placeholder="US"
-                disabled={known}
-              />
-            </FormRow>
-          </div>
+          {isCash ? (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <FormRow
+                label="Purpose"
+                hint="Investable counts toward your return %. Reserved sits out."
+              >
+                <select
+                  className="sheet-input"
+                  value={cashRole}
+                  onChange={(e) => setCashRole(e.target.value as "investable" | "reserved")}
+                >
+                  <option value="investable">Investable</option>
+                  <option value="reserved">Reserved</option>
+                </select>
+              </FormRow>
+              <FormRow label="Label" hint="Optional objective">
+                <Combobox<string>
+                  value={cashLabel}
+                  onChange={setCashLabel}
+                  onPick={setCashLabel}
+                  items={purposeOptions}
+                  getKey={(s) => s}
+                  renderItem={(s) => s}
+                  label="Cash purpose label"
+                  placeholder="e.g. Emergency"
+                  inputClassName="sheet-input"
+                />
+              </FormRow>
+            </div>
+          ) : null}
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <FormRow label="TER (%)" hint="Annual expense ratio">
-              <input
-                className="sheet-input"
-                type="number"
-                step="0.01"
-                value={Number.isFinite(values.ter) ? values.ter : ""}
-                onChange={(e) => update({ ter: Number.parseFloat(e.target.value) || 0 })}
-                placeholder="0.45"
-                disabled={known}
-              />
-            </FormRow>
-            <FormRow label="Source" hint="Where this came from">
-              <input
-                className="sheet-input"
-                list="edit-source-suggestions"
-                value={values.source}
-                onChange={(e) => update({ source: e.target.value })}
-                placeholder="Type or pick a source"
-              />
-              <datalist id="edit-source-suggestions">
-                {sourceOptions.map((s) => (
-                  <option key={s} value={s} />
-                ))}
-              </datalist>
-            </FormRow>
-          </div>
+          {!isCash && (
+            <>
+              <FormRow label="Asset class">
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {ASSET_CLASSES.map((a) => (
+                    <button
+                      key={a.value}
+                      type="button"
+                      onClick={() => update({ assetClass: a.value })}
+                      disabled={known}
+                      style={{
+                        padding: "6px 12px",
+                        borderRadius: 8,
+                        border: "1px solid",
+                        borderColor:
+                          values.assetClass === a.value ? "var(--accent)" : "var(--line-soft)",
+                        background:
+                          values.assetClass === a.value ? "var(--accent-soft)" : "var(--paper)",
+                        fontSize: 12.5,
+                        cursor: known ? "not-allowed" : "pointer",
+                        opacity: known && values.assetClass !== a.value ? 0.5 : 1,
+                      }}
+                    >
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+              </FormRow>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <FormRow label="Category" hint="e.g. US Equity">
+                  <input
+                    className="sheet-input"
+                    value={values.category}
+                    onChange={(e) => update({ category: e.target.value })}
+                    placeholder="US Equity"
+                    disabled={known}
+                  />
+                </FormRow>
+                <FormRow label="Region" hint="US / TH / Global / EM">
+                  <input
+                    className="sheet-input"
+                    value={values.region}
+                    onChange={(e) => update({ region: e.target.value })}
+                    placeholder="US"
+                    disabled={known}
+                  />
+                </FormRow>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <FormRow label="TER (%)" hint="Annual expense ratio">
+                  <input
+                    className="sheet-input"
+                    type="number"
+                    step="0.01"
+                    value={Number.isFinite(values.ter) ? values.ter : ""}
+                    onChange={(e) => update({ ter: Number.parseFloat(e.target.value) || 0 })}
+                    placeholder="0.45"
+                    disabled={known}
+                  />
+                </FormRow>
+                <FormRow label="Source" hint="Where this came from">
+                  <input
+                    className="sheet-input"
+                    list="edit-source-suggestions"
+                    value={values.source}
+                    onChange={(e) => update({ source: e.target.value })}
+                    placeholder="Type or pick a source"
+                  />
+                  <datalist id="edit-source-suggestions">
+                    {sourceOptions.map((s) => (
+                      <option key={s} value={s} />
+                    ))}
+                  </datalist>
+                </FormRow>
+              </div>
+            </>
+          )}
 
           {error && (
             <div

@@ -15,6 +15,7 @@
 // pages use. Total value and money-in come from the portfolio series (props) so
 // they tie out exactly to the hero.
 
+import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import { PrivateAmount } from "@/components/PrivateAmount";
 import { useResource } from "@/lib/fetchers/swr";
@@ -38,19 +39,32 @@ export function ReturnsBreakdownSheet({
   portfolioName,
   totalValue,
   netContributed,
+  cashMode = "incl",
+  onCashModeChange,
+  showCashToggle = false,
+  idleCash = 0,
 }: {
   open: boolean;
   onClose: () => void;
   /** "all" for the combined book, otherwise the bucket id. */
   bucketId: string;
   portfolioName: string;
-  /** Total wealth incl. in-transit cash — the hero balance. */
+  /** Total wealth for the RETURN view (mode-adjusted) — matches the screen headline. */
   totalValue: number;
   /**
    * Net external money contributed (deposits − withdrawals), or null when the
    * ledger-derived contribution series isn't available (static placeholder).
    */
   netContributed: number | null;
+  /** Contribution mode (#149): "funds" excludes uninvested cash from the IRR. */
+  cashMode?: "incl" | "funds";
+  /** Flip the basis from inside the sheet — the sheet's own figures recompute, so
+   * the effect is visible here (it's a contextual shortcut; the ⋯ menu is canonical). */
+  onCashModeChange?: (m: "incl" | "funds") => void;
+  /** Only show the basis line when the book actually holds cash. */
+  showCashToggle?: boolean;
+  /** Uninvested (non-reserved) cash in THB — for the basis line. */
+  idleCash?: number;
 }) {
   return (
     <Modal
@@ -71,6 +85,10 @@ export function ReturnsBreakdownSheet({
             bucketId={bucketId}
             totalValue={totalValue}
             netContributed={netContributed}
+            cashMode={cashMode}
+            onCashModeChange={onCashModeChange}
+            showCashToggle={showCashToggle}
+            idleCash={idleCash}
           />
         )}
       </Modal.Body>
@@ -82,15 +100,24 @@ function ReturnsBreakdownBody({
   bucketId,
   totalValue,
   netContributed,
+  cashMode,
+  onCashModeChange,
+  showCashToggle,
+  idleCash,
 }: {
   bucketId: string;
   totalValue: number;
   netContributed: number | null;
+  cashMode: "incl" | "funds";
+  onCashModeChange?: (m: "incl" | "funds") => void;
+  showCashToggle?: boolean;
+  idleCash?: number;
 }) {
-  const key =
-    bucketId === "all"
-      ? "/api/transactions/analytics"
-      : `/api/transactions/analytics?bucket=${encodeURIComponent(bucketId)}`;
+  const params = new URLSearchParams();
+  if (bucketId !== "all") params.set("bucket", bucketId);
+  if (cashMode === "funds") params.set("cash", "funds");
+  const qs = params.toString();
+  const key = `/api/transactions/analytics${qs ? `?${qs}` : ""}`;
   const { data, isLoading } = useResource<AnalyticsResponse>(key);
 
   if (isLoading || !data) {
@@ -134,6 +161,43 @@ function ReturnsBreakdownBody({
         )}
       </div>
 
+      {/* Contribution-basis line (#149). The sheet's own figures are mode-dependent, so
+          flipping here recomputes them in view — a contextual shortcut (the ⋯ menu on the
+          portfolio is the canonical control; both call the same setter). */}
+      {showCashToggle && onCashModeChange && (
+        <p className="rb-cash-mode-note">
+          {cashMode === "incl" ? (
+            <>
+              Includes{" "}
+              {idleCash && idleCash > 0.5 ? (
+                <PrivateAmount>{fmtTHBClean(idleCash)}</PrivateAmount>
+              ) : (
+                "your"
+              )}{" "}
+              idle cash.{" "}
+              <button type="button" className="link-btn" onClick={() => onCashModeChange("funds")}>
+                Exclude cash
+                <Icon name="chevron-right" size={11} />
+              </button>
+            </>
+          ) : (
+            <>
+              Excludes{" "}
+              {idleCash && idleCash > 0.5 ? (
+                <PrivateAmount>{fmtTHBClean(idleCash)}</PrivateAmount>
+              ) : (
+                "your"
+              )}{" "}
+              idle cash.{" "}
+              <button type="button" className="link-btn" onClick={() => onCashModeChange("incl")}>
+                Include cash
+                <Icon name="chevron-right" size={11} />
+              </button>
+            </>
+          )}
+        </p>
+      )}
+
       <section className="rb-group">
         <h4 className="rb-group-title">Summary</h4>
         <Row label="Total value" value={r.totalValue} />
@@ -168,7 +232,7 @@ function ReturnsBreakdownBody({
 
       <p className="rb-note muted">
         Switching funds rolls each gain into the new holding's cost basis, so unrealized gain keeps
-        resetting. <strong>Total return</strong> instead counts every baht you've put in against
+        resetting. <strong>Total return</strong> instead weighs what you've contributed against
         today's value. Fund fees (TER) are already deducted.
       </p>
     </div>

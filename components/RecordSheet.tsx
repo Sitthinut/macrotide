@@ -19,9 +19,16 @@ import { Modal } from "@/components/Modal";
 import { SymbolCombobox } from "@/components/portfolio/SymbolCombobox";
 import { Combobox } from "@/components/ui/Combobox";
 import { QtyInput, qtyDefaultMode } from "@/components/ui/QtyInput";
+import { mergeCashPurposes } from "@/lib/data/cash-purposes";
 import { mergeWithHoldings, type TickerSuggestion } from "@/lib/data/known-holdings";
 import { mergeSourceSuggestions } from "@/lib/data/sources";
-import { useBrokerConnectors, useBuckets, useHoldings } from "@/lib/fetchers/portfolio";
+import {
+  saveEarmark,
+  useBrokerConnectors,
+  useBuckets,
+  useEarmarks,
+  useHoldings,
+} from "@/lib/fetchers/portfolio";
 import { cachedQuoteSource, resolveQuoteSources } from "@/lib/fetchers/quote-source";
 import { invalidate, useResource } from "@/lib/fetchers/swr";
 import { fmtDate, fmtTHBClean } from "@/lib/format";
@@ -33,6 +40,7 @@ import type { TxnKind } from "@/lib/portfolio/lots";
 import type { ExtractedTxnRow, ImportDocType } from "@/lib/portfolio/ocr";
 import { TXN_KIND_HELP, TXN_KIND_LABEL, typeSelectOptions } from "@/lib/portfolio/txn-display";
 import {
+  isCashKind,
   normalizeDate,
   normalizeTxnDraft,
   parseTxnPaste,
@@ -57,6 +65,9 @@ const VERB: Record<RowKind, string> = {
   fee: "Fee",
   split: "Split",
   reinvest: "Reinvested",
+  deposit: "Deposited",
+  withdraw: "Withdrew",
+  cash_balance: "Balance",
 };
 
 const ABBR: Record<RowKind, string> = {
@@ -68,6 +79,9 @@ const ABBR: Record<RowKind, string> = {
   fee: "FEE",
   split: "SPL",
   reinvest: "RE",
+  deposit: "DEP",
+  withdraw: "WD",
+  cash_balance: "CASH",
 };
 
 const TONE: Record<RowKind, string> = {
@@ -79,6 +93,9 @@ const TONE: Record<RowKind, string> = {
   fee: "var(--muted-2)",
   split: "var(--muted-2)",
   snapshot: "var(--amber)",
+  deposit: "var(--accent)",
+  withdraw: "var(--loss)",
+  cash_balance: "var(--accent-2)",
 };
 
 const isAnchor = (k: RowKind): boolean => k === "opening" || k === "snapshot";
@@ -123,6 +140,18 @@ interface Row {
   estimated?: boolean;
   fee: string;
   amount: string;
+  /** A cash account's currency (deposit/withdraw/cash_balance). Defaults THB. */
+  currency?: string;
+  /** Native→THB rate for a non-THB cash account; "" / "1" for THB. The entered
+   * figure is in the account currency; the ledger ฿ amount is figure × this rate. */
+  fxToThb?: string;
+  /** "No money moved" override on a Set balance (cash_balance) — interest, a
+   * correction, or asserting parked sale proceeds. Sent as `reconcile`. */
+  reconcile?: boolean;
+  /** Cash account Purpose (#149) — its RETURN role + an optional objective label;
+   * saved as an earmark on submit. Only meaningful for cash rows. */
+  cashRole?: "investable" | "reserved";
+  cashLabel?: string;
   quoteSource?: QuoteSource;
   /** True once the user explicitly flips the price-source badge — pins the badge
    * highlight and stops a ticker edit from re-inferring over the choice. */
@@ -148,6 +177,18 @@ const blankRow = (kind: RowKind): Row => ({
   provenance: "manual",
 });
 
+// A fresh cash row: a named account, priced as cash, defaulting to "Set balance"
+// (the hero) as of today, in THB.
+const newCashRow = (): Row => ({
+  ...blankRow("cash_balance"),
+  tradeDate: today(),
+  quoteSource: "cash",
+  quoteSourceLocked: true,
+  currency: "THB",
+  cashRole: "investable",
+  cashLabel: "",
+});
+
 // An untouched manual row (e.g. the default row on open) — no fund or numbers
 // typed. Dropped once real rows arrive from paste/import so it isn't left dangling.
 const isBlankManual = (r: Row): boolean =>
@@ -157,6 +198,19 @@ const isBlankManual = (r: Row): boolean =>
   !r.price.trim() &&
   !r.amount.trim() &&
   !r.fee.trim();
+
+// A row with nothing typed yet (any family — also covers the cash `value` field).
+// Switching the Investment|Cash toggle CONVERTS such a row in place instead of
+// spawning a second one; an edited row is preserved.
+const isRowPristine = (r: Row): boolean =>
+  !r.ticker.trim() &&
+  !r.units.trim() &&
+  !r.price.trim() &&
+  !r.amount.trim() &&
+  !r.fee.trim() &&
+  !(r.value ?? "").trim() &&
+  !(r.currentPrice ?? "").trim() &&
+  !(r.costTotal ?? "").trim();
 
 // Map a pasted draft → a Row. A row with no trade date is read as a Starting
 // balance (the snapshot case); a dated row keeps its detected trade kind.
@@ -233,6 +287,9 @@ export interface RecordSheetProps {
   defaultBucketId?: string | null;
   /** "opening" when entered from Holdings "Add"; "buy" from a Record action. */
   defaultKind?: RowKind;
+  /** Which family the modal opens in (#149). "cash" jumps straight to the cash form
+   * (the split-button "Add cash" path); defaults to "investment". */
+  defaultMode?: "investment" | "cash";
   /** Rows seeded from the Advisor's in-chat holdings table (→ Starting balances). */
   holdingsSeed?: ImportSeedRow[] | null;
   /** Rows seeded from a handoff (→ activity). */
@@ -247,6 +304,7 @@ export function RecordSheet({
   onSaved,
   defaultBucketId,
   defaultKind = "opening",
+  defaultMode = "investment",
   holdingsSeed,
   txnSeed,
   onConnectBroker,
@@ -279,6 +337,10 @@ export function RecordSheet({
   };
   const [bucketId, setBucketId] = useState("");
   const [source, setSource] = useState("");
+  // Investment | Cash segment (#149 D5): Investment = the symbol-based flow (paste /
+  // screenshot / Balance / Buy / Sell…); Cash = a scoped form for a named account
+  // (Set balance / Deposit / Withdraw), no symbol or fund intake.
+  const [mode, setMode] = useState<"investment" | "cash">(defaultMode);
   const [rows, setRows] = useState<Row[]>([]);
   const [editing, setEditing] = useState<number | null>(null);
   const [pasteText, setPasteText] = useState("");
@@ -323,11 +385,17 @@ export function RecordSheet({
   // biome-ignore lint/correctness/useExhaustiveDependencies: open-transition only
   useEffect(() => {
     if (!open || holdingsSeed?.length || txnSeed?.length) return;
-    const r = blankRow(defaultKind === "opening" ? "opening" : "buy");
+    // Open straight into the requested family — "cash" (the split-button "Add cash"
+    // path) seeds a scoped Set-balance row; otherwise the usual fund row.
+    const r =
+      defaultMode === "cash"
+        ? newCashRow()
+        : blankRow(defaultKind === "opening" ? "opening" : "buy");
     setRows([r]);
     setEditing(r.id);
     setPasteText("");
     setError(null);
+    setMode(defaultMode);
   }, [open]);
 
   const sourceOptions = useMemo(
@@ -351,6 +419,24 @@ export function RecordSheet({
         })),
       ).slice(0, 200),
     [holdings],
+  );
+  // Existing cash account names — autocomplete the Account field (Set balance an account
+  // you already track, or name a new one).
+  const cashAccounts = useMemo(
+    () => [
+      ...new Set(
+        (holdings ?? [])
+          .filter((h) => h.quoteSource === "cash")
+          .map((h) => h.englishName || h.ticker),
+      ),
+    ],
+    [holdings],
+  );
+  // Existing Purpose labels for the Label combobox + the current designation per account.
+  const { data: earmarks } = useEarmarks();
+  const purposeLabels = useMemo(
+    () => mergeCashPurposes((earmarks ?? []).map((e) => e.purpose)),
+    [earmarks],
   );
 
   const reset = () => {
@@ -513,10 +599,38 @@ export function RecordSheet({
   };
 
   const addManual = () => {
+    if (mode === "cash") {
+      const r = newCashRow();
+      setRows((prev) => [...prev, r]);
+      setEditing(r.id);
+      return;
+    }
     const kind: RowKind = (holdings?.length ?? 0) > 0 ? defaultKind : "opening";
     const r = blankRow(kind === "opening" ? "opening" : "buy");
     setRows((prev) => [...prev, r]);
     setEditing(r.id);
+  };
+
+  const freshInvestmentRow = (): Row => blankRow(defaultKind === "opening" ? "opening" : "buy");
+
+  // Switch the intake family. If the only row is untouched, CONVERT it to the other
+  // family in place (investment Balance ↔ cash Balance) — no second row. If you've
+  // edited it (or there are several), keep your work and add a fresh row of the new
+  // family instead (so a new entry is created only when the row was edited).
+  const switchMode = (m: "investment" | "cash") => {
+    if (m === mode) return;
+    setMode(m);
+    if (rows.length === 1 && isRowPristine(rows[0])) {
+      const next = m === "cash" ? newCashRow() : freshInvestmentRow();
+      next.id = rows[0].id;
+      setRows([next]);
+      setEditing(next.id);
+      return;
+    }
+    if (rows.some((r) => isCashKind(r.kind) === (m === "cash"))) return; // already have one
+    const fresh = m === "cash" ? newCashRow() : freshInvestmentRow();
+    setRows((prev) => [...prev, fresh]);
+    setEditing(fresh.id);
   };
 
   // Resolve each row's price source against the REAL fund catalog (in the catalog →
@@ -590,6 +704,35 @@ export function RecordSheet({
     try {
       const transactions = readyRows.map((r) => {
         const quoteSource = r.quoteSource || "manual";
+        if (isCashKind(r.kind)) {
+          // Cash: the entered figure is in the account currency = NATIVE units (THB by
+          // default). `units` stays native (its position is valued at live FX); the
+          // ledger ฿ `amount` is native × the trade-date rate (1 for THB). cash_balance
+          // carries the asserted native balance (`units`) + its ฿ value; deposit/withdraw
+          // carry the ฿ amount the server signs (deposit −, withdraw +).
+          const currency = (r.currency || "THB").trim().toUpperCase() || "THB";
+          const rate = currency === "THB" ? 1 : Number(r.fxToThb) > 0 ? Number(r.fxToThb) : 1;
+          const native = r.kind === "cash_balance" ? Number(r.value || r.amount) : Number(r.amount);
+          const figure = native > 0 ? native : 0;
+          const thb = figure * rate;
+          return {
+            tradeDate: r.tradeDate || new Date().toISOString().slice(0, 10),
+            kind: r.kind,
+            // The ticker is the upper-cased identity (matching/cache keys); the
+            // account NAME keeps the user's case for display (#149).
+            ticker: r.ticker.trim().toUpperCase(),
+            englishName: r.ticker.trim() || undefined,
+            units: figure > 0 ? figure : undefined,
+            value: r.kind === "cash_balance" && thb > 0 ? thb : undefined,
+            amount: r.kind === "cash_balance" ? 0 : thb,
+            // "No money moved" override — only meaningful on a Set balance.
+            reconcile: r.kind === "cash_balance" ? !!r.reconcile : undefined,
+            quoteSource: "cash",
+            tradeCurrency: currency,
+            fxToThb: rate,
+            source: source.trim() || undefined,
+          };
+        }
         if (isAnchor(r.kind)) {
           const hasUnits = Number(r.units) > 0;
           const avg = r.price.trim() === "" ? null : Number(r.price);
@@ -656,9 +799,26 @@ export function RecordSheet({
       // fold when that date's NAV lands. So there's no "couldn't price it" reject here.
       if (!res.ok) throw new Error(String(res.status));
       const body = (await res.json()) as { count: number };
+      // Save the cash Purpose for any Set-balance row that set one — only when Reserved
+      // or a label is given, so a plain Set balance never clobbers an existing designation.
+      for (const r of readyRows) {
+        if (
+          r.kind === "cash_balance" &&
+          (r.cashRole === "reserved" || (r.cashLabel ?? "").trim())
+        ) {
+          await saveEarmark({
+            bucketId,
+            ticker: r.ticker.trim().toUpperCase(),
+            role: r.cashRole ?? "investable",
+            amount: null,
+            purpose: r.cashLabel,
+          });
+        }
+      }
       invalidate(/^\/api\/transactions/);
       invalidate(/^\/api\/holdings/);
       invalidate(/^\/api\/portfolios/);
+      invalidate("/api/earmarks");
       onSaved?.(body.count);
       reset();
       onClose();
@@ -681,8 +841,34 @@ export function RecordSheet({
     >
       <Modal.Header
         title="Add to portfolio"
-        subtitle="Paste, snap a screenshot, or add a row. We sort out what's a holding and what's a trade — change any row's type below."
+        subtitle={
+          mode === "cash"
+            ? "Set a bank balance, or record a deposit / withdrawal."
+            : "Paste, snap a screenshot, or add a row. We sort out what's a holding and what's a trade — change any row's type below."
+        }
         id="rec-title"
+        action={
+          <div className="rec-segment rec-segment--compact" role="tablist" aria-label="Entry type">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "investment"}
+              data-active={mode === "investment"}
+              onClick={() => switchMode("investment")}
+            >
+              Investment
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "cash"}
+              data-active={mode === "cash"}
+              onClick={() => switchMode("cash")}
+            >
+              Cash
+            </button>
+          </div>
+        }
       />
       <Modal.Body gap={12}>
         {showBrokerCta && onConnectBroker && (
@@ -735,75 +921,80 @@ export function RecordSheet({
           </label>
         </div>
 
-        {/* One intake — no mode segment. Paste, drop screenshots/CSV, or add a row. */}
-        <div
-          className="rec-intake"
-          data-drag={dragOver || undefined}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragOver(true);
-          }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragOver(false);
-            void handleFiles(Array.from(e.dataTransfer.files ?? []));
-          }}
-        >
-          <div className="rec-paste">
-            <textarea
-              rows={5}
-              placeholder={
-                "Paste your holdings or a buy/sell log — one per line.\nEXAMPLE-FUND-A, 100, 25.00\n2024-03-12, Buy, K-EQUITY, 50, 18.40, 920\n\nOr drop screenshots / a CSV here."
-              }
-              value={pasteText}
-              onChange={(e) => setPasteText(e.target.value)}
-              onPaste={(e) => {
-                // Auto-parse on paste — rows appear immediately, AND the raw text
-                // stays so you can edit it and re-sync with Apply.
-                const pasted = e.clipboardData.getData("text");
-                if (!pasted.trim()) return;
-                const t = e.currentTarget;
-                const start = t.selectionStart ?? t.value.length;
-                const end = t.selectionEnd ?? t.value.length;
-                const next = t.value.slice(0, start) + pasted + t.value.slice(end);
-                e.preventDefault();
-                setPasteText(next);
-                syncPasteRows(next);
-              }}
-            />
-          </div>
-          <div className="rec-intake__actions">
-            {/* Apply sits to the LEFT of Images/CSV and only appears once there's
+        {/* Investment | Cash lives in the header (#149 D5). Cash hides the fund intake
+            (paste/screenshot) and scopes the rows to a named cash account.
+            Investment intake — paste, drop screenshots/CSV, or add a row. Hidden in
+            Cash mode (cash is entered by hand against a named account). */}
+        {mode === "cash" ? null : (
+          <div
+            className="rec-intake"
+            data-drag={dragOver || undefined}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              void handleFiles(Array.from(e.dataTransfer.files ?? []));
+            }}
+          >
+            <div className="rec-paste">
+              <textarea
+                rows={5}
+                placeholder={
+                  "Paste your holdings or a buy/sell log — one per line.\nEXAMPLE-FUND-A, 100, 25.00\n2024-03-12, Buy, K-EQUITY, 50, 18.40, 920\n\nOr drop screenshots / a CSV here."
+                }
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                onPaste={(e) => {
+                  // Auto-parse on paste — rows appear immediately, AND the raw text
+                  // stays so you can edit it and re-sync with Apply.
+                  const pasted = e.clipboardData.getData("text");
+                  if (!pasted.trim()) return;
+                  const t = e.currentTarget;
+                  const start = t.selectionStart ?? t.value.length;
+                  const end = t.selectionEnd ?? t.value.length;
+                  const next = t.value.slice(0, start) + pasted + t.value.slice(end);
+                  e.preventDefault();
+                  setPasteText(next);
+                  syncPasteRows(next);
+                }}
+              />
+            </div>
+            <div className="rec-intake__actions">
+              {/* Apply sits to the LEFT of Images/CSV and only appears once there's
                 text to read — so it never floats over the box or shifts its height. */}
-            {pasteText.trim() && (
+              {pasteText.trim() && (
+                <button
+                  type="button"
+                  className="btn primary sm"
+                  onClick={() => syncPasteRows(pasteText)}
+                  title="Read the rows from this text"
+                >
+                  Apply
+                </button>
+              )}
               <button
                 type="button"
-                className="btn primary sm"
-                onClick={() => syncPasteRows(pasteText)}
-                title="Read the rows from this text"
+                className="btn ghost sm"
+                onClick={() => fileRef.current?.click()}
+                disabled={imgBusy}
               >
-                Apply
+                <Icon name="chart" size={12} /> {imgBusy ? "Reading…" : "Images / CSV"}
               </button>
-            )}
-            <button
-              type="button"
-              className="btn ghost sm"
-              onClick={() => fileRef.current?.click()}
-              disabled={imgBusy}
-            >
-              <Icon name="chart" size={12} /> {imgBusy ? "Reading…" : "Images / CSV"}
-            </button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/jpeg,image/png,image/webp,.csv,.txt,text/csv,text/plain"
-              multiple
-              hidden
-              onChange={onFileInput}
-            />
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,.csv,.txt,text/csv,text/plain"
+                multiple
+                hidden
+                onChange={onFileInput}
+              />
+            </div>
           </div>
-        </div>
+        )}
 
         {error && <div className="rec-error">{error}</div>}
         {unsure && (
@@ -837,6 +1028,8 @@ export function RecordSheet({
                   key={r.id}
                   row={r}
                   tickers={tickerOptions}
+                  cashAccounts={cashAccounts}
+                  purposeOptions={purposeLabels}
                   onChange={(p) => patch(r.id, p)}
                   onDone={() => setEditing(null)}
                   onRemove={() => removeRow(r.id)}
@@ -854,13 +1047,18 @@ export function RecordSheet({
         )}
 
         <button type="button" className="rec-add-row" onClick={addManual}>
-          <Icon name="plus" size={13} /> Add a row
+          <Icon name="plus" size={13} />{" "}
+          {mode === "cash" ? "Add a cash entry" : "Add an investment entry"}
         </button>
 
-        <p className="rec-hint">
-          <Icon name="sparkle" size={12} /> Or tell Advisor in chat — e.g. “Add ฿50k of K-FIXED-A
-          from SCB.” It confirms before saving.
-        </p>
+        {/* The Advisor chat-import path is fund-focused (it parses trades/holdings); cash
+            entry isn't wired through it yet, so hide the prompt in Cash mode. */}
+        {mode === "cash" ? null : (
+          <p className="rec-hint">
+            <Icon name="sparkle" size={12} /> Or tell Advisor in chat — e.g. “Add ฿50k of K-FIXED-A
+            from SCB.” It confirms before saving.
+          </p>
+        )}
       </Modal.Body>
       <Modal.Footer
         start={
@@ -996,17 +1194,25 @@ function DraftRow({
 function RowEditor({
   row,
   tickers,
+  cashAccounts,
+  purposeOptions,
   onChange,
   onDone,
   onRemove,
 }: {
   row: Row;
   tickers: TickerSuggestion[];
+  cashAccounts: string[];
+  purposeOptions: string[];
   onChange: (p: Partial<Row>) => void;
   onDone: () => void;
   onRemove: () => void;
 }) {
   const anchor = isAnchor(row.kind);
+  // Cash events (deposit / withdraw / cash_balance) — entered against a named cash
+  // account in its currency (THB by default), no fund symbol or NAV.
+  const isCash = isCashKind(row.kind);
+  const cashBalance = row.kind === "cash_balance";
   // Dividend / fee are pure ฿ flows — no units or price, just an amount.
   const amountOnly = row.kind === "dividend" || row.kind === "fee";
   // A Balance recorded by its ฿ value (not a unit count): avg cost is optional here
@@ -1023,7 +1229,10 @@ function RowEditor({
   // its units and its cash — never optional there (without it, an amount becomes 0 units).
   const tradePriceOptional =
     !anchor && pricedByFeed && (Number(row.amount) > 0 || Number(row.units) > 0);
-  const cls = `rec-edit${anchor ? " is-anchor" : amountOnly ? " is-flow" : ""}`;
+  // A Set balance carries 6 fields (Type·Date·Account·Total·Purpose·Label) → reuse the
+  // 6-column investment grid (one line on desktop). Deposit/withdraw + dividend/fee have
+  // 4, so they keep the wider `is-flow` grid.
+  const cls = `rec-edit${anchor ? " is-anchor" : amountOnly || (isCash && !cashBalance) ? " is-flow" : ""}`;
   return (
     <div className="ledger-edit-card">
       <div className={cls}>
@@ -1033,9 +1242,25 @@ function RowEditor({
             value={row.kind}
             onChange={(e) => {
               const k = e.target.value as RowKind;
+              // Switching INTO a cash kind: pin the source to "cash", default the
+              // date, and keep whatever ฿ figure was typed (cash_balance reads it as
+              // `value`, deposit/withdraw as `amount`).
+              if (isCashKind(k)) {
+                onChange({
+                  kind: k,
+                  quoteSource: "cash",
+                  quoteSourceLocked: true,
+                  ...(k === "cash_balance"
+                    ? { value: row.value ?? row.amount, amount: "" }
+                    : { amount: row.amount || (row.value ?? "") }),
+                  ...(!row.tradeDate ? { tradeDate: today() } : {}),
+                });
+                return;
+              }
               // The ฿ total lives in `value` on a Balance, `amount` on a trade —
               // carry it across when the type flips so a figure typed in ฿ mode
-              // survives the switch (and clear the field it left).
+              // survives the switch (and clear the field it left). Leaving cash also
+              // releases the pinned source so the symbol re-infers.
               const toAnchor = isAnchor(k);
               const ledgerMove =
                 toAnchor === anchor
@@ -1046,6 +1271,7 @@ function RowEditor({
               onChange({
                 kind: k,
                 ...ledgerMove,
+                ...(isCash ? { quoteSource: undefined, quoteSourceLocked: false } : {}),
                 // Switching to a Balance with no date yet defaults it to today.
                 ...(toAnchor && !row.tradeDate ? { tradeDate: today() } : {}),
               });
@@ -1060,51 +1286,113 @@ function RowEditor({
           </select>
         </label>
         <label className="rec-field">
-          <span className="rec-label">{anchor ? "As-of date" : "Date"}</span>
+          <span className="rec-label">{anchor || cashBalance ? "As-of date" : "Date"}</span>
           <input
             type="date"
             value={row.tradeDate}
             onChange={(e) => onChange({ tradeDate: e.target.value })}
-            aria-label={anchor ? "As-of date" : "Trade date"}
+            aria-label={anchor || cashBalance ? "As-of date" : "Trade date"}
           />
         </label>
-        <div className="rec-field">
-          <span className="rec-label">Symbol</span>
-          <SymbolCombobox
-            value={row.ticker}
-            quoteSource={row.quoteSource}
-            sourceLocked={row.quoteSourceLocked}
-            pool={tickers}
-            onChange={(text) =>
-              onChange({
-                ticker: text,
-                englishName: undefined,
-                // Editing the symbol re-infers the source unless the user pinned it.
-                ...(row.quoteSourceLocked ? {} : { quoteSource: undefined }),
-              })
-            }
-            onPick={(s) =>
-              onChange({
-                ticker: s.ticker,
-                englishName: s.name,
-                quoteSource: s.quoteSource,
-                quoteSourceLocked: false,
-              })
-            }
-            onToggleSource={() => {
-              // Cycle Thai fund → Stock/ETF → Custom (manual price).
-              const qs = row.quoteSource ?? "manual";
-              const next: QuoteSource =
-                qs === "thai_mutual_fund"
-                  ? "market"
-                  : qs === "market"
-                    ? "manual"
-                    : "thai_mutual_fund";
-              onChange({ quoteSource: next, quoteSourceLocked: true });
-            }}
-          />
-        </div>
-        {amountOnly ? (
+        {isCash ? (
+          // THB only for now — non-THB cash waits on auto-fetched FX (no manual rate field).
+          <label className="rec-field">
+            <span className="rec-label">Account</span>
+            <Combobox<string>
+              value={row.ticker}
+              onChange={(text) => onChange({ ticker: text, englishName: undefined })}
+              onPick={(s) => onChange({ ticker: s, englishName: undefined })}
+              items={cashAccounts}
+              getKey={(s) => s}
+              renderItem={(s) => s}
+              label="Cash account"
+              placeholder="e.g. Savings"
+            />
+          </label>
+        ) : (
+          <div className="rec-field">
+            <span className="rec-label">Symbol</span>
+            <SymbolCombobox
+              value={row.ticker}
+              quoteSource={row.quoteSource}
+              sourceLocked={row.quoteSourceLocked}
+              pool={tickers}
+              onChange={(text) =>
+                onChange({
+                  ticker: text,
+                  englishName: undefined,
+                  // Editing the symbol re-infers the source unless the user pinned it.
+                  ...(row.quoteSourceLocked ? {} : { quoteSource: undefined }),
+                })
+              }
+              onPick={(s) =>
+                onChange({
+                  ticker: s.ticker,
+                  englishName: s.name,
+                  quoteSource: s.quoteSource,
+                  quoteSourceLocked: false,
+                })
+              }
+              onToggleSource={() => {
+                // Cycle Thai fund → Stock/ETF → Custom (manual price).
+                const qs = row.quoteSource ?? "manual";
+                const next: QuoteSource =
+                  qs === "thai_mutual_fund"
+                    ? "market"
+                    : qs === "market"
+                      ? "manual"
+                      : "thai_mutual_fund";
+                onChange({ quoteSource: next, quoteSourceLocked: true });
+              }}
+            />
+          </div>
+        )}
+        {isCash ? (
+          <>
+            <label className="rec-field">
+              <span className="rec-label">{cashBalance ? "Total (฿)" : "Amount (฿)"}</span>
+              <input
+                value={cashBalance ? (row.value ?? "") : row.amount}
+                onChange={(e) =>
+                  onChange(cashBalance ? { value: e.target.value } : { amount: e.target.value })
+                }
+                placeholder={cashBalance ? "e.g. 100,000" : "e.g. 5,000"}
+                inputMode="decimal"
+                aria-label={cashBalance ? "Cash balance" : "Cash amount"}
+              />
+            </label>
+            {cashBalance ? (
+              <>
+                <label className="rec-field">
+                  <span className="rec-label">Purpose</span>
+                  <select
+                    value={row.cashRole ?? "investable"}
+                    onChange={(e) =>
+                      onChange({ cashRole: e.target.value as "investable" | "reserved" })
+                    }
+                    aria-label="Cash purpose"
+                  >
+                    <option value="investable">Investable</option>
+                    <option value="reserved">Reserved</option>
+                  </select>
+                </label>
+                <label className="rec-field">
+                  <span className="rec-label">Label</span>
+                  <Combobox<string>
+                    value={row.cashLabel ?? ""}
+                    onChange={(text) => onChange({ cashLabel: text })}
+                    onPick={(s) => onChange({ cashLabel: s })}
+                    items={purposeOptions}
+                    getKey={(s) => s}
+                    renderItem={(s) => s}
+                    label="Cash purpose label"
+                    placeholder="e.g. Emergency"
+                  />
+                </label>
+              </>
+            ) : null}
+          </>
+        ) : amountOnly ? (
           <label className="rec-field">
             <span className="rec-label">฿ Amount</span>
             <input
@@ -1198,6 +1486,8 @@ function RowEditor({
           </>
         )}
       </div>
+      {/* Purpose (Role + Label) now lives in the main `.rec-edit` grid above — single row
+          on desktop, wraps on narrow — instead of a separate block here. */}
       <div className="ledger-edit-actions">
         <span className="rec-type-help">
           <Icon name="info" size={12} />
