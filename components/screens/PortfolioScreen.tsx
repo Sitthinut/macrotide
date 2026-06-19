@@ -62,6 +62,7 @@ import { computeHealth, rebalanceHint, summarizeHealth } from "@/lib/portfolio/h
 import { performanceDisclaimer } from "@/lib/portfolio/performance-disclaimer";
 import { heroReturn } from "@/lib/portfolio/returns-breakdown";
 import { holdingColor } from "@/lib/portfolio/risk-palette";
+import { periodTwr } from "@/lib/portfolio/twr";
 import type { AssetClass, Holding, Portfolio } from "@/lib/static/types";
 import { usePortfolioUi } from "@/lib/stores/portfolio-ui";
 import { usePrivacy } from "@/lib/stores/privacy";
@@ -1073,28 +1074,20 @@ export function PortfolioScreen({
   const baselineValue = clipped ? retSeries[0].v : 0;
   const baselineInvested = clipped ? (retNetInvested[0]?.v ?? 0) : 0;
 
-  // % return for the range pill — MONEY-WEIGHTED (gain ÷ invested), matching the
-  // chart tooltip's Gain %. The value line now includes contributions, so a
-  // naive first→last ratio (seriesReturnPct) would read deposits as "return"
-  // (e.g. +41000% on a long book). Lifetime: gain ÷ total invested. Windowed:
-  // the change in gain over the window ÷ the wealth held at window start. Falls
-  // back to the price-ratio when net-invested data is absent (static placeholder).
-  const periodReturn = ((): number | null => {
-    const lastV = retSeries.at(-1)?.v;
-    if (lastV == null) return null;
-    if (retNetInvested.length === 0) return seriesReturnPct(retSeries);
-    const lastInv = retNetInvested.at(-1)?.v ?? 0;
-    // A clipped window divides the window's gain by the wealth held at its start.
-    // But if nothing was held then (e.g. "Exclude cash" before any fund was bought),
-    // that base is 0 and there's nothing to divide by — fall back to the lifetime
-    // base (contributions) so the figure still shows instead of vanishing.
-    const useClipped = clipped && baselineValue > 0;
-    const baseV = useClipped ? baselineValue : 0;
-    const baseI = useClipped ? baselineInvested : 0;
-    const gain = lastV - baseV - (lastInv - baseI);
-    const denom = useClipped ? baseV : lastInv;
-    return denom > 0 ? (gain / denom) * 100 : null;
-  })();
+  // % return for the range pill — TIME-WEIGHTED (#236). Chains each day's return
+  // on the wealth held that day, netting external flows out via the contribution
+  // line, so a big mid-window deposit rebases the next day rather than dividing a
+  // window's gain by a tiny start base (the start-฿11k / +฿800k / 73% blowup). It
+  // reflects the active cash mode for free — retSeries/retNetInvested are already
+  // mode-adjusted. Falls back to the price-ratio when net-invested data is absent
+  // (static placeholder). This answers "how did this window perform"; the chart
+  // tooltip's cumulative Gain % stays money-weighted ("gain on what I put in").
+  const periodReturn =
+    retSeries.length === 0
+      ? null
+      : retNetInvested.length === 0
+        ? seriesReturnPct(retSeries)
+        : periodTwr(retSeries, retNetInvested);
   // In-transit cash is reported for the whole book; per-portfolio views skip
   // the tooltip note rather than implying a per-bucket number we don't have. In
   // "Funds only" the cash is OUT of the value line, so the note would contradict
