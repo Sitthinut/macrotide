@@ -1353,13 +1353,39 @@ export function ChatScreen({
   // the content. CSS caps the height and adds a scrollbar past the cap, and the
   // composer is bottom-aligned so the send/attach buttons stay put as it grows.
   const composerRef = useRef<HTMLTextAreaElement>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-fit whenever the text changes (incl. programmatic clears on send / seed)
-  useEffect(() => {
+  const fitComposer = useCallback(() => {
     const el = composerRef.current;
-    if (!el) return;
+    // A detached/hidden textarea measures scrollHeight as 0, which would lock the
+    // height to 0px and clip the placeholder behind a scrollbar — skip until it
+    // has layout (the ResizeObserver below re-fits once it does).
+    if (!el || el.scrollHeight === 0) return;
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
-  }, [input]);
+  }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `input` is the trigger — re-fit whenever the text changes (incl. programmatic clears on send / seed); fitComposer reads the value off the ref
+  useEffect(() => {
+    fitComposer();
+  }, [input, fitComposer]);
+  // The single ChatScreen is re-parented between the mobile screen and the desktop
+  // dock (see App's chatHost note), so it can mount — and the effect above can run
+  // — while detached, measuring a 0 height. And once mounted it spans both shells'
+  // widths, so the same text wraps differently after a viewport swap. Re-fit when
+  // the composer's WIDTH changes: that fires when it first gains layout (detached
+  // → attached) and on every shell/panel resize. Guarding on width (not height,
+  // which we set ourselves) avoids a feedback loop.
+  useEffect(() => {
+    const el = composerRef.current;
+    const box = el?.parentElement;
+    if (!box || typeof ResizeObserver === "undefined") return;
+    let lastWidth = box.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (box.clientWidth === lastWidth) return;
+      lastWidth = box.clientWidth;
+      fitComposer();
+    });
+    ro.observe(box);
+    return () => ro.disconnect();
+  }, [fitComposer]);
 
   // Send the composer's current text + staged attachments, then clear them.
   const sendComposer = () => {

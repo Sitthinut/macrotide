@@ -438,6 +438,31 @@ export function App({ isDemo }: { isDemo: boolean }) {
     }
   }, [screenSlot]);
 
+  // The Advisor chat is the same conversation in two shells: a full screen on
+  // mobile (renderScreen) and the right dock on wide (ChatPanel). Rendering a
+  // <ChatScreen> in each meant crossing the 700px breakpoint UNMOUNTED one and
+  // MOUNTED the other, wiping the in-memory conversation (restore-on-mount only
+  // reloaded persisted turns, and not reliably — a reload was needed). Fix (#225):
+  // one persistent ChatScreen lives in a host <div> created once; whichever shell
+  // shows chat renders an empty mount-point and a layout effect re-parents the
+  // host into it. The host keeps its stable React-tree position (portaled from the
+  // single return below), so the conversation is reconciled, never remounted —
+  // exactly the screenHost pattern, applied to chat. When neither shell shows chat
+  // the host is simply detached (the ChatScreen stays mounted, hidden), so the
+  // conversation survives until chat is opened again.
+  const chatHostRef = useRef<HTMLDivElement | null>(null);
+  if (chatHostRef.current === null && typeof document !== "undefined") {
+    chatHostRef.current = document.createElement("div");
+    chatHostRef.current.className = "chat-host";
+  }
+  const [chatSlot, setChatSlot] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const host = chatHostRef.current;
+    if (host && chatSlot && host.parentNode !== chatSlot) {
+      chatSlot.appendChild(host);
+    }
+  }, [chatSlot]);
+
   // PortfolioSheet lives at the App level so it survives the mobile↔wide
   // layout swap (which remounts everything below App). Without this lift,
   // an open edit dialog disappears the moment the viewport crosses 700px.
@@ -773,16 +798,13 @@ export function App({ isDemo }: { isDemo: boolean }) {
     if (screen === "funds") {
       return <FundSelectScreen onOpenSettings={openMobileMenu} showMenu={!isWide} />;
     }
-    if (screen === "chat") {
-      return (
-        <ChatScreen
-          persona="advisor"
-          seedPrompt={pendingPrompt}
-          onPromptConsumed={() => setPendingPrompt(null)}
-          onOpenMenu={() => setAccountMenuOpen(true)}
-          activeScreen="chat"
-        />
-      );
+    // Mobile full-screen chat: an empty mount-point for the persistent chat host
+    // (see chatHost note); the single ChatScreen is portaled into it. Guarded to
+    // mobile — on wide, `screen === "chat"` is transient (the effect at L509
+    // redirects to portfolio) and chat lives in the dock, so we never mount a
+    // second chat-slot in main alongside the panel's.
+    if (screen === "chat" && !isWide) {
+      return <div ref={setChatSlot} className="chat-mount" />;
     }
     if (screen === "journal") {
       return (
@@ -1116,10 +1138,8 @@ export function App({ isDemo }: { isDemo: boolean }) {
               )}
               {activeApp === "chat" && (
                 <ChatPanel
-                  seedPrompt={pendingPrompt}
-                  onPromptConsumed={() => setPendingPrompt(null)}
+                  chatSlotRef={setChatSlot}
                   onClose={() => setActiveApp(null)}
-                  activeScreen={toAdvisorScreen(screen)}
                   maxed={panelMaxed}
                   onToggleMax={toggleMax}
                 />
@@ -1178,6 +1198,22 @@ export function App({ isDemo }: { isDemo: boolean }) {
   return (
     <>
       {screenHostRef.current && createPortal(renderScreen(), screenHostRef.current)}
+      {/* The single persistent Advisor chat (see chatHost note). Portaled into the
+          stable host node, which the layout effect re-parents into the active
+          shell's chat mount-point — so the conversation survives the shell swap.
+          `activeScreen` is the screen behind the dock on wide; on mobile chat is
+          the screen, so there's nothing behind it. */}
+      {chatHostRef.current &&
+        createPortal(
+          <ChatScreen
+            persona="advisor"
+            seedPrompt={pendingPrompt}
+            onPromptConsumed={() => setPendingPrompt(null)}
+            onOpenMenu={() => setAccountMenuOpen(true)}
+            activeScreen={isWide ? toAdvisorScreen(screen) : "chat"}
+          />,
+          chatHostRef.current,
+        )}
       {isWide ? wideShell : mobileShell}
       {sharedModals}
     </>
