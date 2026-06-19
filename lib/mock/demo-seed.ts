@@ -15,6 +15,7 @@
 import type { drizzle } from "drizzle-orm/better-sqlite3";
 import {
   buckets,
+  earmarks,
   holdings,
   journalEntries,
   modelPortfolios,
@@ -149,6 +150,175 @@ function parseRelativeDate(text: string, today = REFERENCE_TODAY): string {
   return today.toISOString();
 }
 
+// Explicit cash accounts (#149) — real bank cash held alongside the funds so the
+// demo shows cash in allocation/net worth + the value chart, a Reserved slice
+// carved out of the return, and idle investable cash for the Include/Exclude-cash
+// return toggle to move. All in the "main" bucket, THB, valued 1.0. The ticker is
+// the account NAME (upper = ledger identity); `name` carries the display case.
+type DemoCashEvent =
+  | { kind: "cash_balance"; date: string; balance: number; reconcile?: boolean }
+  | { kind: "deposit" | "withdraw"; date: string; amount: number };
+
+interface DemoCashAccount {
+  ticker: string;
+  name: string;
+  /** Set → a Reserved earmark with this purpose label; absent → investable. */
+  reserved?: string;
+  events: DemoCashEvent[];
+}
+
+const DEMO_CASH_BUCKET = "main";
+
+export const DEMO_CASH: DemoCashAccount[] = [
+  {
+    ticker: "SCB SAVINGS",
+    name: "SCB Savings",
+    events: [
+      { kind: "cash_balance", date: "2024-06-17", balance: 100000 },
+      { kind: "deposit", date: "2024-12-10", amount: 50000 },
+      { kind: "withdraw", date: "2025-05-20", amount: 30000 },
+      { kind: "deposit", date: "2025-11-05", amount: 40000 },
+      // A reconcile (interest credited) — not new money, so no contribution.
+      { kind: "cash_balance", date: "2026-03-01", balance: 162000, reconcile: true },
+    ],
+  },
+  {
+    ticker: "EMERGENCY SAVINGS",
+    name: "Emergency Savings",
+    reserved: "Emergency",
+    events: [
+      { kind: "cash_balance", date: "2024-06-17", balance: 200000 },
+      { kind: "deposit", date: "2025-08-12", amount: 25000 },
+    ],
+  },
+  {
+    ticker: "BROKERAGE CASH",
+    name: "Brokerage Cash",
+    events: [{ kind: "cash_balance", date: "2025-12-01", balance: 45000 }],
+  },
+];
+
+/** Seed the demo's explicit-cash accounts, their cash events, and the reserved
+ *  earmark into the "main" bucket (created by the PORTFOLIOS loop). */
+function seedDemoCash(db: Db, now: string): void {
+  for (const acct of DEMO_CASH) {
+    db.insert(holdings)
+      .values({
+        bucketId: DEMO_CASH_BUCKET,
+        ticker: acct.ticker,
+        thaiName: null,
+        englishName: acct.name,
+        category: "Cash",
+        assetClass: "cash",
+        region: "",
+        ter: null,
+        source: "Demo",
+        quoteSource: "cash",
+        currency: "THB",
+        acquiredOn: null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+
+    for (const ev of acct.events) {
+      // cash_balance asserts the level (units = value = balance, amount 0, no flow);
+      // a delta carries its magnitude as units, signed into `amount` for XIRR
+      // (deposit = cash out → negative, withdraw = cash in → positive).
+      let units: number;
+      let amount: number;
+      let value: number | null;
+      let reconcile: boolean | null;
+      if (ev.kind === "cash_balance") {
+        units = ev.balance;
+        amount = 0;
+        value = ev.balance;
+        reconcile = ev.reconcile ?? false;
+      } else {
+        units = ev.amount;
+        amount = ev.kind === "deposit" ? -ev.amount : ev.amount;
+        value = null;
+        reconcile = null;
+      }
+      db.insert(transactions)
+        .values({
+          bucketId: DEMO_CASH_BUCKET,
+          ticker: acct.ticker,
+          englishName: acct.name,
+          quoteSource: "cash",
+          kind: ev.kind,
+          tradeDate: ev.date,
+          units,
+          pricePerUnit: null,
+          amount,
+          value,
+          reconcile,
+          fee: null,
+          tradeCurrency: "THB",
+          fxToThb: 1,
+          source: "Demo",
+          importBatchId: "seed-cash",
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+    }
+
+    if (acct.reserved) {
+      db.insert(earmarks)
+        .values({
+          bucketId: DEMO_CASH_BUCKET,
+          ticker: acct.ticker,
+          scope: "account",
+          role: "reserved",
+          amount: null,
+          currency: null,
+          purpose: acct.reserved,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+    }
+  }
+}
+
+// A pair of recent fund dividends so the "Recently recorded" peek reads as a
+// believable cash/fund mix: the two newest ledger rows are fund income (April /
+// May 2026, after the latest cash event), the third-newest is a cash Set balance.
+// Dividends are paid out (no unit change), so the demo's book-value invariant and
+// the series tests are unaffected.
+function seedDemoRecentDividends(db: Db, now: string): void {
+  const main = PORTFOLIOS[0];
+  if (!main) return;
+  const dividends = [
+    { holding: main.holdings[0], date: "2026-04-15", amount: 1280 },
+    { holding: main.holdings[1], date: "2026-05-12", amount: 2450 },
+  ];
+  for (const d of dividends) {
+    if (!d.holding) continue;
+    db.insert(transactions)
+      .values({
+        bucketId: main.id,
+        ticker: d.holding.ticker,
+        englishName: d.holding.name,
+        quoteSource: DEMO_QUOTE_SOURCE,
+        kind: "dividend",
+        tradeDate: d.date,
+        units: null,
+        pricePerUnit: null,
+        amount: d.amount,
+        fee: null,
+        tradeCurrency: "THB",
+        fxToThb: 1,
+        source: d.holding.source,
+        importBatchId: "seed-history",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+  }
+}
+
 export function seedDemoData(db: Db): void {
   const now = new Date().toISOString();
 
@@ -239,6 +409,9 @@ export function seedDemoData(db: Db): void {
       }
     }
   }
+
+  seedDemoCash(db, now);
+  seedDemoRecentDividends(db, now);
 
   db.insert(plans)
     .values({
