@@ -113,7 +113,9 @@ function draftFromTxn(t: Transaction): Draft {
   return {
     tradeDate: t.tradeDate.slice(0, 10),
     kind: t.kind as TxnKind,
-    ticker: t.ticker,
+    // Cash accounts edit their cased display NAME (the ticker is the upper-cased
+    // ledger identity, re-derived on save); funds edit their ticker symbol.
+    ticker: isCashKind(t.kind) ? (t.englishName ?? t.ticker) : t.ticker,
     units: t.units != null ? String(t.units) : "",
     // The Balance field holds the NATIVE figure the user typed. A cash Set balance
     // stores its asserted balance in `units` (native); show that, not the ฿ `value`.
@@ -264,6 +266,9 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
           tradeDate: draft.tradeDate,
           kind: draft.kind,
           ticker: draft.ticker.trim().toUpperCase(),
+          // Preserve the cased account name (the editor field IS the display name);
+          // omitting it would null englishName and the row would read upper again.
+          englishName: draft.ticker.trim(),
           units: figure > 0 ? figure : undefined,
           value: draft.kind === "cash_balance" && thb > 0 ? thb : undefined,
           amount: draft.kind === "cash_balance" ? 0 : thb,
