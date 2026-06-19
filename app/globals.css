@@ -3318,6 +3318,14 @@ button.chip {
   display: block;
   width: 100%;
 }
+/* The persistent Advisor chat host (App.tsx) and its mobile mount-point are
+   layout-transparent (display:contents), so the chat shell lays out exactly as a
+   direct child of its mount-point's parent — the mobile .screen-host or the wide
+   .ra-chat-body — in either shell, after the host is re-parented (#225). */
+.chat-host,
+.chat-mount {
+  display: contents;
+}
 .ra-shell.desktop .ra-main-inner {
   max-width: 880px;
 }

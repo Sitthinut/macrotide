@@ -837,6 +837,11 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Fixed
 
+- **Switching between a phone and a desktop layout no longer drops the open
+  Advisor chat.** The conversation — including an in-flight reply and unsent
+  composer text — is held by a single chat instance that moves between the
+  mobile full screen and the desktop dock, so crossing the layout breakpoint
+  (rotate, resize, split-view) keeps it intact instead of needing a reload.
 - **The date field no longer overflows its cell in the Add-to-portfolio editor
   on iPadOS.** Native date inputs in the record editor get an appearance reset
   so they match the height of the adjacent fields instead of overlapping the

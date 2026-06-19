@@ -6,7 +6,6 @@ import { useSortable } from "@dnd-kit/react/sortable";
 import { type CSSProperties, type ReactNode, useEffect, useState } from "react";
 import { ChatThreadList } from "@/components/ChatThreadList";
 import { Icon } from "@/components/Icon";
-import { ChatScreen, type SeedPrompt } from "@/components/screens/ChatScreen";
 import { SkeletonRows } from "@/components/ui/Skeleton";
 import {
   useJournalView,
@@ -15,7 +14,6 @@ import {
   useSelectedModelId,
 } from "@/lib/fetchers/legacy";
 import { invalidate } from "@/lib/fetchers/swr";
-import type { AdvisorScreenContext } from "@/lib/portfolio/chat-suggestions";
 import { computeHealth, summarizeHealth } from "@/lib/portfolio/health";
 import type { Portfolio } from "@/lib/static/types";
 import { useChatUi } from "@/lib/stores/chat-ui";
@@ -103,18 +101,16 @@ function PanelHeader({ title, showDot, onClose, maxed, onToggleMax }: PanelHeade
 }
 
 export function ChatPanel({
-  seedPrompt,
-  onPromptConsumed,
+  chatSlotRef,
   onClose,
-  activeScreen,
   maxed,
   onToggleMax,
 }: {
-  seedPrompt: SeedPrompt | null;
-  onPromptConsumed: () => void;
+  /** Registers this panel's chat body as the mount-point for the single
+      persistent ChatScreen (owned by App; see its chatHost note). The conversation
+      lives in App and is re-parented here, so it survives the mobile↔wide swap. */
+  chatSlotRef: (el: HTMLElement | null) => void;
   onClose: () => void;
-  /** The screen behind the dock, so chat suggestions reflect it. Forwarded to ChatScreen. */
-  activeScreen?: AdvisorScreenContext | null;
   /** Panel "expand to full" state + toggle (issue #95); shared with the other panels. */
   maxed?: boolean;
   onToggleMax?: () => void;
@@ -204,19 +200,15 @@ export function ChatPanel({
           </button>
         </div>
       )}
-      {/* ChatScreen stays mounted across the swap so in-flight turns and the
-          active thread survive — just hidden while the list is showing. */}
+      {/* Mount-point for App's persistent ChatScreen (chatSlotRef). It stays
+          mounted across the in-panel chat↔threads swap (hidden via display:none,
+          not unmounted) AND across the mobile↔wide shell swap (re-parented, not
+          remounted) — so in-flight turns and the active thread always survive. */}
       <div
+        ref={chatSlotRef}
         className="ra-panel-body ra-chat-body"
         style={view === "chat" ? undefined : { display: "none" }}
-      >
-        <ChatScreen
-          persona="advisor"
-          seedPrompt={seedPrompt}
-          onPromptConsumed={onPromptConsumed}
-          activeScreen={activeScreen}
-        />
-      </div>
+      />
       {view === "threads" && (
         <ChatThreadList
           variant="panel"
