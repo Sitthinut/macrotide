@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EventLine } from "@/components/history/EventLine";
 import { Icon } from "@/components/Icon";
+import { PrivateAmount } from "@/components/PrivateAmount";
 import { SymbolCombobox } from "@/components/portfolio/SymbolCombobox";
 import { QtyInput, qtyDefaultMode } from "@/components/ui/QtyInput";
 import { Skeleton, SkeletonRows } from "@/components/ui/Skeleton";
@@ -26,7 +27,12 @@ import type { QuoteSource } from "@/lib/market/sources";
 import type { TxnKind } from "@/lib/portfolio/lots";
 import type { TransactionAnalytics } from "@/lib/portfolio/transaction-analytics";
 import { TXN_KIND_HELP, typeSelectOptions } from "@/lib/portfolio/txn-display";
-import { normalizeTxnDraft, type RowInvalidReason, rowValidity } from "@/lib/portfolio/txn-import";
+import {
+  isCashKind,
+  normalizeTxnDraft,
+  type RowInvalidReason,
+  rowValidity,
+} from "@/lib/portfolio/txn-import";
 
 type AnalyticsResponse = TransactionAnalytics & { transactionCount: number };
 
@@ -78,6 +84,12 @@ interface Draft {
   fee: string;
   amount: string;
   quoteSource: string;
+  /** A cash account's currency (deposit/withdraw/cash_balance). Defaults THB. */
+  currency?: string;
+  /** Native→THB rate for a non-THB cash account; "" / "1" for THB. */
+  fxToThb?: string;
+  /** "No money moved" override on a Set balance (cash_balance) — sent as `reconcile`. */
+  reconcile?: boolean;
   /** True once the source was set explicitly (saved value or a badge flip) — keeps
    * a ticker edit from re-inferring over it. */
   quoteSourceLocked?: boolean;
@@ -94,6 +106,7 @@ function blankDraft(): Draft {
     fee: "",
     amount: "",
     quoteSource: "",
+    currency: "THB",
   };
 }
 function draftFromTxn(t: Transaction): Draft {
@@ -102,12 +115,28 @@ function draftFromTxn(t: Transaction): Draft {
     kind: t.kind as TxnKind,
     ticker: t.ticker,
     units: t.units != null ? String(t.units) : "",
-    value: t.value != null ? String(t.value) : "",
+    // The Balance field holds the NATIVE figure the user typed. A cash Set balance
+    // stores its asserted balance in `units` (native); show that, not the ฿ `value`.
+    value:
+      t.kind === "cash_balance" && t.units != null
+        ? String(t.units)
+        : t.value != null
+          ? String(t.value)
+          : "",
     pricePerUnit: t.pricePerUnit != null ? String(t.pricePerUnit) : "",
     marketPrice: t.marketPrice != null ? String(t.marketPrice) : "",
     fee: t.fee != null ? String(t.fee) : "",
-    amount: String(Math.abs(t.amount)),
+    // The Amount field is NATIVE. A cash deposit/withdraw stores native in `units` and
+    // ฿ in `amount`; seed from `units` so a non-THB amount doesn't re-apply the rate on save.
+    amount:
+      isCashKind(t.kind) && t.kind !== "cash_balance" && t.units != null
+        ? String(t.units)
+        : String(Math.abs(t.amount)),
     quoteSource: t.quoteSource,
+    currency: t.tradeCurrency ?? "THB",
+    // Only surface a rate for a non-THB account (THB is the implicit 1).
+    fxToThb: t.fxToThb != null && t.fxToThb !== 1 ? String(t.fxToThb) : "",
+    reconcile: !!t.reconcile,
     quoteSourceLocked: true,
   };
 }
@@ -219,7 +248,31 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
     }
     try {
       let payload: Record<string, unknown>;
-      if (anchor) {
+      if (isCashKind(draft.kind)) {
+        // Cash: the figure is in the account currency = NATIVE units; the ฿ ledger
+        // amount is native × the trade-date rate (1 for THB). units stays native (valued
+        // at live FX); cash_balance moves no cash and carries its ฿ value + reconcile.
+        const currency = (draft.currency || "THB").trim().toUpperCase() || "THB";
+        const rate = currency === "THB" ? 1 : Number(draft.fxToThb) > 0 ? Number(draft.fxToThb) : 1;
+        const native =
+          draft.kind === "cash_balance"
+            ? Number(draft.value || draft.amount)
+            : Number(draft.amount);
+        const figure = native > 0 ? native : 0;
+        const thb = figure * rate;
+        payload = {
+          tradeDate: draft.tradeDate,
+          kind: draft.kind,
+          ticker: draft.ticker.trim().toUpperCase(),
+          units: figure > 0 ? figure : undefined,
+          value: draft.kind === "cash_balance" && thb > 0 ? thb : undefined,
+          amount: draft.kind === "cash_balance" ? 0 : thb,
+          reconcile: draft.kind === "cash_balance" ? !!draft.reconcile : undefined,
+          quoteSource: "cash",
+          tradeCurrency: currency,
+          fxToThb: rate,
+        };
+      } else if (anchor) {
         const hasUnits = draft.units.trim() !== "" && Number(draft.units) > 0;
         const hasValue = draft.value.trim() !== "" && Number(draft.value) > 0;
         const avg = draft.pricePerUnit.trim() === "" ? null : Number(draft.pricePerUnit);
@@ -391,7 +444,7 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
             <h3 style={{ fontSize: 13 }}>{monthLabel(ym)}</h3>
             {netByMonth.has(ym) && (
               <span className="num" style={{ fontSize: 11, color: "var(--muted)" }}>
-                net invested {fmtTHBSigned(netByMonth.get(ym) ?? 0)}
+                net invested <PrivateAmount>{fmtTHBSigned(netByMonth.get(ym) ?? 0)}</PrivateAmount>
               </span>
             )}
           </div>
@@ -543,15 +596,25 @@ function TxnEditor({
   }, [draft.ticker, draft.quoteSourceLocked]);
 
   const anchor = isAnchor(draft.kind);
+  // Cash events (deposit / withdraw / cash_balance) — a named cash account, no symbol.
+  const isCash = isCashKind(draft.kind);
+  const cashBalance = draft.kind === "cash_balance";
   // Dividend / fee are pure ฿ flows — no units or price, just an amount.
   const amountOnly = draft.kind === "dividend" || draft.kind === "fee";
 
   return (
     <div className="ledger-edit-card">
-      <div className={`rec-edit${anchor ? " is-anchor" : amountOnly ? " is-flow" : ""}`}>
+      <div className={`rec-edit${anchor ? " is-anchor" : amountOnly || isCash ? " is-flow" : ""}`}>
         <select
           value={draft.kind}
-          onChange={(e) => set({ kind: e.target.value as TxnKind })}
+          onChange={(e) => {
+            const k = e.target.value as TxnKind;
+            set(
+              isCashKind(k)
+                ? { kind: k, quoteSource: "cash", quoteSourceLocked: true }
+                : { kind: k },
+            );
+          }}
           aria-label="Type"
         >
           {typeSelectOptions(draft.kind).map((o) => (
@@ -566,30 +629,52 @@ function TxnEditor({
           onChange={(e) => set({ tradeDate: e.target.value })}
           aria-label={anchor ? "As-of date" : "Trade date"}
         />
-        <SymbolCombobox
-          value={draft.ticker}
-          quoteSource={draft.quoteSource ? (draft.quoteSource as QuoteSource) : undefined}
-          sourceLocked={draft.quoteSourceLocked}
-          pool={pool}
-          onChange={(text) =>
-            set({ ticker: text, ...(draft.quoteSourceLocked ? {} : { quoteSource: "" }) })
-          }
-          onPick={(s) =>
-            set({ ticker: s.ticker, quoteSource: s.quoteSource, quoteSourceLocked: false })
-          }
-          onToggleSource={() => {
-            // Cycle Thai fund → Stock/ETF → Custom (manual price).
-            const qs = (draft.quoteSource || "manual") as QuoteSource;
-            const next: QuoteSource =
-              qs === "thai_mutual_fund"
-                ? "market"
-                : qs === "market"
-                  ? "manual"
-                  : "thai_mutual_fund";
-            set({ quoteSource: next, quoteSourceLocked: true });
-          }}
-        />
-        {amountOnly ? (
+        {isCash ? (
+          // THB only for now — non-THB cash waits on auto-fetched FX (no manual rate).
+          <input
+            value={draft.ticker}
+            onChange={(e) => set({ ticker: e.target.value })}
+            placeholder="Account"
+            aria-label="Cash account name"
+          />
+        ) : (
+          <SymbolCombobox
+            value={draft.ticker}
+            quoteSource={draft.quoteSource ? (draft.quoteSource as QuoteSource) : undefined}
+            sourceLocked={draft.quoteSourceLocked}
+            pool={pool}
+            onChange={(text) =>
+              set({ ticker: text, ...(draft.quoteSourceLocked ? {} : { quoteSource: "" }) })
+            }
+            onPick={(s) =>
+              set({ ticker: s.ticker, quoteSource: s.quoteSource, quoteSourceLocked: false })
+            }
+            onToggleSource={() => {
+              // Cycle Thai fund → Stock/ETF → Custom (manual price).
+              const qs = (draft.quoteSource || "manual") as QuoteSource;
+              const next: QuoteSource =
+                qs === "thai_mutual_fund"
+                  ? "market"
+                  : qs === "market"
+                    ? "manual"
+                    : "thai_mutual_fund";
+              set({ quoteSource: next, quoteSourceLocked: true });
+            }}
+          />
+        )}
+        {isCash ? (
+          // The "no money moved" override was replaced by the per-account Purpose
+          // (Investable | Reserved) — the role decides the return treatment (#149 D10).
+          <input
+            value={cashBalance ? (draft.value ?? "") : draft.amount}
+            onChange={(e) =>
+              set(cashBalance ? { value: e.target.value } : { amount: e.target.value })
+            }
+            placeholder={cashBalance ? "Balance (฿)" : "฿ amount"}
+            inputMode="decimal"
+            aria-label={cashBalance ? "Cash balance" : "Cash amount"}
+          />
+        ) : amountOnly ? (
           <input
             value={draft.amount}
             onChange={(e) => set({ amount: e.target.value })}

@@ -17,29 +17,20 @@ const PLACEHOLDER_SHORT = "12,345,456";
  * When hidden we render a crisp ฿ sign followed by a blurred fixed placeholder
  * (see `.private-amt-digits` in globals.css) — it reads like a real hidden
  * balance, but because the placeholder is constant, neither the digits nor the
- * width leak the true amount.
+ * width leak the true amount. Unmasking is a deliberate act via the privacy
+ * toggle (the eye icon); the mask itself is inert so a stray click can't reveal.
  *
  * - `wide` uses the long placeholder (hero total only).
- * - `tappable` makes the masked value itself a button that reveals everything
- *   (the hero total isn't already inside a clickable row).
  */
-export function PrivateAmount({
-  children,
-  tappable = false,
-  wide = false,
-}: {
-  children: ReactNode;
-  tappable?: boolean;
-  wide?: boolean;
-}) {
-  const { hidden, toggle } = usePrivacy();
+export function PrivateAmount({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
+  const { hidden } = usePrivacy();
 
   if (!hidden) return <>{children}</>;
 
   // App is ฿-only, so the mask owns its currency sign + placeholder and ignores
   // the children's text entirely while hidden (no real digits reach the DOM).
-  const mask = (
-    <>
+  return (
+    <span className="private-amt" data-private="true">
       ฿
       <span
         className={wide ? "private-amt-digits private-amt-digits--wide" : "private-amt-digits"}
@@ -48,32 +39,6 @@ export function PrivateAmount({
         {wide ? PLACEHOLDER_WIDE : PLACEHOLDER_SHORT}
       </span>
       <span className="sr-only">hidden</span>
-    </>
-  );
-
-  // Tappable masked value: a real <button> that reveals everything — native
-  // keyboard + a11y, no manual key handling.
-  if (tappable) {
-    return (
-      <button
-        type="button"
-        className="private-amt"
-        data-private="true"
-        aria-label="Show portfolio values"
-        title="Show values"
-        onClick={(e) => {
-          e.stopPropagation();
-          toggle();
-        }}
-      >
-        {mask}
-      </button>
-    );
-  }
-
-  return (
-    <span className="private-amt" data-private="true">
-      {mask}
     </span>
   );
 }

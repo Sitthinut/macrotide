@@ -21,6 +21,9 @@ const VERB: Record<TxnKind, string> = {
   // Both anchors are one user-facing concept, "Balance".
   opening: "Balance",
   snapshot: "Balance",
+  deposit: "Deposited",
+  withdraw: "Withdrew",
+  cash_balance: "Balance",
 };
 
 // Short swatch tag (mirrors the holdings swatch's 3-char abbreviation).
@@ -33,6 +36,9 @@ const ABBR: Record<TxnKind, string> = {
   reinvest: "RE",
   opening: "BAL",
   snapshot: "BAL",
+  deposit: "DEP",
+  withdraw: "WD",
+  cash_balance: "CASH",
 };
 
 // Swatch colour by kind (same token palette the rest of the app uses).
@@ -45,6 +51,9 @@ const TONE: Record<TxnKind, string> = {
   split: "var(--muted-2)",
   opening: "var(--amber)",
   snapshot: "var(--amber)",
+  deposit: "var(--accent)",
+  withdraw: "var(--loss)",
+  cash_balance: "var(--accent-2)",
 };
 
 function isAnchor(k: TxnKind): boolean {

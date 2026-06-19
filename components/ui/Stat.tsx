@@ -3,9 +3,12 @@
 // activity recap so the History/Position performance summary reads richer than a
 // bare strip (a caption can say "money-weighted", a tone can color a gain/loss).
 
+import type { ReactNode } from "react";
+
 export interface StatProps {
   label: string;
-  value: string;
+  // ReactNode so callers can wrap the value in PrivateAmount (privacy masking).
+  value: ReactNode;
   tone?: "up" | "down" | "muted" | "neutral";
   caption?: string;
 }
