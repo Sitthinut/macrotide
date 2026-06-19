@@ -224,9 +224,15 @@ function prettyModel(id: string): string {
 // round-trip — never shown in the bubble. See lib/advisor/entry-context.ts.
 export type SeedPrompt =
   | string
-  // `newChat` opens a fresh thread before sending — used by the Journal → Memory
-  // "Edit" action so an edit request doesn't land in the conversation you're in.
-  | { display: string; send: string; context?: EntryContext; newChat?: boolean };
+  // `newChat` opens a fresh thread before sending — used for in-chat hand-offs so
+  // a seeded request doesn't land in the conversation you're in.
+  | { display: string; send: string; context?: EntryContext; newChat?: boolean }
+  // The Journal → Memory "Edit" hand-off: open a fresh thread whose first turn is
+  // a canned ADVISOR message (`opener`) asking what to change — no synthesized
+  // user turn, no model call. The memory's content + body ride `context` and are
+  // attached to the user's FIRST reply (see `editContext`), so the Advisor only
+  // acts once the user has actually said what to change.
+  | { opener: string; context?: EntryContext; newChat: true };
 
 export interface ChatScreenProps {
   persona?: string;
@@ -598,6 +604,18 @@ export function ChatScreen({
     send: string;
     context?: EntryContext;
   } | null>(null);
+  // The Journal → Memory "Edit" hand-off (canned Advisor opener), queued until
+  // newChat() resets the history — then it replaces the greeting with the opener
+  // and stashes `context` as `editContext` for the user's first reply.
+  const [pendingEditOpener, setPendingEditOpener] = useState<{
+    opener: string;
+    context?: EntryContext;
+  } | null>(null);
+  // Entry context that must ride the user's NEXT turn (not the current messages):
+  // the edited memory's content + body, set when the edit opener lands and
+  // consumed by the first composer send so the Advisor knows which memory to
+  // change and its full current detail.
+  const [editContext, setEditContext] = useState<EntryContext | null>(null);
   // Pending image attachments for the next turn (downscaled), plus a click-to-
   // enlarge lightbox. Whether the attach affordance shows at all is gated by the
   // server-computed capability below (vision on + demo allows it).
@@ -824,6 +842,7 @@ export function ChatScreen({
     setContextNotice(false);
     setAttachments([]);
     setAttachNotice(null);
+    setEditContext(null);
   }, [initial, closeOutgoing]);
 
   // ── Image attachments ────────────────────────────────────────────────────
@@ -1347,7 +1366,10 @@ export function ChatScreen({
     if (loading) return;
     const imgs = attachments;
     if (!input.trim() && imgs.length === 0) return;
-    ask(input, input, undefined, imgs);
+    // After an Edit hand-off, the first reply carries the memory's content + body
+    // (editContext) so the Advisor targets the right row; consume it once.
+    ask(input, input, editContext ?? undefined, imgs);
+    if (editContext) setEditContext(null);
     setAttachments([]);
     setAttachNotice(null);
   };
@@ -1398,9 +1420,17 @@ export function ChatScreen({
   // biome-ignore lint/correctness/useExhaustiveDependencies: fire once per seed — `ask`/`onPromptConsumed` are intentionally unmemoized and must not retrigger the effect
   useEffect(() => {
     if (!seedPrompt) return;
-    if (typeof seedPrompt !== "string" && seedPrompt.newChat) {
+    if (typeof seedPrompt === "string") {
+      ask(seedPrompt);
+    } else if ("opener" in seedPrompt) {
+      // Canned Advisor opener (Journal → Memory "Edit"): open a fresh thread,
+      // then drop the opener in once newChat() has reset the history (deferred
+      // effect below). No turn is sent — we wait for the user's first reply.
+      newChat();
+      setPendingEditOpener({ opener: seedPrompt.opener, context: seedPrompt.context });
+    } else if (seedPrompt.newChat) {
       // Open a fresh thread first, then send once newChat() has reset the
-      // history (see the deferred effect below) — so the edit request doesn't
+      // history (see the deferred effect below) — so the seeded request doesn't
       // append to whatever conversation was open.
       newChat();
       setPendingNewChatSeed({
@@ -1408,8 +1438,6 @@ export function ChatScreen({
         send: seedPrompt.send,
         context: seedPrompt.context,
       });
-    } else if (typeof seedPrompt === "string") {
-      ask(seedPrompt);
     } else {
       ask(seedPrompt.display, seedPrompt.send, seedPrompt.context);
     }
@@ -1426,6 +1454,19 @@ export function ChatScreen({
       setPendingNewChatSeed(null);
     }
   }, [pendingNewChatSeed, messages]);
+
+  // Drop the canned Advisor opener in once newChat() has reset the history, and
+  // stash its context for the user's first reply. Nothing is sent — the Advisor
+  // asks, the user answers, and only that reply (carrying `editContext`) goes to
+  // the server.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `initial` is unmemoized; fire only once the reset has landed
+  useEffect(() => {
+    if (pendingEditOpener && messages === initial) {
+      setMessages([{ role: "ai", text: pendingEditOpener.opener, ts: Date.now(), id: makeId() }]);
+      setEditContext(pendingEditOpener.context ?? null);
+      setPendingEditOpener(null);
+    }
+  }, [pendingEditOpener, messages]);
 
   const applyProposal = async (idx: number, proposal: PlanProposal) => {
     // Optimistic: mark applied immediately, roll back on failure.
