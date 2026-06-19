@@ -4,7 +4,12 @@ import { withDb } from "@/lib/api/with-db";
 import { listBuckets } from "@/lib/db/queries/buckets";
 import { catalogQuoteSource } from "@/lib/db/queries/funds";
 import { deleteTransaction, updateTransaction } from "@/lib/db/queries/transactions";
-import { isAnchorKind, LEDGER_KINDS, signedAmount } from "@/lib/portfolio/txn-import";
+import {
+  isAnchorKind,
+  isCashAnchorKind,
+  LEDGER_KINDS,
+  signedAmount,
+} from "@/lib/portfolio/txn-import";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,6 +35,8 @@ const patchBody = z
     marketPrice: z.number().finite().nonnegative().nullish(),
     // A Balance's stated current ฿ VALUE (units derive from value ÷ NAV(date) at the fold).
     value: z.number().finite().nonnegative().nullish(),
+    // "No money moved" override on a Set balance (cash_balance) — see settlement-cash.ts.
+    reconcile: z.boolean().nullish(),
     amount: z.number().finite().nonnegative().default(0),
     fee: z.number().finite().nonnegative().nullish(),
     quoteSource: z.string().trim().min(1).max(40),
@@ -83,6 +90,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       units: t.units ?? null,
       // The stated current value — the fact for a value-only Balance; NULL otherwise.
       value: anchor ? (t.value ?? null) : null,
+      // "No money moved" override — only on a Set balance (cash_balance).
+      reconcile: isCashAnchorKind(t.kind) ? (t.reconcile ?? false) : null,
       pricePerUnit,
       marketPrice: t.marketPrice ?? (anchor ? null : pricePerUnit),
       // Client sends a positive magnitude; sign it by the (possibly anchor) kind.

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
 import { listBuckets } from "@/lib/db/queries/buckets";
+import { listEarmarks } from "@/lib/db/queries/earmarks";
 import {
   listTransactionsByBucket,
   listTransactionsForBuckets,
@@ -24,6 +25,9 @@ export async function GET(req: Request) {
   const bucket = url.searchParams.get("bucket") ?? undefined;
   const ticker = url.searchParams.get("ticker")?.trim() || undefined;
   const method: CostBasisMethod = url.searchParams.get("method") === "fifo" ? "fifo" : "average";
+  // Contribution mode (#149): `cash=funds` excludes uninvested cash from the
+  // return (mode B); default counts it (mode A). Reserved cash is out either way.
+  const countUninvestedCash = url.searchParams.get("cash") !== "funds";
 
   return withDb(async () => {
     const owned = listBuckets();
@@ -46,8 +50,20 @@ export async function GET(req: Request) {
     // it just runs over that fund's events only.
     const txns = ticker ? all.filter((t) => t.ticker === ticker) : all;
 
+    // Reserved cash accounts (#149) are excluded from the return — collect their tickers.
+    const reservedTickers = new Set(
+      listEarmarks()
+        .filter((e) => e.role === "reserved" && e.ticker)
+        .map((e) => (e.ticker as string).toUpperCase()),
+    );
+
     const asOf = new Date().toISOString().slice(0, 10);
-    const analytics = await computeTransactionAnalytics(txns, { method, asOf });
+    const analytics = await computeTransactionAnalytics(txns, {
+      method,
+      asOf,
+      reservedTickers,
+      countUninvestedCash,
+    });
     return NextResponse.json({ ...analytics, transactionCount: txns.length });
   });
 }
