@@ -243,6 +243,37 @@ const RECOVER_DIRECTIVE =
   "You looked up the data above but didn't reply. Using ONLY those tool results, " +
   "answer my previous question now, in plain language. Do not call any tools.";
 
+// Memory-write tools that actually persist a change. If the model TELLS the user
+// it changed a memory but none of these ran in the turn, the write silently never
+// happened — a probabilistic failure on every model we've tried (the model
+// narrates the change without emitting the tool call, ~half the time on repeated
+// edits in one chat). The harness verifies and re-prompts so the write lands; the
+// "Memory updated" chip is derived from these tools' structured output, so a
+// missed call is also a missing chip (the UI never lied, but nothing got saved).
+const MEMORY_WRITE_TOOLS = new Set([
+  "save_preference",
+  "update_preference",
+  "forget_preference",
+  "confirm_preference",
+]);
+
+// A committed (past-tense) claim that the model DID something durable — including
+// bare "Updated." / "Done." / "Changed it", which is exactly what models emit on a
+// later edit in a chat (and what slips a tighter regex). We can be broad here only
+// because the trigger is GATED on `cards === null` at the call site: a real plan or
+// holding update ("updated your plan") rides a propose_* card, so those turns are
+// excluded and a forced memory write can't be mistakenly triggered by them. Benign
+// future-tense acknowledgements ("I'll keep that in mind") stay out by design.
+const MEMORY_CLAIM_RE =
+  /\b(saved|updated|changed|logged|noted|forgot|forgotten|removed|remembered|all set|done)\b/i;
+
+const MEMORY_REDO_DIRECTIVE =
+  "You told me a saved memory was changed, but you did NOT call the tool that " +
+  "performs it — so nothing was actually saved. If a memory should change, call " +
+  "the right memory tool now (save_preference / update_preference / " +
+  "forget_preference) with the correct arguments. If you misspoke and nothing " +
+  "needs saving, say so briefly. Do not repeat your previous message.";
+
 // Served when a turn carries images but inline vision isn't available for it.
 // Both point the user at the always-on Add-to-portfolio image importer so they're
 // never stuck — the chat just can't look at the image on this path.
@@ -292,15 +323,24 @@ function streamAdvisorResponse(opts: AdvisorStreamOptions): Response {
       // outputs. A provider error (free tier) rejects the await chain — we catch
       // it here so the turn can be retried instead of dead-ending. `useTools`
       // is off for the recover-on-empty follow-up so it can't stall again.
-      const run = async (messages: ModelMessage[], useTools: boolean) => {
+      const run = async (
+        messages: ModelMessage[],
+        useTools: boolean,
+        // When set, FORCE a tool call from a restricted set (the last memory-write
+        // retry): `toolChoice: "required"` + only these tools, capped to ONE step
+        // so "required" can't loop into repeated writes across steps.
+        force?: { tools: ToolSet },
+      ) => {
         const gen = streamText({
           model: opts.model,
           system: opts.system,
           messages,
-          tools: useTools ? opts.tools : undefined,
+          tools: force ? force.tools : useTools ? opts.tools : undefined,
+          toolChoice: force ? "required" : undefined,
           // Multi-step so the model can call a read tool then answer using the
-          // result (or explain a proposal after propose_plan_edit).
-          stopWhen: stepCountIs(5),
+          // result (or explain a proposal after propose_plan_edit). A forced retry
+          // runs a single step — emit the tool call, no follow-on generation.
+          stopWhen: force ? stepCountIs(1) : stepCountIs(5),
           maxOutputTokens: opts.maxOutputTokens,
         });
         writer.merge(gen.toUIMessageStream());
@@ -365,6 +405,63 @@ function streamAdvisorResponse(opts: AdvisorStreamOptions): Response {
             inputTokens += rec.usage.inputTokens ?? 0;
             outputTokens += rec.usage.outputTokens ?? 0;
             console.warn(`[advisor] recovered empty turn (${opts.path}) via follow-up`);
+          }
+        }
+
+        // Verify-and-retry the WRITE: the model claimed a memory change but no
+        // memory-write tool ran, so nothing was saved. Re-prompt (tools on, so the
+        // model can actually call update/save/forget this time) up to twice, and
+        // stop as soon as a write fires. Tool choice stays `auto`: a false claim
+        // (mere politeness) self-corrects without forcing a spurious write. The
+        // follow-up streams into the SAME assistant message, so its tool result
+        // produces the "Memory updated" chip the first attempt was missing.
+        let memoryWriteFired = a.steps.some((s) =>
+          s.toolCalls.some((c) => MEMORY_WRITE_TOOLS.has(c.toolName)),
+        );
+        // Gate on `cards === null`: a plan/holding update rides a propose_* card,
+        // so excluding carded turns keeps the broad claim regex from forcing a
+        // memory write on "updated your plan" and the like.
+        if (text.trim() && !memoryWriteFired && cards === null && MEMORY_CLAIM_RE.test(text)) {
+          // Only the memory-write tools, for the forced final attempt.
+          const memoryTools = Object.fromEntries(
+            Object.entries(opts.tools).filter(([name]) => MEMORY_WRITE_TOOLS.has(name)),
+          ) as ToolSet;
+          let convo = [...opts.messages, ...a.response.messages];
+          for (let attempt = 0; attempt < 2 && !memoryWriteFired; attempt++) {
+            // Attempt 0 nudges (tool choice auto) so a false claim — the model
+            // misspoke and nothing needs saving — can self-correct without a write.
+            // The LAST attempt forces a memory tool so a genuine missed write lands.
+            const force =
+              attempt === 1 && Object.keys(memoryTools).length > 0
+                ? { tools: memoryTools }
+                : undefined;
+            const redo = await run(
+              [...convo, { role: "user" as const, content: MEMORY_REDO_DIRECTIVE }],
+              true,
+              force,
+            );
+            if (!redo.ok) break;
+            inputTokens += redo.usage.inputTokens ?? 0;
+            outputTokens += redo.usage.outputTokens ?? 0;
+            modelId = redo.response.modelId ?? modelId;
+            memoryWriteFired = redo.steps.some((s) =>
+              s.toolCalls.some((c) => MEMORY_WRITE_TOOLS.has(c.toolName)),
+            );
+            const redoText = joinStepText(redo.steps) || redo.text;
+            if (redoText.trim()) text = `${text}\n\n${redoText}`.trim();
+            // `cards` is null here (the trigger gates on it), so a redo's cards —
+            // unusual on a forced memory write — simply take its place.
+            const redoCards = extractCards(redo.steps);
+            if (redoCards) cards = redoCards;
+            convo = [...convo, ...redo.response.messages];
+            if (memoryWriteFired) {
+              console.warn(
+                `[advisor] recovered missed memory write (${opts.path}) on attempt ${attempt + 1}`,
+              );
+            }
+          }
+          if (!memoryWriteFired) {
+            console.warn(`[advisor] memory write claimed but never landed (${opts.path})`);
           }
         }
       }
