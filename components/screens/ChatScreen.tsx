@@ -7,6 +7,7 @@ import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { SaveNoteButton } from "@/components/SaveNoteButton";
 import type { EntryContext } from "@/lib/advisor/entry-context";
 import { MAX_CHAT_ATTACHMENTS, withImageMarker } from "@/lib/advisor/image-turn";
+import type { MemoryEventData as MemoryEvent, TurnPart } from "@/lib/advisor/turn-persist";
 import {
   useModelPortfoliosView,
   usePortfolioView,
@@ -101,6 +102,10 @@ function parseCards(json: string | null | undefined): {
   transactionsImport?: TransactionsImport;
   holdings?: HoldingProposal[];
   proposal?: PlanProposal;
+  // The authoritative ordered body for new rows.
+  parts?: TurnPart[];
+  // Legacy: pre-parts rows persisted memory events unordered. Synthesized into
+  // parts on hydrate (text, then the chips) when `parts` is absent.
   memoryEvents?: MemoryEvent[];
 } | null {
   if (!json) return null;
@@ -110,6 +115,23 @@ function parseCards(json: string | null | undefined): {
   } catch {
     return null;
   }
+}
+
+// Rebuild an assistant turn's ordered parts when none were persisted (a legacy
+// row written before `parts`): the prose as one text part, then any unordered
+// memory chips after it — the most order recoverable. Returns undefined when
+// there's nothing to render as parts. Accepts the loosely-typed cached memory
+// events (browser `ChatCard`) and narrows their `kind`.
+function synthesizeParts(
+  text: string,
+  legacy?: { kind: string; id: number; oldId?: number; category: string; content?: string }[],
+): TurnPart[] | undefined {
+  const parts: TurnPart[] = [];
+  if (text.trim()) parts.push({ type: "text", text });
+  for (const e of legacy ?? []) {
+    parts.push({ type: "memory", event: { ...e, kind: e.kind as MemoryEvent["kind"] } });
+  }
+  return parts.length > 0 ? parts : undefined;
 }
 
 interface PlanProposal {
@@ -152,22 +174,11 @@ interface TransactionsImport {
   note: string | null;
 }
 
-// A memory write the Advisor made this turn, surfaced as a muted status line
-// with an Undo. Derived from the memory tools' structured `memoryEvent` output
-// (lib/memory/tools.ts) — the audit surface ADR 0006 calls for. `undone` flips
-// once the user reverses it.
-interface MemoryEvent {
-  kind: "save" | "update" | "forget" | "confirm";
-  id: number;
-  oldId?: number;
-  category: string;
-  // The short declarative note (the `content` line, not the long `body`).
-  content?: string;
-  // True when the write happened BEFORE any prose this turn (the Advisor saved,
-  // then explained) — render the line ABOVE the bubble. False/undefined → after
-  // the prose, render below. Keeps it in the order things actually occurred.
-  beforeText?: boolean;
-}
+// `MemoryEvent` is the shared `MemoryEventData` (imported above): a memory write
+// the Advisor made this turn (save/update/forget/confirm), surfaced as a muted
+// status line. It rides an ordered `memory` TurnPart so its position relative to
+// the prose is preserved — no above/below guessing. The durable record lives in
+// Journal → Memory; the audit surface ADR 0006 calls for.
 
 interface Message {
   role: "user" | "ai";
@@ -191,10 +202,11 @@ interface Message {
   // state tracked by index.
   holdings?: HoldingProposal[];
   holdingStatus?: Record<number, "applied" | "rejected">;
-  // Memory writes the Advisor made this turn (save/update/forget/confirm) —
-  // rendered as muted status lines with Undo. Live-session only (the durable
-  // record is Journal → Memory), so not persisted across reload.
-  memoryEvents?: MemoryEvent[];
+  // The assistant turn's body as ordered parts — runs of prose interleaved with
+  // memory-write indicators, in the order they happened. The render walks these;
+  // `text` stays the flat prose join (copy / save / legacy). Persisted via
+  // `cards.parts` so the ordering survives reload and crosses devices.
+  parts?: TurnPart[];
   // Set on a failed/empty assistant turn so the UI can offer a "Try again"
   // button that re-sends the preceding user message.
   canRetry?: boolean;
@@ -791,10 +803,15 @@ export function ChatScreen({
                   transactionsImport: dbCards?.transactionsImport ?? card?.transactionsImport,
                   holdings: dbCards?.holdings,
                   proposal: dbCards?.proposal,
-                  // Prefer the server-persisted events (cross-device) and fall
-                  // back to the browser cache, like the import cards above.
-                  memoryEvents:
-                    dbCards?.memoryEvents ?? (card?.memoryEvents as MemoryEvent[] | undefined),
+                  // Prefer the server-persisted ordered parts (cross-device), then
+                  // the browser cache; for legacy rows with neither, synthesize
+                  // parts from the prose + unordered memory events (text, then the
+                  // chips — the most order we can recover).
+                  parts: isUser
+                    ? undefined
+                    : (dbCards?.parts ??
+                      card?.parts ??
+                      synthesizeParts(text, dbCards?.memoryEvents ?? card?.memoryEvents)),
                 } as Message;
               }),
         );
@@ -1082,9 +1099,11 @@ export function ChatScreen({
       // statement row). Accumulate them here and attach the growing list to the
       // streaming assistant message so each card appears as it arrives.
       const holdingProposals: HoldingProposal[] = [];
-      // Memory writes this turn (save/update/forget/confirm) — surfaced as
-      // muted status lines with Undo on the assistant message.
-      const memoryEvents: MemoryEvent[] = [];
+      // The turn's body as ordered parts: prose runs interleaved with memory
+      // indicators, in arrival order. The trailing text part grows with each
+      // delta; a memory event closes it so the next prose starts a fresh part —
+      // so order is positional, no above/below flag. Persisted via cards.parts.
+      const parts: TurnPart[] = [];
 
       while (true) {
         const { value, done } = await reader.read();
@@ -1106,8 +1125,19 @@ export function ChatScreen({
               event.delta ?? event.text ?? event.textDelta ?? undefined;
             if (delta && (event.type?.startsWith("text") || !event.type)) {
               accumulated += delta;
+              // Grow the trailing text part (or open one) so prose stays one
+              // block until a memory event splits it.
+              const last = parts[parts.length - 1];
+              if (last?.type === "text") {
+                parts[parts.length - 1] = { type: "text", text: last.text + delta };
+              } else {
+                parts.push({ type: "text", text: delta });
+              }
+              const snapshot = [...parts];
               setMessages((prev) =>
-                prev.map((m) => (m.id === placeholderId ? { ...m, text: accumulated } : m)),
+                prev.map((m) =>
+                  m.id === placeholderId ? { ...m, text: accumulated, parts: snapshot } : m,
+                ),
               );
             }
             // Served model id (transient part from the route) — attach it to the
@@ -1138,21 +1168,17 @@ export function ChatScreen({
                   oldId: raw.oldId,
                   category: String(raw.category ?? "fact"),
                   content: typeof raw.content === "string" ? raw.content : undefined,
-                  // Order the line relative to the prose: empty `accumulated`
-                  // means no text yet → the save preceded the reply → render above.
-                  beforeText: !accumulated.trim(),
                 };
-                memoryEvents.push(memEvent);
-                const snapshot = [...memoryEvents];
+                // Close the open text part: this memory write lands here, in order.
+                parts.push({ type: "memory", event: memEvent });
+                const snapshot = [...parts];
                 setMessages((prev) =>
-                  prev.map((m) => (m.id === placeholderId ? { ...m, memoryEvents: snapshot } : m)),
+                  prev.map((m) => (m.id === placeholderId ? { ...m, parts: snapshot } : m)),
                 );
-                // Persist (browser fallback to the server-side `cards` column) so
-                // the line survives reload. Strip the transient ordering flag.
+                // Browser fallback to the server-side `cards.parts` so the
+                // interleaved render survives reload.
                 if (tidForImages) {
-                  saveChatCard(tidForImages, userSeq, {
-                    memoryEvents: snapshot.map(({ beforeText, ...e }) => e),
-                  });
+                  saveChatCard(tidForImages, userSeq, { parts: snapshot });
                 }
               }
             }
@@ -1410,6 +1436,72 @@ export function ChatScreen({
     if (last?.role !== "user") return;
     setMessages(withoutFailed);
     void askLive(last.text, withoutFailed.slice(0, -1));
+  };
+
+  // Index of the most recent assistant turn — Regenerate is offered on it alone.
+  const lastAiIndex = useMemo(() => {
+    for (let k = messages.length - 1; k >= 0; k--) if (messages[k].role === "ai") return k;
+    return -1;
+  }, [messages]);
+
+  // Regenerate the latest reply: drop the persisted reply server-side FIRST
+  // (await, so the re-ask's fresh reply isn't the one we delete), then re-ask
+  // the preceding user turn via the same path as retry. Reload-safe and linear.
+  const regenerate = async (aiId: string) => {
+    if (loading) return;
+    const tid = threadIdRef.current;
+    if (tid) {
+      try {
+        await fetch(`/api/chat/threads/${encodeURIComponent(tid)}/latest-reply`, {
+          method: "DELETE",
+        });
+        void invalidate("/api/chat/threads");
+      } catch {
+        // Best-effort; the re-ask still proceeds (a stray old reply self-resolves
+        // on the next regenerate or is harmless until then).
+      }
+    }
+    retry(aiId);
+  };
+
+  // Save (or un-save) a reply's prose as a user Note in Journal → Notes. The
+  // saved state is derived from the journal fetch (savedNoteIdByBody), so this
+  // just toggles and lets the derived state self-correct on refetch.
+  const saveNote = (body: string) => {
+    void (async () => {
+      try {
+        const existingId = savedNoteIdByBody.get(body);
+        if (existingId != null) {
+          // Toggle off: a 404 (already deleted in Journal) is fine.
+          const res = await fetch(`/api/journal/${existingId}`, { method: "DELETE" });
+          if (res.ok || res.status === 404) void invalidate("/api/journal");
+          return;
+        }
+        const res = await fetch("/api/journal", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kind: "note", body, source: "user_tool" }),
+        });
+        if (res.ok) void invalidate("/api/journal");
+      } catch {
+        // best-effort; the derived state self-corrects on refetch
+      }
+    })();
+  };
+
+  // Copy a finished reply's prose to the clipboard, with a brief confirmation.
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copyTurn = (id: string, text: string) => {
+    if (!navigator.clipboard) return;
+    void navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        setCopiedId(id);
+        window.setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 1500);
+      })
+      .catch(() => {
+        // Clipboard denied (permissions / insecure context) — no-op.
+      });
   };
 
   // Context the UI already has, fed to the thin suggestion layer. These are the
@@ -1671,25 +1763,33 @@ export function ChatScreen({
             const holdingsImport = m.holdingsImport;
             const transactionsImport = m.transactionsImport;
             // The actively-streaming assistant message is the last one while
-            // loading — don't offer "save to notes" until it's finished writing.
+            // loading — don't offer per-turn actions until it's finished writing.
             const isStreaming = loading && i === messages.length - 1;
-            const showSave =
-              m.role === "ai" &&
-              i > 0 &&
-              !!m.text &&
+            // Per-turn actions appear at the foot of a finished assistant reply.
+            const showActions = m.role === "ai" && i > 0 && !!m.text && !isStreaming;
+            // Save-to-Notes is meaningless on a card-bearing reply (the value is
+            // in the card, not the prose), so gate it to plain text replies.
+            const canSaveNote =
+              showActions &&
               !m.proposal &&
               !m.holdings?.length &&
               !m.holdingsImport &&
-              !m.transactionsImport &&
-              !isStreaming;
-            const aboveEvents = m.memoryEvents?.some((e) => e.beforeText);
-            const belowEvents = m.memoryEvents?.some((e) => !e.beforeText);
+              !m.transactionsImport;
+            // Regenerate only the latest reply, and not mid-stream.
+            const canRegenerate = showActions && i === lastAiIndex && !loading;
+            // The Advisor turn's body as ordered parts (prose ↔ memory chips). Fall
+            // back to a single text part for the live placeholder / any row that
+            // predates parts but carries text.
+            const renderParts: TurnPart[] | undefined =
+              m.role === "ai"
+                ? (m.parts ?? (m.text ? [{ type: "text", text: m.text }] : []))
+                : undefined;
             // The AI bubble renders only when it has visible content; an empty
             // streaming placeholder shows nothing here — the single thinking
             // indicator at the bottom of the stream conveys "working", so a
             // memory chip or streamed text appears ABOVE it, never under empty dots.
             const aiHasContent =
-              !!m.text ||
+              !!renderParts?.length ||
               !!proposal ||
               !!m.holdings?.length ||
               !!holdingsImport ||
@@ -1698,21 +1798,6 @@ export function ChatScreen({
               !!m.images?.length;
             return (
               <Fragment key={m.id}>
-                {/* Memory writes that happened BEFORE any prose this turn render
-                  above the reply — the order they actually occurred. */}
-                {m.role === "ai" && aboveEvents && (
-                  <div className="msg-aside">
-                    {m.memoryEvents?.map((evt, eIdx) =>
-                      evt.beforeText ? (
-                        <MemoryEventLine
-                          // biome-ignore lint/suspicious/noArrayIndexKey: events are append-only within a message
-                          key={`${m.id}-mem-${eIdx}`}
-                          event={evt}
-                        />
-                      ) : null,
-                    )}
-                  </div>
-                )}
                 {(m.role !== "ai" || aiHasContent) && (
                   <div className={`msg ${m.role}`}>
                     {m.role === "ai" && (
@@ -1726,11 +1811,26 @@ export function ChatScreen({
                       </div>
                     )}
                     {m.role === "ai"
-                      ? // Advisor replies are Markdown — render them styled. User bubbles
-                        // stay plain text (below) so nothing the user typed is reinterpreted
-                        // as markup.
-                        m.text && <MarkdownMessage text={m.text} />
-                      : m.text && <div style={{ whiteSpace: "pre-wrap" }}>{m.text}</div>}
+                      ? // Walk the turn's ordered parts: prose runs (Markdown, styled)
+                        // interleaved with memory-write indicators, in the order they
+                        // happened, under the single meta header above.
+                        renderParts?.map((part, pIdx) =>
+                          part.type === "text" ? (
+                            <MarkdownMessage
+                              // biome-ignore lint/suspicious/noArrayIndexKey: parts are append-only within a turn
+                              key={`${m.id}-part-${pIdx}`}
+                              text={part.text}
+                            />
+                          ) : (
+                            <MemoryEventLine
+                              // biome-ignore lint/suspicious/noArrayIndexKey: parts are append-only within a turn
+                              key={`${m.id}-part-${pIdx}`}
+                              event={part.event}
+                            />
+                          ),
+                        )
+                      : // User bubbles stay plain text so nothing typed is reinterpreted as markup.
+                        m.text && <div style={{ whiteSpace: "pre-wrap" }}>{m.text}</div>}
                     {m.images && m.images.length > 0 && (
                       <div className="chat-attachments">
                         {m.images.map((img) => (
@@ -1795,55 +1895,38 @@ export function ChatScreen({
                         onOpen={() => requestTxnImportWithRows(transactionsImport.rows)}
                       />
                     )}
-                    {/* The save affordance belongs to the message — it lives at
-                        the foot of the bubble, not in the system aside below. */}
-                    {showSave && (
-                      <SaveNoteButton
-                        saved={savedNoteIdByBody.has(m.text)}
-                        onSave={() => {
-                          void (async () => {
-                            try {
-                              const existingId = savedNoteIdByBody.get(m.text);
-                              if (existingId != null) {
-                                // Toggle off: remove the note for this reply. A 404
-                                // (already deleted in Journal) is fine.
-                                const res = await fetch(`/api/journal/${existingId}`, {
-                                  method: "DELETE",
-                                });
-                                if (res.ok || res.status === 404) void invalidate("/api/journal");
-                                return;
-                              }
-                              const res = await fetch("/api/journal", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({
-                                  kind: "note",
-                                  body: m.text,
-                                  source: "user_tool",
-                                }),
-                              });
-                              if (res.ok) void invalidate("/api/journal");
-                            } catch {
-                              // best-effort; the derived state self-corrects on refetch
-                            }
-                          })();
-                        }}
-                      />
-                    )}
-                  </div>
-                )}
-                {/* Memory line(s) whose write came AFTER the prose — OUTSIDE the
-                  bubble, a system note distinct from what the Advisor said. */}
-                {m.role === "ai" && belowEvents && (
-                  <div className="msg-aside">
-                    {m.memoryEvents?.map((evt, eIdx) =>
-                      evt.beforeText ? null : (
-                        <MemoryEventLine
-                          // biome-ignore lint/suspicious/noArrayIndexKey: events are append-only within a message
-                          key={`${m.id}-mem-${eIdx}`}
-                          event={evt}
-                        />
-                      ),
+                    {/* Per-turn actions, foot of the reply (Claude/ChatGPT style):
+                        Copy · Save · Retry (latest only). Hover tooltips via title. */}
+                    {showActions && (
+                      <div className="msg-actions">
+                        <button
+                          type="button"
+                          className="msg-action"
+                          onClick={() => copyTurn(m.id, m.text)}
+                          aria-label={copiedId === m.id ? "Copied" : "Copy"}
+                          title={copiedId === m.id ? "Copied" : "Copy"}
+                        >
+                          <Icon name={copiedId === m.id ? "check" : "copy"} size={14} />
+                        </button>
+                        {canSaveNote && (
+                          <SaveNoteButton
+                            saved={savedNoteIdByBody.has(m.text)}
+                            onSave={() => saveNote(m.text)}
+                          />
+                        )}
+                        {canRegenerate && (
+                          <button
+                            type="button"
+                            className="msg-action"
+                            onClick={() => void regenerate(m.id)}
+                            disabled={loading}
+                            aria-label="Retry"
+                            title="Retry"
+                          >
+                            <Icon name="rotate-cw" size={14} />
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}

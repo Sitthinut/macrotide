@@ -28,10 +28,12 @@ import { classifyReasoningIntent } from "@/lib/advisor/intent";
 import { ADVISOR_SYSTEM_PROMPT } from "@/lib/advisor/system-prompt";
 import { createAdvisorTools } from "@/lib/advisor/tools";
 import {
+  buildParts,
   debugLogTurn,
   extractCards,
   joinStepText,
   type TurnCards,
+  type TurnPart,
 } from "@/lib/advisor/turn-persist";
 import {
   createVisionTools,
@@ -374,11 +376,15 @@ function streamAdvisorResponse(opts: AdvisorStreamOptions): Response {
       let inputTokens = 0;
       let outputTokens = 0;
       let cards: TurnCards | null = null;
+      // The turn's prose + memory indicators in order, persisted on the row so
+      // the interleaved render survives reload (see buildParts / TurnCards.parts).
+      let parts: TurnPart[] = [];
 
       if (a.ok) {
         // Persist EVERY step's text (the UI shows all of them — e.g. prose before
         // a tool call + the closing line), not just the final step's `a.text`.
         text = joinStepText(a.steps) || a.text;
+        parts = buildParts(a.steps);
         modelId = a.response.modelId ?? null;
         inputTokens = a.usage.inputTokens ?? 0;
         outputTokens = a.usage.outputTokens ?? 0;
@@ -401,6 +407,9 @@ function streamAdvisorResponse(opts: AdvisorStreamOptions): Response {
           const rec = await run(followUp, false);
           if (rec.ok && rec.text.trim()) {
             text = rec.text;
+            // The base turn produced no prose (only the tool ran), so keep any
+            // memory indicators it emitted and append the recovered prose after.
+            parts = [...parts.filter((p) => p.type === "memory"), { type: "text", text: rec.text }];
             modelId = rec.response.modelId ?? modelId;
             inputTokens += rec.usage.inputTokens ?? 0;
             outputTokens += rec.usage.outputTokens ?? 0;
@@ -449,6 +458,8 @@ function streamAdvisorResponse(opts: AdvisorStreamOptions): Response {
             );
             const redoText = joinStepText(redo.steps) || redo.text;
             if (redoText.trim()) text = `${text}\n\n${redoText}`.trim();
+            // Append the redo's prose + the now-landed memory indicator in order.
+            parts = [...parts, ...buildParts(redo.steps)];
             // `cards` is null here (the trigger gates on it), so a redo's cards —
             // unusual on a forced memory write — simply take its place.
             const redoCards = extractCards(redo.steps);
@@ -473,8 +484,12 @@ function streamAdvisorResponse(opts: AdvisorStreamOptions): Response {
       // response header — it streams here instead.
       if (modelId) writer.write({ type: "data-model", data: modelId, transient: true });
 
+      // Fold the ordered parts onto the persisted payload so the interleaved
+      // render survives reload — even on a memory-only turn that has no cards.
+      const cardsToPersist: TurnCards | null = parts.length > 0 ? { ...cards, parts } : cards;
+
       runWithDbContext(opts.ctx, () => {
-        if (text.trim()) opts.persist(text, modelId, cards);
+        if (text.trim()) opts.persist(text, modelId, cardsToPersist);
         opts.recordUsageFor?.({ inputTokens, outputTokens, modelId });
       });
     },

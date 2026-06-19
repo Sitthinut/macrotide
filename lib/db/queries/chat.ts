@@ -390,3 +390,32 @@ export function setMessageFeedback(
     .returning()
     .get();
 }
+
+/**
+ * Remove the thread's most recent assistant reply — the server half of
+ * "Regenerate" (the client then re-asks the preceding user turn, appending a
+ * fresh reply). Id-agnostic so it works whether the regenerated turn was live
+ * or reloaded. Scoped to a thread the caller owns; the user turn and the
+ * internal summary row are left intact. The FTS mirror cleans up via its
+ * AFTER DELETE trigger. Returns true when a reply was removed.
+ */
+export function deleteLatestAssistantTurn(threadId: string): boolean {
+  const db = getDb();
+  // Only the thread's owner may regenerate it.
+  const thread = db
+    .select({ id: chatThreads.id })
+    .from(chatThreads)
+    .where(and(eq(chatThreads.id, threadId), ownedBy(chatThreads.userId)))
+    .get();
+  if (!thread) return false;
+  const latest = db
+    .select({ id: chatMessages.id })
+    .from(chatMessages)
+    .where(and(eq(chatMessages.threadId, threadId), eq(chatMessages.role, "assistant")))
+    .orderBy(desc(chatMessages.createdAt), desc(chatMessages.id))
+    .limit(1)
+    .get();
+  if (!latest) return false;
+  db.delete(chatMessages).where(eq(chatMessages.id, latest.id)).run();
+  return true;
+}

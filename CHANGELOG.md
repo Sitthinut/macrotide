@@ -15,6 +15,13 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Advisor replies read as ordered steps, with per-reply actions.** A reply now
+  renders its prose and "Memory saved/updated" indicators in the order they
+  actually happened — said something, saved a memory, said more — under one
+  header, and that ordering is saved so it looks the same on reload and on
+  another device. Each finished reply carries a quiet action row at its foot:
+  **Copy**, **Save** to your Notes, and **Retry** (re-runs the latest reply).
+
 - **Feedback is memory, not a ratings bar.** The 👍/👎 row is gone. You shape the
   Advisor by correcting it in words, and the correction becomes a remembered
   memory: every write shows a quiet status line in the chat (click it to see what
