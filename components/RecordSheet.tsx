@@ -358,9 +358,15 @@ export function RecordSheet({
   const [submitting, setSubmitting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // On each open, target the active portfolio (defaultBucketId). In the All view
+  // there's no active portfolio (defaultBucketId undefined) — keep the last pick,
+  // falling back to the first portfolio. Re-runs only on open / default change, so
+  // it never clobbers a bucket the user changes mid-session.
   useEffect(() => {
-    if (open && !bucketId) setBucketId(defaultBucketId || buckets?.[0]?.id || "");
-  }, [open, bucketId, defaultBucketId, buckets]);
+    if (!open) return;
+    if (defaultBucketId) setBucketId(defaultBucketId);
+    else setBucketId((prev) => prev || buckets?.[0]?.id || "");
+  }, [open, defaultBucketId, buckets]);
 
   // Consume seeds once per open.
   const seededRef = useRef(false);

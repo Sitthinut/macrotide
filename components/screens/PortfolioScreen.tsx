@@ -1828,7 +1828,12 @@ export function PortfolioScreen({
         </div>
       )}
 
-      {onOpenActivity && <RecentActivityPeek onSeeAll={onOpenActivity} />}
+      {onOpenActivity && (
+        <RecentActivityPeek
+          bucketId={activePfId === "all" ? undefined : activePfId}
+          onSeeAll={onOpenActivity}
+        />
+      )}
 
       <div className="section-header" style={{ padding: "0 20px", marginBottom: 4, marginTop: 18 }}>
         <h3>Holdings</h3>

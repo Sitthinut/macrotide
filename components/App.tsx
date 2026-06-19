@@ -475,7 +475,7 @@ export function App({ isDemo }: { isDemo: boolean }) {
   const { portfolios } = usePortfolioView();
   // Create/edit intents from PortfolioScreen + PortfoliosPanel flow through the
   // shared store. App owns the sheet so it survives the mobile↔wide swap.
-  const { editTarget, newNonce, consumeEditTarget } = usePortfolioUi();
+  const { activeId, editTarget, newNonce, consumeEditTarget } = usePortfolioUi();
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -895,6 +895,7 @@ export function App({ isDemo }: { isDemo: boolean }) {
         open={addOpen}
         defaultKind={addMode === "activity" ? "buy" : "opening"}
         defaultMode={addEntryMode}
+        defaultBucketId={activeId === "all" ? undefined : activeId}
         holdingsSeed={importSeed}
         txnSeed={txnSeed}
         onClose={() => {
