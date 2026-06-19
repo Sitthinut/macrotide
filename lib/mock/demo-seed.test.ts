@@ -16,7 +16,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { describe, expect, it } from "vitest";
 import * as schema from "../db/schema";
 import { PORTFOLIOS } from "./data";
-import { seedDemoData } from "./demo-seed";
+import { DEMO_CASH, seedDemoData } from "./demo-seed";
 
 function freshDb() {
   const sqlite = new Database(":memory:");
@@ -44,18 +44,29 @@ describe("seedDemoData (app-only demo DB)", () => {
       .n;
     expect(bucketCount).toBe(PORTFOLIOS.length);
 
-    const expectedHoldings = PORTFOLIOS.reduce((sum, p) => sum + p.holdings.length, 0);
-    const holdingCount = (
-      sqlite.prepare("SELECT COUNT(*) AS n FROM holdings").get() as { n: number }
+    const expectedFundHoldings = PORTFOLIOS.reduce((sum, p) => sum + p.holdings.length, 0);
+    const fundHoldings = (
+      sqlite
+        .prepare("SELECT COUNT(*) AS n FROM holdings WHERE quote_source = 'thai_mutual_fund'")
+        .get() as { n: number }
     ).n;
-    expect(holdingCount).toBe(expectedHoldings);
+    expect(fundHoldings).toBe(expectedFundHoldings);
+
+    const cashHoldings = (
+      sqlite.prepare("SELECT COUNT(*) AS n FROM holdings WHERE quote_source = 'cash'").get() as {
+        n: number;
+      }
+    ).n;
+    expect(cashHoldings).toBe(DEMO_CASH.length);
   });
 
-  it("seeds every holding with the thai_mutual_fund quote source and a real ticker", () => {
+  it("seeds every fund holding with the thai_mutual_fund quote source and a real ticker", () => {
     const { sqlite, db } = freshDb();
     seedDemoData(db);
 
-    const rows = sqlite.prepare("SELECT ticker, quote_source FROM holdings").all() as Array<{
+    const rows = sqlite
+      .prepare("SELECT ticker, quote_source FROM holdings WHERE quote_source = 'thai_mutual_fund'")
+      .all() as Array<{
       ticker: string;
       quote_source: string;
     }>;
@@ -82,5 +93,53 @@ describe("seedDemoData (app-only demo DB)", () => {
       sqlite.prepare("SELECT COUNT(*) AS n FROM model_portfolios").get() as { n: number }
     ).n;
     expect(models).toBeGreaterThan(0);
+  });
+
+  it("seeds explicit cash accounts with cash events and a reserved earmark", () => {
+    const { sqlite, db } = freshDb();
+    seedDemoData(db);
+
+    const cash = sqlite
+      .prepare("SELECT asset_class, currency FROM holdings WHERE quote_source = 'cash'")
+      .all() as Array<{ asset_class: string; currency: string }>;
+    expect(cash.length).toBe(DEMO_CASH.length);
+    for (const c of cash) {
+      expect(c.asset_class).toBe("cash");
+      expect(c.currency).toBe("THB");
+    }
+
+    const kinds = (
+      sqlite
+        .prepare("SELECT DISTINCT kind FROM transactions WHERE quote_source = 'cash'")
+        .all() as Array<{ kind: string }>
+    ).map((r) => r.kind);
+    expect(kinds).toContain("cash_balance");
+    expect(kinds).toContain("deposit");
+    expect(kinds).toContain("withdraw");
+
+    const reserved = sqlite
+      .prepare("SELECT purpose FROM earmarks WHERE role = 'reserved'")
+      .all() as Array<{ purpose: string }>;
+    expect(reserved.length).toBe(DEMO_CASH.filter((a) => a.reserved).length);
+    expect(reserved.every((r) => r.purpose)).toBe(true);
+  });
+
+  it("the three most-recent ledger rows are a cash/fund mix (two fund dividends, then cash)", () => {
+    const { sqlite, db } = freshDb();
+    seedDemoData(db);
+
+    // Newest first, mirroring the "Recently recorded" peek (ORDER BY tradeDate, id).
+    const recent = sqlite
+      .prepare(
+        "SELECT kind, quote_source FROM transactions ORDER BY trade_date DESC, id DESC LIMIT 3",
+      )
+      .all() as Array<{ kind: string; quote_source: string }>;
+    expect(recent.map((r) => r.quote_source)).toEqual([
+      "thai_mutual_fund",
+      "thai_mutual_fund",
+      "cash",
+    ]);
+    expect(recent[0].kind).toBe("dividend");
+    expect(recent[2].kind).toBe("cash_balance");
   });
 });

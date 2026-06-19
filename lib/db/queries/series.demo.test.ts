@@ -9,7 +9,7 @@ import { getBenchmarkSeries } from "@/lib/market/benchmarks";
 import { PORTFOLIOS } from "@/lib/mock/data";
 import { DEMO_HOLDING_HISTORY } from "@/lib/mock/demo-history";
 import { demoIndexSeries } from "@/lib/mock/demo-history-read";
-import { seedDemoData } from "@/lib/mock/demo-seed";
+import { DEMO_CASH, seedDemoData } from "@/lib/mock/demo-seed";
 import { freshAppDb, freshMarketDb } from "@/tests/db-helpers";
 import { runWithDbContext } from "../context";
 import { fundCatalog, holdings } from "../schema";
@@ -93,8 +93,24 @@ describe("getPortfolioSeries — demo mode (fixture-backed)", () => {
     return total;
   }
 
+  // Demo cash terminal balances (#149): cash_balance asserts a level; deposits add,
+  // withdrawals subtract. Cash is valued 1.0 (THB), so the terminal balance is its value.
+  function fullCashValue(): number {
+    let total = 0;
+    for (const acct of DEMO_CASH) {
+      let bal = 0;
+      for (const ev of acct.events) {
+        if (ev.kind === "cash_balance") bal = ev.balance;
+        else if (ev.kind === "deposit") bal += ev.amount;
+        else bal -= ev.amount;
+      }
+      total += bal;
+    }
+    return total;
+  }
+
   it("the window's FIRST date is full, not partial (carry-in seeds the left edge)", async () => {
-    const fullBook = fullBookValue();
+    const fullBook = fullBookValue() + fullCashValue();
     // The first 1M point must already include every holding — close to the full
     // book (a month's drift, never a fraction like 3/12 ≈ 20%). Regression guard
     // for the left-edge jump: pre-fix this was ~250k (3 of 12 funds present).
@@ -107,9 +123,9 @@ describe("getPortfolioSeries — demo mode (fixture-backed)", () => {
   it("the demo aggregate equals the sum of every seeded holding's current value", async () => {
     const { aggregate } = await runDemo(() => getPortfolioSeries("max"));
     const lastTotal = aggregate.at(-1)?.value as number;
-    // Terminal replayed units × last fixture NAV per holding: the trade story
-    // always folds back to data.ts's unit counts.
-    expect(lastTotal).toBeCloseTo(fullBookValue(), 0);
+    // Terminal replayed units × last fixture NAV per holding (the trade story always
+    // folds back to data.ts's unit counts), plus the explicit cash terminal balances.
+    expect(lastTotal).toBeCloseTo(fullBookValue() + fullCashValue(), 0);
   });
 
   it("a shorter range returns fewer points (range filter applies)", async () => {
