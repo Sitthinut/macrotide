@@ -128,8 +128,11 @@ export function EventLine({
   if (txn.source) sub.push(txn.source);
 
   const costUnknown = anchor && txn.pricePerUnit == null;
-  const amount =
-    kind === "split" ? "" : `${kind === "fee" ? "−" : ""}${fmtTHBClean(Math.abs(txn.amount))}`;
+  // A value-stated anchor (a `cash_balance`, or a value-only fund Balance) holds
+  // its ฿ magnitude in `value` with `amount` 0 (no cash moved) — show the asserted
+  // balance, not the zero flow. Every other kind shows its signed cash amount.
+  const magnitude = txn.value ?? Math.abs(txn.amount);
+  const amount = kind === "split" ? "" : `${kind === "fee" ? "−" : ""}${fmtTHBClean(magnitude)}`;
 
   return (
     <button type="button" className="holding" style={ROW_STYLE} onClick={onOpen}>

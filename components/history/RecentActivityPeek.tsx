@@ -14,7 +14,14 @@ import type { TransactionAnalytics } from "@/lib/portfolio/transaction-analytics
 
 type AnalyticsResponse = TransactionAnalytics & { transactionCount: number };
 
-export function RecentActivityPeek({ onSeeAll }: { onSeeAll: () => void }) {
+export function RecentActivityPeek({
+  bucketId,
+  onSeeAll,
+}: {
+  /** Active portfolio's bucket — scopes the peek to it; `undefined` shows all. */
+  bucketId?: string;
+  onSeeAll: () => void;
+}) {
   const { data: txns } = useResource<Transaction[]>("/api/transactions");
   const { data: analytics } = useResource<AnalyticsResponse>("/api/transactions/analytics");
 
@@ -25,7 +32,11 @@ export function RecentActivityPeek({ onSeeAll }: { onSeeAll: () => void }) {
   }, [analytics]);
 
   // The API returns the ledger oldest-first (tradeDate, id); the tail is newest.
-  const recent = useMemo(() => [...(txns ?? [])].slice(-3).reverse(), [txns]);
+  // Scope to the active portfolio's bucket first so the peek matches the screen.
+  const recent = useMemo(() => {
+    const scoped = bucketId ? (txns ?? []).filter((t) => t.bucketId === bucketId) : (txns ?? []);
+    return scoped.slice(-3).reverse();
+  }, [txns, bucketId]);
   if (recent.length === 0) return null;
 
   return (
