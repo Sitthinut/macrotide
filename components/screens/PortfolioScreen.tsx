@@ -821,8 +821,9 @@ export function PortfolioScreen({
 
   const filtered = useMemo(() => {
     if (!view) return [] as Holding[];
-    if (filter === "all") return view.holdings;
-    return view.holdings.filter((h) => h.class === filter);
+    const list = filter === "all" ? view.holdings : view.holdings.filter((h) => h.class === filter);
+    // Sort by weight (current value, descending); ties / zero-value fall back to name (A–Z).
+    return [...list].sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
   }, [view, filter]);
 
   // Cash earmarks (#149) → per-account designation (Investable | Reserved + label),
