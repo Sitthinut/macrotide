@@ -63,6 +63,16 @@ function parseModels(value: string | undefined): string[] | null {
 /** OpenRouter `reasoning.effort` levels (highest → lowest cost/latency). */
 export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high";
 
+const EFFORT_VALUES: ReasoningEffort[] = ["none", "minimal", "low", "medium", "high"];
+
+/** Parse an operator-set reasoning-effort env var, falling back when unset or
+ * invalid. Lets the reasoning policy track the chosen MODEL (e.g. pointing the
+ * public tier at grok → set PUBLIC_REASONING_EFFORT=low). */
+function parseEffort(raw: string | undefined, fallback: ReasoningEffort): ReasoningEffort {
+  const v = raw?.trim().toLowerCase();
+  return v && (EFFORT_VALUES as string[]).includes(v) ? (v as ReasoningEffort) : fallback;
+}
+
 interface OpenRouterOpts {
   /**
    * OpenRouter `reasoning.effort`. `"none"` disables a reasoning model's hidden
@@ -148,7 +158,31 @@ function openrouter(apiKey: string, models: string[], opts: OpenRouterOpts = {})
                 // Body wasn't JSON — forward untouched rather than crashing.
               }
             }
-            return fetch(input as RequestInfo, init);
+            const res = await fetch(input as RequestInfo, init);
+            // Some free models MANDATE reasoning and 400 when we send a disable
+            // (`reasoning:{effort:'none'}`). The model-fallback `models[]` chain
+            // doesn't absorb this (it's a request-shape rejection, not a provider
+            // outage), so retry ONCE without the reasoning control — letting that
+            // model use its default — instead of dead-ending the turn. Covers
+            // every disable path (public/demo/title/extract/vision); trusted never
+            // disables, so it can't hit this. Reading a 400's small JSON error is
+            // safe — it's not the streamed success body.
+            if (res.status === 400 && injectReasoning && typeof init?.body === "string") {
+              const text = await res
+                .clone()
+                .text()
+                .catch(() => "");
+              if (/reasoning is mandatory|cannot be disabled/i.test(text)) {
+                try {
+                  const retryBody = JSON.parse(init.body);
+                  delete retryBody.reasoning;
+                  return fetch(input as RequestInfo, { ...init, body: JSON.stringify(retryBody) });
+                } catch {
+                  // fall through to the original response
+                }
+              }
+            }
+            return res;
           },
   });
   return provider(primary);
@@ -158,16 +192,37 @@ function chainLabel(prefix: string, models: string[]): string {
   return models.length === 1 ? `${prefix} · ${models[0]}` : `${prefix} · ${models.join(" → ")}`;
 }
 
+// Owner/trusted reasoning FLOOR. The eval (docs/explanation/inference-strategy.md)
+// found the trusted primary (grok-4.3) saves explicit memory requests only ~41%
+// of the time at effort `none` but ~100% at `low`, with no over-firing — and that
+// the cheap public model REGRESSES with reasoning (more dead-ends), so the floor
+// is trusted-only. So trusted runs at `low` minimum: the per-turn intent gate can
+// still raise it (analytical → medium), but never below the floor. The floor is
+// `TRUSTED_REASONING_FLOOR`-overridable (default `low`); public/demo set their own
+// fixed effort below. `undefined` (gate off) also floors.
+const EFFORT_RANK: Record<ReasoningEffort, number> = {
+  none: 0,
+  minimal: 1,
+  low: 2,
+  medium: 3,
+  high: 4,
+};
+function atLeastTrustedFloor(effort: ReasoningEffort | undefined): ReasoningEffort {
+  const floor = parseEffort(process.env.TRUSTED_REASONING_FLOOR, "low");
+  if (effort === undefined) return floor;
+  return EFFORT_RANK[effort] >= EFFORT_RANK[floor] ? effort : floor;
+}
+
 export function resolveOwnerProvider(
   opts: { reasoningEffort?: ReasoningEffort; conversationId?: string } = {},
 ): ResolvedProvider {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) return { model: null, ready: false, label: "OpenRouter (no key)" };
   const models = parseModels(process.env.TRUSTED_TIER_MODELS) ?? TRUSTED_TIER_DEFAULT;
-  // Effort is gated per-turn by intent in the route (undefined = model default).
+  // Per-turn intent gate raises effort (analytical → medium), floored at `low`.
   return {
     model: openrouter(key, models, {
-      reasoningEffort: opts.reasoningEffort,
+      reasoningEffort: atLeastTrustedFloor(opts.reasoningEffort),
       conversationId: opts.conversationId,
     }),
     ready: true,
@@ -204,10 +259,11 @@ export function resolveTierProvider(
   if (!key) return { model: null, ready: false, label: "OpenRouter (no key)" };
   if (tier === "trusted") {
     const models = parseModels(process.env.TRUSTED_TIER_MODELS) ?? TRUSTED_TIER_DEFAULT;
-    // Trusted shares the owner chain AND the per-turn intent-gated effort.
+    // Trusted shares the owner chain AND the per-turn intent-gated effort, floored
+    // at `low` (the eval-backed memory-save floor; see atLeastTrustedFloor).
     return {
       model: openrouter(key, models, {
-        reasoningEffort: opts.reasoningEffort,
+        reasoningEffort: atLeastTrustedFloor(opts.reasoningEffort),
         conversationId: opts.conversationId,
       }),
       ready: true,
@@ -215,13 +271,14 @@ export function resolveTierProvider(
     };
   }
   const models = parseModels(process.env.PUBLIC_TIER_MODELS) ?? PUBLIC_TIER_DEFAULT;
-  // Public tier: ALWAYS pin reasoning off, ignoring any gated effort. Public is
-  // the cost-protected path — a cheap model the router lands on must not reason
-  // (slow + billed at the output rate) even on an analytical-looking turn. The
-  // intent gate raises effort only for owner/trusted, who value (and fund) it.
+  // Public tier: a FIXED reasoning effort (default `none`), ignoring the gated
+  // effort. Public is the cost-protected path — a cheap model the router lands on
+  // must not reason (slow + billed at the output rate) even on an analytical turn.
+  // `PUBLIC_REASONING_EFFORT` lets an operator who points the public tier at a
+  // reasoning model (e.g. grok) lift it to `low` so its tool-calling lands.
   return {
     model: openrouter(key, models, {
-      reasoningEffort: "none",
+      reasoningEffort: parseEffort(process.env.PUBLIC_REASONING_EFFORT, "none"),
       conversationId: opts.conversationId,
     }),
     ready: true,
@@ -233,11 +290,12 @@ export function resolveDemoProvider(opts: { conversationId?: string } = {}): Res
   const key = process.env.DEMO_OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY;
   if (!key) return { model: null, ready: false, label: "Demo (no key configured)" };
   const models = parseModels(process.env.DEMO_TIER_MODELS) ?? DEMO_TIER_DEFAULT;
-  // Demo: pin reasoning off — public, abuse-exposed, and on the free chain; it
-  // should never burn reasoning latency/cost on a throwaway demo turn.
+  // Demo: fixed reasoning effort (default `none`) — public, abuse-exposed, on the
+  // free chain; it shouldn't burn reasoning latency/cost on a throwaway turn.
+  // `DEMO_REASONING_EFFORT` overrides for parity with the public knob.
   return {
     model: openrouter(key, models, {
-      reasoningEffort: "none",
+      reasoningEffort: parseEffort(process.env.DEMO_REASONING_EFFORT, "none"),
       conversationId: opts.conversationId,
     }),
     ready: true,

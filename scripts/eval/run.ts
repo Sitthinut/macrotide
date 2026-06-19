@@ -291,6 +291,10 @@ const THRESHOLDS: Record<
 > = {
   retrieve: { deadMaxPct: 5, factsMinPct: 80, safetyMinPct: 100 },
   complex: { deadMaxPct: 15, factsMinPct: 60, safetyMinPct: 100 },
+  // Memory tier: the metric that matters is the TOOLS sub-score (save-rate +
+  // the no-false-positive controls), read from the per-category breakdown, not
+  // gated here. Keep facts/safety lenient so they don't spuriously trip.
+  memory: { deadMaxPct: 10, factsMinPct: 0, safetyMinPct: 100 },
 };
 
 const pct = (num: number, den: number): number => (den ? (num / den) * 100 : 100);

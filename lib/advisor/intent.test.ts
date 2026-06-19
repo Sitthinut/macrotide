@@ -75,3 +75,35 @@ describe("classifyReasoningIntent — EntryContext intent", () => {
     expect(d.signals).toContain("step-by-step");
   });
 });
+
+describe("classifyReasoningIntent — explicit memory intent (backstop trigger)", () => {
+  const memory = [
+    "Remember that I prefer low-fee index funds.",
+    "From now on, keep your answers short.",
+    "Note that I'm 30 with a 20-year horizon.",
+    "Don't forget I'm risk-averse.",
+    "Forget that I wanted to add bonds.",
+    "For your records, my timezone is Asia/Bangkok.",
+    "Keep that in mind when you advise me.",
+  ];
+  for (const text of memory) {
+    it(`memoryIntent: ${text.slice(0, 40)}`, () => {
+      expect(classifyReasoningIntent(text).memoryIntent).toBe(true);
+    });
+  }
+
+  // Lookups, analysis, and a RECALL question ("what do you remember") must NOT
+  // trigger the forced-save backstop — only an explicit capture/forget directive.
+  const notMemory = [
+    "Read my portfolio and tell me my biggest holding.",
+    "Should I rebalance now or wait?",
+    "What do you remember about me?",
+    "Actually, always lead with fees when comparing funds.",
+    "",
+  ];
+  for (const text of notMemory) {
+    it(`not memoryIntent: ${JSON.stringify(text).slice(0, 40)}`, () => {
+      expect(classifyReasoningIntent(text).memoryIntent).toBe(false);
+    });
+  }
+});

@@ -59,7 +59,7 @@ describe("eval question set", () => {
   it("every question is well-formed and references only real tools", () => {
     for (const q of QUESTIONS) {
       expect(q.prompt.trim().length, q.id).toBeGreaterThan(0);
-      expect(["retrieve", "complex"], q.id).toContain(q.tier);
+      expect(["retrieve", "complex", "memory"], q.id).toContain(q.tier);
       const e = q.expect;
       const hasCheck =
         !!e.mustInclude?.length ||

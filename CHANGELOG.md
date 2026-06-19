@@ -15,6 +15,14 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **The Advisor reliably remembers when you ask it to.** Explicit "remember
+  this" requests now save on the first try and show the memory chip in the same
+  reply, instead of the Advisor sometimes just acknowledging in words without
+  saving. Asking it to remember something no longer produces a repetitive
+  "already saved / nothing needs saving" reply. Replies also no longer
+  occasionally cut out on the free tier — when a free model requires reasoning,
+  the request transparently retries instead of dead-ending.
+
 - **Advisor replies read as ordered steps, with per-reply actions.** A reply now
   renders its prose and "Memory saved/updated" indicators in the order they
   actually happened — said something, saved a memory, said more — under one

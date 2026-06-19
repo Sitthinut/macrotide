@@ -47,8 +47,9 @@ export interface ModelPrice {
   out: number;
 }
 
-// Built-in price table for the likely cheap-paid-model candidates, keyed by the
-// model id OpenRouter reports back in the response (`response.modelId`). These
+// Built-in price table for the paid models we may serve (public candidates + the
+// owner/trusted chain), keyed by the model id OpenRouter reports back in the
+// response (`response.modelId`). These
 // are list prices and may drift — operators override/extend via the MODEL_PRICES
 // env (JSON) rather than a code change. Free / zero-cost models are deliberately
 // ABSENT: an unpriced model contributes 0 cost, so `openrouter/free` routing
@@ -59,6 +60,8 @@ const BUILTIN_PRICES: Record<string, ModelPrice> = {
   "google/gemini-3.1-flash-lite": { in: 0.25, out: 1.5 },
   "openai/gpt-4.1-mini": { in: 0.4, out: 1.6 },
   "openai/gpt-4.1-nano": { in: 0.1, out: 0.4 },
+  "x-ai/grok-4.3": { in: 1.25, out: 2.5 },
+  "z-ai/glm-5.1": { in: 0.98, out: 3.08 },
 };
 
 let cachedPriceEnv: string | undefined;

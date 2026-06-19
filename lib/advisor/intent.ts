@@ -26,6 +26,14 @@ export interface ReasoningDecision {
   effort: "none" | "medium";
   /** Why — the matched intent/phrase tags (for logging/observability). */
   signals: string[];
+  /** True when the user EXPLICITLY asked the Advisor to remember/forget/change a
+   * durable preference. Drives the memory-write backstop (route): if the user
+   * asked and no write tool fired, force one silent save. NOT an effort signal —
+   * trusted is already floored to `low` (which lands the save ~100% in eval) and
+   * the cheap public model regresses with reasoning, so memory intent must not
+   * raise effort. High-precision patterns only (a forced save on a false positive
+   * would persist a spurious memory). */
+  memoryIntent: boolean;
 }
 
 // EntryContext.intent values (set by the Ask-Advisor buttons) that are
@@ -80,10 +88,28 @@ const ANALYTICAL_PATTERNS: { re: RegExp; tag: string }[] = [
   },
 ];
 
+// HIGH-PRECISION explicit memory-capture / correction directives — the user
+// telling the Advisor to remember, forget, or change something durable. Kept
+// tight on purpose: this gates a FORCED save in the backstop, so a false match
+// would persist a spurious memory. Fuzzy signals ("I prefer", a bare "always")
+// are deliberately excluded — the model captures those on the first pass (the
+// trusted `low` floor) or the session-close extraction net catches them later.
+const MEMORY_PATTERNS: RegExp[] = [
+  /\bremember (that|this|i|my|to|for)\b/i,
+  /\bnote that\b|\bmake a note\b|\bjot (that|this) down\b/i,
+  /\bkeep (that|this|it) in mind\b|\bbear (that|this|it) in mind\b/i,
+  /\bfrom now on\b|\bgoing forward\b/i,
+  /\bdon'?t forget\b/i,
+  /\bforget (that|about|my|the fact)\b/i,
+  /\bfor your records\b|\bfor future reference\b/i,
+  /\bsave (that|this) (to|as|in) (memory|a memory|my profile)\b/i,
+];
+
 /**
  * Classify a turn's reasoning need from the user's latest message plus any
- * Ask-Advisor entry context. Returns the effort the owner/trusted paths should
- * apply. Free/demo never consult this (they stay pinned to `none`).
+ * Ask-Advisor entry context, and flag explicit memory-capture intent. Returns
+ * the effort the owner/trusted paths should apply (free/demo stay pinned `none`)
+ * plus `memoryIntent` for the write backstop. Pure (no env / server-only).
  */
 export function classifyReasoningIntent(
   text: string | null | undefined,
@@ -100,5 +126,6 @@ export function classifyReasoningIntent(
   }
 
   const analytical = signals.length > 0;
-  return { analytical, effort: analytical ? "medium" : "none", signals };
+  const memoryIntent = MEMORY_PATTERNS.some((re) => re.test(t));
+  return { analytical, effort: analytical ? "medium" : "none", signals, memoryIntent };
 }

@@ -54,7 +54,7 @@ export interface Expect {
   minSteps?: number;
 }
 
-export type EvalTier = "retrieve" | "complex";
+export type EvalTier = "retrieve" | "complex" | "memory";
 
 export interface EvalQuestion {
   id: string;
@@ -388,6 +388,87 @@ export const QUESTIONS: EvalQuestion[] = [
       mustNotInclude: [/EXAMPLE-FUND-[E-Z]/],
     },
     note: "Multi-turn long discussion: review → scope to Tax → concrete action → beginner rationale. Judge scores cross-turn coherence + memory + adaptivity.",
+  },
+
+  // ── Tier 3: memory capture (does the model CALL save_preference?) ────────────
+  // Measures the failure this tier exists to fix: on an explicit memory request
+  // the model often acknowledges in prose but never calls the write tool. Each
+  // MEM question must fire save_preference (the save-rate metric); the two CTRL
+  // questions must NOT (the false-positive guard — a lookup/definition shouldn't
+  // write a memory). Run the reasoning A/B (EVAL_REASONING=none|low) on this tier.
+  {
+    id: "MEM1-explicit-save",
+    tier: "memory",
+    prompt: "Remember that I prefer low-fee index funds.",
+    expect: {
+      expectTools: ["save_preference"],
+      expectToolArgs: [{ tool: "save_preference", contains: /index|low|fee|fund/i }],
+      maxSteps: 3,
+    },
+    note: "The canonical explicit save. At effort 'none' grok tends to acknowledge without calling the tool.",
+  },
+  {
+    id: "MEM2-style-instruction",
+    tier: "memory",
+    prompt: "From now on, keep your answers short and skip the long disclaimers.",
+    expect: {
+      expectTools: ["save_preference"],
+      expectToolArgs: [
+        { tool: "save_preference", contains: /short|concise|brief|disclaimer|style/i },
+      ],
+      maxSteps: 3,
+    },
+    note: "A durable response-style instruction ('from now on') — should persist as a response_style memory.",
+  },
+  {
+    id: "MEM3-profile-fact",
+    tier: "memory",
+    prompt: "For your records, I'm 30 years old and investing with a 20-year time horizon.",
+    expect: {
+      expectTools: ["save_preference"],
+      expectToolArgs: [{ tool: "save_preference", contains: /30|horizon|20|age/i }],
+      maxSteps: 3,
+    },
+    note: "A stable profile fact stated explicitly — should land as a profile memory.",
+  },
+  {
+    id: "MEM4-correction",
+    tier: "memory",
+    prompt: "Actually, always lead with fees when you compare funds for me.",
+    expect: {
+      expectTools: ["save_preference"],
+      expectToolArgs: [{ tool: "save_preference", contains: /fee/i }],
+      maxSteps: 3,
+    },
+    note: "A correction phrased as a standing instruction ('always') — capture as a memory, not just an apology.",
+  },
+  {
+    // Control: a plain lookup must NOT write a memory (false-positive guard).
+    id: "MEM-C1-lookup-no-save",
+    tier: "memory",
+    prompt: "What's my single biggest holding right now?",
+    expect: {
+      expectTools: ["read_portfolio"],
+      mustInclude: ["EXAMPLE-FUND-A"],
+      mustNotCallTools: ["save_preference", "update_preference", "forget_preference"],
+    },
+    note: "Negative control: reading the portfolio is not a memory request — no write should fire.",
+  },
+  {
+    // Control: a definition must NOT write a memory (or call any data tool).
+    id: "MEM-C2-definition-no-save",
+    tier: "memory",
+    prompt: "Quick definition — what does NAV stand for?",
+    expect: {
+      anyOf: [/net asset value/i],
+      mustNotCallTools: [
+        "save_preference",
+        "update_preference",
+        "forget_preference",
+        "read_portfolio",
+      ],
+    },
+    note: "Negative control: a definitional question carries no durable preference — no write should fire.",
   },
 ];
 
