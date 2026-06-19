@@ -523,16 +523,54 @@ export function buildEvalTools(opts: BuildEvalToolsOptions = {}) {
       },
       ...shaped("cheaper"),
     }),
-    // ─── memory tools (terse synthetic stand-ins; here for surface fidelity) ──
+    // ─── memory tools ─────────────────────────────────────────────────────────
+    // save_preference / update_preference mirror the REAL descriptions + schemas
+    // (lib/memory/tools.ts) so the eval measures the model's true save-rate on
+    // memory-capture turns (the metric the reasoning A/B exists to move). The
+    // other three stay terse — they're here for surface fidelity, not measured.
     save_preference: tool({
-      description: "Save a durable user preference (how to advise them).",
-      inputSchema: z.object({ category: z.string(), content: z.string() }),
-      execute: async ({ content }) => okResult({ saved: true, content }),
+      description:
+        "Save a durable preference about the user so it loads automatically in future chats. " +
+        "Use when the user explicitly states a stable fact, preference, account detail, or how " +
+        "they want Advisor to respond. FIRST check whether this UPDATES something already saved " +
+        "(it's in your memory block, or use list_preferences) — if so call update_preference " +
+        "instead of saving a near-duplicate. Choose the most specific category. The saved " +
+        "preference does NOT affect the current chat — it activates in the next chat. Confirm to " +
+        "the user with the returned message.",
+      inputSchema: z.object({
+        category: z
+          .enum(["profile", "finance_context", "response_style", "fact"])
+          .describe(
+            "profile = stable facts about the user (risk tolerance, time horizon, timezone, age). " +
+              "finance_context = accounts, tax situation, constraints. response_style = how Advisor " +
+              "should communicate. fact = one-off ad-hoc remembers.",
+          ),
+        content: z
+          .string()
+          .min(1)
+          .max(500)
+          .describe("The fact to remember, written as a short declarative phrase."),
+        detail: z.string().max(2000).optional(),
+      }),
+      execute: async ({ content }) =>
+        okResult({
+          memoryEvent: { kind: "save", id: 1, category: "fact", content },
+          message: `Saved: ${content}. Active in your next chat.`,
+        }),
     }),
     update_preference: tool({
-      description: "Update an existing saved preference by id.",
-      inputSchema: z.object({ id: z.string(), content: z.string() }),
-      execute: async () => okResult({ updated: true }),
+      description:
+        "Update an existing preference. Pass either the numeric id (from a previous " +
+        "list_preferences call) or a distinctive substring of the current content. If the " +
+        "substring matches more than one active preference, the tool returns the candidates so " +
+        "you can ask the user to clarify before retrying.",
+      inputSchema: z.object({
+        id: z.union([z.number(), z.string()]).optional(),
+        match: z.string().optional(),
+        content: z.string().min(1).max(500),
+      }),
+      execute: async ({ content }) =>
+        okResult({ memoryEvent: { kind: "update", id: 1, content }, message: "Updated." }),
     }),
     forget_preference: tool({
       description: "Delete a saved preference by id.",

@@ -34,13 +34,41 @@ with recover-on-empty + retry-on-error resilience.
 |---|---|---|
 | **Model routing** | public pinned to its own `PUBLIC_TIER_MODELS`; multi-model fallback; recover-on-empty net | route by tool-call reliability, not just price |
 | **Prompt caching** | frozen prefix is cache-*ready* but no breakpoints sent | keep volatile data after the prefix; exploit public-chain auto-caching; clear the floor |
-| **Reasoning tokens** | `effort:none` pinned on public/demo/title/extract; owner/trusted gated by intent (`none`↔`medium`) | push more "complex math" into tools so even complex turns need less reasoning |
+| **Reasoning tokens** | `effort:none` pinned on public/demo/title/extract; owner/trusted **floored at `low`**, raised to `medium` on analytical intent | push more "complex math" into tools so even complex turns need less reasoning |
 | **Context loading** | JIT tool reads + the entry-context envelope | keep JIT default; app-layer compaction; shape tool results |
 | **Structured output** | tool-call-as-extraction via the AI SDK | one schema to the strictest intersection + Zod re-validate |
 
 ---
 
 ## 1. Model routing & tiers
+
+### Routing at a glance
+
+The single map of model + reasoning per surface. **Code defaults** are authoritative
+in [configuration.md § Environment variables](../reference/configuration.md#environment-variables)
+(the env table); the **suggested** + **reasoning** columns are the eval-backed verdict
+and live here (with the sweeps below as evidence). Reasoning per tier is
+env-overridable — see the `*_REASONING_*` rows in configuration.md.
+
+| Surface | Env var | Code default | Suggested (primary → fallback) | Reasoning |
+|---|---|---|---|---|
+| Owner / trusted chat | `TRUSTED_TIER_MODELS` | `openrouter/free,openrouter/auto` | `x-ai/grok-4.3,z-ai/glm-5.1` | `low` floor → `medium` analytical (`TRUSTED_REASONING_FLOOR`) |
+| Public chat | `PUBLIC_TIER_MODELS` | `openrouter/free` | `google/gemini-2.5-flash-lite,google/gemini-3.1-flash-lite,openai/gpt-4.1-mini` | `none` (`PUBLIC_REASONING_EFFORT`; set `low` if you run grok) |
+| Demo chat | `DEMO_TIER_MODELS` | `openrouter/free` | `openrouter/free` | `none` (`DEMO_REASONING_EFFORT`) + retry-on-400 |
+| Title | `TITLE_MODELS` | `openrouter/free` | `openrouter/free,google/gemini-2.5-flash-lite,google/gemini-3.1-flash-lite` | `none` |
+| Memory extract | `EXTRACT_MODELS` | `openrouter/free` (via `TITLE_MODELS`) | `google/gemini-2.5-flash-lite,google/gemini-3.1-flash-lite,openai/gpt-4.1-mini` | `none` (reasoning corrupts its JSON) |
+| Vision (chat) | `VISION_CHAT_MODELS` | `google/gemini-2.5-flash-lite,google/gemini-3.1-flash-lite` | = default | `none` (structured-output guard) |
+| OCR (import) | `OCR_MODELS` | `google/gemini-2.5-flash-lite,google/gemini-3.1-flash-lite` | = default | `none`/`low` |
+| Vision escalate | `VISION_CHAT_ESCALATE_MODELS` | unset | unset (cheap vision handles charts) | owner/trusted only |
+
+Two cross-cutting mechanisms make the `none` pins robust: **retry-on-400** —
+`openrouter()` retries once without the reasoning field when a model 400s "reasoning
+is mandatory / cannot be disabled" (free models that can't disable reasoning), so a
+disable-path turn isn't lost; and the **`*_REASONING_*` env overrides**, so the
+reasoning policy tracks the chosen model (point public at grok → `PUBLIC_REASONING_EFFORT=low`).
+Why **extract is paid-primary**: a probe found `openrouter/free` extraction is a
+quality lottery (1–6 facts, and *empty/unparseable JSON* at default reasoning),
+while `gemini-2.5-flash-lite` returned 9/9 facts, clean JSON, ~1.7s, ~$0.0005/run.
 
 **Route by tool-call reliability, not just price.**
 For an advisor, a dropped or garbled tool call puts a *wrong number on screen* —
@@ -274,6 +302,33 @@ exists: pay it on the few turns that earn it, not every turn. Re-run with
 set. Use `reasoning:{exclude:true}` to hide chain-of-thought from the UI (still
 billed) if a reasoning trace is ever surfaced, and verify per-model that
 `reasoning_details` is actually returned — some silently drop it.
+
+**Floor the trusted tier at `low` — tool-call reliability, not depth.**
+Reasoning effort turns out to gate *tool-calling*, not just answer depth. On an
+explicit "remember X" request the trusted primary (`x-ai/grok-4.3`) often
+acknowledges in prose but never calls `save_preference` at `effort:none`. So the
+owner/trusted paths floor at `low` (`atLeastTrustedFloor`, `lib/ai/provider.ts`):
+the intent gate can still raise to `medium`, but never below `low`. Public/demo
+keep their hard `none` pin (below) — the floor is **trusted-only** because the
+cheap public model *regresses* with reasoning.
+
+*Measured (committed eval, `EVAL_TIER=memory`, N=3, 2026-06-19), explicit
+memory-save call-rate, 0 false-positives on the lookup/definition controls in
+every cell:*
+
+| Model (tier) | `effort:none` | `effort:low` |
+|---|---|---|
+| `x-ai/grok-4.3` (trusted) | **41%** save-rate, 0% dead-ends | **100%**, 6% dead-ends |
+| `google/gemini-2.5-flash-lite` (public) | 83%, 22% dead-ends | 58%, **39%** dead-ends |
+
+Reasoning fixes trusted (41%→100%) but breaks public (save 83%→58%, dead-ends
+22%→39%) — confirming `low` is a trusted-only floor. Re-run with
+`EVAL_TIER=memory EVAL_REASONING=none|low` before retuning. The reactive
+"claimed-but-didn't-save" retry that this floor replaced is gone; a slim,
+**silent** single-attempt backstop (`app/api/chat/route.ts`) now fires only on
+explicit user memory-intent (`classifyReasoningIntent` → `memoryIntent`) when no
+write landed, capturing just the resulting memory indicator — no retry prose — and
+a true miss falls to the session-close extraction net.
 
 **Never high/max effort on structured-output paths.**
 Anthropic warns `max` overthinks structured tasks — costing more *and* risking

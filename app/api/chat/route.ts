@@ -259,16 +259,6 @@ const MEMORY_WRITE_TOOLS = new Set([
   "confirm_preference",
 ]);
 
-// A committed (past-tense) claim that the model DID something durable — including
-// bare "Updated." / "Done." / "Changed it", which is exactly what models emit on a
-// later edit in a chat (and what slips a tighter regex). We can be broad here only
-// because the trigger is GATED on `cards === null` at the call site: a real plan or
-// holding update ("updated your plan") rides a propose_* card, so those turns are
-// excluded and a forced memory write can't be mistakenly triggered by them. Benign
-// future-tense acknowledgements ("I'll keep that in mind") stay out by design.
-const MEMORY_CLAIM_RE =
-  /\b(saved|updated|changed|logged|noted|forgot|forgotten|removed|remembered|all set|done)\b/i;
-
 const MEMORY_REDO_DIRECTIVE =
   "You told me a saved memory was changed, but you did NOT call the tool that " +
   "performs it — so nothing was actually saved. If a memory should change, call " +
@@ -295,6 +285,9 @@ interface AdvisorStreamOptions {
   tools: ToolSet;
   maxOutputTokens: number;
   threadId: string;
+  /** The user EXPLICITLY asked to remember/forget/change a durable preference
+   * (lib/advisor/intent.ts). Gates the silent memory-write backstop. */
+  memoryIntent: boolean;
   setContextHeader: (res: Response) => void;
   /**
    * Persist the assistant turn. Runs inside the captured DB context. `cards`
@@ -328,10 +321,14 @@ function streamAdvisorResponse(opts: AdvisorStreamOptions): Response {
       const run = async (
         messages: ModelMessage[],
         useTools: boolean,
-        // When set, FORCE a tool call from a restricted set (the last memory-write
-        // retry): `toolChoice: "required"` + only these tools, capped to ONE step
-        // so "required" can't loop into repeated writes across steps.
+        // When set, FORCE a tool call from a restricted set (the memory-write
+        // backstop): `toolChoice: "required"` + only these tools, capped to ONE
+        // step so "required" can't loop into repeated writes across steps.
         force?: { tools: ToolSet },
+        // When true, run the generation but DON'T merge it into the visible
+        // stream — used by the silent memory backstop so its bookkeeping prose
+        // never reaches the user; only its structured memory result is captured.
+        silent = false,
       ) => {
         const gen = streamText({
           model: opts.model,
@@ -345,7 +342,7 @@ function streamAdvisorResponse(opts: AdvisorStreamOptions): Response {
           stopWhen: force ? stepCountIs(1) : stepCountIs(5),
           maxOutputTokens: opts.maxOutputTokens,
         });
-        writer.merge(gen.toUIMessageStream());
+        if (!silent) writer.merge(gen.toUIMessageStream());
         try {
           const [text, steps, finishReason, response, usage] = await Promise.all([
             gen.text,
@@ -417,62 +414,48 @@ function streamAdvisorResponse(opts: AdvisorStreamOptions): Response {
           }
         }
 
-        // Verify-and-retry the WRITE: the model claimed a memory change but no
-        // memory-write tool ran, so nothing was saved. Re-prompt (tools on, so the
-        // model can actually call update/save/forget this time) up to twice, and
-        // stop as soon as a write fires. Tool choice stays `auto`: a false claim
-        // (mere politeness) self-corrects without forcing a spurious write. The
-        // follow-up streams into the SAME assistant message, so its tool result
-        // produces the "Memory updated" chip the first attempt was missing.
-        let memoryWriteFired = a.steps.some((s) =>
+        // Memory-write backstop (SILENT). The trusted tier is floored to `low`
+        // reasoning, which lands an explicit save ~100% in eval, so this rarely
+        // fires there; it's mainly a net for the cheaper public model (~83% at
+        // `none`). Triggers on the USER'S explicit memory intent (precise patterns
+        // in classifyReasoningIntent) — not the model's prose claim, which was
+        // brittle and chatty. One forced attempt; we capture ONLY the resulting
+        // memory indicator (the chip), never the redo's bookkeeping prose, and it
+        // never streams — so no "nothing needs saving" repetition reaches the user.
+        // Gated on `cards === null` so a plan/holding card-turn isn't forced into a
+        // memory write. A miss falls to the session-close extraction net.
+        const memoryWriteFired = a.steps.some((s) =>
           s.toolCalls.some((c) => MEMORY_WRITE_TOOLS.has(c.toolName)),
         );
-        // Gate on `cards === null`: a plan/holding update rides a propose_* card,
-        // so excluding carded turns keeps the broad claim regex from forcing a
-        // memory write on "updated your plan" and the like.
-        if (text.trim() && !memoryWriteFired && cards === null && MEMORY_CLAIM_RE.test(text)) {
-          // Only the memory-write tools, for the forced final attempt.
+        if (opts.memoryIntent && !memoryWriteFired && cards === null) {
           const memoryTools = Object.fromEntries(
             Object.entries(opts.tools).filter(([name]) => MEMORY_WRITE_TOOLS.has(name)),
           ) as ToolSet;
-          let convo = [...opts.messages, ...a.response.messages];
-          for (let attempt = 0; attempt < 2 && !memoryWriteFired; attempt++) {
-            // Attempt 0 nudges (tool choice auto) so a false claim — the model
-            // misspoke and nothing needs saving — can self-correct without a write.
-            // The LAST attempt forces a memory tool so a genuine missed write lands.
-            const force =
-              attempt === 1 && Object.keys(memoryTools).length > 0
-                ? { tools: memoryTools }
-                : undefined;
+          if (Object.keys(memoryTools).length > 0) {
             const redo = await run(
-              [...convo, { role: "user" as const, content: MEMORY_REDO_DIRECTIVE }],
+              [
+                ...opts.messages,
+                ...a.response.messages,
+                { role: "user" as const, content: MEMORY_REDO_DIRECTIVE },
+              ],
               true,
-              force,
+              { tools: memoryTools },
+              true, // silent — capture the write, don't show the redo
             );
-            if (!redo.ok) break;
-            inputTokens += redo.usage.inputTokens ?? 0;
-            outputTokens += redo.usage.outputTokens ?? 0;
-            modelId = redo.response.modelId ?? modelId;
-            memoryWriteFired = redo.steps.some((s) =>
-              s.toolCalls.some((c) => MEMORY_WRITE_TOOLS.has(c.toolName)),
-            );
-            const redoText = joinStepText(redo.steps) || redo.text;
-            if (redoText.trim()) text = `${text}\n\n${redoText}`.trim();
-            // Append the redo's prose + the now-landed memory indicator in order.
-            parts = [...parts, ...buildParts(redo.steps)];
-            // `cards` is null here (the trigger gates on it), so a redo's cards —
-            // unusual on a forced memory write — simply take its place.
-            const redoCards = extractCards(redo.steps);
-            if (redoCards) cards = redoCards;
-            convo = [...convo, ...redo.response.messages];
-            if (memoryWriteFired) {
+            if (redo.ok) {
+              inputTokens += redo.usage.inputTokens ?? 0;
+              outputTokens += redo.usage.outputTokens ?? 0;
+              const landed = redo.steps.some((s) =>
+                s.toolCalls.some((c) => MEMORY_WRITE_TOOLS.has(c.toolName)),
+              );
+              // Only the memory indicator(s) — the redo's prose is bookkeeping.
+              parts = [...parts, ...buildParts(redo.steps).filter((p) => p.type === "memory")];
               console.warn(
-                `[advisor] recovered missed memory write (${opts.path}) on attempt ${attempt + 1}`,
+                landed
+                  ? `[advisor] memory backstop landed a missed write (${opts.path})`
+                  : `[advisor] memory intent but write never landed (${opts.path})`,
               );
             }
-          }
-          if (!memoryWriteFired) {
-            console.warn(`[advisor] memory write claimed but never landed (${opts.path})`);
           }
         }
       }
@@ -712,6 +695,7 @@ export async function POST(req: Request) {
         tools,
         maxOutputTokens: 1024,
         threadId: finalThreadId,
+        memoryIntent: reasoningDecision.memoryIntent,
         setContextHeader,
         persist: (text, modelId, cards) =>
           appendMessage({
@@ -814,6 +798,7 @@ export async function POST(req: Request) {
         tools,
         maxOutputTokens: tier === "trusted" ? 2048 : 1024,
         threadId: finalThreadId,
+        memoryIntent: reasoningDecision.memoryIntent,
         setContextHeader,
         persist: (text, modelId, cards) =>
           appendMessage({
@@ -882,6 +867,7 @@ export async function POST(req: Request) {
       tools,
       maxOutputTokens: 2048,
       threadId: finalThreadId,
+      memoryIntent: reasoningDecision.memoryIntent,
       setContextHeader,
       persist: (text, modelId, cards) =>
         appendMessage({

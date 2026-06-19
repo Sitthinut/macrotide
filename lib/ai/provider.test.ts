@@ -437,7 +437,7 @@ describe("openrouter fetch wrapper", () => {
     expect(body.reasoning).toEqual({ effort: "none" });
   });
 
-  it("owner path does NOT pin reasoning (keeps model default for the owner)", async () => {
+  it("owner path FLOORS reasoning to `low` (the eval-backed memory-save floor)", async () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
     process.env.TRUSTED_TIER_MODELS = "openrouter/auto"; // single model → no models[] override either
 
@@ -450,6 +450,7 @@ describe("openrouter fetch wrapper", () => {
       });
     });
 
+    // No reasoningEffort passed (gate off / non-analytical) → floored to `low`.
     const p = resolveOwnerProvider();
     if (!p.model || typeof p.model === "string") throw new Error("expected model object");
     try {
@@ -461,6 +462,64 @@ describe("openrouter fetch wrapper", () => {
     }
 
     const body = JSON.parse(capturedBody as string);
-    expect(body.reasoning).toBeUndefined();
+    expect(body.reasoning).toEqual({ effort: "low" });
+  });
+
+  it("public effort is PUBLIC_REASONING_EFFORT-overridable (grok-on-public)", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    delete process.env.PUBLIC_TIER_MODELS;
+    process.env.PUBLIC_REASONING_EFFORT = "low";
+    // Fixed by env; still ignores the gated `medium` (public is not intent-gated).
+    const body = await captureBody(() =>
+      resolveTierProvider("public", { reasoningEffort: "medium" }),
+    );
+    expect(body.reasoning).toEqual({ effort: "low" });
+    delete process.env.PUBLIC_REASONING_EFFORT;
+  });
+
+  it("trusted floor is TRUSTED_REASONING_FLOOR-overridable", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    process.env.TRUSTED_TIER_MODELS = "openrouter/auto";
+    process.env.TRUSTED_REASONING_FLOOR = "medium";
+    const body = await captureBody(() => resolveOwnerProvider()); // no effort → floors to medium
+    expect(body.reasoning).toEqual({ effort: "medium" });
+    delete process.env.TRUSTED_REASONING_FLOOR;
+  });
+
+  it("retries WITHOUT reasoning when a model 400s 'reasoning is mandatory'", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    delete process.env.PUBLIC_TIER_MODELS; // public pins effort:none → sends the disable
+    delete process.env.PUBLIC_REASONING_EFFORT;
+    const bodies: string[] = [];
+    vi.stubGlobal("fetch", async (_url: unknown, init?: RequestInit) => {
+      bodies.push(init?.body as string);
+      if (bodies.length === 1) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              message: "Reasoning is mandatory for this endpoint and cannot be disabled.",
+              code: 400,
+            },
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const p = resolveTierProvider("public");
+    if (!p.model || typeof p.model === "string") throw new Error("expected model object");
+    try {
+      await p.model.doGenerate({
+        prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      });
+    } catch {
+      // forward
+    }
+    expect(bodies.length).toBe(2); // first (reasoning:none) → 400 → one retry
+    expect(JSON.parse(bodies[0]).reasoning).toEqual({ effort: "none" });
+    expect(JSON.parse(bodies[1]).reasoning).toBeUndefined(); // dropped on retry
   });
 });
