@@ -26,7 +26,7 @@ plan, and journal — including plan edits it proposes as accept/reject cards.
 
 **Portfolio, ledger & analytics**
 
-- **Unified ledger** — your holdings are a projection of one buy/sell + balance ledger; full-screen History and per-fund Position pages, in-place edits, custom self-priced assets, and graceful handling of unknown cost basis
+- **Unified ledger** — your holdings are an event-sourced projection of one buy / sell / balance ledger, so every figure self-corrects on the latest NAV; full-screen History and per-fund Position pages with in-place edits, custom self-priced assets, tracked cash you can reserve for a purpose so an emergency fund doesn't drag your return, and graceful handling of unknown cost basis
 - **Performance** — headline total return on contributed capital, with a full breakdown: realized and unrealized gains, money-weighted return (XIRR) per-fund and whole-portfolio, cost-basis timeline, contributions and income
 - **Wealth-over-time chart** — portfolio value vs. net invested over time, replayed from your ledger so it shows what you actually held (exited funds included)
 - **Plain-language health checks** — allocation drift, blended fees, cash drag, and look-through diversification (underlying single-name concentration, feeder-aware); fee-creep alerts you can dismiss or snooze
@@ -36,24 +36,24 @@ plan, and journal — including plan edits it proposes as accept/reject cards.
 
 **AI Advisor**
 
-- **Grounded streaming chat** — knows your real portfolio, plan, and journal; tool-calls, accept/reject proposal cards, performance-vs-index and plan-anchored rebalancing guidance
-- **In-chat vision** — attach images for multi-image holdings reconciliation (snapshot vs transaction-history auto-detected) into an editable importer, plus chart / factsheet Q&A
+- **Grounded streaming chat** — knows your real portfolio, plan, and journal, with tool-calls, accept/reject proposal cards, performance-vs-index and plan-anchored rebalancing guidance
+- **In-chat vision** — attach images for multi-image holdings reconciliation (snapshot vs transaction-history auto-detected) into an editable importer, plus chart and factsheet Q&A
 - **Long-term memory + chat archival** — recall, full-text search, and session lifecycle with preference extraction; you correct the Advisor in words (no ratings bar) and it remembers, with every write shown inline and reversible
-- **Built to be reliable** — empty-turn recovery, provider fallback, a configurable cheap-paid public tier with token / cost caps, and a committed eval harness in CI
+- **Built to be reliable** — empty-turn recovery, multi-provider fallback, a configurable cheap-paid public tier with token and cost caps, and a committed eval harness in CI
 
 **Funds & markets**
 
 - **Fund finder & screener** — fuzzy, feeder-aware search over priceable **share classes** with per-class fee, tax wrapper, and 1-year return; screen by tracked index (S&P 500, SET50…) for the cheapest trackers; shows buyable funds by default while search finds any active fund you might hold; TER ranking
-- **Fund detail** — per-share-class price and fund-size (AUM) history, holdings by asset type, and feeder look-through to underlying holdings
-- **Market data** — live index levels (FMP / EODHD with ETF-proxy + Yahoo fallback) + FX, Thai fund NAVs and history (Thai SEC), and RSS news, over a resilient stale-on-error cache
-- **Benchmarks & models** — match-or-beat the market on a total-return basis (global, US, regional, and Thai indices), and model portfolios you can browse, fork, and set as a target that drives drift + health checks
+- **Fund detail** — per-share-class price and fund-size (AUM) history, holdings by asset type, and feeder look-through to the underlying holdings
+- **Market data** — live index levels, FX, Thai fund NAVs and history (Thai SEC), and RSS news, over a resilient stale-on-error cache
+- **Benchmarks & models** — match-or-beat the market on a total-return basis (global, US, regional, and Thai indices); browse, fork, and set a model portfolio as the target that drives drift and health checks
 
 **Platform**
 
-- **Sign-in** — passkeys + Google, with an isolated, ephemeral per-session demo mode
+- **Sign-in** — passkeys and Google, with an isolated, ephemeral per-session demo on its own in-memory SQLite
 - **Multi-user** — per-user data isolation, tiers and quotas, owner admin
 - **Storage** — a two-database SQLite split (precious `app.db` + regenerable `market.db`) on Drizzle, with daily backups
-- **Scheduled jobs** — daily NAV freshness + all-funds NAV/AUM history pre-warm on systemd timers, plus a nightly SEC fund-data ELT pipeline with risk-spectrum asset classification
+- **Scheduled jobs** — NAV/AUM history pre-warm and a nightly SEC fund-data ELT pipeline run on systemd timers, so your view stays current
 
 For what's next see the **[project board](https://github.com/users/Sitthinut/projects/2)**;
 for shipped detail see [CHANGELOG.md](./CHANGELOG.md) and the **[docs/](./docs)**

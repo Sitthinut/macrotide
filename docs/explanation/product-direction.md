@@ -1,6 +1,6 @@
 # Product direction
 
-*Last updated: 2026-05-30*
+*Last updated: 2026-06-18*
 
 Why Macrotide exists, who it's for, and how the pieces fit into one product.
 This is the durable **why**; the forward build order lives on the
@@ -132,7 +132,13 @@ standard allocation taxonomy, sufficient for an index portfolio:
   (REITs), commodities (gold), and crypto. A catch-all for diversifiers and
   higher-volatility, non-traditional exposures.
 - **`cash`** — cash and near-cash (deposits, money-market), which the health
-  view watches for cash drag.
+  view watches for cash drag. Real bank cash is first-class: you record a named
+  account's balance (or explicit deposits/withdrawals) and it counts in net
+  worth, gets its own allocation slice, and rides the value chart. You can give a
+  cash account a **Purpose** — reserve it (an emergency fund, goal savings) so it
+  stays in net worth but is carved out of your return — and choose per view
+  whether idle investable cash drags the money-weighted return. See
+  [Cash](./cash.md).
 
 That's the whole taxonomy — there isn't a missing class to add; new instruments
 (crypto included) slot into `alternative` rather than needing their own bucket.
@@ -227,6 +233,19 @@ do.
 - **No tax filing / advice** — it can explain how SSF/RMF/Thai ESG work; it is
   not a tax service.
 - **No real-time trading-desk data** — long-horizon cadence, not tick data.
+- **No named goals or targets on cash — and no rich earmarking — in the cash
+  feature itself.** Cash carries a single per-account Purpose (one Role + an
+  optional label) and reserves either a fixed amount or the whole balance. The
+  richer version — named goals with a target amount and date, a trajectory/glide
+  path, multiple earmark slices in one account (฿200k Emergency + ฿100k House +
+  the rest investable), and reserving *funds* (not just cash) — belongs to the
+  goals / wealth-path planner ([#36](https://github.com/users/Sitthinut/projects/2)),
+  which will sit on top as a read-only overlay referencing accounts rather than a
+  money container. The account-scope earmark is the forward-fit hook for it.
+- **No FX for non-baht cash yet, and no Advisor cash import.** Cash is THB-only
+  for now (the currency/FX plumbing is in place but the rate fetch and currency
+  picker are deferred), and the Advisor's chat import is fund-only — recording a
+  cash balance by chat is a later add. Both are tracked on the board.
 
 ## References
 

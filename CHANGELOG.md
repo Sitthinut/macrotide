@@ -49,6 +49,29 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   (Accredited / Ultra / Provident / Inst. / Fixed-term). Replaces the old blunt
   retail gate that hid ~110 individually-buyable accredited/ultra funds.
 
+- **Cash is now a first-class part of the portfolio.** You can record explicit
+  cash events against a named account — a **Deposit** or **Withdraw**, or a **Set
+  balance** that simply states how much cash an account holds as of a date. Idle
+  bank cash shows up alongside funds in allocation, net worth, and the value chart
+  (priced 1.0, foreign cash converted to baht). Recording cash doesn't disturb your
+  funds: a buy never silently debits a tracked cash account, so the two stay
+  independent unless you say otherwise. Recorded cash also corrects the automatic
+  in-transit estimate: asserting a balance stops deliberately-parked sale proceeds
+  from being read as withdrawn, so lifetime contribution no longer double-counts
+  money that was reinvested later. Deposits and withdrawals flow into the
+  money-weighted return as real external cash.
+
+- **Reserve cash for a purpose, and choose whether idle cash counts toward your
+  return.** Each cash account carries a **Purpose** — a **Role** (Investable or
+  Reserved) plus an optional free-text label like "Emergency" or "House". Reserved
+  cash (an emergency fund, money saved for a goal) stays in your net worth and gets
+  its own slice in the allocation donut, but is carved out of your return so it no
+  longer drags performance. Investable dry powder is governed by a per-view
+  **Return basis** toggle — *Include cash* (the default, the honest money-weighted
+  number, so idle cash you haven't deployed visibly drags) or *Exclude cash* (judge
+  only the funds you've actually bought) — flipped right at the return figure and
+  remembered as your preference.
+
 - **The Advisor reads chat images through a vision tool, keeping the conversation
   fast.** The chat model now stays on every turn and reads an attached screenshot
   by calling an `examine_image` tool (instead of swapping the whole turn onto a
