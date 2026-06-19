@@ -9,6 +9,7 @@
 import { NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
 import { listBuckets } from "@/lib/db/queries/buckets";
+import { listEarmarks } from "@/lib/db/queries/earmarks";
 import { listHeldQuoteKeys, listHoldings } from "@/lib/db/queries/holdings";
 import { listModelPortfolios } from "@/lib/db/queries/models";
 import { getPlan } from "@/lib/db/queries/plan";
@@ -38,12 +39,19 @@ export async function GET() {
 
     // ── 4. Compute health signals (with underlying-exposure look-through) ──
     const lookThrough = computeLookThrough(aggregate.holdings);
+    // Reserved cash (#149) → its own allocation slice, not the investable Cash sleeve.
+    const reservedTickers = new Set(
+      listEarmarks()
+        .filter((e) => e.role === "reserved" && e.ticker)
+        .map((e) => (e.ticker as string).toUpperCase()),
+    );
     const health = computeHealth(
       aggregate.holdings,
       aggregate.totalValue,
       targetModel?.mix ?? null,
       targetModel?.ter ?? null,
       lookThrough,
+      reservedTickers,
     );
 
     // ── 5. Derive composite score ─────────────────────────────────────────

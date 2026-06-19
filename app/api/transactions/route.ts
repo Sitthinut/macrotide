@@ -12,6 +12,7 @@ import {
 } from "@/lib/db/queries/transactions";
 import {
   isAnchorKind,
+  isCashAnchorKind,
   LEDGER_KINDS,
   promoteAnchorKinds,
   signedAmount,
@@ -44,6 +45,8 @@ const txnInput = z
     // (the Thai-app case). Units are DERIVED from value ÷ NAV(tradeDate) here —
     // never required as input (#130). Ignored once `units` is given.
     value: z.number().finite().nonnegative().nullish(),
+    // "No money moved" override on a Set balance (cash_balance) — see settlement-cash.ts.
+    reconcile: z.boolean().nullish(),
     amount: z.number().finite().nonnegative(),
     fee: z.number().finite().nonnegative().nullish(),
     quoteSource: z.string().trim().min(1).max(40).default("market"),
@@ -144,6 +147,8 @@ export async function POST(req: Request) {
         units: t.units ?? null,
         // The stated current value — the fact for a value-only Balance; NULL otherwise.
         value: anchor ? (t.value ?? null) : null,
+        // "No money moved" override — only on a Set balance (cash_balance).
+        reconcile: isCashAnchorKind(kind) ? (t.reconcile ?? false) : null,
         pricePerUnit: t.pricePerUnit ?? null,
         // A Balance's user-entered current price; a trade's execution price (if given)
         // doubles as its market point. Never a value derived from units here.
