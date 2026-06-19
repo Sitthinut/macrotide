@@ -52,6 +52,17 @@ describe("parseEntryContext", () => {
     // image-only envelope has no text fields → treated as empty.
     expect(parseEntryContext({ image: { ref: "blob:123" } })).toBeNull();
   });
+
+  it("keeps a trimmed detail block and caps its length", () => {
+    expect(parseEntryContext({ detail: "  the full memory body  " })?.detail).toBe(
+      "the full memory body",
+    );
+    const long = "x".repeat(5000);
+    expect(parseEntryContext({ detail: long })?.detail).toHaveLength(2000);
+    // a detail-only envelope is non-empty (the memory-edit handoff).
+    expect(parseEntryContext({ detail: "body" })).toEqual({ detail: "body" });
+    expect(parseEntryContext({ detail: "   " })).toBeNull();
+  });
 });
 
 describe("isEmptyEntryContext", () => {
@@ -89,6 +100,17 @@ describe("entryContextMessage", () => {
 
   it("returns null when the envelope is empty", () => {
     expect(entryContextMessage({})).toBeNull();
+  });
+
+  it("renders a detail block as its own labeled section", () => {
+    const msg = entryContextMessage({
+      screen: "journal",
+      intent: "edit_memory",
+      detail: "Prefers low-fee index funds and dislikes single-stock bets.",
+    });
+    const text = msg?.content as string;
+    expect(text).toContain("Screen: journal");
+    expect(text).toContain("Detail:\nPrefers low-fee index funds");
   });
 });
 

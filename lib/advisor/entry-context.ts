@@ -20,6 +20,14 @@ export interface EntryContext {
   /** Compact pre-computed facts the UI already has (e.g. `{ trackingGapPp: 6.2 }`). */
   signals?: Record<string, string | number>;
   /**
+   * A longer free-text block the screen already has on hand — e.g. the recall-only
+   * `body` of a memory the user is editing from Journal → Memory, which is too long
+   * for `subject`/`signals` and must not appear in the visible/persisted message.
+   * Riding it here lets the Advisor see the whole memory without leaking its id or
+   * polluting the chat title. Capped at MAX_DETAIL_LEN.
+   */
+  detail?: string;
+  /**
    * RESERVED for a future in-chat vision handoff: an image reference. Declared so
    * the envelope is the single, forward-compatible place that work will land —
    * not parsed or rendered yet.
@@ -30,12 +38,13 @@ export interface EntryContext {
 const MAX_SIGNALS = 12;
 const MAX_VALUE_LEN = 80;
 const MAX_FIELD_LEN = 120;
+const MAX_DETAIL_LEN = 2000;
 
 /** True when the envelope carries nothing worth injecting (ignores the unused `image`). */
 export function isEmptyEntryContext(ctx: EntryContext | null | undefined): boolean {
   if (!ctx) return true;
   const hasSignals = !!ctx.signals && Object.keys(ctx.signals).length > 0;
-  return !ctx.screen && !ctx.intent && !ctx.subject && !hasSignals;
+  return !ctx.screen && !ctx.intent && !ctx.subject && !hasSignals && !ctx.detail;
 }
 
 /**
@@ -54,6 +63,10 @@ export function parseEntryContext(raw: unknown): EntryContext | null {
     screen: str(r.screen),
     intent: str(r.intent),
     subject: str(r.subject),
+    detail:
+      typeof r.detail === "string" && r.detail.trim()
+        ? r.detail.trim().slice(0, MAX_DETAIL_LEN)
+        : undefined,
   };
 
   if (r.signals && typeof r.signals === "object" && !Array.isArray(r.signals)) {
@@ -87,6 +100,9 @@ export function entryContextMessage(ctx: EntryContext): ModelMessage | null {
       lines.push(`- ${k}: ${v}`);
     }
   }
+  // Longer free-text last, on its own line, so the labeled fields above stay
+  // scannable when the detail spans several lines.
+  if (ctx.detail) lines.push(`Detail:\n${ctx.detail}`);
   if (lines.length === 0) return null;
   const body =
     "[Context from the screen the user launched this question from. Use it to " +

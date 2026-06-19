@@ -52,8 +52,13 @@ open **Journal → Memory**.
 old row is stamped with an end date and a new row takes its place (and any links
 re-point to the new row in the same transaction). On the Memory page, memories
 aren't edited in a text box — that would lose the provenance trail; instead
-**Edit** seeds a chat turn so the change flows through the Advisor and is
-captured like any other correction.
+**Edit** opens a fresh chat where the *Advisor* asks what you'd like to change,
+then captures your answer like any other correction. It only acts once you've
+said what to change — there's no synthesized "change it" turn to act on
+prematurely. The memory's full `content` and longer `body` ride along as hidden
+context on your reply (never shown in the bubble or the chat title), so the
+Advisor targets the right memory and sees the whole of it, not just the short
+`content` line.
 
 ### Confirming
 

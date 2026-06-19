@@ -20,7 +20,10 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   memory: every write shows a quiet status line in the chat (click it to see what
   changed), and **Journal → Memory** is the browsable, reversible record of
   everything the Advisor has learned (review, forget/restore, or ask the Advisor
-  to change a memory). The store is self-maintaining — each write reconciles
+  to change a memory — Edit opens a fresh chat where the Advisor asks what to
+  change, with the whole memory in view, not just its summary line). Memory
+  writes are verified so a change the Advisor says it made actually lands.
+  The store is self-maintaining — each write reconciles
   against what's already saved (add / update / skip) instead of piling up
   duplicates; inferred memories that go unreinforced decay to recall-only while
   explicit ones never do; and an extracted memory can never silently override

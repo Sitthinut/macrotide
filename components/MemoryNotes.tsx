@@ -62,22 +62,33 @@ function fmtForgottenAt(iso: string): string {
   return `${parts} (${tz})`;
 }
 
-// Memories have no direct edit field by design —
-// a change flows through Advisor so it stays concise, consistent, and provenance-
-// tracked (ADR 0006). "Edit" opens a NEW chat (so it doesn't land in whatever
-// conversation was open): the visible bubble shows a short reference (the
-// `content` line, never the long body), while the hidden `send` carries the memory
-// id so the Advisor targets the right row via update_preference and asks what to
-// change before touching anything.
+// Memories have no direct edit field by design — a change flows through Advisor
+// so it stays concise, consistent, and provenance-tracked (ADR 0006). "Edit"
+// opens a NEW chat (so it doesn't land in whatever conversation was open) whose
+// first turn is the ADVISOR asking what to change — not a synthesized user
+// message. That's deliberate: with no user "go-ahead" on turn 1, the Advisor
+// can't edit before the user has actually said what to change; it only acts on
+// the reply. The memory's content + recall-only body ride the hidden entry-
+// context envelope (attached to that first reply), so the Advisor targets the
+// right row via update_preference and sees the full memory — without leaking the
+// internal id or the long body into any visible/persisted message.
 function askAdvisorToEdit(row: PreferenceRow) {
-  // A clean, natural message (no internal id, no bracketed directive) — it's
-  // both shown to the user AND persisted/titled, so it must read like real
-  // speech. The Advisor identifies the memory by its content (update_preference
-  // matches by substring) and follows the system-prompt rules: never reveal the
-  // id, summarize rather than quote, ask before changing anything.
-  const prompt = `I'd like to update my saved memory: "${row.content}". Help me change it.`;
+  // The opener quotes the short `content` line (never the long body) and asks
+  // what to change. It's a canned assistant message — deterministic, so it always
+  // asks first regardless of model quality.
+  const opener = `You'd like to update this saved memory: "${row.content}". What would you like to change?`;
+  const context = {
+    screen: "journal",
+    intent: "edit_memory",
+    // Distinctive substring update_preference matches on; the full content also
+    // rides the opener above, so a cap here is just a hint.
+    subject: row.content,
+    // The recall-only detail (when present) — the Advisor sees the whole memory
+    // without it ever appearing in a visible/persisted message.
+    ...(row.body?.trim() ? { detail: row.body } : {}),
+  };
   window.dispatchEvent(
-    new CustomEvent("ai-prompt", { detail: { display: prompt, send: prompt, newChat: true } }),
+    new CustomEvent("ai-prompt", { detail: { opener, context, newChat: true } }),
   );
 }
 
