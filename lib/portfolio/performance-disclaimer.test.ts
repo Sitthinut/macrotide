@@ -8,13 +8,13 @@ describe("performanceDisclaimer", () => {
 
   it("no benchmark, holds a dividend fund → balance-only sentence", () => {
     expect(performanceDisclaimer(false, true)).toBe(
-      "Some of your funds pay dividends as cash. Your total return is a little higher than this line shows.",
+      "Some funds pay dividends out, so your real total return is a bit higher than shown.",
     );
   });
 
   it("TR benchmark + dividend fund → portfolio understates vs benchmark", () => {
     expect(performanceDisclaimer(true, true)).toBe(
-      "Your funds pay dividends as cash, so your line may run slightly below this total-return benchmark.",
+      "Your funds pay dividends out, so your line can sit just below this benchmark.",
     );
   });
 

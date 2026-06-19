@@ -22,13 +22,16 @@ import { useSyncExternalStore } from "react";
 export interface PortfolioUiState {
   /** Active portfolio id; "all" is the combined view. */
   activeId: string;
+  /** Asset-class filter for the holdings list ("all" or an AssetClass). Lives here
+   *  so it survives navigating to a position and back, like `activeId`. */
+  filter: string;
   /** Pending "open edit sheet for this id" intent, or null when consumed. */
   editTarget: string | null;
   /** Incrementing counter; a change signals a pending "open new sheet" intent. */
   newNonce: number;
 }
 
-let state: PortfolioUiState = { activeId: "all", editTarget: null, newNonce: 0 };
+let state: PortfolioUiState = { activeId: "all", filter: "all", editTarget: null, newNonce: 0 };
 
 const listeners = new Set<() => void>();
 
@@ -58,6 +61,12 @@ export function setActiveId(id: string) {
   setState({ activeId: id });
 }
 
+/** Set the holdings asset-class filter (persists across position navigation). */
+export function setFilter(f: string) {
+  if (state.filter === f) return;
+  setState({ filter: f });
+}
+
 /** Request the create-portfolio sheet. App.tsx consumes this once. */
 export function requestNew() {
   setState({ newNonce: state.newNonce + 1 });
@@ -85,6 +94,7 @@ export function usePortfolioUi() {
   return {
     ...snapshot,
     setActiveId,
+    setFilter,
     requestNew,
     requestEdit,
     consumeEditTarget,

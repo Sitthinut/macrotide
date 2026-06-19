@@ -52,7 +52,15 @@ export type TxnKind =
   | "split"
   | "reinvest"
   | "opening"
-  | "snapshot";
+  | "snapshot"
+  // Explicit cash events (issue #149), scoped to a named cash account (the ticker).
+  // They fold into a held-cash POSITION at face value (1 ฿ = 1 unit, avg cost 1) so
+  // bank balances show up alongside funds, but never touch fund net-invested /
+  // realized gains. The bucket-level contribution + in-transit override lives in the
+  // settlement-cash fold; here they only move the cash position.
+  | "deposit"
+  | "withdraw"
+  | "cash_balance";
 
 export type CostBasisMethod = "average" | "fifo";
 
@@ -79,6 +87,18 @@ export interface LedgerTxn {
   pricePerUnit?: number | null;
   /** Signed THB cash flow; magnitude is the basis (buy) or proceeds (sell). */
   amount: number;
+  /**
+   * Trade-date FX rate (native → THB). Read by the settlement-cash fold to value a
+   * `cash_balance` assertion in THB (`units × fxToThb`); 1 for THB. Ignored elsewhere.
+   */
+  fxToThb?: number | null;
+  /**
+   * `cash_balance` only: the "no money moved" override (#149). When true, the Set
+   * balance is a pure reconciliation — no contribution flow, and it clears the bucket's
+   * in-transit settlement lots. When false/absent, the change vs the prior asserted
+   * balance is a contribution/withdrawal. See lib/portfolio/settlement-cash.ts.
+   */
+  reconcile?: boolean | null;
   /** Secondary tie-breaker when ids are absent. */
   createdAt?: string;
 }
@@ -354,6 +374,34 @@ export function reduceLots(
       case "fee": {
         // Standalone account fee — expense, no basis effect, no realized gain.
         expenses.push({ ticker, tradeDate, amount: magnitude });
+        break;
+      }
+      case "deposit": {
+        // Cash into a bank account — a position add at face: `units` is the amount
+        // in the account's NATIVE currency (e.g. 100 for $100), avg cost 1, so the
+        // value series prices it units × 1 × FX. NOT added to net-invested: cash
+        // contribution rides the settlement-cash external-flow fold (in THB), not
+        // the fund cost-basis timeline.
+        const units = txn.units ?? 0;
+        if (units > 0) applyBuy(method, avg, fifo, ticker, units, units, true);
+        break;
+      }
+      case "withdraw": {
+        // Cash out of a bank account — removes position at face (native units). No
+        // realized event (cash gains nothing); over-withdraw is flagged like an oversell.
+        const units = txn.units ?? 0;
+        if (units > 0) {
+          applySell(method, avg, fifo, ticker, units, units, tradeDate, true, warnings);
+        }
+        break;
+      }
+      case "cash_balance": {
+        // Absolute restatement of a cash balance (the cash analogue of a fund
+        // Balance): units = the asserted NATIVE balance (resolved upstream for a
+        // value-only row), priced at 1. Resets the position; never touches net-invested.
+        const units = txn.units ?? 0;
+        applyAnchor(method, avg, fifo, ticker, units, units > 0 ? 1 : null, units > 0);
+        costKnown.set(ticker, true);
         break;
       }
     }

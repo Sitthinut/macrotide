@@ -75,11 +75,64 @@ export const holdings = sqliteTable(
      * `holdings` denormalizes its display fields and never joins fund_catalog.
      */
     quoteSource: text("quote_source").notNull().default("market"),
+    /**
+     * Native currency for a `cash` holding (issue #149) — e.g. "THB", "USD".
+     * The ticker of a cash account is its NAME, not a symbol, so currency can't
+     * be inferred and is stored here; valuation prices cash at 1.0 in this
+     * currency × FX. NULL for non-cash holdings (currency inferred from the
+     * routing key, see lib/market/currency.ts).
+     */
+    currency: text("currency"),
     acquiredOn: text("acquired_on"),
     createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
     updatedAt: text("updated_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
   },
   (table) => [index("idx_holdings_bucket").on(table.bucketId)],
+);
+
+// Cash earmarks (issue #149) — a DESIGNATION of existing cash, never new money. An
+// earmark marks part (or all) of a cash account as "reserved" for a purpose, which
+// excludes that slice from INVESTMENT return while net worth + allocation still count
+// the full balance. One mechanism, multi-scope: `account` (v1) sets aside cash on one
+// account; `portfolio`/`goal` scopes are schema-ready for a later UI / #36.
+//
+// Keyed on the STABLE identity `(bucketId, ticker)` — NOT a `holdings.id` FK: holdings
+// is a derived projection whose rows are dropped/recreated on rebuild (id reassigned),
+// so an id reference would dangle or silently re-point. A ticker rename must cascade
+// here exactly as the ledger rename does (editHoldingViaLedger). Stores no money fact
+// — it is metadata, never a ledger event (facts-only stays intact).
+export const earmarks = sqliteTable(
+  "earmarks",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: text("user_id").references(() => user.id),
+    // 'account' (v1) | 'portfolio' | 'goal' (schema-ready, no UI yet).
+    scope: text("scope").notNull().default("account"),
+    // The account's RETURN role (#149): 'reserved' = set aside, excluded from the
+    // investment return (its own allocation slice; full balance still in net worth);
+    // 'investable' = counts toward the return — the row then exists only to carry the
+    // `purpose` label (an objective on dry powder, e.g. "Retirement"). Only `reserved`
+    // rows drive the reserve math (resolveEarmarks).
+    role: text("role").notNull().default("reserved"),
+    bucketId: text("bucket_id")
+      .notNull()
+      .references(() => buckets.id, { onDelete: "cascade" }),
+    // The cash account's ticker for `account` scope; NULL for `portfolio` scope.
+    ticker: text("ticker"),
+    // Reserved amount in `currency`; NULL means "All" (the whole balance, auto-tracks).
+    amount: real("amount"),
+    // Native currency the `amount` is expressed in (matches the cash account currency).
+    currency: text("currency"),
+    // Optional free-text purpose label (e.g. "Emergency"). Rich named goals are #36.
+    purpose: text("purpose"),
+    createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
+    updatedAt: text("updated_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
+  },
+  (table) => [
+    // One earmark per (bucket, ticker, scope) in v1 — the account split is single.
+    uniqueIndex("idx_earmarks_target").on(table.bucketId, table.ticker, table.scope),
+    index("idx_earmarks_bucket").on(table.bucketId),
+  ],
 );
 
 // Transaction ledger — the buy/sell/dividend event log behind realized gains,
@@ -112,7 +165,9 @@ export const transactions = sqliteTable(
     /**
      * Event type. Plain TEXT validated by Zod at the route boundary (the
      * action_item_states precedent) so a new kind needs no migration. Set:
-     *   buy | sell | dividend | fee | split | reinvest
+     *   buy | sell | dividend | fee | split | reinvest    (fund deltas)
+     *   opening | snapshot                                 (fund position anchors)
+     *   deposit | withdraw | cash_balance                 (explicit cash, #149)
      */
     kind: text("kind").notNull(),
     /**
@@ -142,8 +197,9 @@ export const transactions = sqliteTable(
      * SIGNED THB cash flow — the SOLE money-weighted-return primitive, always
      * present even when units/price are blank. Sign convention (validated at
      * the route, never silently coerced):
-     *   buy / fee / reinvest-buy leg → NEGATIVE (cash out)
-     *   sell / cash dividend / withdrawal → POSITIVE (cash in)
+     *   buy / fee / reinvest-buy leg / cash deposit → NEGATIVE (cash out)
+     *   sell / cash dividend / cash withdraw → POSITIVE (cash in)
+     *   split / snapshot / cash_balance → 0 (no cash moves)
      * Already in THB. `fxToThb` is NEVER re-applied to this value — doing so
      * re-introduces the mixed-currency double-count.
      */
@@ -187,6 +243,15 @@ export const transactions = sqliteTable(
      * rule — see AGENTS.md § Ledger and ADR 0004.)
      */
     value: real("value"),
+    /**
+     * "No money moved" override on a `cash_balance` (Set balance) row (#149). NULL/false
+     * = the change vs the prior asserted balance is treated as money in/out (a
+     * contribution/withdrawal); true = a pure reconciliation (interest, a correction, or
+     * asserting parked sale proceeds) — no contribution flow, and it clears that bucket's
+     * in-transit settlement lots. Only meaningful for `cash_balance`. See
+     * lib/portfolio/settlement-cash.ts.
+     */
+    reconcile: integer("reconcile", { mode: "boolean" }),
   },
   (table) => [
     index("idx_transactions_bucket").on(table.bucketId, table.tradeDate),

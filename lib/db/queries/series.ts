@@ -5,7 +5,11 @@ import { buildFxConverter } from "@/lib/market/fx";
 import { quoteCacheKey } from "@/lib/market/sources";
 import { demoHoldingSeries } from "@/lib/mock/demo-history-read";
 import { type LedgerTxn, type PositionCheckpoint, reduceLots } from "@/lib/portfolio/lots";
-import { type CashPoint, foldSettlementCash } from "@/lib/portfolio/settlement-cash";
+import {
+  type CashPoint,
+  cashContributionFlows,
+  foldSettlementCash,
+} from "@/lib/portfolio/settlement-cash";
 import { toLedgerTxn } from "@/lib/portfolio/transaction-analytics";
 import { isAnchorKind } from "@/lib/portfolio/txn-import";
 import { getMarketDb, isDemoRequest, type MarketDb } from "../context";
@@ -26,6 +30,21 @@ export interface SeriesPoint {
   value: number;
 }
 
+/**
+ * The cash slices needed to recompute the return for either contribution mode,
+ * each a step series aligned to the scope's plotted dates.
+ */
+export interface CashDecomp {
+  /** THB value of ALL cash (held cash accounts + in-transit settlement cash) per date. */
+  cashValue: SeriesPoint[];
+  /** THB value of RESERVED held cash per date (always excluded from the return). */
+  reservedCashValue: SeriesPoint[];
+  /** Cumulative contribution from ALL cash events (deposit/withdraw/Set-balance) per date. */
+  cashContrib: SeriesPoint[];
+  /** Cumulative contribution from RESERVED cash events per date. */
+  reservedCashContrib: SeriesPoint[];
+}
+
 export interface PortfolioSeriesResult {
   aggregate: SeriesPoint[];
   perBucket: Record<string, SeriesPoint[]>;
@@ -44,6 +63,16 @@ export interface PortfolioSeriesResult {
    * "incl. ฿X cash in transit" instead of baking it in silently.
    */
   cash: SeriesPoint[];
+  /**
+   * Cash decomposition for the contribution-mode pill (#149). Lets the client
+   * compute the "Funds only" vs "Incl. cash" return WITHOUT a refetch: it
+   * subtracts the right cash slice from the value + contribution lines. Reserved
+   * cash is ALWAYS out of the return (both modes); the rest of the cash is out
+   * only in "Funds only" (mode B). The hero BALANCE stays full net worth — this
+   * only adjusts the return view. Aligned to `aggregate`'s dates.
+   */
+  cashDecomp: CashDecomp;
+  cashDecompByBucket: Record<string, CashDecomp>;
   /** ISO timestamp of the most recent plotted date. */
   asOf: string | null;
   /**
@@ -79,12 +108,21 @@ export interface PortfolioSeriesResult {
   unpriced: string[];
 }
 
+const EMPTY_CASH_DECOMP: CashDecomp = {
+  cashValue: [],
+  reservedCashValue: [],
+  cashContrib: [],
+  reservedCashContrib: [],
+};
+
 const EMPTY_RESULT: Omit<PortfolioSeriesResult, "hasDistributingHolding"> = {
   aggregate: [],
   perBucket: {},
   netInvested: [],
   netInvestedByBucket: {},
   cash: [],
+  cashDecomp: EMPTY_CASH_DECOMP,
+  cashDecompByBucket: {},
   asOf: null,
   missingFx: [],
   estimatedThrough: null,
@@ -265,7 +303,12 @@ function stepWalker<T extends { date: string }>(points: readonly T[]): (d: strin
  */
 export async function getPortfolioSeries(
   range: SeriesRange = "6mo",
+  opts: { reservedTickers?: ReadonlySet<string> } = {},
 ): Promise<PortfolioSeriesResult> {
+  // Reserved cash account tickers (#149) — always carved out of the RETURN view
+  // (both contribution modes), never out of net worth. Upper-cased to match the
+  // ledger ticker. Empty = nothing reserved = today's behavior.
+  const reservedTickers = opts.reservedTickers;
   // Cross-domain read: the ledger lives in app.db, NAV series in market.db.
   // There is no SQL join — we read each side and join app-side on the soft
   // `${quoteSource}:${ticker}` cache key.
@@ -307,10 +350,18 @@ export async function getPortfolioSeries(
     keyMeta.set(key, { quoteSource: r.quoteSource, ticker: r.ticker });
   }
   const cacheKeys = Array.from(keyMeta.keys());
+  // Cash carries its currency on the holding row (the ticker is the account name,
+  // not a symbol) — index it by cache key so inferHoldingCurrency can read it.
+  const cashCurrencyByKey = new Map<string, string | null>();
+  for (const h of allHoldings) {
+    if (h.quoteSource === "cash") {
+      cashCurrencyByKey.set(quoteCacheKey(h.quoteSource, h.ticker), h.currency ?? null);
+    }
+  }
   const currencyByKey = new Map<string, string>();
   const currencies = new Set<string>();
   for (const [key, m] of keyMeta) {
-    const ccy = inferHoldingCurrency(m.quoteSource, m.ticker);
+    const ccy = inferHoldingCurrency(m.quoteSource, m.ticker, cashCurrencyByKey.get(key));
     currencyByKey.set(key, ccy);
     currencies.add(ccy);
   }
@@ -390,9 +441,15 @@ export async function getPortfolioSeries(
 
   const perBucket: Record<string, SeriesPoint[]> = {};
   const netInvestedByBucket: Record<string, SeriesPoint[]> = {};
+  const cashDecompByBucket: Record<string, CashDecomp> = {};
   const aggregateByDate = new Map<string, number>();
   const investedByDate = new Map<string, number>();
   const cashByDate = new Map<string, number>();
+  // Cash decomposition for the return-mode pill (#149), summed across buckets.
+  const cashValueByDate = new Map<string, number>();
+  const reservedCashValueByDate = new Map<string, number>();
+  const cashContribByDate = new Map<string, number>();
+  const reservedCashContribByDate = new Map<string, number>();
   // THB value priced from trade-implied prices / cost-carry (not cached NAV) per
   // date — drives a MATERIALITY-gated `estimatedThrough` so one dust position
   // with shallow NAV coverage can't imply the whole history is estimated.
@@ -426,6 +483,23 @@ export async function getPortfolioSeries(
     });
     const contribAt = stepWalker(contributions);
 
+    // Cumulative CASH-only contributions (deposit/withdraw/Set-balance) — the
+    // slice the pill removes in "Funds only", and reserved-only for "Incl. cash".
+    // Same SHARED definition as the fold/XIRR so the three can't diverge.
+    const cumulative = (flows: { date: string; amount: number }[]) => {
+      let acc = 0;
+      return stepWalker(
+        flows.map((f) => {
+          acc += f.amount;
+          return { date: f.date, value: acc };
+        }),
+      );
+    };
+    const cashContribAt = cumulative(cashContributionFlows(ledgerTxns));
+    const reservedCashContribAt = reservedTickers
+      ? cumulative(cashContributionFlows(ledgerTxns.filter((t) => reservedTickers.has(t.ticker))))
+      : null;
+
     // The bucket exists on the chart from its first ledger event — never before.
     const firstEvent = bucketEvents.reduce(
       (min, r) => (r.tradeDate < min ? r.tradeDate : min),
@@ -434,14 +508,33 @@ export async function getPortfolioSeries(
 
     const series: SeriesPoint[] = [];
     const invested: SeriesPoint[] = [];
+    const bCashValue: SeriesPoint[] = [];
+    const bReservedCashValue: SeriesPoint[] = [];
+    const bCashContrib: SeriesPoint[] = [];
+    const bReservedCashContrib: SeriesPoint[] = [];
     for (const d of dates) {
       if (d < firstEvent) continue;
       const cash = cashAt(d)?.cash ?? 0;
       let value = cash;
+      // Held cash-account value on this date (in-transit cash is added separately
+      // below); reserved tracked apart so the pill can carve either slice.
+      let heldCashThb = 0;
+      let reservedCashThb = 0;
       for (const [ticker, at] of tickerWalkers) {
         const cp = at(d);
         if (!cp || cp.units <= UNIT_EPSILON) continue;
         const key = keyByBucketTicker.get(`${bucketId} ${ticker}`);
+        // Cash: priced EXACTLY at 1.0 in its currency (no NAV), converted to THB.
+        // A null rate (cold FX) drops it, reported via missingFx; never estimated.
+        if (key !== undefined && keyMeta.get(key)?.quoteSource === "cash") {
+          const rate = fx.rateOn(currencyByKey.get(key) ?? BASE_CURRENCY, d);
+          if (rate === null) continue;
+          const thb = cp.units * rate;
+          value += thb;
+          heldCashThb += thb;
+          if (reservedTickers?.has(ticker)) reservedCashThb += thb;
+          continue;
+        }
         const nav = key === undefined ? undefined : filled.get(key)?.get(d);
         if (nav !== undefined && key !== undefined) {
           // Convert native value → THB at this date's rate. A null rate (cold
@@ -464,13 +557,35 @@ export async function getPortfolioSeries(
       series.push({ date: d, value });
       const contributed = contribAt(d)?.value ?? 0;
       invested.push({ date: d, value: contributed });
+      // Total cash value = held cash accounts + in-transit settlement cash
+      // (in-transit cash is heuristic sell proceeds, never reserved).
+      const totalCashThb = heldCashThb + cash;
+      const cashContributed = cashContribAt(d)?.value ?? 0;
+      const reservedContributed = reservedCashContribAt?.(d)?.value ?? 0;
+      bCashValue.push({ date: d, value: totalCashThb });
+      bReservedCashValue.push({ date: d, value: reservedCashThb });
+      bCashContrib.push({ date: d, value: cashContributed });
+      bReservedCashContrib.push({ date: d, value: reservedContributed });
       aggregateByDate.set(d, (aggregateByDate.get(d) ?? 0) + value);
       investedByDate.set(d, (investedByDate.get(d) ?? 0) + contributed);
       cashByDate.set(d, (cashByDate.get(d) ?? 0) + cash);
+      cashValueByDate.set(d, (cashValueByDate.get(d) ?? 0) + totalCashThb);
+      reservedCashValueByDate.set(d, (reservedCashValueByDate.get(d) ?? 0) + reservedCashThb);
+      cashContribByDate.set(d, (cashContribByDate.get(d) ?? 0) + cashContributed);
+      reservedCashContribByDate.set(
+        d,
+        (reservedCashContribByDate.get(d) ?? 0) + reservedContributed,
+      );
       emittedDates.add(d);
     }
     perBucket[bucketId] = series;
     netInvestedByBucket[bucketId] = invested;
+    cashDecompByBucket[bucketId] = {
+      cashValue: bCashValue,
+      reservedCashValue: bReservedCashValue,
+      cashContrib: bCashContrib,
+      reservedCashContrib: bReservedCashContrib,
+    };
   }
 
   const plotted = dates.filter((d) => emittedDates.has(d));
@@ -498,6 +613,18 @@ export async function getPortfolioSeries(
     value: investedByDate.get(d) ?? 0,
   }));
   const cash: SeriesPoint[] = plotted.map((d) => ({ date: d, value: cashByDate.get(d) ?? 0 }));
+  const cashDecomp: CashDecomp = {
+    cashValue: plotted.map((d) => ({ date: d, value: cashValueByDate.get(d) ?? 0 })),
+    reservedCashValue: plotted.map((d) => ({
+      date: d,
+      value: reservedCashValueByDate.get(d) ?? 0,
+    })),
+    cashContrib: plotted.map((d) => ({ date: d, value: cashContribByDate.get(d) ?? 0 })),
+    reservedCashContrib: plotted.map((d) => ({
+      date: d,
+      value: reservedCashContribByDate.get(d) ?? 0,
+    })),
+  };
 
   return {
     aggregate,
@@ -505,6 +632,8 @@ export async function getPortfolioSeries(
     netInvested,
     netInvestedByBucket,
     cash,
+    cashDecomp,
+    cashDecompByBucket,
     asOf: plotted[plotted.length - 1] ?? null,
     missingFx: Array.from(fx.missing).sort(),
     hasDistributingHolding,
@@ -579,7 +708,11 @@ export async function getHoldingValueSeries(
   let quoteSource = events[0].quoteSource;
   for (const r of events) quoteSource = r.quoteSource;
   const key = quoteCacheKey(quoteSource, ticker);
-  const currency = inferHoldingCurrency(quoteSource, ticker);
+  // Cash carries its currency on the ledger (tradeCurrency); the ticker is the
+  // account name, so it can't be inferred from the symbol.
+  const isCash = quoteSource === "cash";
+  const cashCcy = isCash ? (events.find((r) => r.tradeCurrency)?.tradeCurrency ?? null) : null;
+  const currency = inferHoldingCurrency(quoteSource, ticker, cashCcy);
   const currencyByKey = new Map([[key, currency]]);
 
   // NAV rows for this key only (demo fixture or market.db), merged with the
@@ -647,7 +780,11 @@ export async function getHoldingValueSeries(
     const cp = unitsAt(d);
     let v = 0;
     let estimated = false;
-    if (cp && cp.units > UNIT_EPSILON) {
+    if (cp && cp.units > UNIT_EPSILON && isCash) {
+      // Cash: priced EXACTLY at 1.0 in its currency, converted to THB. Not estimated.
+      const rate = fx.rateOn(currency, d);
+      if (rate !== null) v = cp.units * rate;
+    } else if (cp && cp.units > UNIT_EPSILON) {
       const nav = filled.get(d);
       if (nav !== undefined) {
         const rate = fx.rateOn(currency, d);

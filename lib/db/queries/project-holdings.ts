@@ -6,7 +6,7 @@ import {
   projectPositions,
 } from "@/lib/portfolio/project-positions";
 import { getDb } from "../context";
-import { holdings, transactions } from "../schema";
+import { earmarks, holdings, transactions } from "../schema";
 import type { Holding, HoldingRow } from "./holdings";
 import { foldableEvents } from "./resolve-derived-units";
 import type { Transaction, TransactionInsert } from "./transactions";
@@ -103,6 +103,21 @@ export function rebuildHoldingsForBucket(bucketId: string): void {
   const byTicker = new Map(existing.map((h) => [h.ticker, h]));
   const now = new Date().toISOString();
 
+  // Cash accounts carry their currency on the ledger (tradeCurrency); surface it +
+  // the "cash" asset class onto a NEW holding row so allocation / net-worth see it.
+  const cashCurrency = new Map<string, string | null>();
+  for (const t of db
+    .select({
+      ticker: transactions.ticker,
+      currency: transactions.tradeCurrency,
+      quoteSource: transactions.quoteSource,
+    })
+    .from(transactions)
+    .where(eq(transactions.bucketId, bucketId))
+    .all()) {
+    if (t.quoteSource === "cash") cashCurrency.set(t.ticker, t.currency ?? null);
+  }
+
   db.transaction((tx) => {
     const seen = new Set<string>();
     for (const p of positions) {
@@ -123,13 +138,17 @@ export function rebuildHoldingsForBucket(bucketId: string): void {
           .run();
       } else {
         // First time we've seen this ticker — create the metadata row with whatever
-        // identity the ledger carries; richer metadata fills in via later edits.
+        // identity the ledger carries; richer metadata fills in via later edits. A
+        // cash account also gets its asset class + native currency from the ledger.
+        const isCash = p.quoteSource === "cash";
         tx.insert(holdings)
           .values({
             bucketId,
             ticker: p.ticker,
             englishName: p.englishName || p.ticker,
             quoteSource: p.quoteSource,
+            assetClass: isCash ? "cash" : undefined,
+            currency: isCash ? (cashCurrency.get(p.ticker) ?? null) : undefined,
             source: p.source,
             acquiredOn: p.acquiredOn,
             createdAt: now,
@@ -345,10 +364,20 @@ export function editHoldingViaLedger(id: number, patch: EditHoldingPatch): Holdi
     // 3. Rename the row BEFORE rebuild so the projection matches it (keeps id + metadata).
     if (newTicker !== oldTicker) {
       db.update(holdings).set({ ticker: newTicker }).where(eq(holdings.id, id)).run();
+      // Cascade the cash Purpose (#149): an earmark is keyed by (bucketId, ticker), so a
+      // rename must move it to the new name — same cascade the ledger does — or the
+      // account's Investable/Reserved designation would orphan.
+      db.update(earmarks)
+        .set({ ticker: newTicker, updatedAt: now })
+        .where(and(eq(earmarks.bucketId, bucketId), eq(earmarks.ticker, oldTicker)))
+        .run();
     }
 
     // 4. Metadata onto the row.
     const meta = pickMetadata(patch as unknown as Record<string, unknown>);
+    // Cash has no expense ratio — the edit form carries a numeric `ter` (0), which
+    // would otherwise persist and render "TER 0.00%" on the row. Force it null (#149).
+    if ((patch.quoteSource ?? h.quoteSource) === "cash") meta.ter = null;
     if (Object.keys(meta).length > 0) {
       db.update(holdings)
         .set({ ...meta, updatedAt: now })

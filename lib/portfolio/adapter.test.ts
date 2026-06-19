@@ -32,6 +32,7 @@ const sampleHolding = {
   ter: 0.22,
   source: "live",
   quoteSource: "market",
+  currency: null,
   acquiredOn: null,
   createdAt: "2026-01-01",
   updatedAt: "2026-01-01",

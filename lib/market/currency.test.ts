@@ -40,6 +40,13 @@ describe("inferHoldingCurrency", () => {
     expect(inferHoldingCurrency("market", "ptt.bk")).toBe("THB");
   });
 
+  it("reads cash currency from the stored column, defaulting to THB", () => {
+    // The ticker is the account name, not a symbol — currency is explicit.
+    expect(inferHoldingCurrency("cash", "SCB-SAVINGS", "THB")).toBe("THB");
+    expect(inferHoldingCurrency("cash", "WISE-USD", "usd")).toBe("USD");
+    expect(inferHoldingCurrency("cash", "PIGGY-BANK")).toBe("THB");
+  });
+
   it("exposes THB as the base currency", () => {
     expect(BASE_CURRENCY).toBe("THB");
   });

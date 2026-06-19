@@ -9,6 +9,7 @@
 // why `amount` is the authoritative money field and FX is never re-applied).
 
 import type { LedgerTxn } from "./lots";
+import { cashContributionFlows } from "./settlement-cash";
 
 export interface MonthlyContribution {
   /** Calendar month, "YYYY-MM". */
@@ -41,7 +42,10 @@ export interface ContributionSummary {
 const CONTRIBUTING: ReadonlySet<string> = new Set(["buy", "reinvest"]);
 
 /** Aggregate a ledger into the monthly contribution series + summary. */
-export function summarizeContributions(txns: readonly LedgerTxn[]): ContributionSummary {
+export function summarizeContributions(
+  txns: readonly LedgerTxn[],
+  opts: { countUninvestedCash?: boolean; excludeTickers?: ReadonlySet<string> } = {},
+): ContributionSummary {
   const byMonth = new Map<string, MonthlyContribution>();
   const contributionAmounts: number[] = [];
   const contributionDays: number[] = [];
@@ -73,6 +77,27 @@ export function summarizeContributions(txns: readonly LedgerTxn[]): Contribution
 
     row.net = row.invested - row.withdrawn;
     byMonth.set(month, row);
+  }
+
+  // Explicit-cash contributions (mode A, #149): a deposit / Set-balance raise adds to
+  // invested, a withdraw / Set-balance drop to withdrawn — the SAME shared definition the
+  // chart line and XIRR use, so the three agree. Deliberately kept OUT of the cadence /
+  // average figures (those measure investment-purchase rhythm, which idle cash isn't).
+  // Mode B (countUninvestedCash false) excludes cash from the contribution totals entirely.
+  if (opts.countUninvestedCash ?? true) {
+    for (const f of cashContributionFlows(txns, opts.excludeTickers)) {
+      const month = f.date.slice(0, 7);
+      const row = byMonth.get(month) ?? { month, invested: 0, withdrawn: 0, net: 0 };
+      if (f.amount > 0) {
+        row.invested += f.amount;
+        totalInvested += f.amount;
+      } else {
+        row.withdrawn += -f.amount;
+        totalWithdrawn += -f.amount;
+      }
+      row.net = row.invested - row.withdrawn;
+      byMonth.set(month, row);
+    }
   }
 
   const months = [...byMonth.values()].sort((a, b) => (a.month < b.month ? -1 : 1));

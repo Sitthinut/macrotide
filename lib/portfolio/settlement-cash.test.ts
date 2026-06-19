@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LedgerTxn } from "./lots";
-import { foldSettlementCash } from "./settlement-cash";
+import { cashContributionFlows, foldSettlementCash } from "./settlement-cash";
 
 // Synthetic data only (EXAMPLE-FUND-*), never real fund codes.
 const A = "EXAMPLE-FUND-A";
@@ -171,5 +171,244 @@ describe("foldSettlementCash", () => {
       new Map([[1, 1000]]),
     );
     expect(r.externalFlows).toEqual([{ date: "2024-03-01", amount: -400 }]);
+  });
+
+  // ── Explicit cash events (issue #149) ──────────────────────────────────────
+
+  it("a deposit is an external inflow and never becomes in-transit cash", () => {
+    // Stored amount is signed (signFor deposit = -1); the fold uses its magnitude.
+    const r = foldSettlementCash(
+      [tx({ ticker: "THB", kind: "deposit", amount: -500, tradeDate: "2024-01-01" })],
+      TODAY,
+    );
+    expect(r.externalFlows).toEqual([{ date: "2024-01-01", amount: 500 }]);
+    expect(r.terminalCash).toBe(0);
+    expect(r.cashTimeline).toEqual([]);
+  });
+
+  it("a withdraw is a boundary outflow at face and leaves in-transit sell proceeds alone", () => {
+    // A withdraw moves money out of a TRACKED account; the sale proceeds are the
+    // untracked-path heuristic — a separate pool the withdraw must not drain.
+    const r = foldSettlementCash(
+      [
+        tx({ kind: "sell", units: 100, amount: 1000, tradeDate: "2025-05-20", id: 1 }),
+        tx({ ticker: "THB", kind: "withdraw", amount: 500, tradeDate: "2025-05-25" }),
+      ],
+      TODAY, // sell is 12d old → still in transit, never expires
+      undefined,
+      new Map([[1, 1000]]),
+    );
+    expect(r.externalFlows).toEqual([{ date: "2025-05-25", amount: -500 }]);
+    expect(r.terminalCash).toBeCloseTo(1000, 6); // proceeds untouched
+  });
+
+  it("a withdraw beyond available cash still records the full external outflow", () => {
+    const r = foldSettlementCash(
+      [tx({ ticker: "THB", kind: "withdraw", amount: 700, tradeDate: "2024-02-01" })],
+      TODAY,
+    );
+    expect(r.externalFlows).toEqual([{ date: "2024-02-01", amount: -700 }]);
+  });
+
+  it("a Set balance classifies the change vs the prior balance as money in/out by default", () => {
+    const r = foldSettlementCash(
+      [
+        tx({
+          ticker: "THB",
+          kind: "cash_balance",
+          units: 1000,
+          amount: 0,
+          tradeDate: "2024-01-01",
+        }),
+        tx({
+          ticker: "THB",
+          kind: "cash_balance",
+          units: 1500,
+          amount: 0,
+          tradeDate: "2024-02-01",
+        }),
+        tx({
+          ticker: "THB",
+          kind: "cash_balance",
+          units: 1200,
+          amount: 0,
+          tradeDate: "2024-03-01",
+        }),
+      ],
+      TODAY,
+    );
+    expect(r.externalFlows).toEqual([
+      { date: "2024-01-01", amount: 1000 }, // first balance: delta from 0
+      { date: "2024-02-01", amount: 500 }, // +500 added
+      { date: "2024-03-01", amount: -300 }, // −300 spent/withdrawn
+    ]);
+  });
+
+  it("a Set balance after a deposit counts only the un-deposited change (no double count)", () => {
+    const r = foldSettlementCash(
+      [
+        tx({ ticker: "THB", kind: "deposit", amount: -500, tradeDate: "2024-01-01" }),
+        tx({ ticker: "THB", kind: "cash_balance", units: 800, amount: 0, tradeDate: "2024-01-15" }),
+      ],
+      TODAY,
+    );
+    expect(r.externalFlows).toEqual([
+      { date: "2024-01-01", amount: 500 }, // the deposit
+      { date: "2024-01-15", amount: 300 }, // balance 800 vs deposited 500 → +300 only
+    ]);
+  });
+
+  it("values a non-THB Set balance in THB via fxToThb", () => {
+    const r = foldSettlementCash(
+      [
+        tx({
+          ticker: "USD-CASH",
+          kind: "cash_balance",
+          units: 100,
+          fxToThb: 35,
+          amount: 0,
+          tradeDate: "2024-01-01",
+        }),
+      ],
+      TODAY,
+    );
+    expect(r.externalFlows).toEqual([{ date: "2024-01-01", amount: 3500 }]);
+  });
+
+  it("tracks each cash account's balance independently (per-ticker delta)", () => {
+    const r = foldSettlementCash(
+      [
+        tx({
+          ticker: "ACCT-1",
+          kind: "cash_balance",
+          units: 1000,
+          amount: 0,
+          tradeDate: "2024-01-01",
+        }),
+        tx({
+          ticker: "ACCT-2",
+          kind: "cash_balance",
+          units: 500,
+          amount: 0,
+          tradeDate: "2024-01-02",
+        }),
+        tx({
+          ticker: "ACCT-1",
+          kind: "cash_balance",
+          units: 1200,
+          amount: 0,
+          tradeDate: "2024-02-01",
+        }),
+      ],
+      TODAY,
+    );
+    expect(r.externalFlows).toEqual([
+      { date: "2024-01-01", amount: 1000 }, // ACCT-1 first
+      { date: "2024-01-02", amount: 500 }, // ACCT-2 first — NOT compared to ACCT-1
+      { date: "2024-02-01", amount: 200 }, // ACCT-1 1200 vs its own prior 1000 → +200
+    ]);
+  });
+
+  it("a reconcile Set balance asserts parked proceeds with no flow and clears in-transit lots", () => {
+    // Sell, never rebuy: the heuristic ALONE would withdraw the proceeds at the sell
+    // date (see "a buy outside the window…"). The "no money moved" override asserts the
+    // cash accounts for them instead — they become a held-cash position, off this
+    // in-transit timeline — and emits no contribution flow (issue #149 parked proceeds).
+    const r = foldSettlementCash(
+      [
+        tx({ kind: "sell", units: 100, amount: 1000, tradeDate: "2024-03-01", id: 1 }),
+        tx({
+          ticker: "THB",
+          kind: "cash_balance",
+          units: 1000,
+          amount: 0,
+          reconcile: true,
+          tradeDate: "2024-04-01",
+        }),
+      ],
+      TODAY,
+      undefined,
+      new Map([[1, 1000]]),
+    );
+    expect(r.externalFlows).toEqual([]); // reconcile = no flow; no phantom withdrawal
+    expect(r.terminalCash).toBe(0);
+    expect(cashOn(r, "2024-03-15")).toBeCloseTo(1000, 6); // in transit until the assertion
+    expect(cashOn(r, "2024-04-01")).toBe(0);
+  });
+
+  it("a buy draws from in-transit proceeds only — explicit cash is never auto-deducted", () => {
+    // No-deduct model: the buy does NOT consume the deposited cash, so both the
+    // contribution line (+deposit +buy) and net worth (cash + fund) move together —
+    // consistent (the user records a withdraw via the nudge, or reconciles at Set balance).
+    const r = foldSettlementCash(
+      [
+        tx({ ticker: "THB", kind: "deposit", amount: -500, tradeDate: "2024-01-01" }),
+        tx({ kind: "buy", units: 5, amount: -500, tradeDate: "2024-02-01" }),
+      ],
+      TODAY,
+    );
+    expect(r.externalFlows).toEqual([
+      { date: "2024-01-01", amount: 500 },
+      { date: "2024-02-01", amount: 500 },
+    ]);
+  });
+});
+
+describe("cashContributionFlows (the shared cash-contribution definition)", () => {
+  it("deposit +, withdraw −, Set-balance delta; reconcile = no flow; FX in THB; per-account", () => {
+    const flows = cashContributionFlows([
+      { ticker: "ACCT", kind: "deposit", amount: -500, tradeDate: "2024-01-01" },
+      {
+        ticker: "ACCT",
+        kind: "cash_balance",
+        units: 800,
+        fxToThb: 1,
+        amount: 0,
+        tradeDate: "2024-01-02",
+      },
+      { ticker: "ACCT", kind: "withdraw", amount: 100, tradeDate: "2024-01-03" },
+      {
+        ticker: "ACCT",
+        kind: "cash_balance",
+        units: 700,
+        fxToThb: 1,
+        amount: 0,
+        reconcile: true,
+        tradeDate: "2024-01-04",
+      },
+      {
+        ticker: "USD",
+        kind: "cash_balance",
+        units: 100,
+        fxToThb: 35,
+        amount: 0,
+        tradeDate: "2024-01-05",
+      },
+    ]);
+    expect(flows).toEqual([
+      { date: "2024-01-01", amount: 500 }, // deposit
+      { date: "2024-01-02", amount: 300 }, // balance 800 vs deposited 500 → +300
+      { date: "2024-01-03", amount: -100 }, // withdraw
+      // 2024-01-04 reconcile → no flow
+      { date: "2024-01-05", amount: 3500 }, // USD 100 × 35, its own account's first balance
+    ]);
+  });
+
+  it("excludes a RESERVED account's rows entirely (#149 — its cash is out of the return)", () => {
+    const flows = cashContributionFlows(
+      [
+        { ticker: "INVEST", kind: "deposit", amount: -1000, tradeDate: "2024-01-01" },
+        {
+          ticker: "EMERGENCY",
+          kind: "cash_balance",
+          units: 5000,
+          fxToThb: 1,
+          amount: 0,
+          tradeDate: "2024-01-02",
+        },
+      ],
+      new Set(["EMERGENCY"]), // reserved → skipped
+    );
+    expect(flows).toEqual([{ date: "2024-01-01", amount: 1000 }]); // only the investable account
   });
 });

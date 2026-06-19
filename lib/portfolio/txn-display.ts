@@ -10,11 +10,11 @@
 // promoteAnchorKinds), so the user only ever picks "Balance".
 
 import type { TxnKind } from "@/lib/portfolio/lots";
-import { TXN_KINDS } from "@/lib/portfolio/txn-import";
+import { CASH_KINDS, TXN_KINDS } from "@/lib/portfolio/txn-import";
 
 const isAnchor = (k: TxnKind): boolean => k === "opening" || k === "snapshot";
 
-/** Imperative label for the Type <select>. Both anchors read as "Balance". */
+/** Imperative label for the Type <select>. Both fund anchors read as "Balance". */
 export const TXN_KIND_LABEL: Record<TxnKind, string> = {
   opening: "Balance",
   snapshot: "Balance",
@@ -24,6 +24,11 @@ export const TXN_KIND_LABEL: Record<TxnKind, string> = {
   reinvest: "Reinvest",
   fee: "Fee",
   split: "Split",
+  deposit: "Deposit",
+  withdraw: "Withdraw",
+  // Parallels the investment "Balance" — sets the account's current total; the
+  // sibling Deposit/Withdraw options make "total vs add/remove" unambiguous.
+  cash_balance: "Balance",
 };
 
 // The one explanation shared by both anchor kinds. Calls out that avg cost is
@@ -43,15 +48,27 @@ export const TXN_KIND_HELP: Record<TxnKind, string> = {
   reinvest: "A dividend put back into more units instead of taken as cash.",
   fee: "A cost you paid (platform or switching) — lowers return, not your units.",
   split: "The fund split or merged units — your unit count changes, the total value doesn’t.",
+  deposit: "Cash you moved into this account — funds future buys and counts as money in.",
+  withdraw: "Cash you took out of this account — counts as money out.",
+  cash_balance:
+    "The cash in this account now — its change since last time counts as money in or out.",
 };
 
 /**
- * Options for the Type <select> — a SINGLE "Balance" entry (the anchors), then
- * the trade kinds. The Balance entry's value is the row's current anchor kind
- * (so editing an existing Restatement keeps it), or "opening" for a fresh/non-
- * anchor row. The route auto-promotes a repeat opening to a snapshot on save.
+ * Options for the Type / Action <select>, scoped to the row's FAMILY (#149). A cash
+ * row (deposit / withdraw / set balance) shows only the cash actions; a fund row shows
+ * a SINGLE "Balance" entry (the fund anchors) then the fund trade kinds. The family is
+ * chosen by the Add modal's Investment | Cash segment, not switched mid-row — so the two
+ * worlds never blur (a buy can't become a deposit by accident). The Balance entry's value
+ * is the row's current anchor kind (so editing a Restatement keeps it), or "opening" for a
+ * fresh/non-anchor row; the route auto-promotes a repeat opening to a snapshot on save.
  */
 export function typeSelectOptions(currentKind: TxnKind): { value: TxnKind; label: string }[] {
+  if ((CASH_KINDS as readonly TxnKind[]).includes(currentKind)) {
+    // Anchor FIRST, then the flows — parallels the investment list (Balance, Buy, Sell…).
+    const order: TxnKind[] = ["cash_balance", "deposit", "withdraw"];
+    return order.map((k) => ({ value: k, label: TXN_KIND_LABEL[k] }));
+  }
   const balanceValue: TxnKind = isAnchor(currentKind) ? currentKind : "opening";
   return [
     { value: balanceValue, label: "Balance" },

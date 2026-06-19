@@ -1,6 +1,7 @@
 "use client";
 
 import type { Bucket } from "@/lib/db/queries/buckets";
+import type { Earmark } from "@/lib/db/queries/earmarks";
 import type { Holding as DbHolding } from "@/lib/db/queries/holdings";
 import type { JournalEntry } from "@/lib/db/queries/journal";
 import type { ModelPortfolio as DbModelPortfolio } from "@/lib/db/queries/models";
@@ -58,6 +59,34 @@ export function useQuotes() {
   return useResource<FundQuote[]>("/api/quotes");
 }
 
+/** Cash earmarks (the per-account Investable | Reserved role + optional label, #149). */
+export function useEarmarks() {
+  return useResource<Earmark[]>("/api/earmarks");
+}
+
+/** Set (upsert) or clear a cash account's designation. Clearing (role investable + no
+ *  label) DELETEs the row so the account is back to a plain investable default. */
+export async function saveEarmark(input: {
+  bucketId: string;
+  ticker: string;
+  role: "investable" | "reserved";
+  amount: number | null;
+  purpose?: string | null;
+}): Promise<void> {
+  const clear = input.role === "investable" && !(input.purpose ?? "").trim();
+  const res = await fetch("/api/earmarks", {
+    method: clear ? "DELETE" : "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(
+      clear
+        ? { bucketId: input.bucketId, ticker: input.ticker }
+        : { ...input, purpose: (input.purpose ?? "").trim() || null },
+    ),
+  });
+  if (!res.ok) throw new Error("Failed to save the cash purpose");
+  invalidate("/api/earmarks");
+}
+
 export interface QuoteRef {
   source: string;
   ticker: string;
@@ -90,6 +119,13 @@ export interface PortfolioSeriesPoint {
   value: number;
 }
 
+export interface CashDecompResponse {
+  cashValue: PortfolioSeriesPoint[];
+  reservedCashValue: PortfolioSeriesPoint[];
+  cashContrib: PortfolioSeriesPoint[];
+  reservedCashContrib: PortfolioSeriesPoint[];
+}
+
 export interface PortfolioSeriesResponse {
   aggregate: PortfolioSeriesPoint[];
   perBucket: Record<string, PortfolioSeriesPoint[]>;
@@ -98,6 +134,9 @@ export interface PortfolioSeriesResponse {
   netInvestedByBucket: Record<string, PortfolioSeriesPoint[]>;
   /** In-transit settlement cash included in `aggregate` per date. */
   cash: PortfolioSeriesPoint[];
+  /** Cash decomposition for the return-mode pill (#149) — value + contributions, all vs reserved. */
+  cashDecomp: CashDecompResponse;
+  cashDecompByBucket: Record<string, CashDecompResponse>;
   asOf: string | null;
   /** True if the book holds a dividend-paying fund (price line drops payouts). */
   hasDistributingHolding: boolean;
