@@ -62,6 +62,19 @@ export interface SeriesPoint {
 
 export type PortfolioType = "free" | "tax-locked" | "experiment";
 
+/**
+ * Cash slices for the contribution-mode pill (#149): the value + cumulative
+ * contribution of all cash vs reserved-only cash, on the same dates as `series`.
+ * Lets the screen recompute the "Funds only" / "Incl. cash" return with no
+ * refetch. Absent in static placeholder data.
+ */
+export interface CashDecomp {
+  cashValue: SeriesPoint[];
+  reservedCashValue: SeriesPoint[];
+  cashContrib: SeriesPoint[];
+  reservedCashContrib: SeriesPoint[];
+}
+
 export interface Portfolio {
   id: string;
   name: string;
@@ -79,6 +92,8 @@ export interface Portfolio {
   series: SeriesPoint[];
   /** Cumulative external money in (the chart's contribution line), same dates as `series`. Absent in static placeholder data. */
   netInvested?: SeriesPoint[];
+  /** Cash decomposition for the return-mode pill (#149). Absent in static placeholder data. */
+  cashDecomp?: CashDecomp;
   holdings: Holding[];
 }
 
@@ -93,6 +108,8 @@ export interface AggregatePortfolio {
   series: SeriesPoint[];
   /** Cumulative external money in (the chart's contribution line), same dates as `series`. Absent in static placeholder data. */
   netInvested?: SeriesPoint[];
+  /** Cash decomposition for the return-mode pill (#149). Absent in static placeholder data. */
+  cashDecomp?: CashDecomp;
   target: { equity: number; bond: number; alternative: number; cash: number };
 }
 

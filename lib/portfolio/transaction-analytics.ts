@@ -15,8 +15,9 @@ import {
   reduceLots,
   type TxnKind,
 } from "./lots";
+import { cashContributionFlows } from "./settlement-cash";
 import { isTxnKind } from "./txn-import";
-import { txnsToCashFlows, xirr } from "./xirr";
+import { type CashFlow, txnsToCashFlows, xirr } from "./xirr";
 
 // Server-side orchestrator for the Activity ledger's analytics.
 //
@@ -58,6 +59,20 @@ export interface AnalyticsOptions {
   method?: CostBasisMethod;
   /** ISO date for the terminal value; defaults handled by the caller (route). */
   asOf: string;
+  /**
+   * Contribution mode (D4b, #149). `true` (default, mode A): uninvested cash counts —
+   * deposits/Set-balance raises are contributions and the cash value is in the return
+   * terminal, so idle cash honestly drags the return. `false` (mode B, sidecar): cash is
+   * excluded from the RETURN (no cash contribution flows, cash value out of the terminal)
+   * while net worth (`marketValue`) still includes it. A user preference; caller passes it.
+   */
+  countUninvestedCash?: boolean;
+  /**
+   * Cash account tickers marked `reserved` (#149) — ALWAYS excluded from the return (their
+   * contributions and terminal value), regardless of the mode, while still counted in net
+   * worth (`marketValue`). The caller fetches these from the earmarks.
+   */
+  reservedTickers?: ReadonlySet<string>;
 }
 
 const MIN_IRR_DAYS = 28; // annualized XIRR over < ~1 month is meaningless
@@ -89,15 +104,37 @@ export async function computeTransactionAnalytics(
   // save (ADR 0004). An anchor still unpriceable is dropped (not folded as zero) so
   // it can't wipe a position — foldableEvents matches the holdings projection.
   const txns = foldableEvents(rows).map(toLedgerTxn);
+  const countUninvestedCash = opts.countUninvestedCash ?? true;
+  const reservedTickers = opts.reservedTickers;
 
   const lots = reduceLots(txns, method);
-  const contributions = summarizeContributions(txns);
+  const contributions = summarizeContributions(txns, {
+    countUninvestedCash,
+    excludeTickers: reservedTickers,
+  });
+
+  // Explicit-cash contribution flows from the SHARED definition, negated to the XIRR sign
+  // (money into the portfolio = a negative, out-of-pocket flow). Reserved accounts are
+  // always dropped; mode B drops the rest too.
+  const cashFlows: CashFlow[] = countUninvestedCash
+    ? cashContributionFlows(txns, reservedTickers).map((f) => ({ date: f.date, amount: -f.amount }))
+    : [];
 
   // Price still-held positions → THB, to form the terminal cash flow.
   const held = lots.positions.filter((p) => p.units > 0);
   const costBasisTotal = held.reduce((s, p) => s + (p.costBasis ?? 0), 0);
   const sourceByTicker = new Map<string, string>();
-  for (const r of rows) sourceByTicker.set(r.ticker, r.quoteSource);
+  const cashCurrencyByTicker = new Map<string, string>();
+  for (const r of rows) {
+    sourceByTicker.set(r.ticker, r.quoteSource);
+    // A cash account's currency rides on its rows (tradeCurrency); the ticker is
+    // the account name, so currency can't be inferred from it.
+    if (r.quoteSource === "cash" && r.tradeCurrency) {
+      cashCurrencyByTicker.set(r.ticker, r.tradeCurrency);
+    }
+  }
+  const currencyFor = (source: string, ticker: string): string =>
+    inferHoldingCurrency(source, ticker, cashCurrencyByTicker.get(ticker));
 
   let marketValue: number | null = null;
   let irr: number | null = null;
@@ -105,9 +142,10 @@ export async function computeTransactionAnalytics(
   const missingFx: string[] = [];
 
   if (held.length === 0) {
-    // Fully exited — no synthetic terminal flow needed; IRR rests on real flows.
+    // Fully exited — no synthetic terminal flow needed; IRR rests on real flows
+    // (incl. any cash deposits/withdrawals that netted the position to zero).
     marketValue = 0;
-    ({ irr, irrUnavailable } = solveIrr(txns, null, opts.asOf));
+    ({ irr, irrUnavailable } = solveIrr(txns, null, opts.asOf, cashFlows));
   } else {
     const cacheKeys = held.map((p) =>
       quoteCacheKey(sourceByTicker.get(p.ticker) ?? "market", p.ticker),
@@ -123,25 +161,36 @@ export async function computeTransactionAnalytics(
 
     const currencies = new Set<string>();
     for (const p of held) {
-      currencies.add(inferHoldingCurrency(sourceByTicker.get(p.ticker) ?? "market", p.ticker));
+      currencies.add(currencyFor(sourceByTicker.get(p.ticker) ?? "market", p.ticker));
     }
     const fx = await buildFxConverter(currencies, "1mo", [opts.asOf]);
     for (const c of fx.missing) missingFx.push(c);
 
     let total = 0;
+    let cashValue = 0; // THB value of ALL cash positions — dropped from the RETURN terminal in mode B
+    let reservedCashValue = 0; // reserved cash — ALWAYS dropped from the return terminal
     const unpriced: string[] = [];
     for (const p of held) {
       const source = sourceByTicker.get(p.ticker) ?? "market";
+      // Cash is priced at 1.0 in its currency; manual uses the latest recorded
+      // price; everything else uses the cached NAV.
       const nav =
-        source === "manual"
-          ? manualPrice.get(p.ticker)
-          : navByKey.get(quoteCacheKey(source, p.ticker));
-      const rate = fx.rateOn(inferHoldingCurrency(source, p.ticker), opts.asOf);
+        source === "cash"
+          ? 1
+          : source === "manual"
+            ? manualPrice.get(p.ticker)
+            : navByKey.get(quoteCacheKey(source, p.ticker));
+      const rate = fx.rateOn(currencyFor(source, p.ticker), opts.asOf);
       if (nav === undefined || rate === null) {
         unpriced.push(p.ticker);
         continue;
       }
-      total += p.units * nav * rate;
+      const thb = p.units * nav * rate;
+      total += thb;
+      if (source === "cash") {
+        cashValue += thb;
+        if (reservedTickers?.has(p.ticker)) reservedCashValue += thb;
+      }
     }
 
     if (unpriced.length > 0) {
@@ -153,8 +202,16 @@ export async function computeTransactionAnalytics(
           ? "Waiting on a current price for 1 holding."
           : `Waiting on current prices for ${unpriced.length} holdings.`;
     } else {
+      // Net worth always includes cash; the RETURN terminal drops reserved cash always,
+      // and the rest of the cash too in mode B (sidecar).
       marketValue = total;
-      ({ irr, irrUnavailable } = solveIrr(txns, { date: opts.asOf, amount: total }, opts.asOf));
+      const returnTerminal = total - (countUninvestedCash ? reservedCashValue : cashValue);
+      ({ irr, irrUnavailable } = solveIrr(
+        txns,
+        { date: opts.asOf, amount: returnTerminal },
+        opts.asOf,
+        cashFlows,
+      ));
     }
   }
 
@@ -179,8 +236,11 @@ function solveIrr(
   txns: LedgerTxn[],
   terminal: { date: string; amount: number } | null,
   asOf: string,
+  cashFlows: CashFlow[],
 ): { irr: number | null; irrUnavailable: string | null } {
-  const flows = txnsToCashFlows(txns);
+  // Fund flows (buys/sells/dividends) + the explicit-cash contribution flows (the shared
+  // definition, already XIRR-signed) + the terminal value.
+  const flows = [...txnsToCashFlows(txns), ...cashFlows];
   if (terminal) flows.push(terminal);
   if (flows.length < 2)
     return { irr: null, irrUnavailable: "Not enough activity to compute a return yet." };
@@ -212,6 +272,9 @@ export function toLedgerTxn(r: Transaction): LedgerTxn {
     // ignores it for deltas.
     pricePerUnit: r.pricePerUnit,
     amount: r.amount,
+    // Cash-fold inputs (#149): FX to value a cash_balance in THB; the reconcile override.
+    fxToThb: r.fxToThb,
+    reconcile: r.reconcile,
     createdAt: r.createdAt,
   };
 }

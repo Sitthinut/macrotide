@@ -32,18 +32,29 @@ export interface CashFlow {
 
 /**
  * Map a transaction ledger to external cash flows for XIRR, applying the
- * exclusion rules: `reinvest`, `split`, and `snapshot` move no external cash and
- * are dropped (a `snapshot` is a restatement, not a flow — including it would
- * corrupt the return); everything else passes through with its already-signed
- * `amount` (buys/fees negative, sells/cash dividends positive — enforced at the
- * route boundary). A costed `opening` carries a negative `amount` (cash put to
- * work) and is included; an uncosted `opening` carries `amount` 0 and is a no-op.
- * The caller appends the terminal market-value flow.
+ * exclusion rules: `reinvest`, `split`, `snapshot`, and ALL explicit-cash kinds
+ * (`deposit` / `withdraw` / `cash_balance`) are dropped here. A snapshot/cash_balance is
+ * a restatement, not a flow; the cash CONTRIBUTION flows are supplied separately by
+ * `cashContributionFlows` (settlement-cash.ts) — the single shared definition — so a
+ * Set balance's contribution reaches XIRR (it carries no `amount`, only an asserted
+ * balance) and the three contribution paths can't diverge (#149). Everything else passes
+ * through with its already-signed `amount` (buys/fees negative, sells/cash dividends
+ * positive). A costed `opening` carries a negative `amount` (cash put to work) and is
+ * included; an uncosted `opening` carries `amount` 0 and is a no-op. The caller appends
+ * the cash contribution flows and the terminal market-value flow.
  */
 export function txnsToCashFlows(txns: readonly LedgerTxn[]): CashFlow[] {
   const flows: CashFlow[] = [];
   for (const txn of txns) {
-    if (txn.kind === "reinvest" || txn.kind === "split" || txn.kind === "snapshot") continue;
+    if (
+      txn.kind === "reinvest" ||
+      txn.kind === "split" ||
+      txn.kind === "snapshot" ||
+      txn.kind === "deposit" ||
+      txn.kind === "withdraw" ||
+      txn.kind === "cash_balance"
+    )
+      continue;
     flows.push({ date: txn.tradeDate, amount: txn.amount });
   }
   flows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));

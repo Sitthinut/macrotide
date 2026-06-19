@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LedgerTxn } from "./lots";
+import { cashContributionFlows } from "./settlement-cash";
 import { type CashFlow, txnsToCashFlows, xirr } from "./xirr";
 
 describe("xirr", () => {
@@ -88,6 +89,46 @@ describe("txnsToCashFlows", () => {
     ]);
     expect(flows[0].date).toBe("2024-01-01");
     expect(flows[0].amount).toBe(-1000);
+  });
+
+  it("drops explicit-cash kinds — their contribution flows come from cashContributionFlows", () => {
+    const flows = txnsToCashFlows([
+      base("buy", -1000, "2024-01-01"),
+      base("deposit", -500, "2024-02-01"),
+      base("withdraw", 200, "2024-03-01"),
+      base("cash_balance", 0, "2024-04-01"),
+    ]);
+    // Only the fund buy survives here; cash is supplied separately (one definition).
+    expect(flows.map((f) => f.amount)).toEqual([-1000]);
+  });
+});
+
+describe("cash counts in XIRR without inflating it (#149 phantom-gain regression)", () => {
+  // Reproduces how transaction-analytics composes the return: fund flows
+  // (txnsToCashFlows) + the negated shared cash contribution flows + the terminal value.
+  it("a Set-balance cash slug is offset by its contribution, so XIRR ~ 0", () => {
+    const start = "2024-01-01";
+    const asOf = "2025-01-01";
+    const txns: LedgerTxn[] = [
+      { ticker: "EXAMPLE-FUND-A", kind: "buy", amount: -100_000, tradeDate: start },
+      {
+        ticker: "THB",
+        kind: "cash_balance",
+        units: 100_000,
+        fxToThb: 1,
+        amount: 0,
+        tradeDate: start,
+      },
+    ];
+    // Fund still worth 100k (flat) + 100k cash = 200k terminal.
+    const cashFlows = cashContributionFlows(txns).map((f) => ({ date: f.date, amount: -f.amount }));
+    const fixed = xirr([...txnsToCashFlows(txns), ...cashFlows, { date: asOf, amount: 200_000 }]);
+    expect(fixed).not.toBeNull();
+    expect(fixed as number).toBeCloseTo(0, 3); // cash is a contribution → no fabricated gain
+
+    // Without the shared cash flow (the pre-fix bug) the 100k cash reads as pure profit.
+    const buggy = xirr([...txnsToCashFlows(txns), { date: asOf, amount: 200_000 }]);
+    expect(buggy as number).toBeGreaterThan(0.5); // ~+100% phantom gain
   });
 });
 

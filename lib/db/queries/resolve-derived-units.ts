@@ -1,7 +1,7 @@
 import "server-only";
 import { quoteCacheKey } from "@/lib/market/sources";
 import type { TxnKind } from "@/lib/portfolio/lots";
-import { isAnchorKind, signedAmount, signFor } from "@/lib/portfolio/txn-import";
+import { isAnchorKind, isCashKind, signedAmount, signFor } from "@/lib/portfolio/txn-import";
 import { deriveUnits } from "@/lib/portfolio/value-ledger";
 import { listFundQuotes, navOnDates } from "./quotes";
 import type { Transaction } from "./transactions";
@@ -62,7 +62,11 @@ export function resolveDerivedUnits(rows: readonly Transaction[]): Transaction[]
   return rows.map((r) => {
     if (!isDerivable(r)) return r;
     const key = cacheKey(r);
-    const nav = navByDate.get(r.tradeDate)?.get(key) ?? latest.get(key) ?? null;
+    // Cash has no market NAV — it is priced at 1.0 in its own currency, so a
+    // value-only cash_balance derives units = value ÷ 1 = the asserted balance.
+    const nav = isCashKind(r.kind)
+      ? 1
+      : (navByDate.get(r.tradeDate)?.get(key) ?? latest.get(key) ?? null);
 
     // Units-only delta trade → derive the cash: units × (execution price ?? NAV), with
     // the fee folded in like a normal trade, then signed by kind (buy = cash out). No

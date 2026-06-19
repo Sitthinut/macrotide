@@ -10,18 +10,18 @@
 // A benchmark selected with no distributing fund means both lines are total
 // return → nothing to disclaim.
 //
-// Returns the exact sentence for the active combination, or null when nothing
-// applies. Copy is verbatim per the product spec; do not paraphrase.
+// Returns the sentence for the active combination, or null when nothing applies.
+// Kept terse — these caveats stack with other below-chart notes.
 
 export function performanceDisclaimer(
   benchmarkSelected: boolean,
   hasDividendFund: boolean,
 ): string | null {
   if (benchmarkSelected && hasDividendFund) {
-    return "Your funds pay dividends as cash, so your line may run slightly below this total-return benchmark.";
+    return "Your funds pay dividends out, so your line can sit just below this benchmark.";
   }
   if (hasDividendFund) {
-    return "Some of your funds pay dividends as cash. Your total return is a little higher than this line shows.";
+    return "Some funds pay dividends out, so your real total return is a bit higher than shown.";
   }
   return null;
 }

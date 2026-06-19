@@ -21,25 +21,52 @@ export const TXN_KINDS: readonly TxnKind[] = [
   "reinvest",
 ] as const;
 
-/** Anchor kinds — absolute position assertions (see ADR 0004). */
-export const ANCHOR_KINDS: readonly TxnKind[] = ["opening", "snapshot"] as const;
+/** Position anchor kinds — absolute fund-position assertions (see ADR 0004). */
+export const POSITION_ANCHOR_KINDS: readonly TxnKind[] = ["opening", "snapshot"] as const;
 
-/** Every valid ledger kind (deltas + anchors). */
-export const LEDGER_KINDS: readonly TxnKind[] = [...TXN_KINDS, ...ANCHOR_KINDS] as const;
+// Explicit cash kinds (issue #149), scoped to a named cash account. `deposit` /
+// `withdraw` are cash DELTAS; `cash_balance` is a cash ANCHOR (absolute restatement
+// of a bucket's cash, the cash analogue of a fund Balance).
+export const CASH_DELTA_KINDS: readonly TxnKind[] = ["deposit", "withdraw"] as const;
+export const CASH_ANCHOR_KINDS: readonly TxnKind[] = ["cash_balance"] as const;
+export const CASH_KINDS: readonly TxnKind[] = [...CASH_DELTA_KINDS, ...CASH_ANCHOR_KINDS] as const;
 
-/** True for any valid stored ledger kind (delta OR anchor). */
+/** Every anchor kind (fund position + cash). */
+export const ANCHOR_KINDS: readonly TxnKind[] = [
+  ...POSITION_ANCHOR_KINDS,
+  ...CASH_ANCHOR_KINDS,
+] as const;
+
+/** Every valid ledger kind (fund deltas + anchors + cash kinds). */
+export const LEDGER_KINDS: readonly TxnKind[] = [
+  ...TXN_KINDS,
+  ...POSITION_ANCHOR_KINDS,
+  ...CASH_KINDS,
+] as const;
+
+/** True for any valid stored ledger kind. */
 export function isTxnKind(v: unknown): v is TxnKind {
   return typeof v === "string" && (LEDGER_KINDS as readonly string[]).includes(v);
 }
 
-/** True for a DELTA kind only (excludes anchors) — what the Activity importer accepts. */
+/** True for a FUND DELTA kind only (excludes anchors + cash) — what the Activity importer accepts. */
 export function isDeltaKind(v: unknown): v is TxnKind {
   return typeof v === "string" && (TXN_KINDS as readonly string[]).includes(v);
 }
 
-/** True for an anchor kind (opening / snapshot). */
+/** True for an anchor kind (opening / snapshot / cash_balance). */
 export function isAnchorKind(v: unknown): v is TxnKind {
   return typeof v === "string" && (ANCHOR_KINDS as readonly string[]).includes(v);
+}
+
+/** True for an explicit cash kind (deposit / withdraw / cash_balance). */
+export function isCashKind(v: unknown): v is TxnKind {
+  return typeof v === "string" && (CASH_KINDS as readonly string[]).includes(v);
+}
+
+/** True for a cash anchor (cash_balance). */
+export function isCashAnchorKind(v: unknown): v is TxnKind {
+  return typeof v === "string" && (CASH_ANCHOR_KINDS as readonly string[]).includes(v);
 }
 
 /**
@@ -80,12 +107,18 @@ export function signFor(kind: TxnKind): -1 | 0 | 1 {
     case "fee":
     case "reinvest":
     case "opening":
+    // A deposit commits cash to the portfolio (money in, like a buy) → negative for XIRR.
+    case "deposit":
       return -1;
     case "sell":
     case "dividend":
+    // A withdraw returns cash to the user (money out, like a sell) → positive for XIRR.
+    case "withdraw":
       return 1;
     case "split":
     case "snapshot":
+    // A cash_balance is an absolute restatement — it moves no cash, like a snapshot.
+    case "cash_balance":
       return 0;
   }
 }
@@ -145,9 +178,13 @@ export interface TxnDraftInput {
  *  - quoteSource is inferred from the ticker if not pinned.
  */
 export function normalizeTxnDraft(row: TxnDraftInput): TxnDraftRow {
-  // The Activity importer only deals in deltas; an anchor kind here falls back to
-  // a buy (anchors are created by the Snapshot flow, not the transaction table).
-  const kind: TxnKind = isDeltaKind(row.kind) ? row.kind : "buy";
+  // The Activity importer only deals in fund deltas; an anchor kind here falls back
+  // to a buy (anchors are created by the Snapshot flow, not the transaction table).
+  // Cash deltas (deposit/withdraw) are pure-฿ events that keep their kind.
+  const kind: TxnKind =
+    isDeltaKind(row.kind) || (isCashKind(row.kind) && !isCashAnchorKind(row.kind))
+      ? (row.kind as TxnKind)
+      : "buy";
   const ticker = (row.ticker ?? "").trim();
   const units = numOrNull(row.units);
   const price = numOrNull(row.pricePerUnit);
@@ -263,10 +300,11 @@ export function rowValidity(
     // custom asset has no NAV to value them); with nothing typed, a figure.
     return { ok: false, reason: hasUnits ? "needs-price" : "missing-amount" };
   }
-  // Dividends and fees are pure CASH events — no position change, so there are no
-  // units to resolve. Like a split, they're exempt from the units-resolvable gate
-  // (otherwise a custom-asset cash dividend with only a ฿ amount can't be entered).
-  if (d.kind === "dividend" || d.kind === "fee") return { ok: true };
+  // Dividends, fees, and cash deposits/withdrawals are pure CASH events — no fund
+  // position to resolve, so they're exempt from the units-resolvable gate (a ฿
+  // amount alone is enough; they fold into a cash position at face value).
+  if (d.kind === "dividend" || d.kind === "fee" || d.kind === "deposit" || d.kind === "withdraw")
+    return { ok: true };
   // A figure is present but it's a custom asset with no price to turn ฿ ↔ units.
   if (!d.unitsResolvable) return { ok: false, reason: "needs-price" };
   return { ok: true };

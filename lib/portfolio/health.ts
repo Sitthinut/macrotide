@@ -108,6 +108,10 @@ const ASSET_CLASS_META: Record<AssetClass, { label: string; color: string }> = {
   unknown: { label: "Unknown", color: "#A38A55" },
 };
 
+// Reserved cash (#149) — set-aside cash shown as its OWN slice, a darker shade of the
+// cash grey so it reads as "cash, but earmarked".
+const RESERVED_META = { label: "Reserved", color: "#6E6E7A" };
+
 const REGION_COLORS = [
   "var(--accent)",
   "#F4A434",
@@ -122,24 +126,30 @@ function safePct(part: number, whole: number): number {
   return whole > 0 ? (part / whole) * 100 : 0;
 }
 
-/** Allocation by asset class as ordered slices (only non-zero sleeves). */
-export function allocationByClass(holdings: Holding[], totalValue: number): AllocationSlice[] {
-  const groups = new Map<AssetClass, number>();
+/**
+ * Allocation by asset class as ordered slices (only non-zero sleeves). Reserved cash
+ * (#149 — accounts in `reservedTickers`) is pulled out of the Cash sleeve into its own
+ * "Reserved" slice, so set-aside cash doesn't read as investable allocation.
+ */
+export function allocationByClass(
+  holdings: Holding[],
+  totalValue: number,
+  reservedTickers?: ReadonlySet<string>,
+): AllocationSlice[] {
+  const groups = new Map<string, number>();
   for (const h of holdings) {
-    groups.set(h.class, (groups.get(h.class) ?? 0) + h.value);
+    const key =
+      h.class === "cash" && reservedTickers?.has(h.ticker.trim().toUpperCase())
+        ? "reserved"
+        : h.class;
+    groups.set(key, (groups.get(key) ?? 0) + h.value);
   }
-  const order: AssetClass[] = ["equity", "bond", "alternative", "cash", "unknown"];
+  const order = ["equity", "bond", "alternative", "cash", "reserved", "unknown"] as const;
   return order
-    .map((cls) => {
-      const value = groups.get(cls) ?? 0;
-      const meta = ASSET_CLASS_META[cls];
-      return {
-        key: cls,
-        label: meta.label,
-        value,
-        pct: safePct(value, totalValue),
-        color: meta.color,
-      };
+    .map((key) => {
+      const value = groups.get(key) ?? 0;
+      const meta = key === "reserved" ? RESERVED_META : ASSET_CLASS_META[key];
+      return { key, label: meta.label, value, pct: safePct(value, totalValue), color: meta.color };
     })
     .filter((s) => s.value > 0);
 }
@@ -490,11 +500,12 @@ export function computeHealth(
   targetMix: MixSlice[] | null,
   targetTer: number | null = null,
   lookThrough: LookThrough | null = null,
+  reservedTickers?: ReadonlySet<string>,
 ): HealthSignals {
   const drift = targetMix ? computeDrift(holdings, totalValue, targetMix) : [];
   return {
     totalValue,
-    byClass: allocationByClass(holdings, totalValue),
+    byClass: allocationByClass(holdings, totalValue, reservedTickers),
     byRegion: allocationByRegion(holdings, totalValue),
     drift,
     trackingGapPp: trackingGap(drift),

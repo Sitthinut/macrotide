@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   coerceKind,
+  isAnchorKind,
+  isCashKind,
   looksLikeTransactionHistory,
   normalizeDate,
   normalizeTxnDraft,
   parseTxnPaste,
   promoteAnchorKinds,
+  rowValidity,
   signedAmount,
 } from "./txn-import";
 
@@ -21,6 +24,41 @@ describe("signedAmount", () => {
   it("normalizes an already-signed magnitude to the canonical sign", () => {
     expect(signedAmount("buy", -1000)).toBe(-1000); // |−1000| then negated
     expect(signedAmount("sell", -1200)).toBe(1200);
+  });
+  it("signs cash kinds: deposit out (−), withdraw in (+), cash_balance no-move (0)", () => {
+    expect(signedAmount("deposit", 500)).toBe(-500);
+    expect(signedAmount("withdraw", 200)).toBe(200);
+    expect(signedAmount("cash_balance", 1000)).toBe(0);
+  });
+});
+
+describe("cash kinds (issue #149)", () => {
+  it("classifies the cash kinds", () => {
+    expect(isCashKind("deposit")).toBe(true);
+    expect(isCashKind("withdraw")).toBe(true);
+    expect(isCashKind("cash_balance")).toBe(true);
+    expect(isCashKind("buy")).toBe(false);
+    // cash_balance is also an anchor (an absolute restatement); deltas are not.
+    expect(isAnchorKind("cash_balance")).toBe(true);
+    expect(isAnchorKind("deposit")).toBe(false);
+  });
+
+  it("rowValidity accepts a cash delta with a date + amount, rejects a figure-less one", () => {
+    const base = { kind: "deposit" as const, ticker: "SAVINGS", quoteSource: "cash" as const };
+    expect(rowValidity({ ...base, tradeDate: "2024-01-01", amount: 500 }).ok).toBe(true);
+    const bad = rowValidity({ ...base, tradeDate: "2024-01-01", amount: 0 });
+    expect(bad.ok).toBe(false);
+  });
+
+  it("rowValidity accepts a cash_balance with an asserted ฿ value", () => {
+    const ok = rowValidity({
+      kind: "cash_balance",
+      ticker: "SAVINGS",
+      tradeDate: "2024-01-01",
+      value: 1200,
+      quoteSource: "cash",
+    });
+    expect(ok.ok).toBe(true);
   });
 });
 

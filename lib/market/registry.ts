@@ -9,6 +9,11 @@
 // lib/market/sources.ts), implementing a Provider that matches it, and
 // calling registerProvider() at module load. The provider order ensures
 // more-specific sources are tried before broader ones.
+//
+// "manual" and "cash" have NO Provider: nothing fetches their NAV. A manual
+// asset is priced from the latest market_price the user records; cash is priced
+// at 1.0 in its own currency (× FX). Both are valued inline by the series /
+// analytics fold, never routed here.
 
 import { eodhdProvider } from "./providers/eodhd";
 import { fmpProvider } from "./providers/fmp";

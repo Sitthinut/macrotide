@@ -11,6 +11,7 @@ import { quoteCacheKey } from "@/lib/market/sources";
 import type {
   AggregatePortfolio,
   AssetClass,
+  CashDecomp,
   Holding,
   ModelPortfolio,
   Note,
@@ -46,7 +47,11 @@ function holdingFromDb(h: DbHolding, quotes: Map<string, FundQuote>): Holding {
   // backward compatibility with cache entries written before quoteSource
   // existed.
   const q = quotes.get(quoteCacheKey(h.quoteSource, h.ticker)) ?? quotes.get(h.ticker);
-  const nav = q?.nav ?? h.avgCost ?? 0;
+  // Cash is priced at 1.0 in its own currency (no NAV). Like every other foreign
+  // holding in this snapshot, its native value is summed without FX conversion —
+  // the FX-aware figure is the All-chart series (getPortfolioSeries). THB cash,
+  // the common case, is exact either way.
+  const nav = h.quoteSource === "cash" ? 1 : (q?.nav ?? h.avgCost ?? 0);
   const value = h.units * nav;
   // Cost basis is unknown for an uncosted opening/snapshot (ADR 0004). Keep
   // `cost` at 0 then, but flag it so gain figures degrade rather than mislead.
@@ -168,6 +173,24 @@ function toSeriesPoints(raw: { date: string; value: number }[] | undefined): Ser
   return raw.map((p) => ({ d: p.date, v: p.value }));
 }
 
+// Server cash-decomposition shape ({date,value} arrays) → client ({d,v}).
+interface RawCashDecomp {
+  cashValue: { date: string; value: number }[];
+  reservedCashValue: { date: string; value: number }[];
+  cashContrib: { date: string; value: number }[];
+  reservedCashContrib: { date: string; value: number }[];
+}
+
+function toCashDecomp(raw: RawCashDecomp | undefined): CashDecomp | undefined {
+  if (!raw) return undefined;
+  return {
+    cashValue: toSeriesPoints(raw.cashValue),
+    reservedCashValue: toSeriesPoints(raw.reservedCashValue),
+    cashContrib: toSeriesPoints(raw.cashContrib),
+    reservedCashContrib: toSeriesPoints(raw.reservedCashContrib),
+  };
+}
+
 // Look back `days` calendar days from the latest point and return the % delta
 // vs the closest point on or before that target date. Falls back to the first
 // point if the series doesn't reach that far back.
@@ -193,6 +216,7 @@ export function adaptBucket(
   quotes: Map<string, FundQuote>,
   rawSeries?: { date: string; value: number }[],
   rawNetInvested?: { date: string; value: number }[],
+  rawCashDecomp?: RawCashDecomp,
 ): Portfolio {
   const holdings = bucketHoldings.map((h) => holdingFromDb(h, quotes));
   const totalValue = holdings.reduce((s, h) => s + h.value, 0);
@@ -228,6 +252,7 @@ export function adaptBucket(
     },
     series: toSeriesPoints(rawSeries),
     netInvested: toSeriesPoints(rawNetInvested),
+    cashDecomp: toCashDecomp(rawCashDecomp),
     holdings,
   };
 }
@@ -237,6 +262,8 @@ export interface SeriesBundle {
   perBucket: Record<string, { date: string; value: number }[]>;
   netInvested?: { date: string; value: number }[];
   netInvestedByBucket?: Record<string, { date: string; value: number }[]>;
+  cashDecomp?: RawCashDecomp;
+  cashDecompByBucket?: Record<string, RawCashDecomp>;
 }
 
 export function adaptPortfolios(
@@ -253,6 +280,7 @@ export function adaptPortfolios(
       byTicker,
       series?.perBucket[b.id],
       series?.netInvestedByBucket?.[b.id],
+      series?.cashDecompByBucket?.[b.id],
     ),
   );
 }
@@ -261,6 +289,7 @@ export function adaptAggregate(
   portfolios: Portfolio[],
   rawSeries?: { date: string; value: number }[],
   rawNetInvested?: { date: string; value: number }[],
+  rawCashDecomp?: RawCashDecomp,
 ): AggregatePortfolio {
   const allHoldings = portfolios.flatMap((p) => p.holdings);
   const totalValue = portfolios.reduce((s, p) => s + p.totalValue, 0);
@@ -280,6 +309,7 @@ export function adaptAggregate(
     holdings: allHoldings,
     series: toSeriesPoints(rawSeries),
     netInvested: toSeriesPoints(rawNetInvested),
+    cashDecomp: toCashDecomp(rawCashDecomp),
     target: { equity: 70, bond: 20, alternative: 7, cash: 3 },
   };
 }

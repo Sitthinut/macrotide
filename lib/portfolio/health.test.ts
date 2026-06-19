@@ -62,6 +62,14 @@ describe("allocationByClass", () => {
   it("returns no slices for an empty/zero portfolio", () => {
     expect(allocationByClass([], 0)).toEqual([]);
   });
+
+  it("pulls a RESERVED cash account into its own slice, out of Cash (#149)", () => {
+    const slices = allocationByClass(holdings, TOTAL, new Set(["KFCASH-A"]));
+    const map = Object.fromEntries(slices.map((s) => [s.key, s.pct]));
+    expect(map.cash).toBeUndefined(); // the only cash account is reserved
+    expect(map.reserved).toBeCloseTo(5);
+    expect(slices.find((s) => s.key === "reserved")?.label).toBe("Reserved");
+  });
 });
 
 describe("allocationByRegion", () => {

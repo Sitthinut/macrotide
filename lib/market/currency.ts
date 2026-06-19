@@ -52,16 +52,28 @@ const SYMBOL_CURRENCY: Record<string, string> = {
 
 /**
  * Infer the native currency a holding's NAV is denominated in, from its
- * `quoteSource` + `ticker`. Thai mutual funds are always THB. Yahoo symbols use
- * the exchange suffix (or a known-index override); everything else — bare US
- * tickers, US-index carets — defaults to USD, which is how those quotes arrive.
+ * `quoteSource` + `ticker`. Thai mutual funds are always THB. Cash carries its
+ * currency explicitly (the holding's `currency` column, since the ticker is the
+ * account name, not a symbol) — passed as `storedCurrency`. Yahoo symbols use the
+ * exchange suffix (or a known-index override); everything else — bare US tickers,
+ * US-index carets — defaults to USD, which is how those quotes arrive.
  *
  * This is a best-effort heuristic, not authoritative metadata. It exists so the
  * value series can FX-convert instead of summing raw mixed-currency NAVs; an
  * unknown symbol degrades to USD (the dominant foreign case) rather than
  * silently treating a USD ETF as THB.
  */
-export function inferHoldingCurrency(quoteSource: string, ticker: string): string {
+export function inferHoldingCurrency(
+  quoteSource: string,
+  ticker: string,
+  storedCurrency?: string | null,
+): string {
+  // Cash holds real bank balances in a known currency (the row's `currency`),
+  // defaulting to the base currency when unset.
+  if (quoteSource === "cash") {
+    const c = (storedCurrency ?? "").trim().toUpperCase();
+    return c || BASE_CURRENCY;
+  }
   // Thai funds and manually-priced custom assets are entered in THB (the app's
   // base currency) — no FX is applied to their price.
   if (quoteSource === "thai_mutual_fund" || quoteSource === "manual") return "THB";

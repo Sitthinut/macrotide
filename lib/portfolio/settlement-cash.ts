@@ -20,10 +20,30 @@
 //
 // The window is a foolproof-default heuristic: it keeps a sell-and-walk-away
 // user's chart honest (no phantom wealth forever) at the cost of drawing a
-// deliberately-parked stash as out-of-market. Recorded truth will override it
-// once explicit cash events exist (issue #149).
+// deliberately-parked stash as out-of-market. Recorded truth OVERRIDES it
+// (issue #149) — explicit cash events the user enters:
 //
-// `dividend` (paid out), `fee`, `reinvest` (internal income), and anchors
+//   • A `deposit` is an external inflow; a `withdraw` is an external outflow. They
+//     move money across the portfolio boundary; the held-cash position's standing
+//     value is folded separately (reduceLots), so withdraw is just the boundary flow.
+//   • A `cash_balance` (Set balance) ASSERTS an account's balance. By DEFAULT the
+//     change vs that account's prior asserted balance is money in/out (a
+//     contribution/withdrawal). The "no money moved" override (`reconcile`) makes it a
+//     pure restatement — no flow — and clears the bucket's in-transit lots, so the
+//     asserted balance (now a held-cash position) absorbs deliberately-parked proceeds
+//     and the 30-day heuristic can't retroactively withdraw them.
+//
+// A fund `buy` consumes only in-transit sell proceeds (the heuristic), NOT explicit
+// cash — the app never silently debits a tracked account (which one, of several?).
+// Funding a buy from tracked cash is recorded by the user (a withdraw, via the
+// "funded from cash?" nudge) or reconciled at the next Set balance; either way the
+// buy(+) and the cash-down(−) net to zero. See tmp/cash-prd.md §2c.
+//
+// Explicit cash's standing VALUE is a held-cash position folded by reduceLots (a
+// `cash`-quote-source ticker priced at 1), not in-transit settlement cash — so it
+// never enters `terminalCash` and is never double-counted on the value line.
+//
+// `dividend` (paid out), `fee`, `reinvest` (internal income), and fund anchors
 // (position restatements, no cash flow) do not touch cash.
 //
 // The external-flow series is the chart's CONTRIBUTION line. It is NOT
@@ -48,12 +68,12 @@ export interface CashPoint {
 export interface ExternalFlow {
   date: string;
   /**
-   * Signed THB capital: > 0 money entered the bucket (a buy funded from outside),
-   * < 0 capital left (a withdrawal). A withdrawal removes only the **cost basis**
-   * of the proceeds, never the realized gain riding in them — so cashing out a
-   * position at a profit returns net contribution toward 0, never past it. (The
-   * value line still loses the full proceeds; the gain you withdrew simply leaves
-   * the chart.)
+   * Signed THB capital: > 0 money entered the bucket (a buy funded from outside, a
+   * deposit, or a Set-balance raise), < 0 capital left (a withdraw or a Set-balance
+   * drop). An UNCONSUMED sell lot that expires past the window removes only its **cost
+   * basis**, not the realized gain riding in the proceeds — so walking away from a
+   * profitable sale returns net contribution toward 0, never past it. Explicit
+   * deposit/withdraw/Set-balance flows move at FACE (cash carries no gain to split).
    */
   amount: number;
 }
@@ -95,9 +115,10 @@ function addDays(isoDate: string, days: number): string {
  * @param today ISO date used to keep recent, still-pending proceeds as cash
  * @param windowDays settlement window before unconsumed proceeds count as withdrawn
  * @param costBySellId per-sell cost basis (by txn id) — the capital portion of its
- *   proceeds. A withdrawal removes this, not the full proceeds, so realized gains
- *   don't drive net contribution negative. Falls back to proceeds when absent (an
- *   uncosted sell can't split capital from gain).
+ *   proceeds. When an unconsumed sell lot EXPIRES past the window, only this capital
+ *   is removed (not the realized gain), so walking away from a profitable sale doesn't
+ *   drive net contribution negative. Falls back to proceeds when absent (an uncosted
+ *   sell can't split capital from gain).
  */
 export function foldSettlementCash(
   txns: readonly LedgerTxn[],
@@ -105,14 +126,30 @@ export function foldSettlementCash(
   windowDays: number = SETTLEMENT_WINDOW_DAYS,
   costBySellId?: ReadonlyMap<number, number>,
 ): SettlementCashResult {
-  // Within a single date cash is fungible, so SELLS FOLD FIRST: a same-day
-  // switch (sell A, buy B, equal amounts — the common broker pattern) must net
-  // to zero regardless of row insertion order, never read as an external
-  // deposit plus a later withdrawal.
+  // Within a single date cash is fungible, so the fold order is fixed by kind, not
+  // row insertion: SELL (0) opens proceeds first so a same-day switch nets to zero;
+  // DEPOSIT (1) / WITHDRAW (2) move explicit cash; CASH_BALANCE (3) asserts the level
+  // AFTER those moves (so a same-day deposit+Set-balance double-counts nothing) and a
+  // reconcile clears the still-open sell lots; BUY (4) draws last.
+  const rankKind = (t: LedgerTxn): number => {
+    switch (t.kind) {
+      case "sell":
+        return 0;
+      case "deposit":
+        return 1;
+      case "withdraw":
+        return 2;
+      case "cash_balance":
+        return 3;
+      case "buy":
+        return 4;
+      default:
+        return 5;
+    }
+  };
   const sorted = [...txns].sort((a, b) => {
     if (a.tradeDate !== b.tradeDate) return a.tradeDate < b.tradeDate ? -1 : 1;
-    const rank = (t: LedgerTxn): number => (t.kind === "sell" ? 0 : 1);
-    if (rank(a) !== rank(b)) return rank(a) - rank(b);
+    if (rankKind(a) !== rankKind(b)) return rankKind(a) - rankKind(b);
     return compareTxns(a, b);
   });
 
@@ -132,37 +169,73 @@ export function foldSettlementCash(
     }
   };
 
-  for (const txn of sorted) {
-    const magnitude = Math.abs(txn.amount);
-    if (txn.kind === "sell") {
-      if (magnitude > CASH_EPSILON) {
-        // Cost basis of the proceeds (capital); the rest is realized gain. Unknown
-        // → treat the whole proceeds as capital (can't split without a basis).
-        const cost = txn.id != null ? (costBySellId?.get(txn.id) ?? magnitude) : magnitude;
-        lots.push({
-          date: txn.tradeDate,
-          remaining: magnitude,
-          costRemaining: Math.min(cost, magnitude),
-        });
-      }
-      continue;
-    }
-    if (txn.kind !== "buy") continue; // reinvest/dividend/fee/anchors: no cash effect
-    expireBefore(txn.tradeDate);
-    let need = magnitude;
+  // Draw up to `need` cash from live heuristic lots FIFO, closing each consumed
+  // lot's in-transit span at `onDate`. Returns the cash drawn and its capital
+  // (cost) share — the caller decides whether that capital is an external outflow
+  // (a withdraw) or an internal reinvestment (a buy, no contribution change).
+  const drawCash = (need: number, onDate: string): { drawn: number; costDrawn: number } => {
+    let drawn = 0;
+    let costDrawn = 0;
     while (need > CASH_EPSILON && lots.length > 0) {
       const lot = lots[0];
       const take = Math.min(lot.remaining, need);
-      // Consume cash and its capital share proportionally (reinvestment is
-      // internal — no contribution change, but the lot's remaining cost shrinks).
-      lot.costRemaining -= lot.costRemaining * (take / lot.remaining);
-      spans.push({ from: lot.date, to: txn.tradeDate, amount: take });
+      const costTake = lot.costRemaining * (take / lot.remaining);
+      lot.costRemaining -= costTake;
+      spans.push({ from: lot.date, to: onDate, amount: take });
       lot.remaining -= take;
+      drawn += take;
+      costDrawn += costTake;
       need -= take;
       if (lot.remaining <= CASH_EPSILON) lots.shift();
     }
-    // Whatever live cash couldn't cover came from outside the bucket (new capital).
-    if (need > CASH_EPSILON) flows.push({ date: txn.tradeDate, amount: need });
+    return { drawn, costDrawn };
+  };
+
+  for (const txn of sorted) {
+    const magnitude = Math.abs(txn.amount);
+    switch (txn.kind) {
+      case "sell": {
+        if (magnitude > CASH_EPSILON) {
+          // Cost basis of the proceeds (capital); the rest is realized gain. Unknown
+          // → treat the whole proceeds as capital (can't split without a basis).
+          const cost = txn.id != null ? (costBySellId?.get(txn.id) ?? magnitude) : magnitude;
+          lots.push({
+            date: txn.tradeDate,
+            remaining: magnitude,
+            costRemaining: Math.min(cost, magnitude),
+          });
+        }
+        break;
+      }
+      // deposit / withdraw move no in-transit lots — their CONTRIBUTION flows come from
+      // `cashContributionFlows` (the shared definition), merged in after this loop.
+      case "cash_balance": {
+        // A "no money moved" Set balance (reconcile) asserts that any in-transit proceeds
+        // are now held cash: close their spans and drop the lots, so the 30-day heuristic
+        // can't retroactively withdraw deliberately-parked proceeds (issue #149). The
+        // contribution flow itself (the delta, when NOT a reconcile) is produced by
+        // `cashContributionFlows` — keep that ONE definition, don't duplicate it here.
+        if (txn.reconcile) {
+          for (const lot of lots) {
+            if (lot.remaining > CASH_EPSILON) {
+              spans.push({ from: lot.date, to: txn.tradeDate, amount: lot.remaining });
+            }
+          }
+          lots.length = 0;
+        }
+        break;
+      }
+      case "buy": {
+        expireBefore(txn.tradeDate);
+        const { drawn } = drawCash(magnitude, txn.tradeDate);
+        // Whatever live cash couldn't cover came from outside the bucket (new capital).
+        const shortfall = magnitude - drawn;
+        if (shortfall > CASH_EPSILON) flows.push({ date: txn.tradeDate, amount: shortfall });
+        break;
+      }
+      default:
+        break; // reinvest/dividend/fee/fund anchors: no cash effect
+    }
   }
 
   // Terminal sweep: lots past the window expired (capital withdrawn at their sell
@@ -193,8 +266,82 @@ export function foldSettlementCash(
     cashTimeline.push({ date, cash: level > CASH_EPSILON ? level : 0 });
   }
 
-  // Retroactive expiries land out of order — restore date order for consumers.
+  // Merge the explicit-cash contribution flows from the SHARED definition (deposit /
+  // withdraw / Set-balance delta), so the chart line, XIRR, and the summary can't diverge.
+  flows.push(...cashContributionFlows(txns));
+
+  // Retroactive expiries + merged cash flows land out of order — restore date order.
   flows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
   return { cashTimeline, externalFlows: flows, terminalCash };
+}
+
+// Cash-event ordering within a date: deposit/withdraw settle before a Set balance, so a
+// same-day "deposit then Set balance" counts only the un-deposited change.
+const cashEventRank = (kind: LedgerTxn["kind"]): number =>
+  kind === "deposit" ? 0 : kind === "withdraw" ? 1 : 2; // cash_balance last
+
+/**
+ * The boundary CONTRIBUTION flows from explicit cash events (#149) — the SINGLE
+ * definition shared by the settlement-cash chart line, the XIRR cash flows, and the
+ * contribution summary, so the three never silently diverge (PRD §6 review trap #3).
+ *
+ * Sign (chart convention): > 0 money ENTERED the portfolio (a deposit, or a Set-balance
+ * raise), < 0 it LEFT (a withdraw, or a Set-balance drop). A `reconcile` Set balance moves
+ * no money → no flow. XIRR negates these (money in = a negative, out-of-pocket flow).
+ *
+ * Per-account running balance: a Set balance's delta is measured against THAT account's
+ * prior level (THB = native units × `fxToThb`), not a bucket-wide total — several cash
+ * accounts can share a bucket.
+ */
+export function cashContributionFlows(
+  txns: readonly LedgerTxn[],
+  /**
+   * Cash account tickers whose contributions are EXCLUDED — a `reserved` account (#149)
+   * is set aside, so its deposits / Set-balance changes are not portfolio contributions
+   * and its rows produce no flows. (Its value still counts in net worth, just not in the
+   * return — the terminal-side exclusion is the caller's job.)
+   */
+  excludeTickers?: ReadonlySet<string>,
+): ExternalFlow[] {
+  const sorted = txns
+    .filter(
+      (t) =>
+        (t.kind === "deposit" || t.kind === "withdraw" || t.kind === "cash_balance") &&
+        !excludeTickers?.has(t.ticker),
+    )
+    .sort((a, b) => {
+      if (a.tradeDate !== b.tradeDate) return a.tradeDate < b.tradeDate ? -1 : 1;
+      if (cashEventRank(a.kind) !== cashEventRank(b.kind)) {
+        return cashEventRank(a.kind) - cashEventRank(b.kind);
+      }
+      return compareTxns(a, b);
+    });
+
+  const balanceByTicker = new Map<string, number>();
+  const flows: ExternalFlow[] = [];
+  for (const txn of sorted) {
+    const magnitude = Math.abs(txn.amount);
+    if (txn.kind === "deposit") {
+      if (magnitude > CASH_EPSILON) flows.push({ date: txn.tradeDate, amount: magnitude });
+      balanceByTicker.set(txn.ticker, (balanceByTicker.get(txn.ticker) ?? 0) + magnitude);
+    } else if (txn.kind === "withdraw") {
+      if (magnitude > CASH_EPSILON) flows.push({ date: txn.tradeDate, amount: -magnitude });
+      balanceByTicker.set(
+        txn.ticker,
+        Math.max(0, (balanceByTicker.get(txn.ticker) ?? 0) - magnitude),
+      );
+    } else {
+      // cash_balance: the change vs this account's prior asserted balance is the flow,
+      // unless it's a "no money moved" reconcile.
+      const assertedThb = (txn.units ?? 0) * (txn.fxToThb ?? 1);
+      const prior = balanceByTicker.get(txn.ticker) ?? 0;
+      const delta = assertedThb - prior;
+      balanceByTicker.set(txn.ticker, assertedThb);
+      if (!txn.reconcile && Math.abs(delta) > CASH_EPSILON) {
+        flows.push({ date: txn.tradeDate, amount: delta });
+      }
+    }
+  }
+  return flows;
 }

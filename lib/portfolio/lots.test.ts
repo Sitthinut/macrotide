@@ -343,3 +343,52 @@ describe("reduceLots — positionTimeline (point-in-time replay)", () => {
     expect(last?.date).toBe("2024-04-01");
   });
 });
+
+describe("reduceLots — cash holdings (issue #149)", () => {
+  const CASH = "SAVINGS";
+  // A cash event's `units` is the NATIVE amount; the THB `amount` carries the
+  // contribution (signed elsewhere). reduceLots reads units for the position.
+  it("a deposit folds to a cash position at face (units = native, avg cost 1)", () => {
+    const r = reduceLots([tx({ ticker: CASH, kind: "deposit", units: 500, amount: -500 })]);
+    const pos = r.positions.find((p) => p.ticker === CASH);
+    expect(pos?.units).toBeCloseTo(500, 9);
+    expect(pos?.avgCost).toBeCloseTo(1, 9);
+    expect(pos?.costBasis).toBeCloseTo(500, 9);
+    // Cash never produces realized gains, income, or expenses.
+    expect(r.realized).toEqual([]);
+    expect(r.income).toEqual([]);
+    expect(r.expenses).toEqual([]);
+  });
+
+  it("a withdraw reduces the cash position at face", () => {
+    const r = reduceLots([
+      tx({ ticker: CASH, kind: "deposit", units: 500, amount: -500, tradeDate: "2024-01-01" }),
+      tx({ ticker: CASH, kind: "withdraw", units: 200, amount: 200, tradeDate: "2024-02-01" }),
+    ]);
+    const pos = r.positions.find((p) => p.ticker === CASH);
+    expect(pos?.units).toBeCloseTo(300, 9);
+    expect(pos?.avgCost).toBeCloseTo(1, 9);
+  });
+
+  it("a cash_balance restates the position to the asserted native balance", () => {
+    const r = reduceLots([
+      tx({ ticker: CASH, kind: "deposit", units: 500, amount: -500, tradeDate: "2024-01-01" }),
+      // The asserted balance arrives as units (resolved upstream from value ÷ 1).
+      tx({ ticker: CASH, kind: "cash_balance", units: 1200, amount: 0, tradeDate: "2024-03-01" }),
+    ]);
+    const pos = r.positions.find((p) => p.ticker === CASH);
+    expect(pos?.units).toBeCloseTo(1200, 9);
+    expect(pos?.avgCost).toBeCloseTo(1, 9);
+  });
+
+  it("does not let cash contribute to a fund position in the same ledger", () => {
+    const r = reduceLots([
+      tx({ kind: "buy", units: 10, amount: -1000, tradeDate: "2024-01-01" }),
+      tx({ ticker: CASH, kind: "deposit", units: 500, amount: -500, tradeDate: "2024-01-02" }),
+    ]);
+    const fund = r.positions.find((p) => p.ticker === A);
+    const cash = r.positions.find((p) => p.ticker === CASH);
+    expect(fund?.units).toBeCloseTo(10, 9);
+    expect(cash?.units).toBeCloseTo(500, 9);
+  });
+});
