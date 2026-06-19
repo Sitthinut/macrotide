@@ -15,6 +15,14 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **The period return now reflects how the window actually performed.** The %
+  next to the range selector (1M / 6M / 1Y …) is time-weighted: a deposit or
+  withdrawal made *during* the period no longer distorts it — previously a large
+  mid-period deposit onto a small starting balance could read as a wildly
+  inflated return. It still follows the Include cash ↔ Funds only toggle. The
+  lifetime "all-time" return and the chart tooltip's gain figure are unchanged
+  (those answer "gain on what I put in", a different question).
+
 - **The Advisor reliably remembers when you ask it to.** Explicit "remember
   this" requests now save on the first try and show the memory chip in the same
   reply, instead of the Advisor sometimes just acknowledging in words without
