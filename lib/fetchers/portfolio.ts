@@ -138,6 +138,9 @@ export interface PortfolioSeriesResponse {
   cashDecomp: CashDecompResponse;
   cashDecompByBucket: Record<string, CashDecompResponse>;
   asOf: string | null;
+  /** Inception (first ledger trade), window-independent — for hiding a 5Y range
+   * that would just duplicate "All" on a younger book. */
+  historyStart: string | null;
   /** True if the book holds a dividend-paying fund (price line drops payouts). */
   hasDistributingHolding: boolean;
   /** Latest plotted date partly valued from trade-implied prices (estimate caption). */

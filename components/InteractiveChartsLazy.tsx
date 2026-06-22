@@ -10,6 +10,7 @@ import { type ComponentType, lazy, Suspense } from "react";
 import { NAV_CHART_HEIGHT } from "@/lib/portfolio/adapter";
 import type {
   AllocationDonut as AllocationDonutImpl,
+  BreakdownChart as BreakdownChartImpl,
   DriftBars as DriftBarsImpl,
   NavChart as NavChartImpl,
 } from "./InteractiveCharts";
@@ -51,6 +52,9 @@ const LazyAllocationDonut = lazyChunk(() =>
 const LazyDriftBars = lazyChunk(() =>
   import("./InteractiveCharts").then((m) => ({ default: m.DriftBars })),
 );
+const LazyBreakdownChart = lazyChunk(() =>
+  import("./InteractiveCharts").then((m) => ({ default: m.BreakdownChart })),
+);
 
 function ChartFallback({ height }: { height?: number }) {
   return <div className="skeleton" aria-hidden style={{ height: height ?? NAV_CHART_HEIGHT }} />;
@@ -76,6 +80,14 @@ export function DriftBars(props: Parameters<typeof DriftBarsImpl>[0]) {
   return (
     <Suspense fallback={<ChartFallback height={props.height} />}>
       <LazyDriftBars {...props} />
+    </Suspense>
+  );
+}
+
+export function BreakdownChart(props: Parameters<typeof BreakdownChartImpl>[0]) {
+  return (
+    <Suspense fallback={<ChartFallback height={props.height} />}>
+      <LazyBreakdownChart {...props} />
     </Suspense>
   );
 }

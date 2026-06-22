@@ -9,18 +9,19 @@
 // single-select (the chart overlays one benchmark line), so there's one pill at a
 // time and the "+ Compare" chip stands in for the future "+ Add".
 //
-// The menu reuses the shared `.combobox__list` styling + `useFlipUp` placement
-// (the same logic the symbol Combobox uses) so it sizes, flips, and looks like
-// every other dropdown in the app.
+// The menu reuses the shared `.combobox__list` styling, but is placed with the
+// global `usePopoverPlacement` (two-axis flip: down + left-aligned by default →
+// right-aligned, then up, as space runs out — and fixed-positioned so the
+// toolbar's overflow clip can't cut it off), matching the cash hint's behavior.
 
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { BENCHMARK_TR_OPTIONS } from "@/lib/market/benchmark-options";
-import { useFlipUp } from "@/lib/useFlipUp";
 import { useListboxKeyboard } from "@/lib/useListboxKeyboard";
+import { usePopoverPlacement } from "@/lib/usePopoverPlacement";
 
 // Fixed height so the off chip and the active pill (which has an extra ✕ child)
 // are exactly the same height — no jump on select.
-const CONTROL: CSSProperties = { height: 32, boxSizing: "border-box" };
+const CONTROL: CSSProperties = { height: 28, boxSizing: "border-box" };
 
 export function BenchmarkPicker({
   value,
@@ -34,13 +35,11 @@ export function BenchmarkPicker({
   const ref = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const { up, measure } = useFlipUp(ref);
+  const listStyle = usePopoverPlacement(triggerRef, listRef, { open });
 
   const active = BENCHMARK_TR_OPTIONS.find((b) => b.key === value);
 
-  // Measure placement BEFORE the list renders so it never flips after opening.
   function toggle() {
-    if (!open) measure();
     setOpen((o) => !o);
   }
 
@@ -69,7 +68,6 @@ export function BenchmarkPicker({
     setOpen,
     listRef,
     triggerRef,
-    onBeforeOpen: measure,
   });
 
   return (
@@ -84,13 +82,24 @@ export function BenchmarkPicker({
         flexWrap: "wrap",
         gap: 6,
         alignItems: "center",
-        margin: "10px 4px 0",
+        // No own margin — the caller positions it (so it can sit flush-left under
+        // the period pills). Spacing comes from the wrapper in PortfolioScreen.
+        margin: 0,
       }}
     >
       {active ? (
-        // Span padding is 0 so the two inner buttons fill the pill — clicking the
-        // swatch or anywhere on the label area (not just the text) opens the menu.
-        <span className="btn ghost sm" style={{ ...CONTROL, padding: 0, gap: 0 }}>
+        // Flat like the rest of the toolbar, carrying the same accent-soft highlight
+        // every engaged control shows (so "active = green" stays uniform across the
+        // bar) — including the accent-ink label, so it matches the period/mode/Scale
+        // active text. The dashed swatch keeps the benchmark color (it matches the
+        // chart line); the × stays muted as a secondary affordance. Span padding is 0
+        // so the two inner buttons fill it: clicking the swatch or label opens the
+        // menu, the × removes.
+        <span
+          className="chart-toolbtn"
+          data-active="true"
+          style={{ ...CONTROL, padding: 0, gap: 0 }}
+        >
           <button
             ref={triggerRef}
             type="button"
@@ -103,7 +112,7 @@ export function BenchmarkPicker({
               alignItems: "center",
               gap: 6,
               height: "100%",
-              padding: "0 4px 0 12px",
+              padding: "0 4px 0 7px",
               background: "none",
               border: "none",
               cursor: "pointer",
@@ -144,8 +153,7 @@ export function BenchmarkPicker({
         <button
           ref={triggerRef}
           type="button"
-          className="btn ghost sm"
-          style={CONTROL}
+          className="chart-toolbtn"
           aria-haspopup="listbox"
           aria-expanded={open}
           onClick={toggle}
@@ -159,7 +167,10 @@ export function BenchmarkPicker({
           role="listbox"
           aria-label="Benchmark"
           className="combobox__list"
-          data-up={up || undefined}
+          // Fixed-positioned by usePopoverPlacement; clear the shared class's
+          // `min-width: 100%`, which under `position: fixed` would resolve against
+          // the viewport instead of the trigger.
+          style={{ ...listStyle, minWidth: "auto" }}
         >
           {BENCHMARK_TR_OPTIONS.map((b) => (
             <button

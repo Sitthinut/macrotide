@@ -1,13 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { BrandMark } from "@/components/BrandMark";
 import { ModelDonut } from "@/components/charts";
 import { FundDetailSheet } from "@/components/FundDetailSheet";
 import { type HoldingFormValues, HoldingSheet } from "@/components/HoldingSheet";
 import { RecentActivityPeek } from "@/components/history/RecentActivityPeek";
 import { Icon } from "@/components/Icon";
-import { AllocationDonut, DriftBars, NavChart } from "@/components/InteractiveChartsLazy";
+import {
+  AllocationDonut,
+  BreakdownChart,
+  DriftBars,
+  NavChart,
+} from "@/components/InteractiveChartsLazy";
 import { Modal } from "@/components/Modal";
 import { PrivateAmount } from "@/components/PrivateAmount";
 import { BenchmarkPicker } from "@/components/portfolio/BenchmarkPicker";
@@ -32,18 +37,13 @@ import {
   useHiddenActionItems,
   useLookThrough,
 } from "@/lib/fetchers/portfolio";
-import { invalidate, useResource } from "@/lib/fetchers/swr";
+import { invalidate } from "@/lib/fetchers/swr";
 import { fmtPct } from "@/lib/format";
 import { BENCHMARK_TR_OPTIONS } from "@/lib/market/benchmark-options";
 import { DEFAULT_QUOTE_SOURCE, isQuoteSource } from "@/lib/market/sources";
 import { feeCreepKey } from "@/lib/portfolio/action-item-key";
 import { REASON_CHIPS, type ReasonChip } from "@/lib/portfolio/action-item-resurface";
-import {
-  formatTooltipDate,
-  NAV_CHART_HEIGHT,
-  seriesReturnPct,
-  windowStartIso,
-} from "@/lib/portfolio/adapter";
+import { formatTooltipDate, NAV_CHART_HEIGHT, seriesReturnPct } from "@/lib/portfolio/adapter";
 import {
   applyCashMode,
   type CashMode,
@@ -62,11 +62,13 @@ import { computeHealth, rebalanceHint, summarizeHealth } from "@/lib/portfolio/h
 import { performanceDisclaimer } from "@/lib/portfolio/performance-disclaimer";
 import { heroReturn } from "@/lib/portfolio/returns-breakdown";
 import { holdingColor } from "@/lib/portfolio/risk-palette";
-import { periodTwr } from "@/lib/portfolio/twr";
+import { periodTwr, twrSeries } from "@/lib/portfolio/twr";
 import type { AssetClass, Holding, Portfolio } from "@/lib/static/types";
 import { usePortfolioUi } from "@/lib/stores/portfolio-ui";
 import { usePrivacy } from "@/lib/stores/privacy";
 import { onActivate } from "@/lib/ui-events";
+import { useLocalStorageState } from "@/lib/useLocalStorageState";
+import { usePopoverPlacement } from "@/lib/usePopoverPlacement";
 
 function holdingToFormValues(h: Holding, fallbackBucketId: string): HoldingFormValues {
   return {
@@ -568,6 +570,22 @@ function AddSplitButton({
   );
 }
 
+// Small filled triangle for the scorecard rows — points up for a gain, down for a
+// loss, and inherits the row's gain/loss color via currentColor.
+function TrendCaret({ up }: { up: boolean }) {
+  return (
+    <svg
+      width="9"
+      height="9"
+      viewBox="0 0 10 10"
+      aria-hidden="true"
+      style={{ flex: "none", fill: "currentColor" }}
+    >
+      <path d={up ? "M5 1.5 9 8.5 1 8.5Z" : "M5 8.5 1 1.5 9 1.5Z"} />
+    </svg>
+  );
+}
+
 // Return-basis kebab (#149): the "Include cash / Exclude cash" lever in the shared
 // kebab popover, so it lives ON the page (its effect is visible) instead of inside
 // a modal. Only the non-default choice gets a check + the hero tag, keeping the
@@ -576,67 +594,109 @@ function CashModeKebab({
   mode,
   onChange,
   hasReserved,
+  hintDismissed,
+  onDismissHint,
 }: {
   mode: CashMode;
   onChange: (m: CashMode) => void;
   hasReserved: boolean;
+  hintDismissed: boolean;
+  onDismissHint: () => void;
 }) {
+  // A state toggle on the word "Cash": plain = investable cash counts toward the
+  // return (the default, neutral); struck through + green = cash excluded (active).
+  // Strikethrough reads as "not counted" without the remove-button feel an ✕ would
+  // borrow from the Compare pill. A one-time note (until dismissed) explains it.
+  const active = mode === "funds";
+  // The note appears the first time the user clicks Cash (not auto on load) and
+  // stays until dismissed. `hinted` is this-session; `hintDismissed` is persisted.
+  const [hinted, setHinted] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const hintRef = useRef<HTMLDivElement>(null);
+  const showHint = hinted && !hintDismissed;
+  const hintStyle = usePopoverPlacement(triggerRef, hintRef, { open: showHint });
+  return (
+    <div className="kebab cash-mode-kebab">
+      <button
+        ref={triggerRef}
+        type="button"
+        className="chart-toolbtn"
+        data-active={active || undefined}
+        aria-pressed={active}
+        aria-label="Exclude investable cash from the return"
+        title={
+          active
+            ? "Cash excluded — investable cash sits out of your return; click to include it"
+            : "Cash counted — click to exclude investable cash (a fairer read against an index)"
+        }
+        onClick={() => {
+          onChange(active ? "incl" : "funds");
+          if (!hintDismissed) setHinted(true);
+        }}
+      >
+        Cash
+      </button>
+      {showHint ? (
+        <div ref={hintRef} className="cash-hint" role="note" style={hintStyle}>
+          <p className="cash-hint__body">
+            Investable cash counts toward your return by default. Exclude it to compare your
+            investments against an index, without the cash drag.
+            {hasReserved ? " Reserved cash always sits out." : ""}
+          </p>
+          <button type="button" className="btn ghost sm" onClick={onDismissHint}>
+            Got it
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// Plain-English definitions for the jargon surfaced as tappable terms in the chart
+// caption (see TermTip + the caption line in PortfolioScreen).
+const TERM_DEFS = {
+  twr: "How your holdings performed, regardless of when you added or withdrew money. How much you personally made is the money-weighted figure in the returns breakdown.",
+  scale:
+    "Equal percentage moves are drawn the same height, so early years stay readable. Deposits still show as steps.",
+  mix: "How your money splits between invested funds and cash over time. The shares move with the market and your trades, not just decisions you made.",
+  invested:
+    "The dotted line is your net contributions: money in minus money out. The shaded gap to your value is your gain, or a loss when value falls below it.",
+};
+
+// A jargon term in the chart caption: a dotted-underline word that opens its
+// plain-English definition in place (the underline IS the affordance, so help is
+// discoverable without a separate panel). Placement reuses usePopoverPlacement.
+function TermTip({ label, def }: { label: string; def: string }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLSpanElement>(null);
+  const style = usePopoverPlacement(ref, popRef, { open });
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (!ref.current?.contains(e.target as Node) && !popRef.current?.contains(e.target as Node))
+        setOpen(false);
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
   return (
-    <div className="kebab cash-mode-kebab" ref={ref}>
+    <>
       <button
+        ref={ref}
         type="button"
-        className="icon-btn quiet"
-        aria-label="Return basis"
-        aria-haspopup="menu"
+        className="term"
         aria-expanded={open}
-        title="Return basis"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen((o) => !o)}
       >
-        <Icon name="ellipsis-vertical" size={16} />
+        {label}
       </button>
       {open ? (
-        <div className="kebab__menu" role="menu">
-          <div className="kebab__head">Return basis</div>
-          {(
-            [
-              ["incl", "Include cash"],
-              ["funds", "Exclude cash"],
-            ] as [CashMode, string][]
-          ).map(([m, label]) => (
-            <button
-              key={m}
-              type="button"
-              role="menuitemradio"
-              aria-checked={mode === m}
-              className="kebab__item kebab__item--check"
-              data-active={mode === m}
-              onClick={() => {
-                onChange(m);
-                setOpen(false);
-              }}
-            >
-              <Icon name="check" size={13} /> {label}
-            </button>
-          ))}
-          <p className="kebab__note">
-            {mode === "incl"
-              ? "Idle cash counts toward your return."
-              : "Idle cash sits out of your return."}
-            {hasReserved && " Reserved cash always sits out."}
-          </p>
-        </div>
+        <span ref={popRef} className="chart-info" role="note" style={style}>
+          <span className="chart-info__note">{def}</span>
+        </span>
       ) : null}
-    </div>
+    </>
   );
 }
 
@@ -678,22 +738,38 @@ export function PortfolioScreen({
     requestEdit,
   } = usePortfolioUi();
   const filter = filterRaw as AssetClass | "all";
-  const [range, setRange] = useState<string>("6M");
   const [benchmark, setBenchmark] = useState<string>("none");
-  // Contribution-mode (#149): does idle investable cash drag the return ("incl",
-  // mode A, default) or sit out ("funds", mode B)? Persisted in the settings
-  // store so it follows the user; the pill IS the setting (design-log §3g).
-  const { data: settingsMap, mutate: mutateSettings } =
-    useResource<Record<string, unknown>>("/api/settings");
-  const cashMode: CashMode = settingsMap?.cashReturnMode === "funds" ? "funds" : "incl";
-  const setCashMode = (m: CashMode) => {
-    mutateSettings({ ...(settingsMap ?? {}), cashReturnMode: m }, { revalidate: false });
-    void fetch("/api/settings", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cashReturnMode: m }),
-    });
-  };
+  // Chart view state is PER-DEVICE (localStorage), not synced — the device usually
+  // implies the use case (a phone glance vs a desktop deep-dive), so the chart
+  // opens however you last left it on THIS device. Covers period, mode, scale, and
+  // the cash basis. (For genuinely cross-device prefs we'd persist server-side.)
+  const [range, setRange] = useLocalStorageState<string>("macrotide.period", "1Y");
+  // Cash basis (#149): does idle investable cash drag the return ("incl", default)
+  // or sit out ("funds")?
+  const [cashMode, setCashMode] = useLocalStorageState<CashMode>("macrotide.cashMode", "incl");
+  // Y-axis scale (linear/log) for the value chart — only offered on long ranges
+  // (≥1Y), where a log axis earns its keep; on short windows log ≈ linear.
+  const [yAxisScale, setYAxisScale] = useLocalStorageState<"linear" | "log">(
+    "macrotide.yAxisScale",
+    "linear",
+  );
+  // Chart mode — what the graph plots. "value" = absolute wealth (how much),
+  // "performance" = a time-weighted return curve (how well), "breakdown" = what the
+  // money is made of. The one control that changes what the line *is*.
+  const [chartMode, setChartMode] = useLocalStorageState<"value" | "performance" | "breakdown">(
+    "macrotide.chartMode",
+    "value",
+  );
+  // One-time note for the Cash toggle — shown on first click, then never again on
+  // this device.
+  const [cashHintDismissed, setCashHintDismissed] = useLocalStorageState<boolean>(
+    "macrotide.cashHintDismissed",
+    false,
+  );
+  const dismissCashHint = () => setCashHintDismissed(true);
+  // Breakdown mode: share-of-100% (default — strips deposit-driven height jumps)
+  // vs absolute ฿. Ephemeral; the mode itself is what persists.
+  const [breakdownNorm, setBreakdownNorm] = useState(true);
   const { hidden: valuesHidden, toggle: togglePrivacy } = usePrivacy();
   // Tapping a holding row opens a read-only detail view (detailHolding); the
   // per-row Edit affordance opens the edit form (holdingSheet). Reading a
@@ -752,17 +828,32 @@ export function PortfolioScreen({
         return "1mo";
       case "3M":
         return "3mo";
-      case "1Y":
+      // YTD fetches a full year and is clipped to Jan 1 client-side, so it needs
+      // no new server range (and avoids rippling "ytd" through every provider).
+      case "YTD":
         return "1y";
+      case "5Y":
+        return "5y";
       case "All":
         return "max";
       default:
-        return "6mo";
+        return "1y";
     }
   }, [range]);
 
-  const { portfolios, aggregate, hasDistributingHolding, estimatedThrough, cashSeries, isLoading } =
-    usePortfolioView(seriesRange);
+  const {
+    portfolios,
+    aggregate,
+    hasDistributingHolding,
+    estimatedThrough,
+    cashSeries,
+    historyStart,
+    isLoading,
+  } = usePortfolioView(seriesRange);
+  // 5Y is offered only once the book is ~5y old; below that it just duplicates
+  // "All", so it stays hidden until it would show something distinct.
+  const hasFiveYears =
+    historyStart != null && Date.now() - Date.parse(historyStart) >= 5 * 365.25 * 24 * 3600 * 1000;
   const { models } = useModelPortfoliosView();
   const { data: feeCreepData, mutate: mutateFeeCreep } = useFeeCreep();
   const { data: hiddenData } = useHiddenActionItems();
@@ -1049,8 +1140,14 @@ export function PortfolioScreen({
   // in "Funds only". The hero BALANCE (view.totalValue) stays full net worth; only
   // these return figures + the chart's value/contribution lines follow the mode.
   const retView = applyCashMode(cashMode, view.series, view.netInvested, view.cashDecomp);
-  const retSeries = retView.series;
-  const retNetInvested = retView.netInvested;
+  // YTD = a 1Y fetch clipped to Jan 1 of the current year, applied to every dated
+  // series the chart consumes so the value line, the TWR curve, the pill, and the
+  // benchmark all share the same window.
+  const ytdFrom = range === "YTD" ? `${new Date().getUTCFullYear()}-01-01` : null;
+  const clipYtd = <T extends { d: string }>(s: T[]): T[] =>
+    ytdFrom ? s.filter((p) => p.d >= ytdFrom) : s;
+  const retSeries = clipYtd(retView.series);
+  const retNetInvested = clipYtd(retView.netInvested);
   const retTotalValue = cashReturnValue(cashMode, view.totalValue, view.cashDecomp);
   // Whether the pill is worth showing: there's cash that the mode could move.
   const cashInPlay = (view.cashDecomp?.cashValue.at(-1)?.v ?? 0) > 0.5;
@@ -1058,21 +1155,37 @@ export function PortfolioScreen({
   const hasReserved = (view.cashDecomp?.reservedCashValue.at(-1)?.v ?? 0) > 0.5;
 
   const netContributed = retNetInvested.at(-1)?.v ?? null;
-  const { pnl, pnlPct, usesContribution } = heroReturn(
-    retTotalValue,
-    netContributed,
-    view.initialInvestment,
-  );
+  const { pnl, pnlPct } = heroReturn(retTotalValue, netContributed, view.initialInvestment);
 
-  // Window rebase for the chart: a CLIPPED range (the series starts exactly on
-  // the window boundary, carrying pre-window state) draws change-from-window-
-  // start, so 1M answers "how did I do this month". An unclipped range (All, or
-  // a book younger than the window) keeps absolute wealth levels — the lifetime
-  // story.
-  const since = windowStartIso(seriesRange);
-  const clipped = since !== null && retSeries.length > 0 && retSeries[0].d <= since;
-  const baselineValue = clipped ? retSeries[0].v : 0;
-  const baselineInvested = clipped ? (retNetInvested[0]?.v ?? 0) : 0;
+  // Value mode plots ABSOLUTE wealth on every range (no window-start rebase): the
+  // scale toggle (linear/log) must change only HOW the line is drawn, never what
+  // it means, and an always-positive absolute series is what makes log valid.
+  // "How did I do this window" is answered by the time-weighted pill below (and,
+  // soon, the Performance mode) — not by rebasing the value line.
+  //
+  // Log is offered only on long ranges and applies only when every value is
+  // positive (it always is for a real book; the guard keeps an empty/edge series
+  // from producing a NaN axis). The chart itself re-guards and falls back.
+  const scaleEligible = range === "1Y" || range === "5Y" || range === "All";
+  const effectiveScale: "linear" | "log" = scaleEligible ? yAxisScale : "linear";
+
+  // Performance mode: a running time-weighted return curve as a growth factor
+  // (starts at 1, always positive). The endpoint equals the period pill; the
+  // chart renders it as a % via the formatter below. Deposits don't move it.
+  const perfSeries = twrSeries(retSeries, retNetInvested);
+
+  // Breakdown mode: funds vs cash over time. Uses the FULL net-worth series and
+  // the cash decomposition (not the return-adjusted retSeries) so it shows the
+  // real composition regardless of the Include/Funds-only return toggle.
+  const breakdownValue = clipYtd(view.series);
+  const breakdownCash = clipYtd(view.cashDecomp?.cashValue ?? []);
+
+  const logApplied =
+    effectiveScale === "log" &&
+    chartMode !== "breakdown" &&
+    (chartMode === "performance"
+      ? perfSeries.length > 0
+      : retSeries.length > 0 && retSeries.every((p) => p.v > 0));
 
   // % return for the range pill — TIME-WEIGHTED (#236). Chains each day's return
   // on the wealth held that day, netting external flows out via the contribution
@@ -1095,7 +1208,59 @@ export function PortfolioScreen({
   const chartCash =
     activePf || cashMode === "funds"
       ? null
-      : (cashSeries?.map((p) => ({ d: p.date, v: p.value })) ?? null);
+      : clipYtd(cashSeries?.map((p) => ({ d: p.date, v: p.value })) ?? []);
+  // Benchmark shares the chart's window (incl. the YTD clip).
+  const chartBenchmark = benchmark !== "none" && benchmarkSeries ? clipYtd(benchmarkSeries) : null;
+
+  // ── Chart caption — the windowed number, placed by mode ───────────────────
+  // The all-time "what I made" stays in the hero (stable). This is its windowed
+  // companion, and the unit follows the mode:
+  //  • Value: money made over the window = value change − net deposits. A safe
+  //    ABSOLUTE (no divide → no short-window blowup); a ฿ amount has no
+  //    time-weighted twin, so the caption is ฿-only here.
+  //  • Performance: the time-weighted pill return + the benchmark gap (a bare %
+  //    isn't actionable; it earns its place next to a benchmark).
+  const windowGain =
+    retSeries.length < 2
+      ? null
+      : retNetInvested.length >= 2
+        ? retSeries[retSeries.length - 1].v -
+          retSeries[0].v -
+          (retNetInvested[retNetInvested.length - 1].v - retNetInvested[0].v)
+        : retSeries[retSeries.length - 1].v - retSeries[0].v;
+  // A benchmark has no external flows, so its window return is just the price ratio.
+  const benchmarkReturn =
+    chartBenchmark && chartBenchmark.length > 1 ? seriesReturnPct(chartBenchmark) : null;
+  const benchShort =
+    benchmark !== "none"
+      ? (BENCHMARK_TR_OPTIONS.find((b) => b.key === benchmark)?.short ?? "index")
+      : null;
+  const benchGap =
+    periodReturn != null && benchmarkReturn != null ? periodReturn - benchmarkReturn : null;
+  const rangeLabel: Record<string, string> = {
+    "1M": "past month",
+    "3M": "past 3 months",
+    YTD: "year to date",
+    "1Y": "past year",
+    "5Y": "past 5 years",
+    All: "all-time",
+  };
+
+  // Which scorecard rows render (single source of truth for the JSX below AND the
+  // chart-height math). Row 1 (all-time) is always present; the windowed row shows
+  // in Return always / in Value off "All"; the benchmark row only in Return+Compare.
+  const showWindowRow =
+    (chartMode === "performance" && periodReturn != null) ||
+    (chartMode === "value" && range !== "All" && windowGain != null);
+  const showBenchRow =
+    chartMode === "performance" && benchGap != null && !!benchShort && benchmarkReturn != null;
+  // Instead of reserving the tallest scorecard (a blank gap), let the chart absorb
+  // the slack so the scorecard + chart stays a constant height and the controls
+  // below never move. scoreH() mirrors the CSS: each row is 18px with an equal 3px
+  // gap between rows (see .score-row).
+  const scorecardRows = 1 + (showWindowRow ? 1 : 0) + (showBenchRow ? 1 : 0);
+  const scoreH = (rows: number) => 18 * rows + 3 * Math.max(0, rows - 1);
+  const chartHeight = NAV_CHART_HEIGHT + (scoreH(3) - scoreH(scorecardRows));
 
   const showAnalysis = activePfId === "all" || activePf?.targetModelId;
 
@@ -1203,109 +1368,302 @@ export function PortfolioScreen({
             <span className="cents">.{view.totalValue.toFixed(2).split(".")[1] || "00"}</span>
           </PrivateAmount>
         </div>
-        <div className="hero-sub">
+        {/* Scorecard — three return rows in one consistent language: a gain/loss
+            ▲/▼ caret leads each, the value carries the color, a secondary % sits in
+            parens, and the context (period, metric, benchmark) trails muted. Left
+            edges align into a caret column.
+              1. all-time, money-weighted (the pill's old home) — tap to break down.
+              2. windowed: ฿ made in Value (hidden on "All" — echoes row 1), or the
+                 time-weighted % in Return (shown even on "All", a different number
+                 that the benchmark row below compares against). "time-weighted" is
+                 the GIPS-standard term, twin of row 1's money-weighted return.
+              3. benchmark gap (Return + Compare): ▲/▼ = ahead/behind, vs the index. */}
+        <div className="scorecard">
           <button
             type="button"
-            className="hero-return-btn"
+            className="score-row score-row--tap"
+            data-down={pnl < 0 || undefined}
             onClick={() => setBreakdownOpen(true)}
             aria-label="See how this return breaks down"
             title="See how this return breaks down"
           >
-            <span className={`delta-pill${pnl < 0 ? " down" : ""}`}>
-              <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
-                <path
-                  d={pnl >= 0 ? "M6 2L10 7H2L6 2Z" : "M6 10L2 5H10L6 10Z"}
-                  fill="currentColor"
-                ></path>
-              </svg>
-              <PrivateAmount>฿{Math.abs(Math.round(pnl)).toLocaleString("en-US")}</PrivateAmount> ·{" "}
-              {fmtPct(pnlPct)}
+            <TrendCaret up={pnl >= 0} />
+            <span className="score-val">
+              <PrivateAmount>฿{Math.abs(Math.round(pnl)).toLocaleString("en-US")}</PrivateAmount>
             </span>
-            <span className="muted">
-              {/* In the non-default basis the label itself names it (plain text, no
-                  badge) — keeps the default hero clean and the line short (#149). */}
-              {cashInPlay && cashMode === "funds"
-                ? "excluding cash"
-                : usesContribution
-                  ? "total return"
-                  : "all-time"}
+            <span className="score-pct">· {fmtPct(Math.abs(pnlPct)).slice(1)}</span>
+            <span className="score-ctx">
+              {/* Lead with the span ("all-time") so this row reads as the lifetime
+                  headline vs the period rows below; keep the excluding-cash basis as
+                  a qualifier when that mode is on. */}
+              {cashInPlay && cashMode === "funds" ? "all-time · excluding cash" : "all-time"}
               <Icon name="chevron-right" size={11} />
             </span>
           </button>
+          {showWindowRow &&
+            (chartMode === "performance"
+              ? periodReturn != null && (
+                  <div className="score-row" data-down={periodReturn < 0 || undefined}>
+                    <TrendCaret up={periodReturn >= 0} />
+                    <span className="score-val">{fmtPct(Math.abs(periodReturn)).slice(1)}</span>
+                    <span className="score-ctx">{rangeLabel[range] ?? range} · time-weighted</span>
+                  </div>
+                )
+              : windowGain != null && (
+                  <div className="score-row" data-down={windowGain < 0 || undefined}>
+                    <TrendCaret up={windowGain >= 0} />
+                    <span className="score-val">
+                      <PrivateAmount>
+                        ฿{Math.abs(Math.round(windowGain)).toLocaleString("en-US")}
+                      </PrivateAmount>
+                    </span>
+                    <span className="score-ctx">{rangeLabel[range] ?? range}</span>
+                  </div>
+                ))}
+          {showBenchRow && benchGap != null && benchmarkReturn != null && (
+            <div className="score-row" data-down={benchGap < 0 || undefined}>
+              <TrendCaret up={benchGap >= 0} />
+              <span className="score-val">{Math.abs(benchGap).toFixed(1)}pp</span>
+              <span className="score-ctx">
+                vs {fmtPct(benchmarkReturn)} {benchShort}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="stats-strip">
-        {(
-          [
-            {
-              lbl: "TODAY",
-              val: view.holdings.reduce((s, h) => s + h.d1 * h.value, 0) / view.totalValue,
-            },
-            { lbl: "7D", val: view.perfPct.d7 },
-            { lbl: "30D", val: view.perfPct.d30 },
-            { lbl: "YTD", val: view.perfPct.ytd },
-          ] as { lbl: string; val: number }[]
-        ).map((s) => (
-          <div key={s.lbl}>
-            <div className="lbl">{s.lbl}</div>
-            <div className="val" style={{ color: s.val >= 0 ? "var(--gain)" : "var(--loss)" }}>
-              {fmtPct(s.val)}
-            </div>
-          </div>
-        ))}
-      </div>
-
       <div className="section">
-        <div className="row between" style={{ marginBottom: 8 }}>
-          <div className="range-pills">
-            {["1M", "3M", "6M", "1Y", "All"].map((r) => (
-              <button key={r} data-active={range === r} onClick={() => setRange(r)}>
+        {/* The graph. Its controls — mode, period, scale, cash, Compare — are all
+            below it; the windowed return + benchmark live in the hero scorecard
+            above. */}
+        <div style={{ marginTop: 16 }}>
+          {chartMode === "breakdown" ? (
+            <BreakdownChart
+              value={breakdownValue}
+              cash={breakdownCash}
+              normalized={breakdownNorm}
+              valuesHidden={valuesHidden}
+              height={chartHeight}
+              emptyHint={
+                view.holdings.length === 0
+                  ? "Add holdings to see what your money is made of."
+                  : "We're still fetching NAV history. Pull-to-refresh or wait a moment."
+              }
+            />
+          ) : chartMode === "performance" ? (
+            <NavChart
+              data={perfSeries}
+              valuesHidden={valuesHidden}
+              scaleMode={effectiveScale}
+              valueFormatter={(v) => fmtPct((v - 1) * 100)}
+              seriesLabel="Return"
+              baselineRef={1}
+              benchmarkData={chartBenchmark}
+              benchmarkLabel={
+                benchmark !== "none"
+                  ? (BENCHMARK_TR_OPTIONS.find((b) => b.key === benchmark)?.short ?? null)
+                  : null
+              }
+              height={chartHeight}
+              accent="var(--accent)"
+              emptyHint={
+                view.holdings.length === 0
+                  ? "Add holdings to see how this portfolio has performed."
+                  : "We're still fetching NAV history. Pull-to-refresh or wait a moment."
+              }
+            />
+          ) : (
+            <NavChart
+              data={retSeries}
+              investedData={retNetInvested}
+              cashData={chartCash}
+              valuesHidden={valuesHidden}
+              scaleMode={effectiveScale}
+              benchmarkData={chartBenchmark}
+              benchmarkLabel={
+                benchmark !== "none"
+                  ? (BENCHMARK_TR_OPTIONS.find((b) => b.key === benchmark)?.short ?? null)
+                  : null
+              }
+              height={chartHeight}
+              accent="var(--accent)"
+              emptyHint={
+                view.holdings.length === 0
+                  ? "Add holdings to see how this portfolio tracks over time."
+                  : "We're still fetching NAV history. Pull-to-refresh or wait a moment."
+              }
+            />
+          )}
+        </div>
+        {/* Chart control toolbar — flat worded controls in one wrapping row; each
+            part (period, mode, and each tool) flows and wraps individually. A thin
+            ::before rule separates the parts; the rule before a part that wrapped to
+            a new line is clipped (see .chart-toolbar), so a wrapped line never opens
+            with a divider. */}
+        <div className="chart-toolbar">
+          <div className="toolbar-part">
+            {["1M", "3M", "YTD", "1Y", ...(hasFiveYears ? ["5Y"] : []), "All"].map((r) => (
+              <button
+                key={r}
+                type="button"
+                className="chart-toolbtn"
+                data-active={range === r || undefined}
+                aria-pressed={range === r}
+                onClick={() => setRange(r)}
+              >
                 {r}
               </button>
             ))}
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            {periodReturn != null && (
-              <span
-                className={`delta-pill${periodReturn < 0 ? " down" : ""}`}
-                style={{ fontSize: 13 }}
+          <div className="toolbar-part">
+            {(
+              [
+                ["value", "Value"],
+                ["performance", "Return"],
+                ["breakdown", "Mix"],
+              ] as const
+            ).map(([m, lbl]) => (
+              <button
+                key={m}
+                type="button"
+                className="chart-toolbtn"
+                data-active={chartMode === m || undefined}
+                aria-pressed={chartMode === m}
+                onClick={() => setChartMode(m)}
               >
-                {fmtPct(periodReturn)}
-              </span>
-            )}
-            {cashInPlay && (
-              <CashModeKebab mode={cashMode} onChange={setCashMode} hasReserved={hasReserved} />
-            )}
+                {lbl}
+              </button>
+            ))}
           </div>
+          {chartMode === "breakdown" ? (
+            <div className="toolbar-part">
+              <button
+                type="button"
+                className="chart-toolbtn"
+                data-active={breakdownNorm || undefined}
+                aria-pressed={breakdownNorm}
+                onClick={() => setBreakdownNorm(true)}
+                title="Share of total (100%)"
+              >
+                Share
+              </button>
+              <button
+                type="button"
+                className="chart-toolbtn"
+                data-active={!breakdownNorm || undefined}
+                aria-pressed={!breakdownNorm}
+                onClick={() => setBreakdownNorm(false)}
+                title="Absolute amount — stacked height is your total"
+              >
+                Amount
+              </button>
+            </div>
+          ) : (
+            <>
+              {scaleEligible && (
+                <button
+                  type="button"
+                  className="chart-toolbtn"
+                  data-active={effectiveScale === "log" || undefined}
+                  aria-pressed={effectiveScale === "log"}
+                  onClick={() => setYAxisScale(effectiveScale === "log" ? "linear" : "log")}
+                  title="% scale — equal % moves are the same height, fairer across long spans"
+                >
+                  % Scale
+                </button>
+              )}
+              {cashInPlay && (
+                <CashModeKebab
+                  mode={cashMode}
+                  onChange={setCashMode}
+                  hasReserved={hasReserved}
+                  hintDismissed={cashHintDismissed}
+                  onDismissHint={dismissCashHint}
+                />
+              )}
+              <BenchmarkPicker value={benchmark} onChange={setBenchmark} />
+            </>
+          )}
         </div>
-        <NavChart
-          data={retSeries}
-          investedData={retNetInvested}
-          cashData={chartCash}
-          valuesHidden={valuesHidden}
-          baselineValue={baselineValue}
-          baselineInvested={baselineInvested}
-          benchmarkData={benchmark !== "none" ? benchmarkSeries : null}
-          benchmarkLabel={
-            benchmark !== "none"
-              ? (BENCHMARK_TR_OPTIONS.find((b) => b.key === benchmark)?.short ?? null)
-              : null
-          }
-          height={NAV_CHART_HEIGHT}
-          accent="var(--accent)"
-          emptyHint={
-            view.holdings.length === 0
-              ? "Add holdings to see how this portfolio tracks over time."
-              : "We're still fetching NAV history. Pull-to-refresh or wait a moment."
-          }
-        />
-        <BenchmarkPicker value={benchmark} onChange={setBenchmark} />
+        {/* One adaptive caption line: a short sentence for the current view with the
+            jargon as dotted-underline TERMS that open their definition in place. One
+            visible line (teaches at a glance, discoverable), depth on the word — vs a
+            caption stack or an opaque catch-all icon. The actionable cash nudge stays
+            its own inline line below. */}
+        {(() => {
+          // The base sentence for the current mode, then any active caveat clauses
+          // joined into ONE flowing sentence (commas + a final "and", no dashes).
+          // Jargon renders as tappable TermTips.
+          const core =
+            chartMode === "performance" ? (
+              <>
+                Your <TermTip label="time-weighted" def={TERM_DEFS.twr} /> return over time
+              </>
+            ) : chartMode === "breakdown" ? (
+              <>
+                How your money splits between <TermTip label="funds and cash" def={TERM_DEFS.mix} />{" "}
+                over time
+              </>
+            ) : (
+              <>
+                Your value over time, compared with what you've{" "}
+                <TermTip label="put in" def={TERM_DEFS.invested} />
+              </>
+            );
+          const dividendNote =
+            chartMode !== "breakdown"
+              ? performanceDisclaimer(benchmark !== "none", hasDistributingHolding)
+              : null;
+          const clauses: { k: string; node: ReactNode }[] = [];
+          if (chartMode !== "breakdown" && logApplied)
+            clauses.push({
+              k: "scale",
+              node: (
+                <>
+                  shown on a <TermTip label="% scale" def={TERM_DEFS.scale} />
+                </>
+              ),
+            });
+          if (dividendNote)
+            clauses.push({
+              k: "div",
+              node: (
+                <>
+                  with some <TermTip label="dividends" def={dividendNote} /> paid out
+                </>
+              ),
+            });
+          if (estimatedThrough)
+            clauses.push({
+              k: "est",
+              node: (
+                <>
+                  older values{" "}
+                  <TermTip
+                    label="estimated"
+                    def={`Values before ${formatTooltipDate(estimatedThrough)} are estimated from your recorded prices.`}
+                  />
+                </>
+              ),
+            });
+          return (
+            <div className="chart-caption-line">
+              {core}
+              {clauses.map((c, i) => (
+                <span key={c.k}>
+                  {i === clauses.length - 1 && clauses.length > 1 ? ", and " : ", "}
+                  {c.node}
+                </span>
+              ))}
+              .
+            </div>
+          );
+        })()}
         {/* Excluding cash is most wanted exactly here: an index is fully invested, so a
             blended return (incl. idle cash) is an unfair comparison. Surface the lever at
             the moment of need rather than as permanent chrome (#149). Symmetric — offer to
             fold cash back in once excluded. */}
-        {benchmark !== "none" && cashInPlay && idleCash > 0.5 && (
+        {chartMode !== "breakdown" && benchmark !== "none" && cashInPlay && idleCash > 0.5 && (
           <p
             style={{
               fontSize: 11,
@@ -1331,36 +1689,6 @@ export function PortfolioScreen({
                 </button>
               </>
             )}
-          </p>
-        )}
-        {(() => {
-          // Caveat copy depends on which sources drop dividends: the benchmark
-          // overlay (when one is selected) and/or any held dividend-paying fund.
-          const disclaimer = performanceDisclaimer(benchmark !== "none", hasDistributingHolding);
-          return disclaimer ? (
-            <p
-              style={{
-                fontSize: 11,
-                color: "var(--muted)",
-                lineHeight: 1.45,
-                margin: "6px 4px 0",
-              }}
-            >
-              {disclaimer}
-            </p>
-          ) : null;
-        })()}
-        {estimatedThrough && (
-          <p
-            style={{
-              fontSize: 11,
-              color: "var(--muted)",
-              lineHeight: 1.45,
-              margin: "6px 4px 0",
-            }}
-          >
-            Values before {formatTooltipDate(estimatedThrough)} are estimated from your recorded
-            prices.
           </p>
         )}
       </div>

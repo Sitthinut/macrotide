@@ -177,11 +177,12 @@ governs the rest — your *investable* cash:
   money you've actually deployed into a fund counts. Useful for "how are my
   *investments* doing, setting cash aside."
 
-The control is an inline **"Include cash ↔ Funds only"** pill right at the return
-figure (matching the period and benchmark pills), not a buried setting — it suits
-the compare-and-flip use case and persists as your preference. A caption under
-the figure names the active mode (and, on Include, the amount of uninvested cash
-counted).
+The control is a **`Cash` toggle** in the chart toolbar — the word reads plain when
+cash counts (the default) and struck through, green, when it's excluded — not a
+buried setting, so it suits the compare-and-flip use case. A first-click note
+explains it; "investable" and "reserved" match the cash types in Add-to-portfolio.
+Like the other chart view settings it persists **per device** (localStorage), not
+across devices.
 
 **One definition, three paths.** The two modes are *one* resolver with *one*
 parameter (`countUninvestedCash`, default true = Include). The excluded slice is

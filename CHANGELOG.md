@@ -15,13 +15,71 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
-- **The period return now reflects how the window actually performed.** The %
-  next to the range selector (1M / 6M / 1Y …) is time-weighted: a deposit or
-  withdrawal made *during* the period no longer distorts it — previously a large
-  mid-period deposit onto a small starting balance could read as a wildly
-  inflated return. It still follows the Include cash ↔ Funds only toggle. The
-  lifetime "all-time" return and the chart tooltip's gain figure are unchanged
-  (those answer "gain on what I put in", a different question).
+- **The portfolio chart's controls are one clean, worded toolbar.** Period, mode
+  (Value / Return / Mix), `% Scale`, a `Cash` toggle, and `+ Compare` are all
+  the same flat control in one row below the chart, separated by thin rules that
+  fold away when the row wraps on a phone. The returns moved into a scorecard above
+  the chart — total value, your all-time return (the bold headline), then the
+  period figures (the ฿ you made in Value, the time-weighted % in Return, and the
+  benchmark gap), each a row led by a ▲/▼ gain/loss caret. The short-horizon TODAY /
+  7D / 30D / YTD stat strip was retired — it nudged the daily-return-chasing the app
+  is built to avoid, and the windowed figure covers any window on demand.
+
+- **The chart explains itself in one line, with tap-to-define terms.** A single
+  caption under the chart says what the current view shows in plain language, and
+  the jargon in it — *time-weighted*, *put in*, *funds and cash*, *% scale*,
+  *dividends* — is a dotted-underline term you tap for a short definition. It
+  replaces the old stack of disclaimer lines: one readable sentence, depth one tap
+  away on the exact word.
+
+- **Excluding cash from your return is a one-click toggle.** The return basis is a
+  `Cash` toggle in the chart toolbar — by default your investable cash counts; one
+  tap struck-throughs it (`Cash`) to exclude it, so you compare your investments
+  against an index without the cash drag (reserved cash always sits out). A
+  first-time note explains it, and the wording matches the "investable" / "reserved"
+  cash types in Add-to-portfolio.
+
+- **Chart view settings are remembered per device.** Period, mode, scale, and the
+  cash basis now persist in your browser (localStorage) rather than your account, so
+  the chart reopens however you last left it *on that device* — a quick phone glance
+  and a desktop deep-dive can differ. The period is remembered now too (it used to
+  reset to 1Y each visit). One-time note: any existing "exclude cash" preference
+  resets to the default (include cash) once on upgrade.
+
+- **A Breakdown view shows what your money is made of over time.** The chart's
+  mode switch gains a Breakdown option: a stacked area of funds vs cash across the
+  selected range, shown as share-of-100% (default) or absolute ฿. Cash drag and how
+  quickly new deposits get put to work become visible at a glance.
+
+- **More time ranges, and the chart opens on one year.** The range selector adds
+  **Year-to-date** and (once your history is long enough to differ from "All") **5
+  years**, and the default view is now 1Y instead of 6M. 6M was dropped — 1M, 3M,
+  and YTD bracket it.
+
+- **A Return view shows how your investments did, apart from how much you put
+  in.** A Value / Return switch above the chart flips between your wealth over
+  time and a time-weighted return curve (gains shaded green, losses red, fading out
+  toward break-even). The return curve doesn't jump when you deposit or withdraw —
+  it isolates how the holdings performed — and a benchmark you turn on is compared on
+  the same from-zero footing. (How much you personally made,
+  which depends on your timing, is the money-weighted figure in the returns
+  breakdown.) Log scale works here too.
+
+- **The portfolio chart can switch to a log scale on long ranges.** On the 1Y and
+  All views a "% scale" toggle sits by the chart; it draws the value line so that
+  equal % moves are the same height, so years of compounding no longer crush the
+  early part of the curve into a flat line. The value line now also shows your
+  **actual wealth on every range** (it no longer resets to zero at the start of a
+  shorter window) — "how did this window perform" is the job of the windowed
+  time-weighted % in the scorecard above the chart. Default stays linear.
+
+- **The period return now reflects how the window actually performed.** The
+  windowed return in the chart scorecard (1M / 3M / 1Y …) is time-weighted: a
+  deposit or withdrawal made *during* the period no longer distorts it — previously
+  a large mid-period deposit onto a small starting balance could read as a wildly
+  inflated return. It still follows the `Cash` basis. The lifetime "all-time"
+  return and the chart tooltip's gain figure are unchanged (those answer "gain on
+  what I put in", a different question).
 
 - **The Advisor reliably remembers when you ask it to.** Explicit "remember
   this" requests now save on the first try and show the memory chip in the same

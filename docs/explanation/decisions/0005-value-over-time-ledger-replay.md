@@ -48,11 +48,11 @@ The contribution line is the running sum of the settlement fold's **external flo
 
 A withdrawal removes only the proceeds' **cost basis** (return of capital), never the realized gain riding in them — each settlement cash lot carries its cost basis (from `reduceLots`' realized events, keyed by sell-txn id), reduced proportionally as the lot is reinvested. Without this, cashing a position out at a profit would subtract the full proceeds and drive net contribution **negative** (e.g. buy ฿16k, sell ฿17.6k and walk away → −฿1.6k, the realized gain with a flipped sign). With it, contribution returns toward 0 and floors there; the withdrawn gain simply leaves the chart (the value line still loses the full proceeds). An uncosted sell falls back to treating all proceeds as capital.
 
-### 5. Window-rebased chart, money-weighted return pill
+### 5. Absolute-wealth chart; scale (linear/log) is orthogonal to framing
 
-A **clipped** range (the series carries pre-window state) rebases both lines to the window start, so "1M" answers *"how did I do this month"*; **All** keeps absolute lifetime levels.
+The value chart plots **absolute wealth** on every range — no window-start rebasing. The scale toggle changes only *how* the line is drawn (linear or log), never *what* it represents; an always-positive absolute series is also what makes a log axis valid. **Log** is offered on long ranges (≥1Y), where equal % moves take equal height so compounding doesn't crush the early years (the additive gain wedge is dropped on a log axis; the dotted contribution line stays, so deposit steps remain attributable). The value line carries contributions, so the gain wedge (value − contribution) reads as gain to scale.
 
-The period-return pill is **money-weighted (gain ÷ invested)**, not the old last-÷-first-value ratio: now that the value line carries contributions, a price ratio reads deposits as return (on the real book, +41,000% over All). Lifetime divides total gain by total contributions; a windowed range divides the window's change-in-gain by the wealth held at window start. It matches the tooltip's Gain %. (This makes the chart's "All" return diverge from the hero "all-time" P/L, which is cost-basis-based and inflated by reinvested gains — reconciling them + a returns-breakdown surface is tracked in [#152](https://github.com/Sitthinut/macrotide/issues/152).)
+*"How did this window perform"* is answered by the **time-weighted** period pill (it nets external flows out, so a mid-window deposit can't distort it — see the Picks table), not by rebasing the line. The hero "all-time" P/L is cost-basis-based; reconciling it with the chart's gain + a returns-breakdown surface is tracked in [#152](https://github.com/Sitthinut/macrotide/issues/152).
 
 ### 6. Estimate disclosure is materiality-gated
 

@@ -28,7 +28,7 @@ plan, and journal — including plan edits it proposes as accept/reject cards.
 
 - **Unified ledger** — your holdings are an event-sourced projection of one buy / sell / balance ledger, so every figure self-corrects on the latest NAV; full-screen History and per-fund Position pages with in-place edits, custom self-priced assets, tracked cash you can reserve for a purpose so an emergency fund doesn't drag your return, and graceful handling of unknown cost basis
 - **Performance** — headline total return on contributed capital, with a full breakdown: realized and unrealized gains, time-weighted period returns, money-weighted return (XIRR) per-fund and whole-portfolio, cost-basis timeline, contributions and income
-- **Wealth-over-time chart** — portfolio value vs. net invested over time, replayed from your ledger so it shows what you actually held (exited funds included)
+- **Wealth-over-time chart** — value, return, or funds-vs-cash composition over time, replayed from your ledger so it shows what you actually held (exited funds included)
 - **Plain-language health checks** — allocation drift, blended fees, cash drag, and look-through diversification (underlying single-name concentration, feeder-aware); fee-creep alerts you can dismiss or snooze
 - **Flexible import** — paste, a screenshot, CSV, or typed rows, all reviewed in one editable list before saving; symbol autocomplete; enter by units or baht value
 - **Broker auto-sync** — connect a broker once and it imports your full order history and keeps it in sync, each account as its own portfolio

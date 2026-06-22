@@ -127,6 +127,9 @@ export function usePortfolioView(range: SeriesRange = "6mo") {
     estimatedThrough: series?.estimatedThrough ?? null,
     // In-transit settlement cash per date (aggregate) for the tooltip note.
     cashSeries: series?.cash ?? null,
+    // Inception date (first ledger trade), window-independent — lets the UI hide
+    // a 5Y range that would just duplicate "All" on a younger book.
+    historyStart: series?.historyStart ?? null,
     isLoading: !buckets || !holdings || !quotes,
     error: e1 ?? e2 ?? e3 ?? e4,
   };
