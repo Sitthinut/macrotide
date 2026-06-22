@@ -141,6 +141,13 @@
       "when": 1781852028825,
       "tag": "0019_mean_harry_osborn",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1782200000000,
+      "tag": "0020_chart_settings_to_local",
+      "breakpoints": true
     }
   ]
 }
