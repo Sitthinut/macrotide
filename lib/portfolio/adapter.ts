@@ -147,7 +147,7 @@ export const NAV_CHART_HEIGHT = 160;
 // calendar — so gaps mirror the data's own (trading) days. Returns the points'
 // ISO `d` values; the chart hands these to recharts as an explicit `ticks` list
 // so each tick can compare against its neighbour for month grouping.
-export function pickAxisTicks(data: SeriesPoint[], count = 6): string[] {
+export function pickAxisTicks(data: readonly { d: string }[], count = 6): string[] {
   const n = data.length;
   if (n === 0) return [];
   const c = Math.min(count, n);
