@@ -52,6 +52,13 @@ open tracking issue, so the live link is the reminder to revisit when the work
 lands. Status lives in the board and CHANGELOG, not in prose; the README Features
 list names shipped capabilities only (no status column).
 
+**Exception — numbered ADRs (`decisions/NNNN-*.md`) are immutable:** a record of a
+decision *when it was made*. **Never rewrite one to match new behavior** (it's
+erased history twice). Reversed or refined → keep the original text and add a
+**supersession note** below it (or write a new ADR); a purely *additive*
+clarification is fine. Put the current state in the Picks table, not by editing
+the ADR.
+
 | When you change… | Update… |
 | --- | --- |
 | Shipped a behavior change | [CHANGELOG.md](./CHANGELOG.md) `## [Unreleased]` (by capability) |
