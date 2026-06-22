@@ -48,6 +48,8 @@ The contribution line is the running sum of the settlement fold's **external flo
 
 A withdrawal removes only the proceeds' **cost basis** (return of capital), never the realized gain riding in them — each settlement cash lot carries its cost basis (from `reduceLots`' realized events, keyed by sell-txn id), reduced proportionally as the lot is reinvested. Without this, cashing a position out at a profit would subtract the full proceeds and drive net contribution **negative** (e.g. buy ฿16k, sell ฿17.6k and walk away → −฿1.6k, the realized gain with a flipped sign). With it, contribution returns toward 0 and floors there; the withdrawn gain simply leaves the chart (the value line still loses the full proceeds). An uncosted sell falls back to treating all proceeds as capital.
 
+This cost-basis rule is right for the **money-weighted** contribution line, but the **time-weighted** return needs the opposite: a walk-away exit must strip the *full proceeds* (the market value that actually left) or the realized gain reads as a phantom market loss. So the fold emits a parallel `returnFlows` series — identical except expiries leave at full proceeds — that feeds TWR only (see the Picks table, *TWR walk-away*).
+
 ### 5. Window-rebased chart, money-weighted return pill
 
 A **clipped** range (the series carries pre-window state) rebases both lines to the window start, so "1M" answers *"how did I do this month"*; **All** keeps absolute lifetime levels.

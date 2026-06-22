@@ -111,7 +111,13 @@ export function usePortfolioView(range: SeriesRange = "6mo") {
   const aggregate = useMemo(
     () =>
       portfolios
-        ? adaptAggregate(portfolios, series?.aggregate, series?.netInvested, series?.cashDecomp)
+        ? adaptAggregate(
+            portfolios,
+            series?.aggregate,
+            series?.netInvested,
+            series?.cashDecomp,
+            series?.netInvestedForReturn,
+          )
         : null,
     [portfolios, series],
   );

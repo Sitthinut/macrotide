@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { freshAppDb, freshMarketDb } from "@/tests/db-helpers";
+import { twrSeries } from "../../portfolio/twr";
 import { getMarketDb, runWithDbContext } from "../context";
 import { buckets, fundCatalog, fundQuotes, holdings, navHistory, transactions } from "../schema";
 import { getPortfolioSeries } from "./series";
@@ -447,6 +448,55 @@ describe("getPortfolioSeries — ledger replay (#140)", () => {
     // the phantom dip in the return view either.
     expect(cashDecomp.cashValue.map((p) => p.value)).toEqual([0, 1500, 0, 0]);
     expect(cashDecomp.heldCashValue.map((p) => p.value)).toEqual([0, 0, 0, 0]);
+  });
+
+  it("TWR keeps a realized gain when you sell at a profit and walk away", async () => {
+    seedBucket(appDb);
+    // Buy A @1000, it rises to 1500, sell at the +50% gain, never rebuy → the
+    // proceeds expire (walk away). NAV rises the day BEFORE the sell so the gain
+    // shows in the value line before units zero out.
+    const [d60, d41, d40] = [dateDaysAgo(60), dateDaysAgo(41), dateDaysAgo(40)];
+    navOn(KEY_A, d60, 10);
+    navOn(KEY_A, d41, 15);
+    seedTxn(appDb, {
+      ticker: "EXAMPLE-FUND-A",
+      kind: "buy",
+      tradeDate: d60,
+      units: 100,
+      amount: -1000,
+    });
+    seedTxn(appDb, {
+      ticker: "EXAMPLE-FUND-A",
+      kind: "sell",
+      tradeDate: d40,
+      units: 100,
+      amount: 1500,
+    });
+
+    const { aggregate, netInvested, netInvestedForReturn } = await run(() =>
+      getPortfolioSeries("3mo"),
+    );
+
+    // Value climbs 1000 → 1500, then drops to 0 at the walk-away sale.
+    expect(aggregate.map((p) => p.value)).toEqual([1000, 1500, 0]);
+    // Contribution line (money-weighted): cost basis floors at 0, never negative.
+    expect(netInvested.map((p) => p.value)).toEqual([1000, 1000, 0]);
+    // TWR contribution line: the FULL 1500 proceeds leave (1000 in − 1500 out = −500).
+    expect(netInvestedForReturn.map((p) => p.value)).toEqual([1000, 1000, -500]);
+
+    // The fix: TWR PRESERVES the +50% (growth 1.5) — the realized gain leaving the
+    // book is an external outflow, not a market loss.
+    const twr = twrSeries(
+      aggregate.map((p) => ({ d: p.date, v: p.value })),
+      netInvestedForReturn.map((p) => ({ d: p.date, v: p.value })),
+    );
+    expect(twr.at(-1)?.v).toBeCloseTo(1.5, 6);
+    // Contrast: feeding the cost-basis contribution line wipes the gain (the bug).
+    const twrBug = twrSeries(
+      aggregate.map((p) => ({ d: p.date, v: p.value })),
+      netInvested.map((p) => ({ d: p.date, v: p.value })),
+    );
+    expect(twrBug.at(-1)?.v).toBeCloseTo(1.0, 6);
   });
 
   it("prices pre-coverage history from the ledger's own trade prices", async () => {

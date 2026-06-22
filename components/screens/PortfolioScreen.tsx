@@ -498,6 +498,7 @@ interface ViewPortfolio {
   holdings: Holding[];
   series: { d: string; v: number }[];
   netInvested: { d: string; v: number }[];
+  netInvestedForReturn: { d: string; v: number }[];
   cashDecomp?: Portfolio["cashDecomp"];
   totalValue: number;
   initialInvestment: number;
@@ -890,6 +891,7 @@ export function PortfolioScreen({
         holdings: aggregate.holdings,
         series: aggregate.series,
         netInvested: aggregate.netInvested ?? [],
+        netInvestedForReturn: aggregate.netInvestedForReturn ?? aggregate.netInvested ?? [],
         cashDecomp: aggregate.cashDecomp,
         totalValue: aggregate.totalValue,
         initialInvestment: aggregate.initialInvestment,
@@ -904,6 +906,7 @@ export function PortfolioScreen({
       holdings: activePf.holdings,
       series: activePf.series,
       netInvested: activePf.netInvested ?? [],
+      netInvestedForReturn: activePf.netInvestedForReturn ?? activePf.netInvested ?? [],
       cashDecomp: activePf.cashDecomp,
       totalValue: activePf.totalValue,
       initialInvestment: activePf.initialInvestment,
@@ -1149,6 +1152,13 @@ export function PortfolioScreen({
     ytdFrom ? s.filter((p) => p.d >= ytdFrom) : s;
   const retSeries = clipYtd(retView.series);
   const retNetInvested = clipYtd(retView.netInvested);
+  // The TIME-WEIGHTED return uses the full-proceeds-at-walk-away contribution line
+  // (so a realized gain leaving the book isn't read as a phantom loss). Same cash
+  // slices removed; the value line + contribution line + hero P/L stay on
+  // `retNetInvested` (cost-basis, money-weighted).
+  const retNetInvestedForReturn = clipYtd(
+    applyCashMode(cashMode, view.series, view.netInvestedForReturn, view.cashDecomp).netInvested,
+  );
   const retTotalValue = cashReturnValue(cashMode, view.totalValue, view.cashDecomp);
   // Whether the pill is worth showing: there's HELD cash the mode could move
   // (in-transit settlement float isn't removed by either mode, so it doesn't count).
@@ -1174,7 +1184,7 @@ export function PortfolioScreen({
   // Performance mode: a running time-weighted return curve as a growth factor
   // (starts at 1, always positive). The endpoint equals the period pill; the
   // chart renders it as a % via the formatter below. Deposits don't move it.
-  const perfSeries = twrSeries(retSeries, retNetInvested);
+  const perfSeries = twrSeries(retSeries, retNetInvestedForReturn);
 
   // Breakdown mode: funds vs cash over time. Uses the FULL net-worth series and
   // the cash decomposition (not the return-adjusted retSeries) so it shows the
@@ -1198,9 +1208,9 @@ export function PortfolioScreen({
   const periodReturn =
     retSeries.length === 0
       ? null
-      : retNetInvested.length === 0
+      : retNetInvestedForReturn.length === 0
         ? seriesReturnPct(retSeries)
-        : periodTwr(retSeries, retNetInvested);
+        : periodTwr(retSeries, retNetInvestedForReturn);
   // In-transit cash is reported for the whole book; per-portfolio views skip
   // the tooltip note rather than implying a per-bucket number we don't have. In
   // "Funds only" the cash is OUT of the value line, so the note would contradict
