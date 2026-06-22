@@ -2068,7 +2068,7 @@ button.score-row {
 
 /* Chart control toolbar (Google-Finance feel). Every control is the same flat
    worded button, so a thin vertical rule separates the parts: period │ mode │
-   % Scale │ Cash │ Compare. Each part flows and wraps individually; the rule is
+   Log │ Cash │ Compare. Each part flows and wraps individually; the rule is
    drawn as a ::before in the gap to a part's left, and overflow-x: clip removes it
    when the part has wrapped to a new line (its rule pokes past the left edge), so a
    wrapped line never opens with a divider. overflow-y stays visible so the Cash /

@@ -18,10 +18,10 @@ The chart has three kinds of control, and exactly one of them is allowed to chan
   breakdown) changes **what is plotted** — the one control that changes the line's
   meaning.
 - **Period** (1M, 3M, YTD, 1Y, 5Y, All) changes the **window** — how far back you look.
-- **Scale** (a **% Scale** toggle — linear ↔ log) changes **how the line is drawn**
+- **Scale** (a **`Log`** toggle — linear ↔ log) changes **how the line is drawn**
   — never what it is.
 
-All five controls — period, mode, `% Scale`, the `Cash` toggle, and `+ Compare`
+All five controls — period, mode, `Log`, the `Cash` toggle, and `+ Compare`
 — sit in one flat worded toolbar below the chart, separated by thin rules. They
 persist **per device** (localStorage), not across devices: the device usually
 implies the use case (a phone glance vs a desktop deep-dive), so the chart reopens
@@ -157,10 +157,11 @@ honest — the absolute numbers in the tooltip, and the Log scale.
 
 ## Linear vs Log: two honest ways to draw the same line
 
-On every range, in both Value and Return, a small **% scale** toggle redraws the
-same line on a logarithmic axis. (The label leans on the benefit rather than the
-word "log"; the *% scale* term explains it.) The two draws differ only in what
-"equal height" means:
+On every range, in both Value and Return, a small **`Log`** toggle redraws the
+same line on a logarithmic axis. (The label uses the standard word every charting
+tool uses, so it's instantly recognisable; the benefit — *equal % moves take the
+same height* — is one tap away on the *log scale* term.) The two draws differ only
+in what "equal height" means:
 
 - **Linear** (default): equal **baht** (or percentage-point) moves are equal height.
 - **Log**: equal **percentage** moves are equal height. A doubling looks the same
@@ -208,7 +209,7 @@ line keeps deposit steps attributable.
 |---|---|---|
 | **Mode** (Value/Return/Mix) | Sets what is plotted | **Yes** — this is the one |
 | **Period** (1M…All) | Sets the time window (x-axis) | No |
-| **% Scale** toggle | Sets how the line is drawn (linear ↔ log, y-axis) | No |
+| **`Log`** toggle | Sets how the line is drawn (linear ↔ log, y-axis) | No |
 | **Auto-fit** (automatic) | Frames the y-axis to the window's data, not to ฿0 | No |
 | **Windowed return** (scorecard) | "How did *this window* do" — ฿ in Value, time-weighted % in Return | (separate figure) |
 | **Cash** toggle | Whether investable cash counts in the line + return | Changes the *cash basis*, applied consistently everywhere — see [Cash](./cash.md) |
@@ -235,7 +236,7 @@ claim here.
   so the curve's endpoint equals the scorecard's time-weighted figure.
 - [`components/screens/PortfolioScreen.tsx`](../../components/screens/PortfolioScreen.tsx)
   owns the worded toolbar — period (YTD is a client-side clip of a 1Y fetch; 5Y is
-  gated on inception), the mode switch, the `% Scale` toggle, the `Cash`
+  gated on inception), the mode switch, the `Log` toggle, the `Cash`
   toggle, and `+ Compare` — plus the returns scorecard, and feeds the charts their
   series. View state (period, mode, scale, cash basis) persists per-device via
   [`lib/useLocalStorageState.ts`](../../lib/useLocalStorageState.ts); the cash note
