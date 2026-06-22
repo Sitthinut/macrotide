@@ -176,6 +176,7 @@ function toSeriesPoints(raw: { date: string; value: number }[] | undefined): Ser
 // Server cash-decomposition shape ({date,value} arrays) → client ({d,v}).
 interface RawCashDecomp {
   cashValue: { date: string; value: number }[];
+  heldCashValue: { date: string; value: number }[];
   reservedCashValue: { date: string; value: number }[];
   cashContrib: { date: string; value: number }[];
   reservedCashContrib: { date: string; value: number }[];
@@ -185,6 +186,7 @@ function toCashDecomp(raw: RawCashDecomp | undefined): CashDecomp | undefined {
   if (!raw) return undefined;
   return {
     cashValue: toSeriesPoints(raw.cashValue),
+    heldCashValue: toSeriesPoints(raw.heldCashValue),
     reservedCashValue: toSeriesPoints(raw.reservedCashValue),
     cashContrib: toSeriesPoints(raw.cashContrib),
     reservedCashContrib: toSeriesPoints(raw.reservedCashContrib),

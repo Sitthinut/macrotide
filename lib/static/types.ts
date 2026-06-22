@@ -70,6 +70,8 @@ export type PortfolioType = "free" | "tax-locked" | "experiment";
  */
 export interface CashDecomp {
   cashValue: SeriesPoint[];
+  /** Held cash accounts only (excl. in-transit settlement float) — the "Funds only" slice. */
+  heldCashValue: SeriesPoint[];
   reservedCashValue: SeriesPoint[];
   cashContrib: SeriesPoint[];
   reservedCashContrib: SeriesPoint[];
