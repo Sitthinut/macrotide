@@ -1,6 +1,3 @@
-/* Investment Agent — Direction C: Modern Trustable
-   Light + dark via [data-theme] · Geist family · Spotify-mobile density */
-
 :root {
   /* Type */
   /* Family names come from next/font variables set on <html> (app/layout.tsx);
@@ -1721,36 +1718,75 @@ button.private-amt:focus-visible {
   background: color-mix(in oklab, var(--loss) 12%, transparent);
   color: var(--loss);
 }
-/* Hero return — tap to open the returns breakdown. Reset the button to look
-   like the inline pill + label it wraps; the chevron is the only added chrome. */
-.hero-return-btn {
-  background: none;
-  border: 0;
-  padding: 0;
-  margin: 0;
-  cursor: pointer;
-  display: inline-flex;
+/* Scorecard — the stacked return rows under the hero value. One language across
+   all three: a ▲/▼ caret + value carry the gain/loss color, a secondary % sits in
+   parens, and the trailing context is muted. Left edges align into a caret column
+   (no pill fill — flat, like the chart toolbar). */
+.scorecard {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  margin-top: 8px;
+}
+.score-row {
+  display: flex;
   align-items: center;
   gap: 6px;
-  font: inherit;
-  color: inherit;
+  /* Fixed 18px row height (line-height) + 3px scorecard gap, so the scorecard's
+     height is deterministic and the chart can grow/shrink by exactly that as rows
+     appear/hide — keeping the chart + controls below at a constant total height
+     (see the scoreH() math in PortfolioScreen, which also accounts for the
+     headline row's extra gap). */
+  line-height: 18px;
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--gain);
 }
-.hero-return-btn .muted {
+.score-row[data-down] {
+  color: var(--loss);
+}
+.score-val {
+  font-weight: 600;
+}
+/* The headline row's % is part of its figure — same weight as the value. */
+.score-pct {
+  font-weight: 600;
+}
+.score-ctx {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+  color: var(--muted);
+  font-weight: 400;
 }
-/* Optical nudge: box-centered against the full line, the chevron reads high next
-   to lowercase text — drop it ~1px to sit with the x-height. */
-.hero-return-btn .muted svg {
+/* Optical nudge: the chevron reads high next to lowercase text — drop it ~1px. */
+.score-ctx svg {
   position: relative;
   top: 1px;
 }
-.hero-return-btn:hover .muted,
-.hero-return-btn:focus-visible .muted {
+/* Row 1 is a button (tap to open the returns breakdown) — strip the UA chrome and
+   let .score-row drive the look; the chevron + hover/focus are the tap affordance. */
+button.score-row {
+  padding: 0;
+  border: 0;
+  margin: 0;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+/* Period rows recede with a lighter value weight, so the bold all-time row reads
+   as the headline while every color stays at full contrast and the rows keep
+   equal spacing — one cohesive block. */
+.score-row:not(.score-row--tap) .score-val {
+  font-weight: 400;
+}
+.score-row--tap:hover .score-ctx,
+.score-row--tap:focus-visible .score-ctx {
   color: var(--ink);
 }
-.hero-return-btn:focus-visible {
+.score-row--tap:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
   border-radius: var(--r-sm);
@@ -1957,6 +1993,8 @@ button.private-amt:focus-visible {
   background: var(--chip-bg);
   border-radius: 9px;
   font-size: 11px;
+  height: 28px;
+  box-sizing: border-box;
 }
 .range-pills button {
   padding: 4px 9px;
@@ -1974,6 +2012,166 @@ button.private-amt:focus-visible {
   color: var(--ink);
   font-weight: 500;
   box-shadow: var(--chip-shadow);
+}
+/* Square-ish icon button for the chart's scale / cash / share tools (top-right). */
+.chart-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 7px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  cursor: pointer;
+}
+.chart-tool[data-active="true"] {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent-ink);
+}
+
+/* Worded toolbar button (Google-Finance style) — scale / cash / breakdown
+   normalization. Transparent, muted text, active = accent. Replaces the icon-only
+   chart-tool in the chart's control toolbar. */
+.chart-toolbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 28px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+}
+.chart-toolbtn:hover {
+  color: var(--ink);
+}
+.chart-toolbtn[data-active="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+/* Cash toggle: struck through when investable cash is excluded — reads as "not
+   counted", without the remove-button feel an ✕ would borrow from the Compare ×. */
+.cash-mode-kebab .chart-toolbtn[data-active="true"] {
+  text-decoration: line-through;
+}
+
+/* Chart control toolbar (Google-Finance feel). Every control is the same flat
+   worded button, so a thin vertical rule separates the parts: period │ mode │
+   % Scale │ Cash │ Compare. Each part flows and wraps individually; the rule is
+   drawn as a ::before in the gap to a part's left, and overflow-x: clip removes it
+   when the part has wrapped to a new line (its rule pokes past the left edge), so a
+   wrapped line never opens with a divider. overflow-y stays visible so the Cash /
+   Compare menus (which open downward) are not clipped. */
+.chart-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  row-gap: 8px;
+  column-gap: 14px;
+  margin-top: 12px;
+  overflow-x: clip;
+  overflow-y: visible;
+}
+.chart-toolbar > * {
+  position: relative;
+}
+.chart-toolbar > * + *::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: 50%;
+  width: 1px;
+  height: 16px;
+  background: var(--line);
+  transform: translateY(-50%);
+}
+.toolbar-part {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* First-time note for the Cash checkbox — a small card where the old dropdown
+   opened, shown until the user dismisses it. */
+.cash-hint {
+  /* position/top/left come from usePopoverPlacement (fixed, flips to stay on
+     screen, escapes the toolbar's overflow-x clip). */
+  z-index: 90;
+  width: max-content;
+  max-width: 240px;
+  padding: 10px 12px;
+  background: var(--paper);
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
+}
+.cash-hint__body {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* Adaptive chart caption — one short line per view; jargon renders as `.term`
+   (dotted-underline) words that open their definition in the `.chart-info` card. */
+.chart-caption-line {
+  margin: 8px 4px 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.term {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  /* Standard glossary affordance: a faint dotted underline that says "tap to
+     define", brightening with the text on hover. */
+  text-decoration: underline dotted;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in oklab, currentColor 60%, transparent);
+}
+.term:hover,
+.term:focus-visible {
+  color: var(--ink);
+  text-decoration-color: currentColor;
+  outline: none;
+}
+
+/* Definition popover for a `.term` (and the cash hint shares the card look);
+   placement from usePopoverPlacement. */
+.chart-info {
+  z-index: 90;
+  width: max-content;
+  max-width: 260px;
+  padding: 10px 12px;
+  background: var(--paper);
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chart-info__note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
 }
 
 /* Inline action: accent text + a trailing chevron (the affordance), matching the
@@ -2984,7 +3182,7 @@ button.chip {
   margin-top: 10px;
 }
 /* ============================================================================
- * Responsive shell styles for Investment Agent.
+ * Responsive shell styles.
  *
  * Breakpoints:
  *   <  700px   mobile   — original .app-frame layout (defined in styles.css)

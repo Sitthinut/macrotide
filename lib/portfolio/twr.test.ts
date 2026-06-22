@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SeriesPoint } from "@/lib/static/types";
 import { seriesReturnPct } from "./adapter";
-import { periodTwr } from "./twr";
+import { periodTwr, twrSeries } from "./twr";
 
 // Daily points keyed by an index → date, so the series reads like a calendar.
 const series = (vals: number[]): SeriesPoint[] =>
@@ -76,5 +76,36 @@ describe("periodTwr", () => {
       { d: "2026-01-02", v: 0 },
     ];
     expect(periodTwr(v, f)).toBeCloseTo(10, 5);
+  });
+});
+
+describe("twrSeries", () => {
+  it("ends at the same value periodTwr reports (curve endpoint == pill)", () => {
+    const v = series([1000, 1100, 1045, 1200]);
+    const f = flows([0, 0, 0, 0]);
+    const curve = twrSeries(v, f);
+    const endPct = (curve[curve.length - 1].v - 1) * 100;
+    expect(endPct).toBeCloseTo(periodTwr(v, f) as number, 6);
+  });
+
+  it("starts at 1 and stays positive (valid on a log axis), even through a drawdown", () => {
+    const v = series([1000, 700, 1300]);
+    const curve = twrSeries(v, flows([0, 0, 0]));
+    expect(curve[0].v).toBe(1);
+    expect(curve.every((p) => p.v > 0)).toBe(true);
+  });
+
+  it("does not jump at a mid-window deposit (the whole point of Performance mode)", () => {
+    // ฿800k lands on day 2 with no market move: the growth factor must be
+    // unchanged across that step (a flow is netted out, not read as return).
+    const v = series([11_000, 811_000, 819_000]);
+    const f = flows([0, 800_000, 800_000]);
+    const curve = twrSeries(v, f);
+    expect(curve[1].v).toBeCloseTo(curve[0].v, 6); // no jump on the deposit day
+    expect((curve[curve.length - 1].v - 1) * 100).toBeCloseTo(periodTwr(v, f) as number, 6);
+  });
+
+  it("returns [] for fewer than two finite points", () => {
+    expect(twrSeries(series([1000]), flows([0]))).toEqual([]);
   });
 });

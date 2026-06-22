@@ -76,6 +76,12 @@ export interface PortfolioSeriesResult {
   /** ISO timestamp of the most recent plotted date. */
   asOf: string | null;
   /**
+   * The book's first transaction date (inception) — independent of the requested
+   * window, so the client can tell total history length (e.g. to hide a 5Y range
+   * that would just duplicate "All" on a younger book). Null when empty.
+   */
+  historyStart: string | null;
+  /**
    * Currencies whose USD/THB (or cross) rate could not be resolved, so those
    * holdings were dropped from the totals this run. Empty = everything
    * converted cleanly. The UI surfaces this so a cold FX cache doesn't silently
@@ -124,6 +130,7 @@ const EMPTY_RESULT: Omit<PortfolioSeriesResult, "hasDistributingHolding"> = {
   cashDecomp: EMPTY_CASH_DECOMP,
   cashDecompByBucket: {},
   asOf: null,
+  historyStart: null,
   missingFx: [],
   estimatedThrough: null,
   unpriced: [],
@@ -635,6 +642,9 @@ export async function getPortfolioSeries(
     cashDecomp,
     cashDecompByBucket,
     asOf: plotted[plotted.length - 1] ?? null,
+    // Inception = earliest ledger trade (the list is ordered oldest-first), so
+    // it's the true history start regardless of the requested window.
+    historyStart: ledger[0]?.tradeDate ?? null,
     missingFx: Array.from(fx.missing).sort(),
     hasDistributingHolding,
     estimatedThrough,

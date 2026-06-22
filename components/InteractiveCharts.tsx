@@ -130,6 +130,12 @@ interface TwoLinePoint {
   lower: number;
   gainUp: number;
   gainDown: number;
+  // Range-area bands for the LOG wedge: filled between the two values so they map
+  // through the (log) y-scale directly — unlike the additive stacked wedge above,
+  // which only composes in linear pixel space. gBand tints value-above-invested
+  // (gain), rBand tints underwater (loss); the off-side band is zero-height.
+  gBand: [number, number];
+  rBand: [number, number];
 }
 
 export function NavChart({
@@ -147,6 +153,8 @@ export function NavChart({
   valuesHidden = false,
   baselineValue = 0,
   baselineInvested = 0,
+  scaleMode = "linear",
+  baselineRef = null,
 }: {
   data: SeriesPoint[];
   height?: number;
@@ -183,6 +191,21 @@ export function NavChart({
    */
   baselineValue?: number;
   baselineInvested?: number;
+  /**
+   * Y-axis transform. "log" draws the value line on a ratio (log10) axis so equal
+   * % moves take equal height — only valid when every plotted value is positive,
+   * so the caller passes it on absolute (un-rebased) wealth and the chart falls
+   * back to linear if any point is ≤ 0. Scale changes only HOW the series is
+   * drawn, never what it means (framing ⊥ scale).
+   */
+  scaleMode?: "linear" | "log";
+  /**
+   * Single-series sign reference (Return mode passes 1 = the 0%-return growth
+   * factor). When set, the area fills green above it / red below, and the line
+   * takes the gain/loss color of the latest point. Absent for absolute-value
+   * single-series charts (fund price, cash balance), which keep the plain fill.
+   */
+  baselineRef?: number | null;
 }) {
   const gradId = `nav-grad-${useId().replace(/:/g, "")}`;
 
@@ -240,6 +263,9 @@ export function NavChart({
         lower: Math.min(v, inv),
         gainUp: Math.max(0, gain),
         gainDown: Math.max(0, -gain),
+        // Same wedge for the log axis, expressed as value-pair bands (see type).
+        gBand: [inv, Math.max(v, inv)],
+        rBand: [Math.min(v, inv), inv],
       };
     });
     const axisTicks = pickAxisTicks(merged);
@@ -279,16 +305,14 @@ export function NavChart({
           <span style={{ color, fontVariantNumeric: "tabular-nums" }}>{text}</span>
         </div>
       );
-      // A signed ฿ + % gain string, masking the ฿ figure under the privacy toggle
-      // but keeping the % (matches the portfolio Gain row). Shared by both gains.
-      const gainText = (amount: number, percent: number | null) =>
-        `${valuesHidden ? "" : `${fmtTHBSigned(amount)}${percent === null ? "" : " · "}`}${
-          percent === null
-            ? valuesHidden
-              ? "—"
-              : ""
-            : `${percent >= 0 ? "+" : ""}${percent.toFixed(2)}%`
-        }`;
+      // A signed ฿ with the % after a middot — "฿X · +Y%" — matching the hero
+      // scorecard. Under the privacy toggle the ฿ is masked, leaving just the %.
+      const gainText = (amount: number, percent: number | null) => {
+        const pctStr = percent === null ? null : `${percent >= 0 ? "+" : ""}${percent.toFixed(2)}%`;
+        if (valuesHidden) return pctStr ?? "—";
+        const amtStr = fmtTHBSigned(amount);
+        return pctStr === null ? amtStr : `${amtStr} · ${pctStr}`;
+      };
       return (
         <div style={TOOLTIP_STYLE}>
           <div style={TOOLTIP_LABEL}>{formatTooltipDate(String(props.label ?? p.d))}</div>
@@ -314,6 +338,12 @@ export function NavChart({
 
     const last = merged.at(-1);
     const valueAbove = !last || last.v >= last.inv;
+    // The value line takes the gain/loss color of the CURRENT state (value vs
+    // invested) — green in gain, red underwater — like the hero ▲/▼. A single
+    // color (not segmented): the crossover with the sloped invested line happens
+    // at varying heights, which a stroke gradient can't follow; the wedge area
+    // already carries the per-segment sign.
+    const valueLineColor = valueAbove ? accent : "var(--loss)";
     const n = merged.length;
 
     // Geometry of the plot area (top margin 10, x-axis band NAV_AXIS_H).
@@ -327,6 +357,21 @@ export function NavChart({
     const domMin = yMin - pad;
     const domMax = yMax + pad;
     const yOf = (val: number) => plotTop + (domMax - val) * (plotH / (domMax - domMin));
+
+    // Log scale: draw on a ratio axis so equal % moves take equal height. Only
+    // valid when every value is positive — clamp the domain to the VALUE series
+    // (a near-inception net-invested point near 0 would otherwise squash the
+    // floor), and the caller passes absolute wealth so this holds; fall back to
+    // linear otherwise. The signed gain wedge is rendered differently per scale
+    // (stacked areas on linear, value-pair bands on log — see the Area block); the
+    // dotted net-invested line and its end-label stay on both.
+    let vMin = Number.POSITIVE_INFINITY;
+    let vMax = Number.NEGATIVE_INFINITY;
+    for (const p of merged) {
+      vMin = Math.min(vMin, p.v);
+      vMax = Math.max(vMax, p.v);
+    }
+    const logScale = scaleMode === "log" && vMin > 0;
 
     // The end-label hugs the invested line's last point and stays clear of the
     // line WITHIN THE LABEL'S OWN WIDTH — so a step-up under the text is avoided,
@@ -379,6 +424,37 @@ export function NavChart({
       );
     };
 
+    // Log variant: the linear placement above derives y from `yOf` (a linear
+    // pixel map), which floats off the line on a log axis. Here we use the point's
+    // ACTUAL rendered y (recharts hands it to the label callback under whichever
+    // scale is active) and just offset to the side away from the value line.
+    const investedEndLabelLog = (props: {
+      x?: number | string;
+      y?: number | string;
+      index?: number;
+    }) => {
+      if (props.index !== n - 1 || props.x == null || props.y == null) return null;
+      const lastX = Number(props.x);
+      const lastY = Number(props.y);
+      const y = Math.min(
+        height - 4,
+        Math.max(LABEL_H, valueAbove ? lastY + GAP_BELOW : lastY - GAP_ABOVE),
+      );
+      return (
+        <text
+          x={lastX - 4}
+          y={y}
+          textAnchor="end"
+          fontSize={9}
+          fontFamily="var(--font-mono)"
+          letterSpacing="0.06em"
+          fill="var(--muted-2)"
+        >
+          INVESTED
+        </text>
+      );
+    };
+
     return (
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={merged} margin={{ top: 10, right: 6, bottom: 0, left: 4 }}>
@@ -394,58 +470,93 @@ export function NavChart({
           {/* allowDataOverflow honors this explicit domain — the wedge's stacked
               helper areas would otherwise drag the auto-domain down to the 0
               stack baseline and squash both lines into the top of the plot. */}
-          <YAxis hide domain={[domMin, domMax]} allowDataOverflow />
+          {logScale ? (
+            <YAxis hide scale="log" domain={[vMin * 0.98, vMax * 1.02]} allowDataOverflow />
+          ) : (
+            <YAxis hide domain={[domMin, domMax]} allowDataOverflow />
+          )}
           <Tooltip cursor={{ stroke: "var(--line)", strokeWidth: 1 }} content={renderTooltip} />
-          {/* Signed gain wedge between the two lines (invisible base + |gap|). */}
-          <Area
-            type="monotone"
-            dataKey="lower"
-            stackId="up"
-            stroke="none"
-            fill="transparent"
-            isAnimationActive={false}
-            tooltipType="none"
-            activeDot={false}
-          />
-          <Area
-            type="monotone"
-            dataKey="gainUp"
-            stackId="up"
-            stroke="none"
-            fill={accent}
-            fillOpacity={benchmarkData ? 0.07 : 0.16}
-            isAnimationActive={false}
-            tooltipType="none"
-            activeDot={false}
-          />
-          <Area
-            type="monotone"
-            dataKey="lower"
-            stackId="down"
-            stroke="none"
-            fill="transparent"
-            isAnimationActive={false}
-            tooltipType="none"
-            activeDot={false}
-          />
-          <Area
-            type="monotone"
-            dataKey="gainDown"
-            stackId="down"
-            stroke="none"
-            fill="var(--loss)"
-            fillOpacity={benchmarkData ? 0.06 : 0.14}
-            isAnimationActive={false}
-            tooltipType="none"
-            activeDot={false}
-          />
+          {/* Signed gain wedge between the two lines. Linear: an invisible base
+              (lower) + the |gap| as a stacked area — composes only in linear pixel
+              space. Log: the same wedge drawn as value-pair bands (gBand/rBand) so
+              each edge maps through the log scale; here the gap's HEIGHT reads as
+              the return ratio (log V − log I = log V/I), not baht. */}
+          {logScale ? (
+            <>
+              <Area
+                type="monotone"
+                dataKey="gBand"
+                stroke="none"
+                fill={accent}
+                fillOpacity={benchmarkData ? 0.07 : 0.16}
+                isAnimationActive={false}
+                tooltipType="none"
+                activeDot={false}
+              />
+              <Area
+                type="monotone"
+                dataKey="rBand"
+                stroke="none"
+                fill="var(--loss)"
+                fillOpacity={benchmarkData ? 0.06 : 0.14}
+                isAnimationActive={false}
+                tooltipType="none"
+                activeDot={false}
+              />
+            </>
+          ) : (
+            <>
+              <Area
+                type="monotone"
+                dataKey="lower"
+                stackId="up"
+                stroke="none"
+                fill="transparent"
+                isAnimationActive={false}
+                tooltipType="none"
+                activeDot={false}
+              />
+              <Area
+                type="monotone"
+                dataKey="gainUp"
+                stackId="up"
+                stroke="none"
+                fill={accent}
+                fillOpacity={benchmarkData ? 0.07 : 0.16}
+                isAnimationActive={false}
+                tooltipType="none"
+                activeDot={false}
+              />
+              <Area
+                type="monotone"
+                dataKey="lower"
+                stackId="down"
+                stroke="none"
+                fill="transparent"
+                isAnimationActive={false}
+                tooltipType="none"
+                activeDot={false}
+              />
+              <Area
+                type="monotone"
+                dataKey="gainDown"
+                stackId="down"
+                stroke="none"
+                fill="var(--loss)"
+                fillOpacity={benchmarkData ? 0.06 : 0.14}
+                isAnimationActive={false}
+                tooltipType="none"
+                activeDot={false}
+              />
+            </>
+          )}
           <Line
             type="monotone"
             dataKey="v"
-            stroke={accent}
+            stroke={valueLineColor}
             strokeWidth={2}
             dot={false}
-            activeDot={{ r: 4, fill: accent }}
+            activeDot={{ r: 4, fill: valueLineColor }}
             isAnimationActive={false}
           />
           {/* Contribution line: thin, faint (muted-2), and DOTTED so it reads as
@@ -461,7 +572,7 @@ export function NavChart({
             dot={false}
             activeDot={{ r: 3, fill: "var(--muted-2)" }}
             isAnimationActive={false}
-            label={investedEndLabel}
+            label={logScale ? investedEndLabelLog : investedEndLabel}
           />
           {benchmarkData && (
             <Line
@@ -480,21 +591,110 @@ export function NavChart({
     );
   }
 
-  const merged = data.map((d) => ({
-    d: d.d,
-    v: d.v,
-    bench: benchByLabel?.get(d.d) ?? null,
-  }));
+  // Sign-aware fill (Return mode): green above the 0%-return reference, red below.
+  // `baselineRef` is the growth factor at 0% (1.0); absent for absolute-value
+  // single-series charts (fund price, cash balance), which keep the plain fill.
+  const signed = baselineRef != null;
+  const sBase = baselineRef ?? 0;
+  const merged = data.map((d) => ({ d: d.d, v: d.v, bench: benchByLabel?.get(d.d) ?? null }));
   const axisTicks = pickAxisTicks(merged);
+  // Log on the single-series (Performance) view: the line is a growth factor (or
+  // an absolute value), always positive, so a log axis is valid; fall back to
+  // linear if anything is ≤ 0. The benchmark, rebased onto the same series above,
+  // shares the scale.
+  let sMin = Number.POSITIVE_INFINITY;
+  let lineMin = Number.POSITIVE_INFINITY;
+  let lineMax = Number.NEGATIVE_INFINITY;
+  for (const p of merged) {
+    if (p.v < sMin) sMin = p.v;
+    if (p.bench != null && p.bench < sMin) sMin = p.bench;
+    lineMin = Math.min(lineMin, p.v, p.bench ?? p.v);
+    lineMax = Math.max(lineMax, p.v, p.bench ?? p.v);
+  }
+  const logScaleSingle = scaleMode === "log" && Number.isFinite(sMin) && sMin > 0;
+  // Whole-line color by the CURRENT gain/loss (latest point vs the reference) —
+  // green in gain, red at a loss, matching the hero ▲/▼.
+  const singleCurrentlyUp = (merged.at(-1)?.v ?? sBase) >= sBase;
+  const singleLineColor = signed && !singleCurrentlyUp ? "var(--loss)" : accent;
+  // Inset the domain by ~the active-dot radius (in data units) so a dot sitting on
+  // the extreme isn't clipped in half at the plot edge.
+  const sPlotH = height - 10 - NAV_AXIS_H;
+  const sPad = sPlotH > 0 && lineMax > lineMin ? (5 / sPlotH) * (lineMax - lineMin) : 0;
+  const sDomMin = logScaleSingle ? lineMin * 0.98 : lineMin - sPad;
+  const sDomMax = logScaleSingle ? lineMax * 1.02 : lineMax + sPad;
+  // One continuous area from the line to a baseline clamped INTO the visible domain
+  // (so the gradient maps to what's on screen, and crossovers taper with no gap).
+  // `zeroFrac` = where 0% sits in the area's bounding box (0 = top, 1 = bottom;
+  // log-space on a log axis). The fill is solid from the line, fades over the SPAN
+  // fraction of the band nearest 0%, hits fully transparent AT 0%, and flips
+  // green→red there.
+  const fAt = (val: number) => (logScaleSingle ? Math.log(val) : val);
+  const SPAN = 0.5;
+  const signedBase = signed ? Math.min(sDomMax, Math.max(sDomMin, sBase)) : sBase;
+  const bboxTop = Math.max(lineMax, signedBase);
+  const bboxBottom = Math.min(lineMin, signedBase);
+  const zeroFrac =
+    signed && fAt(bboxTop) > fAt(bboxBottom)
+      ? Math.min(1, Math.max(0, (fAt(bboxTop) - fAt(sBase)) / (fAt(bboxTop) - fAt(bboxBottom))))
+      : 1;
+  const greenFadeStart = zeroFrac * (1 - SPAN);
+  const redFadeEnd = zeroFrac + (1 - zeroFrac) * SPAN;
+
+  // Custom tooltip matching the two-line wealth view (muted label left, value
+  // right, no colon, no color dots) so Return mode and the other single-series
+  // charts read identically — recharts' default content uses a "name: value"
+  // layout that looks foreign next to the two-line view.
+  const renderSingleTooltip = (props: {
+    active?: boolean;
+    label?: string | number;
+    payload?: readonly { payload?: { d: string; v: number; bench: number | null } }[];
+  }) => {
+    if (!props.active || !props.payload?.[0]?.payload) return null;
+    const p = props.payload[0].payload;
+    const row = (label: string, text: string, color = "var(--ink)") => (
+      <div style={{ display: "flex", gap: 10, justifyContent: "space-between" }}>
+        <span style={{ color: "var(--muted)" }}>{label}</span>
+        <span style={{ color, fontVariantNumeric: "tabular-nums" }}>{text}</span>
+      </div>
+    );
+    let seriesText = valueFormatter(p.v);
+    if (showReturnInTooltip && baseline) {
+      const pct = (p.v / baseline - 1) * 100;
+      seriesText = `${seriesText} · ${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
+    }
+    return (
+      <div style={TOOLTIP_STYLE}>
+        <div style={TOOLTIP_LABEL}>{formatTooltipDate(String(props.label ?? p.d))}</div>
+        {row(seriesLabel, seriesText, accent)}
+        {p.bench != null &&
+          row(benchmarkLabel ?? "Benchmark", valueFormatter(p.bench), "var(--benchmark)")}
+      </div>
+    );
+  };
 
   return (
     <ResponsiveContainer width="100%" height={height}>
       <ComposedChart data={merged} margin={{ top: 10, right: 4, bottom: 0, left: 4 }}>
         <defs>
+          {/* Plain fill for non-signed charts (fund price, cash balance): opaque
+              at the line, fully transparent at the bottom. */}
           <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={accent} stopOpacity={0.22} />
             <stop offset="100%" stopColor={accent} stopOpacity={0} />
           </linearGradient>
+          {/* Signed fade (Return): one area, green above the 0% offset / red below.
+              Solid from the line, fading over the SPAN fraction of the band nearest
+              0% to fully transparent AT 0% on both sides. */}
+          {signed && (
+            <linearGradient id={`${gradId}-signed`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset={0} stopColor={accent} stopOpacity={0.32} />
+              <stop offset={greenFadeStart} stopColor={accent} stopOpacity={0.32} />
+              <stop offset={zeroFrac} stopColor={accent} stopOpacity={0} />
+              <stop offset={zeroFrac} stopColor="var(--loss)" stopOpacity={0} />
+              <stop offset={redFadeEnd} stopColor="var(--loss)" stopOpacity={0.32} />
+              <stop offset={1} stopColor="var(--loss)" stopOpacity={0.32} />
+            </linearGradient>
+          )}
         </defs>
         <XAxis
           dataKey="d"
@@ -505,34 +705,51 @@ export function NavChart({
           axisLine={false}
           tick={(props) => <AxisTick {...props} ticks={axisTicks} />}
         />
-        <YAxis hide domain={["dataMin", "dataMax"]} />
-        <Tooltip
-          cursor={{ stroke: "var(--line)", strokeWidth: 1 }}
-          contentStyle={TOOLTIP_STYLE}
-          labelStyle={TOOLTIP_LABEL}
-          labelFormatter={(label) => formatTooltipDate(String(label))}
-          formatter={(value, name) => {
-            if (name === "bench")
-              return [fmtTHBClean(Number(value)), benchmarkLabel ?? "Benchmark"];
-            const v = Number(value);
-            let text = valueFormatter(v);
-            if (showReturnInTooltip && baseline) {
-              const pct = (v / baseline - 1) * 100;
-              text = `${text} · ${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
-            }
-            return [text, seriesLabel];
-          }}
-        />
-        <Area
-          type="monotone"
-          dataKey="v"
-          stroke={accent}
-          strokeWidth={2}
-          fill={`url(#${gradId})`}
-          dot={false}
-          activeDot={{ r: 4, fill: accent }}
-          isAnimationActive={false}
-        />
+        {/* Explicit, dot-radius-padded domain so the active dot at the extreme isn't
+            clipped at the plot edge (matches the two-line view). */}
+        {logScaleSingle ? (
+          <YAxis hide scale="log" domain={[sDomMin, sDomMax]} allowDataOverflow />
+        ) : (
+          <YAxis hide domain={[sDomMin, sDomMax]} allowDataOverflow />
+        )}
+        <Tooltip cursor={{ stroke: "var(--line)", strokeWidth: 1 }} content={renderSingleTooltip} />
+        {signed ? (
+          <>
+            {/* One continuous area from the line to the 0%-anchored baseline (no gap
+                at crossovers); the gradient splits green/red at 0% and fades. The
+                line carries the current gain/loss color. */}
+            <Area
+              type="monotone"
+              dataKey="v"
+              baseValue={signedBase}
+              stroke="none"
+              fill={`url(#${gradId}-signed)`}
+              isAnimationActive={false}
+              tooltipType="none"
+              activeDot={false}
+            />
+            <Line
+              type="monotone"
+              dataKey="v"
+              stroke={singleLineColor}
+              strokeWidth={2}
+              dot={false}
+              activeDot={{ r: 4, fill: singleLineColor }}
+              isAnimationActive={false}
+            />
+          </>
+        ) : (
+          <Area
+            type="monotone"
+            dataKey="v"
+            stroke={accent}
+            strokeWidth={2}
+            fill={`url(#${gradId})`}
+            dot={false}
+            activeDot={{ r: 4, fill: accent }}
+            isAnimationActive={false}
+          />
+        )}
         {benchmarkData && (
           <Line
             type="monotone"
@@ -545,6 +762,119 @@ export function NavChart({
             isAnimationActive={false}
           />
         )}
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ===== Breakdown (composition over time): funds vs cash, stacked =====
+// Zero-based by construction (height from 0 IS the quantity). `normalized` shows
+// share-of-100% (the default — it strips the deposit-driven height jumps so true
+// composition reads clearly); otherwise absolute ฿ with the total = stack height.
+export function BreakdownChart({
+  value,
+  cash,
+  normalized = true,
+  height = NAV_CHART_HEIGHT,
+  valuesHidden = false,
+  emptyHint = null,
+}: {
+  /** Total net worth per date (funds + cash). */
+  value: SeriesPoint[];
+  /** Cash portion per date; funds = value − cash. */
+  cash: SeriesPoint[];
+  normalized?: boolean;
+  height?: number;
+  valuesHidden?: boolean;
+  emptyHint?: string | null;
+}) {
+  if (!value || value.length === 0) return <EmptyState height={height} emptyHint={emptyHint} />;
+
+  const cashByLabel = new Map(cash.map((p) => [p.d, p.v]));
+  const merged = value.map((p) => {
+    const total = p.v;
+    const c = Math.max(0, Math.min(total, cashByLabel.get(p.d) ?? 0));
+    const f = Math.max(0, total - c);
+    if (normalized) {
+      const t = total > 0 ? total : 1;
+      return {
+        d: p.d,
+        v: total,
+        funds: (f / t) * 100,
+        cash: (c / t) * 100,
+        fAbs: f,
+        cAbs: c,
+        total,
+      };
+    }
+    return { d: p.d, v: total, funds: f, cash: c, fAbs: f, cAbs: c, total };
+  });
+  const axisTicks = pickAxisTicks(merged);
+  // Top of the stack (100% normalized, else the largest total) + a dot-radius pad
+  // so the active dot on the top line isn't clipped at the plot edge.
+  const bTopMax = normalized ? 100 : Math.max(0, ...merged.map((p) => p.total));
+  const bPlotH = height - 10 - NAV_AXIS_H;
+  const bPad = bPlotH > 0 ? (5 / bPlotH) * bTopMax : 0;
+
+  const renderTooltip = (props: {
+    active?: boolean;
+    label?: string | number;
+    payload?: readonly { payload?: (typeof merged)[number] }[];
+  }) => {
+    if (!props.active || !props.payload?.[0]?.payload) return null;
+    const p = props.payload[0].payload;
+    const pct = (x: number) => (p.total > 0 ? `${((x / p.total) * 100).toFixed(0)}%` : "—");
+    const row = (label: string, abs: number, color: string) => (
+      <div style={{ display: "flex", gap: 10, justifyContent: "space-between" }}>
+        <span style={{ color: "var(--muted)" }}>{label}</span>
+        <span style={{ color, fontVariantNumeric: "tabular-nums" }}>
+          {valuesHidden ? pct(abs) : `${fmtTHBClean(abs)} · ${pct(abs)}`}
+        </span>
+      </div>
+    );
+    return (
+      <div style={TOOLTIP_STYLE}>
+        <div style={TOOLTIP_LABEL}>{formatTooltipDate(String(props.label ?? p.d))}</div>
+        {row("Funds", p.fAbs, "var(--accent)")}
+        {row("Cash", p.cAbs, "var(--benchmark)")}
+      </div>
+    );
+  };
+
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <ComposedChart data={merged} margin={{ top: 10, right: 6, bottom: 0, left: 4 }}>
+        <XAxis
+          dataKey="d"
+          ticks={axisTicks}
+          interval={0}
+          height={NAV_AXIS_H}
+          tickLine={false}
+          axisLine={false}
+          tick={(props) => <AxisTick {...props} ticks={axisTicks} />}
+        />
+        <YAxis hide domain={[0, bTopMax + bPad]} allowDataOverflow />
+        <Tooltip cursor={{ stroke: "var(--line)", strokeWidth: 1 }} content={renderTooltip} />
+        <Area
+          type="monotone"
+          dataKey="funds"
+          stackId="mix"
+          stroke="var(--accent)"
+          strokeWidth={1}
+          fill="var(--accent)"
+          fillOpacity={0.5}
+          isAnimationActive={false}
+        />
+        <Area
+          type="monotone"
+          dataKey="cash"
+          stackId="mix"
+          stroke="var(--benchmark)"
+          strokeWidth={1}
+          fill="var(--benchmark)"
+          fillOpacity={0.35}
+          isAnimationActive={false}
+        />
       </ComposedChart>
     </ResponsiveContainer>
   );

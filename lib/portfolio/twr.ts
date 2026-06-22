@@ -63,3 +63,49 @@ export function periodTwr(series: SeriesPoint[], netInvested: SeriesPoint[]): nu
 
   return linked ? (growth - 1) * 100 : null;
 }
+
+/**
+ * Running Time-Weighted Return as a dated curve — the Performance mode's line.
+ * Same daily flow-netting as {@link periodTwr}, but instead of collapsing to the
+ * final scalar it emits the cumulative growth factor at every date.
+ *
+ * `v` is the **growth factor** ∏(1 + rᵢ), starting at `1` on the first point and
+ * always positive — so the line is valid on a log axis, and the caller renders it
+ * as a percent via `(v − 1) × 100` (the endpoint then equals {@link periodTwr}).
+ * Keeping one positive series for both linear and log honours "scale ⊥ framing":
+ * linear and log are two drawings of the same curve, not two different curves.
+ *
+ * A day with `prevV ≤ 0` doesn't link (its post-flow value reopens the base), so
+ * the factor carries flat across an empty/fully-divested stretch. Returns `[]`
+ * when there are fewer than 2 finite points.
+ */
+export function twrSeries(series: SeriesPoint[], netInvested: SeriesPoint[]): SeriesPoint[] {
+  const finite = series.filter((p) => Number.isFinite(p.v));
+  if (finite.length < 2) return [];
+
+  const contribByDate = new Map(netInvested.map((p) => [p.d, p.v]));
+
+  const out: SeriesPoint[] = [];
+  let growth = 1;
+  let prevV: number | null = null;
+  let prevContrib = 0;
+
+  for (const { d, v } of finite) {
+    const contrib = contribByDate.get(d) ?? prevContrib;
+    if (prevV === null) {
+      prevV = v;
+      prevContrib = contrib;
+      out.push({ d, v: 1 });
+      continue;
+    }
+    if (prevV > 0) {
+      const flow = contrib - prevContrib;
+      growth *= (v - flow) / prevV;
+    }
+    prevV = v;
+    prevContrib = contrib;
+    out.push({ d, v: growth });
+  }
+
+  return out;
+}
