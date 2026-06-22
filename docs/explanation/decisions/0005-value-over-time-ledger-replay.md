@@ -59,9 +59,9 @@ The period-return pill is **money-weighted (gain ÷ invested)**, not the old las
 > **Superseded by the chart redesign (later refined).** §5 above is the original (#153) decision, kept as the record; the chart's framing has since moved on:
 > - **No window-rebasing.** The value line plots **absolute wealth on every range** — the scale toggle (linear/log) changes only *how* the line is drawn, never *what* it means; only the **mode** (Value / Return / Mix) changes the quantity. An always-positive absolute series is also what makes a log axis valid.
 > - **Period return → time-weighted (TWR).** The money-weighted pill was replaced by a time-weighted figure that nets external flows out, so a mid-window deposit can't distort the window.
-> - **`% Scale` (log) on every range + fully-out gap.** Log is offered on every range (not just ≥1Y); a stretch fully **out of the market** — value exactly ฿0, unplottable on a log axis — renders as a **gap** (a line break, both scales). Mix gaps likewise; Return stays continuous (its growth factor is flat-but-defined while out, never zero).
+> - **`Log` toggle (log scale) on every range + fully-out gap.** Log is offered on every range (not just ≥1Y); a stretch fully **out of the market** — value exactly ฿0, unplottable on a log axis — renders as a **gap** (a line break, both scales). Mix gaps likewise; Return stays continuous (its growth factor is flat-but-defined while out, never zero).
 >
-> The live decisions are the [Picks-table](./README.md) rows *Period (range) pill = time-weighted return* and *`% Scale` (log) on every range + gap fully-out periods*.
+> The live decisions are the [Picks-table](./README.md) rows *Period (range) pill = time-weighted return* and *`Log` toggle (log scale) on every range + gap fully-out periods*.
 
 ### 6. Estimate disclosure is materiality-gated
 

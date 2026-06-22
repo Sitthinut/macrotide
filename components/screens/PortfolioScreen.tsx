@@ -1175,7 +1175,7 @@ export function PortfolioScreen({
   // "How did I do this window" is answered by the time-weighted pill below (and,
   // soon, the Performance mode) — not by rebasing the value line.
   //
-  // Log (`% Scale`) is offered on every range — even short ones, where a volatile
+  // Log scale (the `Log` toggle) is offered on every range — even short ones, where a volatile
   // (crypto/stock) book can still span a wide enough ratio for it to matter. The
   // chart gaps fully-out-of-market ฿0 dates (a log axis can't place a 0), so it
   // stays valid; it falls back to linear only if nothing positive is plotted.
@@ -1570,8 +1570,8 @@ export function PortfolioScreen({
             </div>
           ) : (
             <>
-              {/* Cash precedes % Scale: Mode + Cash change what the line MEANS
-                  (which series, cash in or out); % Scale only changes how it's
+              {/* Cash precedes Log: Mode + Cash change what the line MEANS
+                  (which series, cash in or out); Log only changes how it's
                   drawn. Group the meaning-changers, then the drawing lens. */}
               {cashInPlay && (
                 <CashModeKebab
@@ -1588,9 +1588,9 @@ export function PortfolioScreen({
                 data-active={effectiveScale === "log" || undefined}
                 aria-pressed={effectiveScale === "log"}
                 onClick={() => setYAxisScale(effectiveScale === "log" ? "linear" : "log")}
-                title="% scale — equal % moves are the same height, fairer across long spans"
+                title="Log scale — equal % moves are the same height, fairer across long spans"
               >
-                % Scale
+                Log
               </button>
               <BenchmarkPicker value={benchmark} onChange={setBenchmark} />
             </>
@@ -1631,7 +1631,7 @@ export function PortfolioScreen({
               k: "scale",
               node: (
                 <>
-                  shown on a <TermTip label="% scale" def={TERM_DEFS.scale} />
+                  shown on a <TermTip label="log scale" def={TERM_DEFS.scale} />
                 </>
               ),
             });

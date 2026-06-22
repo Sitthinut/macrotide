@@ -1,6 +1,6 @@
 // Log-scale helpers for the value chart — pure, DB/network-free.
 //
-// A log (`% Scale`) axis can't place a zero (`log(0) = −∞`). The value line hits
+// A log axis (the `Log` toggle) can't place a zero (`log(0) = −∞`). The value line hits
 // exactly ฿0 whenever the book is fully out of the market — every position sold,
 // no held or in-transit cash — which can happen for a stretch in a long history.
 // Rather than silently dropping back to linear (a dead toggle), the chart draws

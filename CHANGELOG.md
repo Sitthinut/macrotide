@@ -22,7 +22,7 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   such an exit, so the return you earned is preserved. The money-weighted figures
   (all-time P/L, contribution line) are unchanged.
 
-- **The `% Scale` (log) view is available on every range and never silently
+- **The `Log` (log-scale) view is available on every range and never silently
   no-ops.** It used to appear only on 1Y and longer; it's now offered on all
   ranges (a volatile crypto/stock book can span a wide enough ratio for log to
   help even over a month). A stretch fully out of the market — value ฿0, which a
@@ -37,7 +37,7 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   Mix chart (both Share and Amount), matching the linear axes.
 
 - **The portfolio chart's controls are one clean, worded toolbar.** Period, mode
-  (Value / Return / Mix), `% Scale`, a `Cash` toggle, and `+ Compare` are all
+  (Value / Return / Mix), `Log`, a `Cash` toggle, and `+ Compare` are all
   the same flat control in one row below the chart, separated by thin rules that
   fold away when the row wraps on a phone. The returns moved into a scorecard above
   the chart — total value, your all-time return (the bold headline), then the
@@ -48,7 +48,7 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 - **The chart explains itself in one line, with tap-to-define terms.** A single
   caption under the chart says what the current view shows in plain language, and
-  the jargon in it — *time-weighted*, *put in*, *funds and cash*, *% scale*,
+  the jargon in it — *time-weighted*, *put in*, *funds and cash*, *log scale*,
   *dividends* — is a dotted-underline term you tap for a short definition. It
   replaces the old stack of disclaimer lines: one readable sentence, depth one tap
   away on the exact word.
@@ -89,7 +89,7 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   breakdown.) Log scale works here too.
 
 - **The portfolio chart can switch to a log scale on long ranges.** On the 1Y and
-  All views a "% scale" toggle sits by the chart; it draws the value line so that
+  All views a `Log` toggle sits by the chart; it draws the value line so that
   equal % moves are the same height, so years of compounding no longer crush the
   early part of the curve into a flat line. The value line now also shows your
   **actual wealth on every range** (it no longer resets to zero at the start of a
