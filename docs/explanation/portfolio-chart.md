@@ -157,10 +157,10 @@ honest — the absolute numbers in the tooltip, and the Log scale.
 
 ## Linear vs Log: two honest ways to draw the same line
 
-On long ranges (1Y, 5Y and All) a small **% scale** toggle appears, in both Value
-and Return — it redraws the same line on a logarithmic axis. (The label leans
-on the benefit rather than the word "log"; the *% scale* term explains it.)
-The two draws differ only in what "equal height" means:
+On every range, in both Value and Return, a small **% scale** toggle redraws the
+same line on a logarithmic axis. (The label leans on the benefit rather than the
+word "log"; the *% scale* term explains it.) The two draws differ only in what
+"equal height" means:
 
 - **Linear** (default): equal **baht** (or percentage-point) moves are equal height.
 - **Log**: equal **percentage** moves are equal height. A doubling looks the same
@@ -168,11 +168,12 @@ The two draws differ only in what "equal height" means:
   an early -30% fall looks as big as a later -30% fall, instead of being visually
   crushed by everything that grew after it.
 
-**When Log earns its keep:** long horizons, where compounding on a linear axis makes
-recent years tower over early ones and quietly flatters the portfolio (it *looks*
-like it got more effective over time when it didn't). That's why the toggle only
-appears at **1Y and longer** — over a few months Log and Linear are nearly
-identical, so offering it there would be a button that does nothing.
+**When Log earns its keep:** wide ratio spans — long horizons where compounding on a
+linear axis makes recent years tower over early ones and quietly flatters the
+portfolio (it *looks* like it got more effective over time when it didn't). Over a
+few months a steady book barely moves, so Log and Linear look nearly identical — but
+a volatile (crypto/stock) book can swing enough even in a short window for Log to
+help, so the toggle is offered on **every** range rather than gated to long ones.
 
 **The honest caveat:** in Value mode, Log un-crushes the
 early years but does **not** remove the vertical *steps* a deposit makes — adding
@@ -185,10 +186,18 @@ A logarithm is undefined at zero and below. The window-resetting value line from
 older builds went *negative* whenever you were underwater for the period — which is
 why Log used to be impossible on anything but All. Making Value plot **absolute
 wealth** (always positive), and Return plot a **growth factor** (starts at 1,
-always positive), is what unlocks Log on every long window. The chart still guards
-itself: if any plotted value is ≤ 0 it silently falls back to Linear. Two details
-fall out of the same rule: the Log domain is clamped to the wealth line (not the
-near-zero early contribution line, which would squash the floor), and the gain
+always positive), is what unlocks Log on any window. The one place wealth still hits
+exactly ฿0 is a stretch fully **out of the market** — every position sold, no held or
+in-transit cash. A log axis can't place that, so the chart draws those dates as a
+**gap** (a line break, on both scales): honest — you held nothing — and it keeps the
+axis valid because every plotted point is positive. (It falls back to Linear only if
+*nothing* positive is plotted.) **Mix** gaps across the same stretch — the funds-vs-cash
+split is undefined (`0/0`) with nothing held, so a break is truer than a "0% of
+everything" band. **Return** stays continuous there: its growth factor is *flat but
+defined* while you hold nothing (no return on zero capital), and never zero, so it
+needs no gap. Two more details fall out of the same rule: the Log
+domain is clamped to the wealth line (not the near-zero early contribution line,
+which would squash the floor), and the gain
 shading on Log is drawn as value-pair bands rather than the additive stack (which is
 meaningless on a ratio axis), so the gain still reads while the dotted contribution
 line keeps deposit steps attributable.
@@ -226,7 +235,7 @@ claim here.
   so the curve's endpoint equals the scorecard's time-weighted figure.
 - [`components/screens/PortfolioScreen.tsx`](../../components/screens/PortfolioScreen.tsx)
   owns the worded toolbar — period (YTD is a client-side clip of a 1Y fetch; 5Y is
-  gated on inception), the mode switch, the `% Scale` toggle (≥1Y), the `Cash`
+  gated on inception), the mode switch, the `% Scale` toggle, the `Cash`
   toggle, and `+ Compare` — plus the returns scorecard, and feeds the charts their
   series. View state (period, mode, scale, cash basis) persists per-device via
   [`lib/useLocalStorageState.ts`](../../lib/useLocalStorageState.ts); the cash note

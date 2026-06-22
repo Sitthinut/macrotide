@@ -29,6 +29,7 @@ import {
   NAV_CHART_HEIGHT,
   pickAxisTicks,
 } from "@/lib/portfolio/adapter";
+import { isFullyOut } from "@/lib/portfolio/chart-scale";
 import type { AllocationSlice, SleeveDrift } from "@/lib/portfolio/health";
 import { rebaseBenchmark, rebaseBenchmarkContrib } from "@/lib/portfolio/rebase";
 import type { SeriesPoint } from "@/lib/static/types";
@@ -123,19 +124,21 @@ function EmptyState({ height, emptyHint }: { height: number; emptyHint?: string 
 
 interface TwoLinePoint {
   d: string;
-  v: number;
-  inv: number;
+  // null on a fully-out-of-market date (value ~฿0): every plotted field breaks so
+  // the line + wedge gap there, keeping a log axis valid (see lib/portfolio/chart-scale).
+  v: number | null;
+  inv: number | null;
   bench: number | null;
   cash: number;
-  lower: number;
-  gainUp: number;
-  gainDown: number;
+  lower: number | null;
+  gainUp: number | null;
+  gainDown: number | null;
   // Range-area bands for the LOG wedge: filled between the two values so they map
   // through the (log) y-scale directly — unlike the additive stacked wedge above,
   // which only composes in linear pixel space. gBand tints value-above-invested
   // (gain), rBand tints underwater (loss); the off-side band is zero-height.
-  gBand: [number, number];
-  rBand: [number, number];
+  gBand: [number, number] | null;
+  rBand: [number, number] | null;
 }
 
 export function NavChart({
@@ -246,21 +249,51 @@ export function NavChart({
     const matched = rebaseBenchmarkContrib(data, benchmarkData, contribDeltas);
     const benchMatchedByLabel = matched ? new Map(matched.map((b) => [b.d, b.v])) : null;
 
+    // Domain stats, accumulated over PLOTTED (non-gap) points only — `vMin`/`vMax`
+    // for the value line (and the log-axis floor), `yMin`/`yMax` across both lines
+    // + the wedge for the linear domain.
+    let yMin = Number.POSITIVE_INFINITY;
+    let yMax = Number.NEGATIVE_INFINITY;
+    let vMin = Number.POSITIVE_INFINITY;
+    let vMax = Number.NEGATIVE_INFINITY;
     const merged: TwoLinePoint[] = data.map((p) => {
+      // Fully out of the market (value ~฿0) → emit a gap so the line + wedge break
+      // here on BOTH scales: a log axis can't place a 0, and a break honestly reads
+      // as "not invested" rather than "held ฿0 of funds".
+      if (isFullyOut(p.v)) {
+        return {
+          d: p.d,
+          v: null,
+          inv: null,
+          bench: null,
+          cash: 0,
+          lower: null,
+          gainUp: null,
+          gainDown: null,
+          gBand: null,
+          rBand: null,
+        };
+      }
       const v = p.v - baselineValue;
       const rawBench = benchMatchedByLabel?.get(p.d);
       const inv = (investedByLabel.get(p.d) ?? baselineInvested) - baselineInvested;
       const gain = v - inv;
+      const bench = rawBench == null ? null : rawBench - baselineValue;
+      const lower = Math.min(v, inv);
+      vMin = Math.min(vMin, v);
+      vMax = Math.max(vMax, v);
+      yMin = Math.min(yMin, lower, bench ?? lower);
+      yMax = Math.max(yMax, v, inv, bench ?? v);
       return {
         d: p.d,
         v,
         inv,
-        bench: rawBench == null ? null : rawBench - baselineValue,
+        bench,
         cash: cashByLabel?.get(p.d) ?? 0,
         // The gain wedge as stacked areas: an invisible base up to the lower
         // line, then the |gap| tinted by sign — green above the invested line,
         // loss-red when the value dips underwater.
-        lower: Math.min(v, inv),
+        lower,
         gainUp: Math.max(0, gain),
         gainDown: Math.max(0, -gain),
         // Same wedge for the log axis, expressed as value-pair bands (see type).
@@ -270,15 +303,9 @@ export function NavChart({
     });
     const axisTicks = pickAxisTicks(merged);
 
-    // Explicit Y domain from the REAL lines only — the wedge's stacked helper
-    // series carry small gap-sized values that would otherwise drag dataMin
-    // toward 0 and squash both lines against the top of the plot.
-    let yMin = Number.POSITIVE_INFINITY;
-    let yMax = Number.NEGATIVE_INFINITY;
-    for (const p of merged) {
-      yMin = Math.min(yMin, p.lower, p.bench ?? p.lower);
-      yMax = Math.max(yMax, p.v, p.inv, p.bench ?? p.v);
-    }
+    // Y domain (`yMin`/`yMax`) and the value-line range (`vMin`/`vMax`) are computed
+    // in the map above, over plotted points only — the wedge's stacked helper series
+    // carry small gap-sized values that would otherwise drag the auto-domain toward 0.
 
     const renderTooltip = (props: {
       active?: boolean;
@@ -287,6 +314,8 @@ export function NavChart({
     }) => {
       if (!props.active || !props.payload?.[0]?.payload) return null;
       const p = props.payload[0].payload;
+      // A gap point (fully out of the market) has no value to report.
+      if (p.v == null || p.inv == null) return null;
       const gain = p.v - p.inv;
       // Windowed: gain relative to the wealth you started the window with.
       // Absolute: gain relative to everything you've put in.
@@ -337,7 +366,9 @@ export function NavChart({
     };
 
     const last = merged.at(-1);
-    const valueAbove = !last || last.v >= last.inv;
+    // The last point is never a gap in practice (you hold something now); default
+    // to "above" if it somehow is, so the value line keeps its gain colour.
+    const valueAbove = !last || last.v == null || last.inv == null || last.v >= last.inv;
     // The value line takes the gain/loss color of the CURRENT state (value vs
     // invested) — green in gain, red underwater — like the hero ▲/▼. A single
     // color (not segmented): the crossover with the sloped invested line happens
@@ -358,20 +389,18 @@ export function NavChart({
     const domMax = yMax + pad;
     const yOf = (val: number) => plotTop + (domMax - val) * (plotH / (domMax - domMin));
 
-    // Log scale: draw on a ratio axis so equal % moves take equal height. Only
-    // valid when every value is positive — clamp the domain to the VALUE series
-    // (a near-inception net-invested point near 0 would otherwise squash the
-    // floor), and the caller passes absolute wealth so this holds; fall back to
-    // linear otherwise. The signed gain wedge is rendered differently per scale
-    // (stacked areas on linear, value-pair bands on log — see the Area block); the
-    // dotted net-invested line and its end-label stay on both.
-    let vMin = Number.POSITIVE_INFINITY;
-    let vMax = Number.NEGATIVE_INFINITY;
-    for (const p of merged) {
-      vMin = Math.min(vMin, p.v);
-      vMax = Math.max(vMax, p.v);
-    }
-    const logScale = scaleMode === "log" && vMin > 0;
+    // Log scale: draw on a ratio axis so equal % moves take equal height. The
+    // domain is clamped to the VALUE series (`vMin`/`vMax` from the map), and
+    // fully-out ฿0 dates are already gapped, so `vMin` is the smallest REAL value
+    // and stays positive; fall back to linear only if nothing positive plotted. The
+    // signed gain wedge is rendered differently per scale (stacked areas on linear,
+    // value-pair bands on log — see the Area block); the dotted net-invested line
+    // and its end-label stay on both.
+    const logScale = scaleMode === "log" && Number.isFinite(vMin) && vMin > 0;
+    // Dot-radius pad for the LOG domain, in log space (a flat % pad clips the
+    // active dot at the peak/floor) — mirrors `pad` for the linear domain below.
+    const vLogSpan = logScale ? Math.log(vMax) - Math.log(vMin) : 0;
+    const vLogK = plotH > 0 && vLogSpan > 0 ? Math.exp((5 / plotH) * vLogSpan) : 1.02;
 
     // The end-label hugs the invested line's last point and stays clear of the
     // line WITHIN THE LABEL'S OWN WIDTH — so a step-up under the text is avoided,
@@ -398,8 +427,10 @@ export function NavChart({
       // Clear against the INVESTED line only — the label belongs to it and must
       // hug it on whichever side, never jump across the wedge to the value line.
       const windowPts = merged.slice(n - span);
-      const invLow = Math.min(...windowPts.map((p) => p.inv));
-      const invHigh = Math.max(...windowPts.map((p) => p.inv));
+      // Trailing window is recent (never a gap), but filter nulls for safety.
+      const invs = windowPts.map((p) => p.inv).filter((x): x is number => x != null);
+      const invLow = invs.length ? Math.min(...invs) : 0;
+      const invHigh = invs.length ? Math.max(...invs) : 0;
       const yBelow = yOf(invLow) + GAP_BELOW;
       const yAbove = yOf(invHigh) - GAP_ABOVE;
       // Prefer the side away from the value line; flip only if it spills past an edge.
@@ -471,7 +502,7 @@ export function NavChart({
               helper areas would otherwise drag the auto-domain down to the 0
               stack baseline and squash both lines into the top of the plot. */}
           {logScale ? (
-            <YAxis hide scale="log" domain={[vMin * 0.98, vMax * 1.02]} allowDataOverflow />
+            <YAxis hide scale="log" domain={[vMin / vLogK, vMax * vLogK]} allowDataOverflow />
           ) : (
             <YAxis hide domain={[domMin, domMax]} allowDataOverflow />
           )}
@@ -620,8 +651,13 @@ export function NavChart({
   // the extreme isn't clipped in half at the plot edge.
   const sPlotH = height - 10 - NAV_AXIS_H;
   const sPad = sPlotH > 0 && lineMax > lineMin ? (5 / sPlotH) * (lineMax - lineMin) : 0;
-  const sDomMin = logScaleSingle ? lineMin * 0.98 : lineMin - sPad;
-  const sDomMax = logScaleSingle ? lineMax * 1.02 : lineMax + sPad;
+  // Log: pad by the dot radius IN LOG SPACE (a flat % pad is too small near the
+  // extremes, clipping the active dot at the peak/floor in half). A factor that
+  // maps ~5px through the log scale; falls back to a small factor on a flat line.
+  const sLogSpan = lineMin > 0 ? Math.log(lineMax) - Math.log(lineMin) : 0;
+  const sLogK = sPlotH > 0 && sLogSpan > 0 ? Math.exp((5 / sPlotH) * sLogSpan) : 1.02;
+  const sDomMin = logScaleSingle ? lineMin / sLogK : lineMin - sPad;
+  const sDomMax = logScaleSingle ? lineMax * sLogK : lineMax + sPad;
   // One continuous area from the line to a baseline clamped INTO the visible domain
   // (so the gradient maps to what's on screen, and crossovers taper with no gap).
   // `zeroFrac` = where 0% sits in the area's bounding box (0 = top, 1 = bottom;
@@ -658,14 +694,21 @@ export function NavChart({
       </div>
     );
     let seriesText = valueFormatter(p.v);
+    // Sign-aware colour for a return series (Return mode): a loss reads red, a
+    // gain accent — matching the line colour and the hero scorecard. Non-signed
+    // single-series charts (fund price, cash balance) stay accent.
+    let seriesColor = accent;
     if (showReturnInTooltip && baseline) {
       const pct = (p.v / baseline - 1) * 100;
       seriesText = `${seriesText} · ${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
+      seriesColor = pct >= 0 ? accent : "var(--loss)";
+    } else if (signed) {
+      seriesColor = p.v >= sBase ? accent : "var(--loss)";
     }
     return (
       <div style={TOOLTIP_STYLE}>
         <div style={TOOLTIP_LABEL}>{formatTooltipDate(String(props.label ?? p.d))}</div>
-        {row(seriesLabel, seriesText, accent)}
+        {row(seriesLabel, seriesText, seriesColor)}
         {p.bench != null &&
           row(benchmarkLabel ?? "Benchmark", valueFormatter(p.bench), "var(--benchmark)")}
       </div>
@@ -793,6 +836,13 @@ export function BreakdownChart({
   const cashByLabel = new Map(cash.map((p) => [p.d, p.v]));
   const merged = value.map((p) => {
     const total = p.v;
+    // Fully out of the market (value ~฿0): there's no composition to draw — the
+    // Share split is 0/0 (undefined) and the Amount stack is zero-height. Emit a
+    // gap (null) so the areas break, matching the Value line, rather than drawing
+    // a misleading "0% of everything" band through a period that held nothing.
+    if (isFullyOut(total)) {
+      return { d: p.d, v: 0, funds: null, cash: null, fAbs: 0, cAbs: 0, total: 0 };
+    }
     const c = Math.max(0, Math.min(total, cashByLabel.get(p.d) ?? 0));
     const f = Math.max(0, total - c);
     if (normalized) {
@@ -811,7 +861,8 @@ export function BreakdownChart({
   });
   const axisTicks = pickAxisTicks(merged);
   // Top of the stack (100% normalized, else the largest total) + a dot-radius pad
-  // so the active dot on the top line isn't clipped at the plot edge.
+  // at BOTH ends (domain `[-bPad, top+bPad]`) so the active dot on the top line
+  // (at the peak) and on a series sitting near the ฿0 floor aren't clipped in half.
   const bTopMax = normalized ? 100 : Math.max(0, ...merged.map((p) => p.total));
   const bPlotH = height - 10 - NAV_AXIS_H;
   const bPad = bPlotH > 0 ? (5 / bPlotH) * bTopMax : 0;
@@ -823,6 +874,8 @@ export function BreakdownChart({
   }) => {
     if (!props.active || !props.payload?.[0]?.payload) return null;
     const p = props.payload[0].payload;
+    // Gap point (fully out of the market) — nothing to compose, no tooltip.
+    if (p.funds == null) return null;
     const pct = (x: number) => (p.total > 0 ? `${((x / p.total) * 100).toFixed(0)}%` : "—");
     const row = (label: string, abs: number, color: string) => (
       <div style={{ display: "flex", gap: 10, justifyContent: "space-between" }}>
@@ -853,7 +906,7 @@ export function BreakdownChart({
           axisLine={false}
           tick={(props) => <AxisTick {...props} ticks={axisTicks} />}
         />
-        <YAxis hide domain={[0, bTopMax + bPad]} allowDataOverflow />
+        <YAxis hide domain={[-bPad, bTopMax + bPad]} allowDataOverflow />
         <Tooltip cursor={{ stroke: "var(--line)", strokeWidth: 1 }} content={renderTooltip} />
         <Area
           type="monotone"
@@ -864,6 +917,7 @@ export function BreakdownChart({
           fill="var(--accent)"
           fillOpacity={0.5}
           isAnimationActive={false}
+          activeDot={{ r: 3 }}
         />
         <Area
           type="monotone"
@@ -874,6 +928,7 @@ export function BreakdownChart({
           fill="var(--benchmark)"
           fillOpacity={0.35}
           isAnimationActive={false}
+          activeDot={{ r: 3 }}
         />
       </ComposedChart>
     </ResponsiveContainer>

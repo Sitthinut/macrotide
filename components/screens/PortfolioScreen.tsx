@@ -50,6 +50,7 @@ import {
   returnValue as cashReturnValue,
   uninvestedCash,
 } from "@/lib/portfolio/cash-mode";
+import { canLogScale } from "@/lib/portfolio/chart-scale";
 import { buildNamedChecks, type NamedCheck } from "@/lib/portfolio/checks";
 import {
   feeCheckInlineIntro,
@@ -1164,11 +1165,11 @@ export function PortfolioScreen({
   // "How did I do this window" is answered by the time-weighted pill below (and,
   // soon, the Performance mode) — not by rebasing the value line.
   //
-  // Log is offered only on long ranges and applies only when every value is
-  // positive (it always is for a real book; the guard keeps an empty/edge series
-  // from producing a NaN axis). The chart itself re-guards and falls back.
-  const scaleEligible = range === "1Y" || range === "5Y" || range === "All";
-  const effectiveScale: "linear" | "log" = scaleEligible ? yAxisScale : "linear";
+  // Log (`% Scale`) is offered on every range — even short ones, where a volatile
+  // (crypto/stock) book can still span a wide enough ratio for it to matter. The
+  // chart gaps fully-out-of-market ฿0 dates (a log axis can't place a 0), so it
+  // stays valid; it falls back to linear only if nothing positive is plotted.
+  const effectiveScale: "linear" | "log" = yAxisScale;
 
   // Performance mode: a running time-weighted return curve as a growth factor
   // (starts at 1, always positive). The endpoint equals the period pill; the
@@ -1184,9 +1185,7 @@ export function PortfolioScreen({
   const logApplied =
     effectiveScale === "log" &&
     chartMode !== "breakdown" &&
-    (chartMode === "performance"
-      ? perfSeries.length > 0
-      : retSeries.length > 0 && retSeries.every((p) => p.v > 0));
+    (chartMode === "performance" ? perfSeries.length > 0 : canLogScale(retSeries.map((p) => p.v)));
 
   // % return for the range pill — TIME-WEIGHTED (#236). Chains each day's return
   // on the wealth held that day, netting external flows out via the contribution
@@ -1573,18 +1572,16 @@ export function PortfolioScreen({
                   onDismissHint={dismissCashHint}
                 />
               )}
-              {scaleEligible && (
-                <button
-                  type="button"
-                  className="chart-toolbtn"
-                  data-active={effectiveScale === "log" || undefined}
-                  aria-pressed={effectiveScale === "log"}
-                  onClick={() => setYAxisScale(effectiveScale === "log" ? "linear" : "log")}
-                  title="% scale — equal % moves are the same height, fairer across long spans"
-                >
-                  % Scale
-                </button>
-              )}
+              <button
+                type="button"
+                className="chart-toolbtn"
+                data-active={effectiveScale === "log" || undefined}
+                aria-pressed={effectiveScale === "log"}
+                onClick={() => setYAxisScale(effectiveScale === "log" ? "linear" : "log")}
+                title="% scale — equal % moves are the same height, fairer across long spans"
+              >
+                % Scale
+              </button>
               <BenchmarkPicker value={benchmark} onChange={setBenchmark} />
             </>
           )}

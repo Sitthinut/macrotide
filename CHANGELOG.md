@@ -15,6 +15,20 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **The `% Scale` (log) view is available on every range and never silently
+  no-ops.** It used to appear only on 1Y and longer; it's now offered on all
+  ranges (a volatile crypto/stock book can span a wide enough ratio for log to
+  help even over a month). A stretch fully out of the market — value ฿0, which a
+  log axis can't place — now draws as a gap (a line break, on both scales) instead
+  of the toggle quietly falling back to linear; a break honestly reads as "not
+  invested" rather than "held ฿0 of funds". The Mix (funds-vs-cash) chart gaps the
+  same stretch (no composition to draw); Return stays continuous (its growth
+  factor is defined and flat while you hold nothing).
+
+- **Hover dots no longer clip at the chart's top and bottom edges.** The active
+  dot at a peak or floor is fully drawn on the log Value/Return axes and on the
+  Mix chart (both Share and Amount), matching the linear axes.
+
 - **The portfolio chart's controls are one clean, worded toolbar.** Period, mode
   (Value / Return / Mix), `% Scale`, a `Cash` toggle, and `+ Compare` are all
   the same flat control in one row below the chart, separated by thin rules that
