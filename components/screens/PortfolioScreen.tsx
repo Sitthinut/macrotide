@@ -1149,8 +1149,9 @@ export function PortfolioScreen({
   const retSeries = clipYtd(retView.series);
   const retNetInvested = clipYtd(retView.netInvested);
   const retTotalValue = cashReturnValue(cashMode, view.totalValue, view.cashDecomp);
-  // Whether the pill is worth showing: there's cash that the mode could move.
-  const cashInPlay = (view.cashDecomp?.cashValue.at(-1)?.v ?? 0) > 0.5;
+  // Whether the pill is worth showing: there's HELD cash the mode could move
+  // (in-transit settlement float isn't removed by either mode, so it doesn't count).
+  const cashInPlay = (view.cashDecomp?.heldCashValue.at(-1)?.v ?? 0) > 0.5;
   const idleCash = uninvestedCash(view.cashDecomp);
   const hasReserved = (view.cashDecomp?.reservedCashValue.at(-1)?.v ?? 0) > 0.5;
 

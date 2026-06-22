@@ -6,9 +6,15 @@
 //
 //   • RESERVED cash is ALWAYS out of the return (both modes) — money the user set
 //     aside for a purpose, never meant to chase a return.
-//   • In "Funds only" (mode B) ALL the remaining cash comes out too, so idle dry
+//   • In "Funds only" (mode B) the rest of the HELD cash comes out too, so idle dry
 //     powder doesn't drag the figure. "Incl. cash" (mode A, the default) keeps it,
 //     the honest money-weighted view.
+//
+// In-transit settlement cash (a sell→buy switch's proceeds mid-flight) is NEVER
+// removed by either mode — it's committed capital, not idle drag, so a routine
+// rebalance draws no phantom dip in the return view. Hence "Funds only" subtracts
+// `heldCashValue` (held accounts only), not `cashValue` (which also carries the float
+// for the Mix composition, where the money really is sitting in cash).
 //
 // With no cash decomposition (static placeholder data) the inputs pass through
 // unchanged, so a book with no cash is byte-identical in either mode.
@@ -26,7 +32,9 @@ export interface ReturnView {
 
 /** The cash VALUE slice a mode removes from the return view. */
 function excludedValue(mode: CashMode, decomp: CashDecomp): SeriesPoint[] {
-  return mode === "funds" ? decomp.cashValue : decomp.reservedCashValue;
+  // "Funds only" removes held cash accounts (idle drag), NOT in-transit settlement
+  // float — so a fund switch doesn't crater the line. "Incl." removes only reserved.
+  return mode === "funds" ? decomp.heldCashValue : decomp.reservedCashValue;
 }
 
 /** The cash CONTRIBUTION slice a mode removes from the return view. */
@@ -73,10 +81,11 @@ export function returnValue(
   return totalValue - (excludedValue(mode, decomp).at(-1)?.v ?? 0);
 }
 
-/** Latest uninvested (non-reserved) cash in THB — for the pill's caption. */
+/** Latest idle (non-reserved, held) cash in THB — for the pill's caption. Excludes
+ * in-transit settlement float, which isn't idle dry powder but capital mid-switch. */
 export function uninvestedCash(decomp: CashDecomp | undefined): number {
   if (!decomp) return 0;
-  const all = decomp.cashValue.at(-1)?.v ?? 0;
+  const held = decomp.heldCashValue.at(-1)?.v ?? 0;
   const reserved = decomp.reservedCashValue.at(-1)?.v ?? 0;
-  return Math.max(0, all - reserved);
+  return Math.max(0, held - reserved);
 }

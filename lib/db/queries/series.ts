@@ -37,6 +37,14 @@ export interface SeriesPoint {
 export interface CashDecomp {
   /** THB value of ALL cash (held cash accounts + in-transit settlement cash) per date. */
   cashValue: SeriesPoint[];
+  /**
+   * THB value of HELD cash accounts only per date — excludes in-transit settlement
+   * cash (a fund switch's proceeds mid-flight). This is the slice "Funds only" removes:
+   * idle cash drag comes out, but a sell→buy switch's pending proceeds stay invested,
+   * so a routine rebalance draws no phantom dip in the return view. (`cashValue` keeps
+   * the in-transit float for the Mix composition, where it really is cash.)
+   */
+  heldCashValue: SeriesPoint[];
   /** THB value of RESERVED held cash per date (always excluded from the return). */
   reservedCashValue: SeriesPoint[];
   /** Cumulative contribution from ALL cash events (deposit/withdraw/Set-balance) per date. */
@@ -116,6 +124,7 @@ export interface PortfolioSeriesResult {
 
 const EMPTY_CASH_DECOMP: CashDecomp = {
   cashValue: [],
+  heldCashValue: [],
   reservedCashValue: [],
   cashContrib: [],
   reservedCashContrib: [],
@@ -454,6 +463,7 @@ export async function getPortfolioSeries(
   const cashByDate = new Map<string, number>();
   // Cash decomposition for the return-mode pill (#149), summed across buckets.
   const cashValueByDate = new Map<string, number>();
+  const heldCashValueByDate = new Map<string, number>();
   const reservedCashValueByDate = new Map<string, number>();
   const cashContribByDate = new Map<string, number>();
   const reservedCashContribByDate = new Map<string, number>();
@@ -516,6 +526,7 @@ export async function getPortfolioSeries(
     const series: SeriesPoint[] = [];
     const invested: SeriesPoint[] = [];
     const bCashValue: SeriesPoint[] = [];
+    const bHeldCashValue: SeriesPoint[] = [];
     const bReservedCashValue: SeriesPoint[] = [];
     const bCashContrib: SeriesPoint[] = [];
     const bReservedCashContrib: SeriesPoint[] = [];
@@ -565,11 +576,13 @@ export async function getPortfolioSeries(
       const contributed = contribAt(d)?.value ?? 0;
       invested.push({ date: d, value: contributed });
       // Total cash value = held cash accounts + in-transit settlement cash
-      // (in-transit cash is heuristic sell proceeds, never reserved).
+      // (in-transit cash is heuristic sell proceeds, never reserved). `heldCashThb`
+      // alone is the "Funds only" exclusion slice — see CashDecomp.heldCashValue.
       const totalCashThb = heldCashThb + cash;
       const cashContributed = cashContribAt(d)?.value ?? 0;
       const reservedContributed = reservedCashContribAt?.(d)?.value ?? 0;
       bCashValue.push({ date: d, value: totalCashThb });
+      bHeldCashValue.push({ date: d, value: heldCashThb });
       bReservedCashValue.push({ date: d, value: reservedCashThb });
       bCashContrib.push({ date: d, value: cashContributed });
       bReservedCashContrib.push({ date: d, value: reservedContributed });
@@ -577,6 +590,7 @@ export async function getPortfolioSeries(
       investedByDate.set(d, (investedByDate.get(d) ?? 0) + contributed);
       cashByDate.set(d, (cashByDate.get(d) ?? 0) + cash);
       cashValueByDate.set(d, (cashValueByDate.get(d) ?? 0) + totalCashThb);
+      heldCashValueByDate.set(d, (heldCashValueByDate.get(d) ?? 0) + heldCashThb);
       reservedCashValueByDate.set(d, (reservedCashValueByDate.get(d) ?? 0) + reservedCashThb);
       cashContribByDate.set(d, (cashContribByDate.get(d) ?? 0) + cashContributed);
       reservedCashContribByDate.set(
@@ -589,6 +603,7 @@ export async function getPortfolioSeries(
     netInvestedByBucket[bucketId] = invested;
     cashDecompByBucket[bucketId] = {
       cashValue: bCashValue,
+      heldCashValue: bHeldCashValue,
       reservedCashValue: bReservedCashValue,
       cashContrib: bCashContrib,
       reservedCashContrib: bReservedCashContrib,
@@ -622,6 +637,7 @@ export async function getPortfolioSeries(
   const cash: SeriesPoint[] = plotted.map((d) => ({ date: d, value: cashByDate.get(d) ?? 0 }));
   const cashDecomp: CashDecomp = {
     cashValue: plotted.map((d) => ({ date: d, value: cashValueByDate.get(d) ?? 0 })),
+    heldCashValue: plotted.map((d) => ({ date: d, value: heldCashValueByDate.get(d) ?? 0 })),
     reservedCashValue: plotted.map((d) => ({
       date: d,
       value: reservedCashValueByDate.get(d) ?? 0,

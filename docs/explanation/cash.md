@@ -177,6 +177,13 @@ governs the rest — your *investable* cash:
   money you've actually deployed into a fund counts. Useful for "how are my
   *investments* doing, setting cash aside."
 
+Funds only excludes the value of your **held cash accounts**, not the
+**in-transit settlement cash** a fund switch parks between a sell and the
+following buy. That float is committed capital mid-flight, not idle dry powder —
+removing it would re-introduce the very phantom drawdown the settlement heuristic
+exists to erase, so a routine rebalance draws no dip in either basis. (The Mix
+composition still shows the float as cash, because for those days it genuinely is.)
+
 The control is a **`Cash` toggle** in the chart toolbar — the word reads plain when
 cash counts (the default) and struck through, green, when it's excluded — not a
 buried setting, so it suits the compare-and-flip use case. A first-click note

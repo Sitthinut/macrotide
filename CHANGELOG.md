@@ -37,7 +37,9 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   tap struck-throughs it (`Cash`) to exclude it, so you compare your investments
   against an index without the cash drag (reserved cash always sits out). A
   first-time note explains it, and the wording matches the "investable" / "reserved"
-  cash types in Add-to-portfolio.
+  cash types in Add-to-portfolio. Excluding cash removes only your held cash
+  accounts — a fund switch's in-transit settlement proceeds stay counted, so a
+  routine rebalance no longer draws a phantom dip in the cash-excluded view.
 
 - **Chart view settings are remembered per device.** Period, mode, scale, and the
   cash basis now persist in your browser (localStorage) rather than your account, so

@@ -435,12 +435,18 @@ describe("getPortfolioSeries — ledger replay (#140)", () => {
       amount: -1500,
     });
 
-    const { aggregate, netInvested } = await run(() => getPortfolioSeries("1mo"));
+    const { aggregate, netInvested, cashDecomp } = await run(() => getPortfolioSeries("1mo"));
 
     // During the 2 transit days the proceeds ARE the value — no fake drawdown.
     expect(aggregate.map((p) => p.value)).toEqual([1000, 1500, 1500, 1575]);
     // The switch is internal: only the original buy is external money.
     expect(netInvested.map((p) => p.value)).toEqual([1000, 1000, 1000, 1000]);
+    // The proceeds are in-transit settlement cash (all-cash slice records it for the
+    // Mix composition), but NOT a held account — so the "Funds only" exclusion slice
+    // stays empty and applying that mode subtracts nothing: the switch can't reopen
+    // the phantom dip in the return view either.
+    expect(cashDecomp.cashValue.map((p) => p.value)).toEqual([0, 1500, 0, 0]);
+    expect(cashDecomp.heldCashValue.map((p) => p.value)).toEqual([0, 0, 0, 0]);
   });
 
   it("prices pre-coverage history from the ledger's own trade prices", async () => {

@@ -121,6 +121,7 @@ export interface PortfolioSeriesPoint {
 
 export interface CashDecompResponse {
   cashValue: PortfolioSeriesPoint[];
+  heldCashValue: PortfolioSeriesPoint[];
   reservedCashValue: PortfolioSeriesPoint[];
   cashContrib: PortfolioSeriesPoint[];
   reservedCashContrib: PortfolioSeriesPoint[];
