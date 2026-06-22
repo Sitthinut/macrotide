@@ -50,6 +50,13 @@
 // `reduceLots().netInvested`: that subtracts sale PROCEEDS (the right sign
 // convention for XIRR) and so phantom-swings on every switch; this fold moves
 // only when money actually enters or leaves the bucket.
+//
+// The fold ALSO emits a parallel `returnFlows` for the time-weighted return. It
+// agrees with the contribution line everywhere EXCEPT a walked-away (expired) sell
+// lot, where it removes the full proceeds rather than just the cost basis — so a
+// realized gain that leaves the book doesn't read as a market loss in TWR. Unlike
+// `reduceLots().netInvested` it still only moves on a genuine exit, never on a
+// reinvested switch (a consumed lot pushes no flow in either series).
 
 import { compareTxns, type LedgerTxn } from "./lots";
 
@@ -83,6 +90,16 @@ export interface SettlementCashResult {
   cashTimeline: CashPoint[];
   /** External flows in/out of the bucket, date-ascending (the contribution line's deltas). */
   externalFlows: ExternalFlow[];
+  /**
+   * Flows for the TIME-WEIGHTED return, date-ascending. Identical to `externalFlows`
+   * except an unconsumed sell lot that EXPIRES (proceeds walked away) leaves at its
+   * **full proceeds**, not just its cost basis. TWR strips external flows to measure
+   * the return earned while invested — so a profitable exit must remove the whole
+   * market value that left; counting only cost basis (as `externalFlows` does, to keep
+   * the money-weighted contribution line from going negative) makes the realized gain
+   * read as a phantom loss. The two series therefore differ ONLY at a walk-away sale.
+   */
+  returnFlows: ExternalFlow[];
   /** Cash still in transit as of `today` (sells younger than the window). */
   terminalCash: number;
 }
@@ -156,15 +173,22 @@ export function foldSettlementCash(
   const lots: CashLot[] = []; // FIFO queue, oldest first
   const spans: CashSpan[] = [];
   const flows: ExternalFlow[] = [];
+  // The TWR variant — same as `flows` except an expired (walked-away) lot leaves
+  // at its full PROCEEDS, not just its cost basis (see SettlementCashResult).
+  const returnFlows: ExternalFlow[] = [];
 
   // Drop every lot no longer consumable at `onDate`: its remainder was never
   // reinvested in time, so it left the bucket — recorded at the LOT's date. The
-  // withdrawal removes the lot's COST basis (return of capital), not its cash.
+  // contribution withdrawal removes the lot's COST basis (return of capital); the
+  // TWR withdrawal removes the lot's full proceeds (the realized gain also left).
   const expireBefore = (onDate: string): void => {
     while (lots.length > 0 && addDays(lots[0].date, windowDays) < onDate) {
       const lot = lots.shift() as CashLot;
       if (lot.costRemaining > CASH_EPSILON) {
         flows.push({ date: lot.date, amount: -lot.costRemaining });
+      }
+      if (lot.remaining > CASH_EPSILON) {
+        returnFlows.push({ date: lot.date, amount: -lot.remaining });
       }
     }
   };
@@ -230,7 +254,10 @@ export function foldSettlementCash(
         const { drawn } = drawCash(magnitude, txn.tradeDate);
         // Whatever live cash couldn't cover came from outside the bucket (new capital).
         const shortfall = magnitude - drawn;
-        if (shortfall > CASH_EPSILON) flows.push({ date: txn.tradeDate, amount: shortfall });
+        if (shortfall > CASH_EPSILON) {
+          flows.push({ date: txn.tradeDate, amount: shortfall });
+          returnFlows.push({ date: txn.tradeDate, amount: shortfall });
+        }
         break;
       }
       default:
@@ -247,6 +274,7 @@ export function foldSettlementCash(
       if (lot.costRemaining > CASH_EPSILON) {
         flows.push({ date: lot.date, amount: -lot.costRemaining });
       }
+      returnFlows.push({ date: lot.date, amount: -lot.remaining });
     } else {
       spans.push({ from: lot.date, to: null, amount: lot.remaining });
       terminalCash += lot.remaining;
@@ -268,12 +296,18 @@ export function foldSettlementCash(
 
   // Merge the explicit-cash contribution flows from the SHARED definition (deposit /
   // withdraw / Set-balance delta), so the chart line, XIRR, and the summary can't diverge.
-  flows.push(...cashContributionFlows(txns));
+  // Explicit cash moves at face (no realized gain to split), so both series get them.
+  const cashFlows = cashContributionFlows(txns);
+  flows.push(...cashFlows);
+  returnFlows.push(...cashFlows);
 
   // Retroactive expiries + merged cash flows land out of order — restore date order.
-  flows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const byDate = (a: ExternalFlow, b: ExternalFlow) =>
+    a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+  flows.sort(byDate);
+  returnFlows.sort(byDate);
 
-  return { cashTimeline, externalFlows: flows, terminalCash };
+  return { cashTimeline, externalFlows: flows, returnFlows, terminalCash };
 }
 
 // Cash-event ordering within a date: deposit/withdraw settle before a Set balance, so a

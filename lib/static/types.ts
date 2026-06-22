@@ -94,6 +94,8 @@ export interface Portfolio {
   series: SeriesPoint[];
   /** Cumulative external money in (the chart's contribution line), same dates as `series`. Absent in static placeholder data. */
   netInvested?: SeriesPoint[];
+  /** Contribution line for the time-weighted return (full proceeds at a walk-away sale). Absent in static placeholder data. */
+  netInvestedForReturn?: SeriesPoint[];
   /** Cash decomposition for the return-mode pill (#149). Absent in static placeholder data. */
   cashDecomp?: CashDecomp;
   holdings: Holding[];
@@ -110,6 +112,8 @@ export interface AggregatePortfolio {
   series: SeriesPoint[];
   /** Cumulative external money in (the chart's contribution line), same dates as `series`. Absent in static placeholder data. */
   netInvested?: SeriesPoint[];
+  /** Contribution line for the time-weighted return (full proceeds at a walk-away sale). Absent in static placeholder data. */
+  netInvestedForReturn?: SeriesPoint[];
   /** Cash decomposition for the return-mode pill (#149). Absent in static placeholder data. */
   cashDecomp?: CashDecomp;
   target: { equity: number; bond: number; alternative: number; cash: number };

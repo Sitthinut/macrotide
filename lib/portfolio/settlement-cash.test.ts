@@ -136,6 +136,8 @@ describe("foldSettlementCash", () => {
     const total = r.externalFlows.reduce((s, f) => s + f.amount, 0);
     expect(total).toBeCloseTo(1000, 6);
     expect(r.externalFlows.every((f) => f.amount > 0)).toBe(true);
+    // A reinvested switch has no walk-away, so the TWR flows match exactly.
+    expect(r.returnFlows).toEqual(r.externalFlows);
   });
 
   it("a profitable cash-out removes only COST BASIS — contribution floors at 0, never negative", () => {
@@ -156,6 +158,12 @@ describe("foldSettlementCash", () => {
       { date: "2024-03-01", amount: -1000 },
     ]);
     expect(r.externalFlows.reduce((s, f) => s + f.amount, 0)).toBeCloseTo(0, 6);
+    // The TWR flows strip the FULL proceeds (1500) at the walk-away — the realized
+    // gain left the book, so it isn't read as a market loss in the time-weighted return.
+    expect(r.returnFlows).toEqual([
+      { date: "2024-01-01", amount: 1000 },
+      { date: "2024-03-01", amount: -1500 },
+    ]);
   });
 
   it("splits a partly-reinvested profitable sale's capital proportionally", () => {
@@ -171,6 +179,9 @@ describe("foldSettlementCash", () => {
       new Map([[1, 1000]]),
     );
     expect(r.externalFlows).toEqual([{ date: "2024-03-01", amount: -400 }]);
+    // TWR strips the full leftover proceeds (600 = 1500 − 900 reinvested), not the
+    // 400 cost portion.
+    expect(r.returnFlows).toEqual([{ date: "2024-03-01", amount: -600 }]);
   });
 
   // ── Explicit cash events (issue #149) ──────────────────────────────────────

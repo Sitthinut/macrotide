@@ -133,6 +133,9 @@ export interface PortfolioSeriesResponse {
   /** Cumulative external money in (the contribution line), same dates as aggregate. */
   netInvested: PortfolioSeriesPoint[];
   netInvestedByBucket: Record<string, PortfolioSeriesPoint[]>;
+  /** Contribution line for the time-weighted return (full proceeds at a walk-away sale). */
+  netInvestedForReturn: PortfolioSeriesPoint[];
+  netInvestedForReturnByBucket: Record<string, PortfolioSeriesPoint[]>;
   /** In-transit settlement cash included in `aggregate` per date. */
   cash: PortfolioSeriesPoint[];
   /** Cash decomposition for the return-mode pill (#149) — value + contributions, all vs reserved. */

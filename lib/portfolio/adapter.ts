@@ -219,6 +219,7 @@ export function adaptBucket(
   rawSeries?: { date: string; value: number }[],
   rawNetInvested?: { date: string; value: number }[],
   rawCashDecomp?: RawCashDecomp,
+  rawNetInvestedForReturn?: { date: string; value: number }[],
 ): Portfolio {
   const holdings = bucketHoldings.map((h) => holdingFromDb(h, quotes));
   const totalValue = holdings.reduce((s, h) => s + h.value, 0);
@@ -254,6 +255,7 @@ export function adaptBucket(
     },
     series: toSeriesPoints(rawSeries),
     netInvested: toSeriesPoints(rawNetInvested),
+    netInvestedForReturn: toSeriesPoints(rawNetInvestedForReturn),
     cashDecomp: toCashDecomp(rawCashDecomp),
     holdings,
   };
@@ -264,6 +266,8 @@ export interface SeriesBundle {
   perBucket: Record<string, { date: string; value: number }[]>;
   netInvested?: { date: string; value: number }[];
   netInvestedByBucket?: Record<string, { date: string; value: number }[]>;
+  netInvestedForReturn?: { date: string; value: number }[];
+  netInvestedForReturnByBucket?: Record<string, { date: string; value: number }[]>;
   cashDecomp?: RawCashDecomp;
   cashDecompByBucket?: Record<string, RawCashDecomp>;
 }
@@ -283,6 +287,7 @@ export function adaptPortfolios(
       series?.perBucket[b.id],
       series?.netInvestedByBucket?.[b.id],
       series?.cashDecompByBucket?.[b.id],
+      series?.netInvestedForReturnByBucket?.[b.id],
     ),
   );
 }
@@ -292,6 +297,7 @@ export function adaptAggregate(
   rawSeries?: { date: string; value: number }[],
   rawNetInvested?: { date: string; value: number }[],
   rawCashDecomp?: RawCashDecomp,
+  rawNetInvestedForReturn?: { date: string; value: number }[],
 ): AggregatePortfolio {
   const allHoldings = portfolios.flatMap((p) => p.holdings);
   const totalValue = portfolios.reduce((s, p) => s + p.totalValue, 0);
@@ -311,6 +317,7 @@ export function adaptAggregate(
     holdings: allHoldings,
     series: toSeriesPoints(rawSeries),
     netInvested: toSeriesPoints(rawNetInvested),
+    netInvestedForReturn: toSeriesPoints(rawNetInvestedForReturn),
     cashDecomp: toCashDecomp(rawCashDecomp),
     target: { equity: 70, bond: 20, alternative: 7, cash: 3 },
   };

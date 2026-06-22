@@ -66,6 +66,16 @@ export interface PortfolioSeriesResult {
   netInvested: SeriesPoint[];
   netInvestedByBucket: Record<string, SeriesPoint[]>;
   /**
+   * Contribution line for the TIME-WEIGHTED return: like `netInvested`, but a
+   * walked-away (expired) sell lot leaves at its full proceeds, not just cost
+   * basis — so a realized gain that exits the book doesn't read as a phantom loss
+   * in TWR. Differs from `netInvested` ONLY at a walk-away sale; feeds `twrSeries`
+   * / `periodTwr` (the contribution line + money-weighted figures stay on
+   * `netInvested`). See settlement-cash `returnFlows`.
+   */
+  netInvestedForReturn: SeriesPoint[];
+  netInvestedForReturnByBucket: Record<string, SeriesPoint[]>;
+  /**
    * In-transit settlement cash included in `aggregate` per date (sell proceeds
    * not yet reinvested, within the settlement window). Lets the UI disclose
    * "incl. ฿X cash in transit" instead of baking it in silently.
@@ -135,6 +145,8 @@ const EMPTY_RESULT: Omit<PortfolioSeriesResult, "hasDistributingHolding"> = {
   perBucket: {},
   netInvested: [],
   netInvestedByBucket: {},
+  netInvestedForReturn: [],
+  netInvestedForReturnByBucket: {},
   cash: [],
   cashDecomp: EMPTY_CASH_DECOMP,
   cashDecompByBucket: {},
@@ -457,9 +469,11 @@ export async function getPortfolioSeries(
 
   const perBucket: Record<string, SeriesPoint[]> = {};
   const netInvestedByBucket: Record<string, SeriesPoint[]> = {};
+  const netInvestedForReturnByBucket: Record<string, SeriesPoint[]> = {};
   const cashDecompByBucket: Record<string, CashDecomp> = {};
   const aggregateByDate = new Map<string, number>();
   const investedByDate = new Map<string, number>();
+  const investedForReturnByDate = new Map<string, number>();
   const cashByDate = new Map<string, number>();
   // Cash decomposition for the return-mode pill (#149), summed across buckets.
   const cashValueByDate = new Map<string, number>();
@@ -481,7 +495,7 @@ export async function getPortfolioSeries(
     // otherwise cashing out at a profit drives the contribution line negative.
     const costBySellId = new Map<number, number>();
     for (const ev of realized) if (ev.id != null) costBySellId.set(ev.id, ev.costRemoved);
-    const { cashTimeline, externalFlows } = foldSettlementCash(
+    const { cashTimeline, externalFlows, returnFlows } = foldSettlementCash(
       ledgerTxns,
       today,
       undefined,
@@ -499,6 +513,14 @@ export async function getPortfolioSeries(
       return { date: f.date, value: running };
     });
     const contribAt = stepWalker(contributions);
+    // Same cumulative on the TWR flows (full proceeds at a walk-away sale) — feeds
+    // the time-weighted return only; the contribution line above stays cost-basis.
+    let runningForReturn = 0;
+    const returnContributions = returnFlows.map((f) => {
+      runningForReturn += f.amount;
+      return { date: f.date, value: runningForReturn };
+    });
+    const returnContribAt = stepWalker(returnContributions);
 
     // Cumulative CASH-only contributions (deposit/withdraw/Set-balance) — the
     // slice the pill removes in "Funds only", and reserved-only for "Incl. cash".
@@ -525,6 +547,7 @@ export async function getPortfolioSeries(
 
     const series: SeriesPoint[] = [];
     const invested: SeriesPoint[] = [];
+    const investedForReturn: SeriesPoint[] = [];
     const bCashValue: SeriesPoint[] = [];
     const bHeldCashValue: SeriesPoint[] = [];
     const bReservedCashValue: SeriesPoint[] = [];
@@ -575,6 +598,8 @@ export async function getPortfolioSeries(
       series.push({ date: d, value });
       const contributed = contribAt(d)?.value ?? 0;
       invested.push({ date: d, value: contributed });
+      const contributedForReturn = returnContribAt(d)?.value ?? 0;
+      investedForReturn.push({ date: d, value: contributedForReturn });
       // Total cash value = held cash accounts + in-transit settlement cash
       // (in-transit cash is heuristic sell proceeds, never reserved). `heldCashThb`
       // alone is the "Funds only" exclusion slice — see CashDecomp.heldCashValue.
@@ -588,6 +613,7 @@ export async function getPortfolioSeries(
       bReservedCashContrib.push({ date: d, value: reservedContributed });
       aggregateByDate.set(d, (aggregateByDate.get(d) ?? 0) + value);
       investedByDate.set(d, (investedByDate.get(d) ?? 0) + contributed);
+      investedForReturnByDate.set(d, (investedForReturnByDate.get(d) ?? 0) + contributedForReturn);
       cashByDate.set(d, (cashByDate.get(d) ?? 0) + cash);
       cashValueByDate.set(d, (cashValueByDate.get(d) ?? 0) + totalCashThb);
       heldCashValueByDate.set(d, (heldCashValueByDate.get(d) ?? 0) + heldCashThb);
@@ -601,6 +627,7 @@ export async function getPortfolioSeries(
     }
     perBucket[bucketId] = series;
     netInvestedByBucket[bucketId] = invested;
+    netInvestedForReturnByBucket[bucketId] = investedForReturn;
     cashDecompByBucket[bucketId] = {
       cashValue: bCashValue,
       heldCashValue: bHeldCashValue,
@@ -634,6 +661,10 @@ export async function getPortfolioSeries(
     date: d,
     value: investedByDate.get(d) ?? 0,
   }));
+  const netInvestedForReturn: SeriesPoint[] = plotted.map((d) => ({
+    date: d,
+    value: investedForReturnByDate.get(d) ?? 0,
+  }));
   const cash: SeriesPoint[] = plotted.map((d) => ({ date: d, value: cashByDate.get(d) ?? 0 }));
   const cashDecomp: CashDecomp = {
     cashValue: plotted.map((d) => ({ date: d, value: cashValueByDate.get(d) ?? 0 })),
@@ -654,6 +685,8 @@ export async function getPortfolioSeries(
     perBucket,
     netInvested,
     netInvestedByBucket,
+    netInvestedForReturn,
+    netInvestedForReturnByBucket,
     cash,
     cashDecomp,
     cashDecompByBucket,

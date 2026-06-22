@@ -15,6 +15,13 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **The time-weighted return no longer loses a realized gain you withdraw.**
+  Selling a holding at a profit and taking the money out (or letting the proceeds
+  expire) used to wipe the gain from the Return line and period figure — the
+  realized gain was read as a market loss. The TWR now strips the full proceeds at
+  such an exit, so the return you earned is preserved. The money-weighted figures
+  (all-time P/L, contribution line) are unchanged.
+
 - **The `% Scale` (log) view is available on every range and never silently
   no-ops.** It used to appear only on 1Y and longer; it's now offered on all
   ranges (a volatile crypto/stock book can span a wide enough ratio for log to
