@@ -1434,7 +1434,7 @@ export function PortfolioScreen({
       </div>
 
       <div className="section">
-        {/* The graph. Its controls — mode, period, scale, cash, Compare — are all
+        {/* The graph. Its controls — period, mode, cash, scale, Compare — are all
             below it; the windowed return + benchmark live in the hero scorecard
             above. */}
         <div style={{ marginTop: 16 }}>
@@ -1561,6 +1561,18 @@ export function PortfolioScreen({
             </div>
           ) : (
             <>
+              {/* Cash precedes % Scale: Mode + Cash change what the line MEANS
+                  (which series, cash in or out); % Scale only changes how it's
+                  drawn. Group the meaning-changers, then the drawing lens. */}
+              {cashInPlay && (
+                <CashModeKebab
+                  mode={cashMode}
+                  onChange={setCashMode}
+                  hasReserved={hasReserved}
+                  hintDismissed={cashHintDismissed}
+                  onDismissHint={dismissCashHint}
+                />
+              )}
               {scaleEligible && (
                 <button
                   type="button"
@@ -1572,15 +1584,6 @@ export function PortfolioScreen({
                 >
                   % Scale
                 </button>
-              )}
-              {cashInPlay && (
-                <CashModeKebab
-                  mode={cashMode}
-                  onChange={setCashMode}
-                  hasReserved={hasReserved}
-                  hintDismissed={cashHintDismissed}
-                  onDismissHint={dismissCashHint}
-                />
               )}
               <BenchmarkPicker value={benchmark} onChange={setBenchmark} />
             </>
