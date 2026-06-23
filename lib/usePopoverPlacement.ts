@@ -13,6 +13,12 @@ import { type CSSProperties, type RefObject, useEffect, useState } from "react";
 //
 // Vertical-only needs are still served by the lighter `useFlipUp`; reach for this
 // when a popover also has to flip horizontally or escape a clipping ancestor.
+//
+// IMPORTANT: `position: fixed` escapes an ancestor's *overflow clip*, but NOT a
+// stacking-context ancestor (a scroll host with `transform`/`contain`, a sticky/
+// z-indexed parent, etc.) — a popover trapped there can paint BEHIND a sibling like
+// the right detail panel. So render the floating element in a PORTAL to
+// `document.body` (`createPortal`), which this style's viewport coords already suit.
 export function usePopoverPlacement(
   anchorRef: RefObject<HTMLElement | null>,
   floatingRef: RefObject<HTMLElement | null>,

@@ -15,6 +15,11 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Chart popovers no longer hide behind the side panel.** The tap-to-define term
+  tooltip, the `Cash` first-use hint, and the `+ Compare` and `+ Add` menus now
+  float above the open detail panel (rendered in a portal) instead of being clipped
+  behind it, and all place adaptively (flip to stay on screen).
+
 - **The time-weighted return no longer loses a realized gain you withdraw.**
   Selling a holding at a profit and taking the money out (or letting the proceeds
   expire) used to wipe the gain from the Return line and period figure — the
