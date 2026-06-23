@@ -136,7 +136,12 @@ export function usePortfolioView(range: SeriesRange = "6mo") {
     // Inception date (first ledger trade), window-independent — lets the UI hide
     // a 5Y range that would just duplicate "All" on a younger book.
     historyStart: series?.historyStart ?? null,
-    isLoading: !buckets || !holdings || !quotes,
+    // Hold the loading skeleton until the chart series resolves too — otherwise
+    // buckets/holdings/quotes land first and the chart renders an empty
+    // "NO HISTORY YET" until `series` arrives a beat later (a flash that a cold
+    // cache stretches into seconds). `e4` lets a series-fetch error fall through
+    // to the (empty) chart instead of spinning the skeleton forever.
+    isLoading: !buckets || !holdings || !quotes || (!series && !e4),
     error: e1 ?? e2 ?? e3 ?? e4,
   };
 }
