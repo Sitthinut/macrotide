@@ -1,6 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { BrandMark } from "@/components/BrandMark";
 import { ModelDonut } from "@/components/charts";
 import { FundDetailSheet } from "@/components/FundDetailSheet";
@@ -509,7 +510,9 @@ interface ViewPortfolio {
 // "+ Add" split button (#149): the main button opens the Add modal on Investment (the
 // frequent case, one click); the caret offers "Cash" for the occasional bank-balance entry
 // — keeping the common path fastest while making cash an explicit, discoverable choice.
-// Reuses the shared `.kebab__menu` popover (background + shadow) and its outside-click.
+// Reuses the shared `.kebab__menu` styling, but placed adaptively with
+// `usePopoverPlacement` + a body portal (two-axis flip, floats above the side
+// panel) — same as the `+ Compare` dropdown, not a fixed `right: 0` lock.
 function AddSplitButton({
   onInvestment,
   onCash,
@@ -519,10 +522,17 @@ function AddSplitButton({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  // Anchor placement to the caret (the dropdown half of the split), so the menu
+  // aligns with the split button — not the wider "Add" main button.
+  const caretRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuStyle = usePopoverPlacement(caretRef, menuRef, { open });
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      // The menu is portaled to <body> (outside `ref`), so check it explicitly.
+      const t = e.target as Node;
+      if (ref.current && !ref.current.contains(t) && !menuRef.current?.contains(t)) setOpen(false);
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
@@ -533,6 +543,7 @@ function AddSplitButton({
         <Icon name="plus" size={12} /> Add
       </button>
       <button
+        ref={caretRef}
         type="button"
         className="btn ghost sm add-split__caret"
         aria-label="More add options"
@@ -542,32 +553,42 @@ function AddSplitButton({
       >
         <Icon name="chevron-down" size={14} />
       </button>
-      {open ? (
-        <div className="kebab__menu" role="menu">
-          <button
-            type="button"
-            role="menuitem"
-            className="kebab__item"
-            onClick={() => {
-              setOpen(false);
-              onInvestment();
-            }}
-          >
-            Investment
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="kebab__item"
-            onClick={() => {
-              setOpen(false);
-              onCash?.();
-            }}
-          >
-            Cash
-          </button>
-        </div>
-      ) : null}
+      {open
+        ? createPortal(
+            // `right: auto` clears the class's `right: 0` so the fixed left/top from
+            // usePopoverPlacement drive placement; portaled so it floats above the panel.
+            <div
+              ref={menuRef}
+              className="kebab__menu"
+              role="menu"
+              style={{ ...menuStyle, right: "auto" }}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className="kebab__item"
+                onClick={() => {
+                  setOpen(false);
+                  onInvestment();
+                }}
+              >
+                Investment
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="kebab__item"
+                onClick={() => {
+                  setOpen(false);
+                  onCash?.();
+                }}
+              >
+                Cash
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
@@ -638,18 +659,22 @@ function CashModeKebab({
       >
         Cash
       </button>
-      {showHint ? (
-        <div ref={hintRef} className="cash-hint" role="note" style={hintStyle}>
-          <p className="cash-hint__body">
-            Investable cash counts toward your return by default. Exclude it to compare your
-            investments against an index, without the cash drag.
-            {hasReserved ? " Reserved cash always sits out." : ""}
-          </p>
-          <button type="button" className="btn ghost sm" onClick={onDismissHint}>
-            Got it
-          </button>
-        </div>
-      ) : null}
+      {showHint
+        ? createPortal(
+            // Portaled to <body> so it floats above the right detail panel.
+            <div ref={hintRef} className="cash-hint" role="note" style={hintStyle}>
+              <p className="cash-hint__body">
+                Investable cash counts toward your return by default. Exclude it to compare your
+                investments against an index, without the cash drag.
+                {hasReserved ? " Reserved cash always sits out." : ""}
+              </p>
+              <button type="button" className="btn ghost sm" onClick={onDismissHint}>
+                Got it
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
@@ -693,11 +718,16 @@ function TermTip({ label, def }: { label: string; def: string }) {
       >
         {label}
       </button>
-      {open ? (
-        <span ref={popRef} className="chart-info" role="note" style={style}>
-          <span className="chart-info__note">{def}</span>
-        </span>
-      ) : null}
+      {open
+        ? createPortal(
+            // Portaled to <body> so it floats above the right detail panel instead
+            // of being trapped behind it by the scroll host's stacking context.
+            <span ref={popRef} className="chart-info" role="note" style={style}>
+              <span className="chart-info__note">{def}</span>
+            </span>,
+            document.body,
+          )
+        : null}
     </>
   );
 }

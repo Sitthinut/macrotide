@@ -15,6 +15,7 @@
 // toolbar's overflow clip can't cut it off), matching the cash hint's behavior.
 
 import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { BENCHMARK_TR_OPTIONS } from "@/lib/market/benchmark-options";
 import { useListboxKeyboard } from "@/lib/useListboxKeyboard";
 import { usePopoverPlacement } from "@/lib/usePopoverPlacement";
@@ -47,7 +48,10 @@ export function BenchmarkPicker({
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      // The list is portaled to <body> (outside `ref`), so check it explicitly —
+      // otherwise an option click reads as "outside" and closes before selecting.
+      const t = e.target as Node;
+      if (ref.current && !ref.current.contains(t) && !listRef.current?.contains(t)) setOpen(false);
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
@@ -161,35 +165,38 @@ export function BenchmarkPicker({
           + Compare
         </button>
       )}
-      {open && (
-        <div
-          ref={listRef}
-          role="listbox"
-          aria-label="Benchmark"
-          className="combobox__list"
-          // Fixed-positioned by usePopoverPlacement; clear the shared class's
-          // `min-width: 100%`, which under `position: fixed` would resolve against
-          // the viewport instead of the trigger.
-          style={{ ...listStyle, minWidth: "auto" }}
-        >
-          {BENCHMARK_TR_OPTIONS.map((b) => (
-            <button
-              key={b.key}
-              type="button"
-              role="option"
-              aria-selected={b.key === value}
-              className="combobox__option"
-              style={b.key === value ? { background: "var(--accent-soft)" } : undefined}
-              onClick={() => {
-                onChange(b.key);
-                setOpen(false);
-              }}
-            >
-              {b.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {open &&
+        createPortal(
+          <div
+            ref={listRef}
+            role="listbox"
+            aria-label="Benchmark"
+            className="combobox__list"
+            // Portaled to <body> so it escapes the scroll host's stacking context
+            // and floats above the right detail panel. Fixed-positioned by
+            // usePopoverPlacement; clear the shared class's `min-width: 100%`, which
+            // under `position: fixed` would resolve against the viewport, not the trigger.
+            style={{ ...listStyle, minWidth: "auto" }}
+          >
+            {BENCHMARK_TR_OPTIONS.map((b) => (
+              <button
+                key={b.key}
+                type="button"
+                role="option"
+                aria-selected={b.key === value}
+                className="combobox__option"
+                style={b.key === value ? { background: "var(--accent-soft)" } : undefined}
+                onClick={() => {
+                  onChange(b.key);
+                  setOpen(false);
+                }}
+              >
+                {b.label}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
