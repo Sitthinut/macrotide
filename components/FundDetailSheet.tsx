@@ -1369,9 +1369,8 @@ function FundNavChartSection({ ticker }: { ticker: string | null }) {
       ? series.flatMap((p) => (p.aum != null ? [{ d: p.d, v: p.aum }] : []))
       : series.map((p) => ({ d: p.d, v: p.v }));
 
-  const emptyHint = isLoading
-    ? "Loading fund history…"
-    : mode === "aum"
+  const emptyHint =
+    mode === "aum"
       ? "Fund-size history isn't available for this fund yet."
       : "Price history isn't available for this fund yet.";
 
@@ -1413,15 +1412,19 @@ function FundNavChartSection({ ticker }: { ticker: string | null }) {
           {fmtPct(periodReturn)}
         </span>
       )}
-      <NavChart
-        data={chartData}
-        height={NAV_CHART_HEIGHT}
-        accent="var(--accent)"
-        valueFormatter={mode === "aum" ? fmtAum : fmtNav}
-        seriesLabel={mode === "aum" ? "Fund size" : "Price"}
-        showReturnInTooltip={mode === "nav"}
-        emptyHint={emptyHint}
-      />
+      {isLoading ? (
+        <Skeleton height={NAV_CHART_HEIGHT} style={{ marginTop: 4 }} />
+      ) : (
+        <NavChart
+          data={chartData}
+          height={NAV_CHART_HEIGHT}
+          accent="var(--accent)"
+          valueFormatter={mode === "aum" ? fmtAum : fmtNav}
+          seriesLabel={mode === "aum" ? "Fund size" : "Price"}
+          showReturnInTooltip={mode === "nav"}
+          emptyHint={emptyHint}
+        />
+      )}
     </section>
   );
 }

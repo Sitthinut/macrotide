@@ -97,7 +97,15 @@ function AxisTick({
 // plot bottom from it.
 const NAV_AXIS_H = 22;
 
-function EmptyState({ height, emptyHint }: { height: number; emptyHint?: string | null }) {
+function EmptyState({
+  height,
+  title = "NO HISTORY YET",
+  emptyHint,
+}: {
+  height: number;
+  title?: string;
+  emptyHint?: string | null;
+}) {
   return (
     <div
       style={{
@@ -113,7 +121,7 @@ function EmptyState({ height, emptyHint }: { height: number; emptyHint?: string 
       }}
     >
       <div style={{ fontSize: 12, fontFamily: "var(--font-mono)", letterSpacing: "0.04em" }}>
-        NO HISTORY YET
+        {title}
       </div>
       {emptyHint && <div style={{ fontSize: 11, maxWidth: 320, lineHeight: 1.5 }}>{emptyHint}</div>}
     </div>
@@ -148,6 +156,7 @@ export function NavChart({
   benchmarkData = null,
   benchmarkLabel = null,
   emptyHint = null,
+  emptyTitle = "NO HISTORY YET",
   valueFormatter = fmtTHBClean,
   seriesLabel = "Portfolio",
   showReturnInTooltip = false,
@@ -165,6 +174,9 @@ export function NavChart({
   benchmarkData?: SeriesPoint[] | null;
   benchmarkLabel?: string | null;
   emptyHint?: string | null;
+  /** Empty-state headline. Defaults to "NO HISTORY YET"; pass "NO HOLDINGS YET"
+   *  when the portfolio is empty so the headline matches the "Add holdings" hint. */
+  emptyTitle?: string;
   /** Formats the main line's value in the tooltip. Defaults to whole-baht. */
   valueFormatter?: (n: number) => string;
   /** Tooltip label for the main series. Defaults to "Portfolio". */
@@ -213,7 +225,7 @@ export function NavChart({
   const gradId = `nav-grad-${useId().replace(/:/g, "")}`;
 
   if (!data || data.length === 0) {
-    return <EmptyState height={height} emptyHint={emptyHint} />;
+    return <EmptyState height={height} title={emptyTitle} emptyHint={emptyHint} />;
   }
 
   // First finite value, for the "% since start" reading in the tooltip.
@@ -821,6 +833,7 @@ export function BreakdownChart({
   height = NAV_CHART_HEIGHT,
   valuesHidden = false,
   emptyHint = null,
+  emptyTitle = "NO HISTORY YET",
 }: {
   /** Total net worth per date (funds + cash). */
   value: SeriesPoint[];
@@ -830,8 +843,10 @@ export function BreakdownChart({
   height?: number;
   valuesHidden?: boolean;
   emptyHint?: string | null;
+  emptyTitle?: string;
 }) {
-  if (!value || value.length === 0) return <EmptyState height={height} emptyHint={emptyHint} />;
+  if (!value || value.length === 0)
+    return <EmptyState height={height} title={emptyTitle} emptyHint={emptyHint} />;
 
   const cashByLabel = new Map(cash.map((p) => [p.d, p.v]));
   const merged = value.map((p) => {
@@ -948,7 +963,13 @@ export function AllocationDonut({
   outerRadius?: number;
 }) {
   if (!data || data.length === 0) {
-    return <EmptyState height={height} emptyHint="Add holdings to see your allocation." />;
+    return (
+      <EmptyState
+        height={height}
+        title="NO HOLDINGS YET"
+        emptyHint="Add holdings to see your allocation."
+      />
+    );
   }
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -998,7 +1019,13 @@ export function DriftBars({
   maxRows?: number;
 }) {
   if (!data || data.length === 0) {
-    return <EmptyState height={height} emptyHint="Set a target model to see allocation drift." />;
+    return (
+      <EmptyState
+        height={height}
+        title="NO TARGET SET"
+        emptyHint="Set a target model to see allocation drift."
+      />
+    );
   }
   const rows = data.slice(0, maxRows);
   const maxAbs = Math.max(2, ...rows.map((r) => Math.abs(r.drift)));

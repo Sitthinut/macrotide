@@ -1484,10 +1484,11 @@ export function PortfolioScreen({
               normalized={breakdownNorm}
               valuesHidden={valuesHidden}
               height={chartHeight}
+              emptyTitle={view.holdings.length === 0 ? "NO HOLDINGS YET" : "NO HISTORY YET"}
               emptyHint={
                 view.holdings.length === 0
                   ? "Add holdings to see what your money is made of."
-                  : "We're still fetching NAV history. Pull-to-refresh or wait a moment."
+                  : "We're still fetching price history — it fills in automatically in a moment."
               }
             />
           ) : chartMode === "performance" ? (
@@ -1506,10 +1507,11 @@ export function PortfolioScreen({
               }
               height={chartHeight}
               accent="var(--accent)"
+              emptyTitle={view.holdings.length === 0 ? "NO HOLDINGS YET" : "NO HISTORY YET"}
               emptyHint={
                 view.holdings.length === 0
                   ? "Add holdings to see how this portfolio has performed."
-                  : "We're still fetching NAV history. Pull-to-refresh or wait a moment."
+                  : "We're still fetching price history — it fills in automatically in a moment."
               }
             />
           ) : (
@@ -1527,10 +1529,11 @@ export function PortfolioScreen({
               }
               height={chartHeight}
               accent="var(--accent)"
+              emptyTitle={view.holdings.length === 0 ? "NO HOLDINGS YET" : "NO HISTORY YET"}
               emptyHint={
                 view.holdings.length === 0
                   ? "Add holdings to see how this portfolio tracks over time."
-                  : "We're still fetching NAV history. Pull-to-refresh or wait a moment."
+                  : "We're still fetching price history — it fills in automatically in a moment."
               }
             />
           )}
