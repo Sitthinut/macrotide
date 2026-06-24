@@ -21,6 +21,7 @@ async function main() {
   console.log(`  Scopes swept:        ${result.scopesSwept.length} (owner + registered users)`);
   console.log(`  With work:           ${result.scopesWorked}`);
   console.log(`  Merged (near-dups):  ${result.mergedCount}`);
+  console.log(`  Superseded (stale):  ${result.supersededCount}`);
   console.log(`  Reshaped (→ detail): ${result.reshapedCount}`);
   console.log(`  Recategorized:       ${result.recategorizedCount}`);
 }

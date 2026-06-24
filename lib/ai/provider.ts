@@ -50,6 +50,27 @@ const TITLE_MODELS_DEFAULT = ["openrouter/free"];
 // back to `TITLE_MODELS` then `openrouter/free` so an operator who already
 // pinned a cheap title model gets the same model for extraction for free.
 const EXTRACT_MODELS_DEFAULT = ["openrouter/free"];
+// Memory consolidation sweep. UNLIKE extraction, this is offline + infrequent, so
+// it can afford a true REASONING model — it judges which saved memories are
+// duplicates and proposes merges, where chain-of-thought meaningfully improves
+// precision. Two quality-verified free reasoners on DIFFERENT providers come first
+// (so one provider's free-tier throttle can't take out both), then `openrouter/free`
+// as a last-resort availability fallback. All probed on the real prompt 2026-06-24:
+// gpt-oss-20b:free and cohere/north-mini-code:free emitted clean ops-JSON with correct
+// merge/supersede every run; `openrouter/free` is a model-quality lottery that
+// occasionally mis-merged a contradiction, so it sits LAST (a wrong merge is reversible
+// and the proposer retries on bad JSON). Bigger free models (gpt-oss-120b, nemotron)
+// are blocked by the account's strict data policy — which we KEEP, as it keeps personal
+// memory data off training-logging providers. For guaranteed completion append a cheap
+// paid model via `CONSOLIDATE_MODELS` (google/gemini-2.5-flash-lite — bounded reasoning,
+// also verified; NOT a thinking-only model like qwen3-235b-thinking, whose reasoning
+// eats the output budget and truncates the JSON). The `:free` tiers churn — re-verify
+// against /api/v1/models before changing.
+const CONSOLIDATE_MODELS_DEFAULT = [
+  "openai/gpt-oss-20b:free",
+  "cohere/north-mini-code:free",
+  "openrouter/free",
+];
 
 function parseModels(value: string | undefined): string[] | null {
   if (!value) return null;
@@ -422,5 +443,32 @@ export function resolveExtractorProvider(): ResolvedProvider {
     model: openrouter(key, models, { reasoningEffort: "none" }),
     ready: true,
     label: chainLabel("Extract", models),
+  };
+}
+
+/**
+ * Reasoning model for the offline memory-consolidation sweep. Reads the shared
+ * `OPENROUTER_API_KEY`. Model resolution: `CONSOLIDATE_MODELS` →
+ * `CONSOLIDATE_MODELS_DEFAULT` (a FREE reasoning chain) — note it does NOT fall
+ * back to the extractor/title chains, because the whole point is to use a
+ * reasoning model the latency-insensitive offline sweep can afford (extraction
+ * runs every session close and stays cheap/non-reasoning).
+ *
+ * Reasoning is ON (effort `low` by default, `CONSOLIDATE_REASONING_EFFORT`
+ * override). Unlike extraction — where the free meta-router is a JSON lottery so
+ * reasoning is pinned `none` — here the chain pins DEDICATED reasoning models, so
+ * OpenRouter returns the chain-of-thought in its own channel and `result.text`
+ * stays clean JSON for the proposer to parse.
+ */
+export function resolveConsolidateProvider(): ResolvedProvider {
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key) return { model: null, ready: false, label: "Consolidate (no key)" };
+  const models = parseModels(process.env.CONSOLIDATE_MODELS) ?? CONSOLIDATE_MODELS_DEFAULT;
+  return {
+    model: openrouter(key, models, {
+      reasoningEffort: parseEffort(process.env.CONSOLIDATE_REASONING_EFFORT, "low"),
+    }),
+    ready: true,
+    label: chainLabel("Consolidate", models),
   };
 }
