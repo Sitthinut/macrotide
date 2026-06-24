@@ -174,6 +174,9 @@ Disconnect ([lib/db/queries/broker-token.ts](../../lib/db/queries/broker-token.t
 | --- | --- | --- | --- |
 | `CODEX_AUTH_FILE` | OS-default Codex auth path | [lib/ai/codex.local.ts](../../lib/ai/codex.local.ts) | Path to a Codex CLI auth JSON file, used by the local-codex integration during development. Test-only outside of dev. |
 | `DEV_ALLOWED_ORIGIN` | unset (localhost only) | [next.config.ts](../../next.config.ts) | One extra origin added to Next's `allowedDevOrigins` so the dev server trusts a non-localhost host (reverse proxy, Codespaces, LAN IP, tunnel). Hostname only, no scheme. No effect on prod builds. |
+| `MEMORY_USER_CAP` | `150` | [lib/memory/inject.ts](../../lib/memory/inject.ts) | Max **About you** memories injected into a chat (the hot-set bound). Past it, lowest-priority memories become recall-only. Co-primary with the char budget. |
+| `MEMORY_USER_CHAR_BUDGET` | `24000` | [lib/memory/inject.ts](../../lib/memory/inject.ts) | Max characters of injected **About you** memories (cost ceiling). Must be ≥ 1000 (several × the ~600 per-row content cap) — boot throws otherwise. Whichever of cap/budget binds first stops selection. |
+| `MEMORY_ADVISOR_CAP` | `30` | [lib/memory/inject.ts](../../lib/memory/inject.ts) | Max **About Advisor** memories injected (generous — these are few + high-value). |
 
 ### Framework
 
