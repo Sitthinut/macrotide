@@ -256,13 +256,16 @@ honest, and high-stakes durable facts are verified before being acted on
 
 ### Injection (hot set)
 
-Active preferences render into the system prompt at session start and are
-**frozen for the session** — writes during a chat take effect on the *next*
-chat. This preserves the prefix cache (the block is byte-identical across turns,
-deterministically ordered) and avoids jarring mid-session behavior shifts. The
-inline status line records the write so the user understands the change lands
-next chat. Each line renders the short `content` hook; the longer `detail` is
-never injected — it's reached on demand via `recall_preferences`.
+Active preferences render into the system prompt at session start and the
+**injected block is frozen for the session** — byte-identical across turns,
+deterministically ordered — to preserve the prefix cache. A memory written during
+a chat does **not** rebuild that block (that would break the cache), but it still
+takes effect immediately: the save/update/forget tool result tells the model its
+write overrides the start-of-chat snapshot, so the Advisor acts on the new value
+for the rest of the conversation (and it loads into the block normally next chat).
+The inline status line records the write. Each line renders the short `content`
+hook; the longer `detail` is never injected — it's reached on demand via
+`recall_preferences`.
 
 ```text
 ## Your stored preferences
@@ -314,12 +317,24 @@ conversation, so a refresh or a read-only revisit never spends a model call.
 4. **Reconciles** each candidate against the memories already saved (passed to the
    extractor as delimited, untrusted data): the model returns an `op` —
    **add** a new memory, **update** an existing one (by id), or **skip** a
-   duplicate — in a single pass (the mem0 token-efficient pattern). Target ids
-   are validated in code, an `update` is held to the trust-tier guard below, and
-   a candidate that *contradicts* an explicit memory is **skipped** rather than
-   silently overriding it.
+   duplicate — in a single pass (the mem0 token-efficient pattern). `update`
+   covers three cases the prompt spells out — it **extends** an existing note
+   (folding a newly-mentioned detail into one combined memory, never dropping the
+   old facts), **refines** it to a more precise version, or supersedes it when the
+   user **contradicts** their earlier statement. Reconciling at write time — while
+   the conversation context is present to tell *extends* from *contradicts* — is
+   where near-duplicates are folded; the offline consolidation sweep is the
+   backstop for what slips through. Target ids are validated in code, an `update`
+   is held to the trust-tier guard below, and a candidate that *contradicts* an
+   explicit memory is **skipped** rather than silently overriding it.
 5. Saves facts with `source='extracted'` + confidence + provenance, then
    advances the watermark and marks the thread `idle`.
+
+A transport error or an unparseable response is **retried in-session** (up to 3
+attempts, temperature bumped each retry so a deterministic primary re-rolls); only
+if every attempt fails does the pass return `model_error` *without* advancing the
+watermark, so the next close re-extracts those turns — an in-session retry now, the
+cross-session retry as the backstop.
 
 Resuming reactivates the thread (`idle → active`) so the next close extracts the
 new turns — incrementally, from the watermark. The extractor model is the cheap
@@ -338,13 +353,26 @@ rewrite what you said explicitly:
   An extraction that conflicts with an explicit memory is **skipped** (the
   explicit memory stands; the user can change it via the Advisor), never applied
   silently (`updateFromExtraction` enforces this in code).
+- **Honest attribution.** A memory is the Advisor's *note* — always a **condensed
+  paraphrase** (the Advisor shortens what it hears when it saves), and for
+  `extracted` rows an *inference*, never a transcript. So **no** memory — not even a
+  `stated` one — is the user's verbatim words. `recall_preferences` /
+  `list_preferences` tag each row's origin (`stated` for `advisor_tool`, `inferred`
+  for `extracted`, with confidence); origin governs only **how sure the fact is**
+  (attribute it to the user vs. hedge it), not the wording. The system prompt tells
+  the Advisor to state the substance in its own words and **never quote a memory back
+  as the user's exact words** ("you told me: …") — attributing a `stated` fact ("you
+  prefer funds only") but hedging an `inferred` one, and always correctable.
 - **Consolidate-on-write — model first.** The injected memory block is a *frozen*
   snapshot from the start of the chat, so it can't show a memory saved earlier in
   the **same** session; the system prompt tells the Advisor to call
   `list_preferences`/`recall_preferences` (the **live** set) before
   `save_preference`, and to `update_preference` an existing memory rather than add
   a near-duplicate — the same "check memory first" pattern Anthropic's memory tool
-  bakes in.
+  bakes in. A write also **takes effect for the rest of the current chat**: the
+  save/update/forget tool result tells the Advisor its write overrides the frozen
+  snapshot, so a mid-chat correction (e.g. "I just retired — play it safe now")
+  changes behavior at once instead of waiting for the next session.
 - **Idempotency net.** `save()` collapses a *near-identical* re-save: an active
   memory whose normalized content matches (trimmed, lowercased, whitespace
   collapsed, trailing punctuation stripped) returns the existing row instead of a
@@ -352,20 +380,33 @@ rewrite what you said explicitly:
 - **Consolidation sweep.** The above don't touch *semantic* near-duplicates that
   accumulate over time ("be concise" / "keep it brief", or an explicit save plus a
   session-close extraction of the same fact). A periodic `jobs:consolidate-memory`
-  sweep (`lib/jobs/consolidate-memory.ts`) runs **per category** and a cheap
-  **lexical pre-filter** (token-set overlap) finds plausible near-dup clusters —
-  the model is called only when there's a cluster (or, for reshape, the store is
-  over the char budget), so a store of genuinely-distinct memories spends no model
-  call. Near-dups are merged at **any** store size (redundancy shows in recall +
-  the Memory tab even below the inject ceiling); reshape (splitting a long hook
-  into hook+detail) only fires under char-budget pressure. The model just **lists
-  the ids that are duplicates** (`{op:"merge","ids":[…]}`) — survivor/loser
-  bookkeeping is too unreliable for a cheap model — and the apply layer picks the
-  survivor **explicit-first** (a user-stated fact always wins over an inference;
-  then highest confidence), folds the rest in via the bitemporal layer (reversible,
-  `superseded_by` → survivor), and re-points links. Within-category only; merge is
-  verbatim-survivor (no rewrite — synthesizing combined memories is a deferred,
-  better-model enhancement).
+  sweep (`lib/jobs/consolidate-memory.ts`) is **holistic**: it hands the **whole** of
+  each category's memories to a cheap **reasoning** model (`CONSOLIDATE_MODELS` —
+  offline + infrequent, so chain-of-thought to judge duplicates is affordable; see
+  [inference-strategy](inference-strategy.md)) rather than pre-selecting candidate
+  pairs. A lexical pre-filter would both **miss** reworded dups that share few tokens
+  ("no individual stocks, funds only" ≈ "I told you no individual stocks") and
+  **over-cluster** opposites that share many ("like X" / "not like X"); a whole-set
+  pass sidesteps both — which is what offline consolidators (Anthropic Dreams, ChatGPT
+  "dreaming") do at this scale, where a pre-filter is a needless scale optimization
+  that also costs recall. The lexical clustering survives ONLY as a scale fallback
+  (`MEMORY_CONSOLIDATE_MAX_CHARS`): if a category is too large to send whole, the sweep
+  batches by near-dup cluster to bound the payload (non-clustering dups may then slip
+  through until #43 adds vector recall). Exact-dup writes never reach it — `save()`'s
+  idempotency net collapses those first. It proposes ops that code applies through the
+  bitemporal layer (reversible, `superseded_by` → survivor, links re-pointed):
+  - **merge** — the model just **lists the duplicate ids** (`{op:"merge","ids":[…]}`);
+    survivor/loser bookkeeping is too error-prone to delegate, so the apply layer
+    picks the survivor **explicit-first** (a user-stated fact always wins over an
+    inference, then highest confidence) and folds the rest in. Verbatim-survivor (no
+    rewrite — the safe partial-overlap *fold* happens at extraction time instead).
+  - **supersede** — two notes about the same attribute that *contradict* (e.g.
+    "risk: moderate" vs "risk: aggressive") retire the outdated side in favour of the
+    current one — but **only ever an extracted note, never an explicit fact** (an
+    inference can't retire what you stated).
+  - **reshape** (long hook → hook+detail) and **recategorize** (wrong category).
+
+  Within-category only.
 
 ### Decay and staleness
 

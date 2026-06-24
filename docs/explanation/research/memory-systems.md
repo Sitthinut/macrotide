@@ -577,6 +577,44 @@ prefix-cached chat advisor drives as many decisions. The recurring findings:
   2304.03442 (Generative Agents); mem0 issue #4573; the LoCoMo and
   lost-in-the-middle benchmarks.
 
+## Deduplication: candidate selection (pre-filter vs. whole-set)
+
+*Added 2026-06-23 from a focused web-search pass for macrotide's consolidation sweep.*
+
+When a system merges near-duplicates or resolves contradictions, how does it pick the
+candidates to compare? Three families:
+
+- **Lexical pre-filter → LLM.** mem0 (BM25 + MD5 exact-hash), Zep/Graphiti
+  (entropy-gated MinHash/LSH + Jaccard 0.9), TiMem (BM25). Cheap; narrows the set
+  before the model.
+- **Vector top-K → LLM.** mem0 (dense top-10, RRF-fused with BM25 + entity), LangMem
+  (top-5), Zep (cosine over 1024-d embeddings). Semantic candidates, then the model
+  decides ADD/UPDATE/DELETE/NOOP.
+- **Whole-set → LLM (no pre-filter).** Anthropic **Dreams** (the entire memory store
+  + ≤100 transcripts handed to Claude to holistically reorganize; hard
+  `input_memory_store_too_large` ceiling), OpenAI **"dreaming"**, Supermemory "dream
+  cycles", and the research system U-Mem. The model reads everything and finds the
+  dups/conflicts itself.
+
+**The finding that drove our design:** every system that pre-filters cites **scale /
+cost**, never accuracy — and several note the opposite, that a whole-set LLM pass
+catches **antonymic conflicts a top-K vector retrieval misses** ("likes cats" vs
+"allergic to cats" aren't embedding-neighbours; a Jaccard pre-filter symmetrically
+*misses* reworded dups and *over-clusters* opposites). Token math: a personal store of
+a few hundred ~50-token hooks is ~15 k tokens — one context window, ~$0.02 (Sonnet) to
+~$0.45 (Opus) per pass, free on our reasoning chain. Pre-filtering only earns its keep
+at thousands+ of memories, or when consolidation must run at write-time latency. One
+thing worth keeping regardless: an **exact-hash dedup** before any LLM call (mem0's
+MD5; our `save()` idempotency net).
+
+**Decision** → macrotide's offline sweep is **holistic**: the whole category goes to
+the reasoning model, and lexical clustering survives only as an over-budget scale
+fallback. Mechanics in [memory.md](../memory.md). Sources: [mem0 (arXiv 2504.19413)](https://arxiv.org/html/2504.19413v1),
+[Zep/Graphiti (arXiv 2501.13956)](https://arxiv.org/html/2501.13956v1),
+[Anthropic Dreams](https://platform.claude.com/docs/en/managed-agents/dreams),
+[OpenAI dreaming](https://openai.com/index/chatgpt-memory-dreaming/),
+[Letta dedup issue #3116](https://github.com/letta-ai/letta/issues/3116).
+
 ## Patterns Macrotide adopted
 
 Macrotide is a single-VM, SQLite, TypeScript personal finance advisor — no
