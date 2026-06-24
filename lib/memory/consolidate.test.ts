@@ -48,6 +48,7 @@ describe("proposeConsolidation — JSON retry", () => {
     h.texts = ["garbage", "garbage", "garbage", "garbage"];
     const ops = await proposeConsolidation("user", pair());
     expect(h.calls).toBe(3);
-    expect(ops).toEqual([]);
+    // null (not []) signals a degraded chain — distinct from a legit empty result.
+    expect(ops).toBeNull();
   });
 });

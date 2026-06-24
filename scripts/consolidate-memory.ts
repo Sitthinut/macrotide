@@ -3,9 +3,10 @@
 // Usage:
 //   npm run jobs:consolidate-memory
 //
-// Pressure-gated + lexically pre-filtered, so it only spends model calls on
-// scopes that are over the inject-all ceiling AND have plausible near-duplicates.
-// Loads .env.local via tsx's --env-file flag (configured in package.json).
+// Holistic: hands each category's memories to a reasoning model (CONSOLIDATE_MODELS)
+// to merge near-dups + retire stale contradictions. Loads .env.local via tsx's
+// --env-file flag (configured in package.json). Exits non-zero when the model chain
+// is degraded (every call unparseable) so the host's job-failure alert fires.
 
 import { fileURLToPath } from "node:url";
 import { consolidateMemory } from "../lib/jobs/consolidate-memory";
@@ -24,6 +25,19 @@ async function main() {
   console.log(`  Superseded (stale):  ${result.supersededCount}`);
   console.log(`  Reshaped (→ detail): ${result.reshapedCount}`);
   console.log(`  Recategorized:       ${result.recategorizedCount}`);
+  console.log(`  Model calls:         ${result.modelCalls} (unparseable: ${result.parseFailures})`);
+
+  // Degraded-chain guard: if the model was invoked but EVERY call (across scopes + the
+  // in-proposer retries) returned unparseable output, nothing got consolidated and the
+  // CONSOLIDATE_MODELS chain is broken. Exit non-zero so systemd's OnFailure fires the
+  // host job-failure alert. A clean store (0 ops, model answered) stays exit 0.
+  if (result.modelCalls > 0 && result.parseFailures === result.modelCalls) {
+    console.error(
+      `consolidation: model chain DEGRADED — all ${result.modelCalls} call(s) returned ` +
+        "unparseable JSON. Memory was not consolidated; check CONSOLIDATE_MODELS.",
+    );
+    process.exitCode = 1;
+  }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

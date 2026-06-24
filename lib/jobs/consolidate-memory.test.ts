@@ -77,6 +77,30 @@ describe("consolidateMemory", () => {
     });
   });
 
+  it("flags a degraded model chain — every call unparseable → parseFailures === modelCalls", async () => {
+    await withFresh(async () => {
+      save({ category: "user", content: "be concise", source: "advisor_tool" });
+      save({ category: "user", content: "Thai tax resident", source: "advisor_tool" });
+      // The proposer returns null when the model was invoked but never parsed.
+      const propose = async (): Promise<ConsolidationOp[] | null> => null;
+      const res = await consolidateMemory({ scopes: [null], propose });
+      expect(res.modelCalls).toBeGreaterThan(0);
+      expect(res.parseFailures).toBe(res.modelCalls); // the CLI exits non-zero on this
+      expect(res.mergedCount).toBe(0);
+    });
+  });
+
+  it("a valid (even empty) result is NOT a parse-failure", async () => {
+    await withFresh(async () => {
+      save({ category: "user", content: "be concise", source: "advisor_tool" });
+      save({ category: "user", content: "Thai tax resident", source: "advisor_tool" });
+      const propose = async (): Promise<ConsolidationOp[]> => [];
+      const res = await consolidateMemory({ scopes: [null], propose });
+      expect(res.modelCalls).toBeGreaterThan(0);
+      expect(res.parseFailures).toBe(0);
+    });
+  });
+
   it("merges a near-dup that does NOT lexically cluster (the holistic win)", async () => {
     await withFresh(async () => {
       // Jaccard 0.375 — below the old 0.5 cluster threshold, so the old gate skipped

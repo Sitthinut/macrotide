@@ -31,7 +31,7 @@ import { type ConsolidationOp, proposeConsolidation } from "../memory/consolidat
 export type ProposeFn = (
   category: PreferenceCategory,
   rows: Preference[],
-) => Promise<ConsolidationOp[]>;
+) => Promise<ConsolidationOp[] | null>;
 
 export interface ConsolidateOptions {
   /** User scopes to sweep (default: NULL owner + every registered user). */
@@ -60,6 +60,10 @@ export interface ConsolidateResult {
   recategorizedCount: number;
   /** Stale rows retired by a contradiction (extracted only; reversible). */
   supersededCount: number;
+  /** Model proposer invocations. */
+  modelCalls: number;
+  /** Invocations that returned unparseable output (degraded chain) — see CLI exit. */
+  parseFailures: number;
 }
 
 const DEFAULT_MAX_OPS = 50;
@@ -180,6 +184,8 @@ export async function consolidateMemory(
     reshapedCount: 0,
     recategorizedCount: 0,
     supersededCount: 0,
+    modelCalls: 0,
+    parseFailures: 0,
   };
 
   for (const userId of scopes) {
@@ -201,6 +207,11 @@ export async function consolidateMemory(
         for (const batch of batches) {
           if (applied >= maxOps) break;
           const ops = await propose(category, batch);
+          result.modelCalls++;
+          if (ops === null) {
+            result.parseFailures++; // model invoked but returned unparseable output
+            continue;
+          }
           for (const op of ops) {
             if (applied >= maxOps) break;
             const kind = applyOp(op, byId);

@@ -406,7 +406,12 @@ rewrite what you said explicitly:
     inference can't retire what you stated).
   - **reshape** (long hook → hook+detail) and **recategorize** (wrong category).
 
-  Within-category only.
+  Within-category only. A legitimately empty result (`0 ops`, model answered) and a
+  *degraded* run (the model invoked but every call — across scopes and the in-proposer
+  retries — returned unparseable JSON) otherwise look identical, so the proposer returns
+  `null` on the latter and the `jobs:consolidate-memory` CLI **exits non-zero** when
+  every call failed — surfacing a broken `CONSOLIDATE_MODELS` chain through the host's
+  job-failure alert rather than silently no-op'ing forever.
 
 ### Decay and staleness
 

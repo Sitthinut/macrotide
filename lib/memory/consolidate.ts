@@ -76,10 +76,13 @@ function normalizeOp(raw: unknown, ids: Set<number>): ConsolidationOp | null {
   return null;
 }
 
+// Returns the proposed ops, or `null` when the model WAS invoked but every attempt
+// returned unparseable output — the caller treats that as a degraded model chain
+// (distinct from a legitimately empty `[]`, which means "nothing to consolidate").
 export async function proposeConsolidation(
   _category: PreferenceCategory,
   rows: Preference[],
-): Promise<ConsolidationOp[]> {
+): Promise<ConsolidationOp[] | null> {
   if (rows.length < 2) return [];
   const provider = resolveConsolidateProvider();
   if (!provider.ready || !provider.model) return [];
@@ -122,5 +125,5 @@ export async function proposeConsolidation(
     if (!Array.isArray(opsRaw)) continue;
     return opsRaw.map((o) => normalizeOp(o, ids)).filter((o): o is ConsolidationOp => o != null);
   }
-  return [];
+  return null; // all attempts unparseable — degraded model chain, not "nothing to do"
 }
