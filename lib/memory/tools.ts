@@ -1,9 +1,8 @@
 // AI SDK tool surface for memory. Tools exposed to the chat model; all
 // delegate to the existing query layer at lib/db/queries/preferences.ts.
 //
-// Source attribution: the model invokes these tools on the user's
-// behalf during a chat turn, so we record source = 'advisor_tool'. A future
-// user-facing "Save this" button would record source = 'user_tool'.
+// Source attribution: the model invokes these tools on the user's behalf during
+// a chat turn, so every save records source = 'advisor_tool'.
 //
 // Confirmation copy follows AGENTS.md § Product copy & vocabulary
 // — the AI is "Advisor", saved-but-not-yet-injected facts are "Active in
@@ -27,14 +26,10 @@ const categoryEnum = z.enum(PREFERENCE_CATEGORIES);
 
 function categoryLabel(category: string): string {
   switch (category) {
-    case "profile":
-      return "profile";
-    case "finance_context":
-      return "finance context";
-    case "response_style":
-      return "response style";
-    case "fact":
-      return "fact";
+    case "user":
+      return "About you";
+    case "advisor":
+      return "How to respond";
     default:
       return category;
   }
@@ -67,28 +62,34 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
       "with the returned message.",
     inputSchema: z.object({
       category: categoryEnum.describe(
-        "Which bucket the preference belongs to. profile = stable facts " +
-          "about the user (risk tolerance, time horizon, timezone, age). " +
-          "finance_context = accounts, tax situation, constraints. " +
-          "response_style = how Advisor should communicate. fact = " +
-          "one-off ad-hoc remembers.",
+        "Which party the memory is about. `user` = any fact/context about the " +
+          "person & their money — identity, goals, risk tolerance, holdings, " +
+          "constraints, AND investing rules ('don't recommend individual " +
+          "stocks' → `user`: that's advice CONTENT). `advisor` = how Advisor " +
+          "should respond — tone, length, format ('be concise', 'answer in " +
+          "Thai', 'skip disclaimers' → `advisor`: reply FORM). The cut is what " +
+          "it controls (advice content vs reply form), not whether it sounds " +
+          "like an instruction.",
       ),
       content: z
         .string()
         .min(1)
-        .max(500)
+        .max(600, {
+          message:
+            "Memory line too long (max 600 chars). Write a one-line hook for `content` and move the elaboration into `detail`.",
+        })
         .describe(
-          "The fact to remember, written as a short declarative phrase " +
+          "The fact to remember, as a SHORT one-line hook " +
             "(e.g. 'risk tolerance: moderate', 'no individual stocks, " +
             "funds only', 'be concise; skip disclaimers').",
         ),
       detail: z
         .string()
-        .max(2000)
+        .max(4000)
         .optional()
         .describe(
-          "Optional longer context recalled on demand (NOT injected every " +
-            "chat — keep `content` as the short line). Use only when there's " +
+          "Optional longer elaboration recalled on demand (NOT injected every " +
+            "chat — keep `content` as the short hook). Use only when there's " +
             "genuinely more nuance worth keeping.",
         ),
     }),
@@ -96,7 +97,7 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
       const row = save({
         category,
         content,
-        body: detail ?? null,
+        detail: detail ?? null,
         source: "advisor_tool",
       });
       return {
@@ -134,16 +135,19 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
       new_content: z
         .string()
         .min(1)
-        .max(500)
-        .describe("The replacement content for the preference."),
+        .max(600, {
+          message:
+            "Memory line too long (max 600 chars). Keep `new_content` a one-line hook; move elaboration into `detail`.",
+        })
+        .describe("The replacement one-line hook for the preference."),
       detail: z
         .string()
-        .max(2000)
+        .max(4000)
         .optional()
         .describe("Optional replacement for the longer recalled-on-demand detail."),
     }),
     execute: async ({ id_or_substring, new_content, detail }) => {
-      const result = update(id_or_substring, new_content, detail ? { body: detail } : {});
+      const result = update(id_or_substring, new_content, detail ? { detail } : {});
       if (result.kind === "none") {
         return {
           ok: false as const,
@@ -299,20 +303,24 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
         ),
     }),
     execute: async ({ query }) => {
-      const rows = recall(query);
+      const { rows, total } = recall(query);
+      const truncated = total > rows.length;
       return {
         ok: true as const,
         count: rows.length,
+        total,
         rows: rows.map((r) => ({
           id: r.id,
           category: r.category,
           content: r.content,
+          ...(r.detail ? { detail: r.detail } : {}),
         })),
         message:
           rows.length === 0
             ? `No saved preferences match "${query}".`
-            : `${rows.length} saved preference${rows.length === 1 ? "" : "s"} match "${query}":\n` +
-              formatCandidates(rows),
+            : `Showing ${rows.length} of ${total} match${total === 1 ? "" : "es"} for "${query}":\n` +
+              formatCandidates(rows) +
+              (truncated ? "\nNarrow your query (add a more specific term) to see the rest." : ""),
       };
     },
   });

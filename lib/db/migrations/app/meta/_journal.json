@@ -148,6 +148,13 @@
       "when": 1782200000000,
       "tag": "0020_chart_settings_to_local",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1782254597397,
+      "tag": "0021_memory_overhaul",
+      "breakpoints": true
     }
   ]
 }

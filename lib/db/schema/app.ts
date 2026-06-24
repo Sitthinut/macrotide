@@ -1,5 +1,6 @@
 import { isNotNull, sql } from "drizzle-orm";
 import {
+  type AnySQLiteColumn,
   index,
   integer,
   primaryKey,
@@ -499,37 +500,38 @@ export const settings = sqliteTable("settings", {
 
 // Long-term memory. Bitemporal: updates add a new row + supersede; rows are
 // never mutated in place. `valid_until IS NULL` is the active set.
-// `source = 'extracted'` is reserved for session-close auto-extraction; the
-// memory tools write only `'user_tool'` / `'advisor_tool'`. See
-// docs/explanation/memory.md.
+// `source = 'advisor_tool'` = a memory the Advisor saved in-chat; `'extracted'`
+// = session-close auto-extraction. See docs/explanation/memory.md.
 export const userPreferences = sqliteTable(
   "user_preferences",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     // Owner. NULL pre-backfill / single-owner mode. Scoped via ownedBy().
     userId: text("user_id").references(() => user.id),
+    // Two-party taxonomy: `user` = facts about the person & their money;
+    // `advisor` = how the Advisor should respond. Split on which party the memory
+    // describes (the foolproof test).
     category: text("category", {
-      enum: ["profile", "finance_context", "response_style", "fact"],
+      enum: ["user", "advisor"],
     }).notNull(),
+    // The injected hook — a short one-line fact (the memory itself).
     content: text("content").notNull(),
-    // Short index injected into the hot block; the longer `body` is recalled on
-    // demand. NULL for rows predating progressive disclosure → injection falls
-    // back to `content`.
-    summary: text("summary"),
-    body: text("body"),
-    source: text("source", { enum: ["user_tool", "advisor_tool", "extracted"] }).notNull(),
+    // Optional longer elaboration, recall-only (never injected). Written from the
+    // tool's `detail` arg; the hook/detail split keeps injection cheap.
+    detail: text("detail"),
+    source: text("source", { enum: ["advisor_tool", "extracted"] }).notNull(),
     sourceSessionId: text("source_session_id").references(() => chatThreads.id, {
       onDelete: "set null",
     }),
     sourceTurnIds: text("source_turn_ids", { mode: "json" }).$type<number[]>(),
     confidence: real("confidence"), // NULL for explicit; 0..1 for extracted
-    // Capture state: 'active' injects normally; 'pending' is recall-only until
-    // the user confirms it (money-sensitive / contradicting / weak-signal write).
-    status: text("status", { enum: ["active", "pending"] })
-      .notNull()
-      .default("active"),
+    // Self-FK to the row that superseded this one (set on update/consolidation
+    // merge, never on a plain forget) — distinguishes edit-history from a
+    // deliberate forget so the former never surfaces in "Recently forgotten".
+    supersededBy: integer("superseded_by").references((): AnySQLiteColumn => userPreferences.id),
     // Bumped only when the user affirms the fact (never on recall/inject) — the
-    // anti-stale reinforcement signal. NULL = never explicitly confirmed.
+    // anti-stale reinforcement signal that exempts a row from decay. NULL = never
+    // explicitly confirmed. (Sparse — not a ranking key; see inject.ts comparator.)
     lastConfirmedAt: text("last_confirmed_at"),
     validFrom: text("valid_from").notNull(),
     validUntil: text("valid_until"), // NULL = active
