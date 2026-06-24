@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  resolveConsolidateProvider,
   resolveDemoProvider,
   resolveOwnerProvider,
   resolveTierProvider,
@@ -15,6 +16,10 @@ const ENV_KEYS = [
   "PUBLIC_TIER_MODELS",
   "VISION_CHAT_MODELS",
   "VISION_CHAT_ESCALATE_MODELS",
+  "CONSOLIDATE_MODELS",
+  "CONSOLIDATE_REASONING_EFFORT",
+  "EXTRACT_MODELS",
+  "TITLE_MODELS",
 ] as const;
 
 const saved: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
@@ -298,6 +303,101 @@ describe("provider-agnostic cache affinity", () => {
       // forward
     }
     expect((capturedHeaders as Headers).get("x-grok-conv-id")).toBeNull();
+  });
+});
+
+describe("resolveConsolidateProvider", () => {
+  it("returns not-ready when key is missing", () => {
+    delete process.env.OPENROUTER_API_KEY;
+    const p = resolveConsolidateProvider();
+    expect(p.ready).toBe(false);
+    expect(p.model).toBeNull();
+  });
+
+  it("defaults to the free reasoning chain", () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    delete process.env.CONSOLIDATE_MODELS;
+    const p = resolveConsolidateProvider();
+    expect(p.ready).toBe(true);
+    expect(p.label).toBe(
+      "Consolidate · openai/gpt-oss-20b:free → cohere/north-mini-code:free → openrouter/free",
+    );
+  });
+
+  it("honors CONSOLIDATE_MODELS as a comma-separated chain", () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    process.env.CONSOLIDATE_MODELS = "google/gemini-2.5-flash-lite";
+    const p = resolveConsolidateProvider();
+    expect(p.label).toBe("Consolidate · google/gemini-2.5-flash-lite");
+  });
+
+  it("does NOT fall back to EXTRACT_MODELS/TITLE_MODELS — an unset value keeps reasoning", () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    delete process.env.CONSOLIDATE_MODELS;
+    process.env.EXTRACT_MODELS = "google/gemini-2.5-flash-lite";
+    process.env.TITLE_MODELS = "openrouter/free";
+    const p = resolveConsolidateProvider();
+    // The reasoning default stands; the extractor/title chains are ignored.
+    expect(p.label).toBe(
+      "Consolidate · openai/gpt-oss-20b:free → cohere/north-mini-code:free → openrouter/free",
+    );
+  });
+
+  it("injects reasoning:{effort:'low'} by default — reasoning is ON (unlike extract)", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    process.env.CONSOLIDATE_MODELS = "openai/gpt-oss-20b:free";
+    delete process.env.CONSOLIDATE_REASONING_EFFORT;
+
+    let capturedBody: string | undefined;
+    vi.stubGlobal("fetch", async (_url: unknown, init?: RequestInit) => {
+      capturedBody = init?.body as string;
+      return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const p = resolveConsolidateProvider();
+    if (!p.model || typeof p.model === "string") throw new Error("expected model object");
+    try {
+      await p.model.doGenerate({
+        prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      });
+    } catch {
+      // forward
+    }
+
+    expect(capturedBody).toBeDefined();
+    const body = JSON.parse(capturedBody as string);
+    expect(body.reasoning).toEqual({ effort: "low" });
+  });
+
+  it("honors CONSOLIDATE_REASONING_EFFORT override", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    process.env.CONSOLIDATE_MODELS = "openai/gpt-oss-20b:free";
+    process.env.CONSOLIDATE_REASONING_EFFORT = "medium";
+
+    let capturedBody: string | undefined;
+    vi.stubGlobal("fetch", async (_url: unknown, init?: RequestInit) => {
+      capturedBody = init?.body as string;
+      return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const p = resolveConsolidateProvider();
+    if (!p.model || typeof p.model === "string") throw new Error("expected model object");
+    try {
+      await p.model.doGenerate({
+        prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      });
+    } catch {
+      // forward
+    }
+
+    const body = JSON.parse(capturedBody as string);
+    expect(body.reasoning).toEqual({ effort: "medium" });
   });
 });
 
