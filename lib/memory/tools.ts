@@ -4,9 +4,11 @@
 // Source attribution: the model invokes these tools on the user's behalf during
 // a chat turn, so every save records source = 'advisor_tool'.
 //
-// Confirmation copy follows AGENTS.md § Product copy & vocabulary
-// — the AI is "Advisor", saved-but-not-yet-injected facts are "Active in
-// your next chat" (frozen-for-the-session discipline; see memory.md).
+// Confirmation copy follows AGENTS.md § Product copy & vocabulary — the AI is
+// "Advisor". A write takes effect immediately for the rest of THIS chat (the tool
+// result tells the model its write overrides the start-of-chat snapshot) and also
+// loads in future chats; the injected block itself stays frozen per session for
+// prompt-cache stability (see memory.md).
 import { tool } from "ai";
 import { z } from "zod";
 import {
@@ -57,9 +59,9 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
       "FIRST check whether this UPDATES something already saved (it's in your " +
       "memory block, or use list_preferences) — if so call update_preference " +
       "instead of saving a near-duplicate. Choose the most specific category. " +
-      "The saved preference does NOT affect the current chat — it activates in " +
-      "the next chat (frozen-for-the-session injection). Confirm to the user " +
-      "with the returned message.",
+      "A saved preference takes effect immediately for the REST OF THIS chat " +
+      "(treat it as overriding the start-of-chat memory snapshot) and also loads " +
+      "automatically in future chats. Confirm to the user with the returned message.",
     inputSchema: z.object({
       category: categoryEnum.describe(
         "Which party the memory is about. `user` = any fact/context about the " +
@@ -112,7 +114,7 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
           category: row.category,
           content: row.content,
         },
-        message: `Saved: ${content}. Active in your next chat.`,
+        message: `Saved: ${content}. In effect now — use it for the rest of this chat (it overrides the start-of-chat memory snapshot) and it loads automatically in future chats.`,
       };
     },
   });
@@ -192,7 +194,7 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
                 content: newRow.content,
               }
             : undefined,
-        message: `Updated: "${oldRow?.content}" → "${newRow?.content}". Active in your next chat.`,
+        message: `Updated: "${oldRow?.content}" → "${newRow?.content}". The new value is in effect now — use it for the rest of this chat (it overrides the start-of-chat snapshot) and it loads in future chats.`,
       };
     },
   });
@@ -246,8 +248,8 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
           ? { kind: "forget" as const, id: row.id, category: row.category, content: row.content }
           : undefined,
         message:
-          `Forgotten: ${row?.content}. It won't load in future chats ` +
-          "(restorable from Journal → Memory for 30 days).",
+          `Forgotten: ${row?.content}. It no longer applies — disregard it for the rest of this chat too — ` +
+          "and it won't load in future chats (restorable from Journal → Memory for 30 days).",
       };
     },
   });
@@ -271,6 +273,11 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
           id: r.id,
           category: r.category,
           content: r.content,
+          // Provenance so the model attributes honestly: a `stated` memory the
+          // user set deliberately vs an `inferred` one you picked up from chat
+          // (paraphrased — never quote it back as the user's exact words).
+          origin: r.source === "advisor_tool" ? ("stated" as const) : ("inferred" as const),
+          ...(r.source === "extracted" && r.confidence != null ? { confidence: r.confidence } : {}),
         })),
         message:
           rows.length === 0
@@ -313,6 +320,10 @@ export function createMemoryTools({ userId }: MemoryToolOptions) {
           id: r.id,
           category: r.category,
           content: r.content,
+          // See list_preferences — `stated` vs `inferred` so recalled memories
+          // are attributed honestly, not quoted back as the user's exact words.
+          origin: r.source === "advisor_tool" ? ("stated" as const) : ("inferred" as const),
+          ...(r.source === "extracted" && r.confidence != null ? { confidence: r.confidence } : {}),
           ...(r.detail ? { detail: r.detail } : {}),
         })),
         message:
