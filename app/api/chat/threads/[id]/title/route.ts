@@ -57,24 +57,30 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     let title = fallback;
     const provider = resolveTitleProvider();
     if (provider.ready && provider.model && firstAssistant) {
-      try {
-        const result = await generateText({
-          model: provider.model,
-          temperature: 0.2,
-          maxOutputTokens: 32,
-          system: SYSTEM_PROMPT,
-          messages: [
-            {
-              role: "user",
-              content: `User asked: ${firstUser.content.slice(0, 800)}\n\nAdvisor replied: ${firstAssistant.content.slice(0, 800)}\n\nTitle:`,
-            },
-          ],
-        });
-        const cleaned = cleanTitle(result.text ?? "");
-        if (cleaned) title = cleaned;
-      } catch {
-        // AI failed — keep the heuristic fallback. The chat doesn't need a
-        // perfect title to function, and the user can always rename it.
+      const userContent = `User asked: ${firstUser.content.slice(0, 800)}\n\nAdvisor replied: ${firstAssistant.content.slice(0, 800)}\n\nTitle:`;
+      // Two attempts: a title runs on every first turn and the cost is ~zero
+      // (free tier), so a light retry re-rolls a transient error or an empty/garbage
+      // title — bumping temperature so the retry differs even on a pinned model.
+      // A miss is only cosmetic, so we keep the heuristic fallback and never block.
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const result = await generateText({
+            model: provider.model,
+            temperature: attempt === 1 ? 0.2 : 0.5,
+            maxOutputTokens: 32,
+            system: SYSTEM_PROMPT,
+            messages: [{ role: "user", content: userContent }],
+          });
+          const cleaned = cleanTitle(result.text ?? "");
+          if (cleaned) {
+            title = cleaned;
+            break; // usable title — done
+          }
+          // empty/garbage — retry once, then keep the heuristic fallback.
+        } catch {
+          // AI failed — retry, then keep the heuristic fallback. The chat doesn't
+          // need a perfect title to function, and the user can always rename it.
+        }
       }
     }
 
