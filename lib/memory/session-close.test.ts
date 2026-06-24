@@ -46,7 +46,7 @@ const result = (threadId: string, saved: number, lastTurnId?: number): Extractio
     id: i,
     op: "add" as const,
     targetId: null,
-    category: "fact" as const,
+    category: "user" as const,
     content: "x",
     confidence: 0.9,
     injected: true,

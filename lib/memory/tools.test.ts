@@ -68,13 +68,13 @@ describe("memory tools — memoryEvent (UI contract)", () => {
     await withFresh(async () => {
       const tools = createMemoryTools({ userId: null });
       const out = await run(tools, "save_preference", {
-        category: "response_style",
+        category: "advisor",
         content: "be concise",
       });
       expect(out.ok).toBe(true);
       expect(out.memoryEvent).toMatchObject({
         kind: "save",
-        category: "response_style",
+        category: "advisor",
         content: "be concise",
       });
       expect(typeof out.memoryEvent?.id).toBe("number");
@@ -85,7 +85,7 @@ describe("memory tools — memoryEvent (UI contract)", () => {
     await withFresh(async () => {
       const tools = createMemoryTools({ userId: null });
       const saved = await run(tools, "save_preference", {
-        category: "profile",
+        category: "user",
         content: "retirement age 60",
       });
       const out = await run(tools, "update_preference", {
@@ -102,7 +102,7 @@ describe("memory tools — memoryEvent (UI contract)", () => {
     await withFresh(async () => {
       const tools = createMemoryTools({ userId: null });
       const saved = await run(tools, "save_preference", {
-        category: "fact",
+        category: "user",
         content: "likes index funds",
       });
       const out = await run(tools, "forget_preference", {
@@ -116,7 +116,7 @@ describe("memory tools — memoryEvent (UI contract)", () => {
     await withFresh(async () => {
       const tools = createMemoryTools({ userId: null });
       const saved = await run(tools, "save_preference", {
-        category: "finance_context",
+        category: "user",
         content: "no crypto",
       });
       const out = await run(tools, "confirm_preference", {

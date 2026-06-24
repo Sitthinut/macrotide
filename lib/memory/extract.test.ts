@@ -73,7 +73,7 @@ describe("extractSessionPreferences", () => {
   it("saves parsed facts as source='extracted' with confidence + provenance", async () => {
     h.text = JSON.stringify({
       summary: "User discussed retirement timing.",
-      facts: [{ category: "profile", content: "retirement age: 50", confidence: 0.9 }],
+      facts: [{ category: "user", content: "retirement age: 50", confidence: 0.9 }],
     });
     await withFresh(async () => {
       const threadId = seedThread();
@@ -84,7 +84,7 @@ describe("extractSessionPreferences", () => {
       expect(result.skipped).toBeUndefined();
 
       const saved = result.saved[0];
-      expect(saved.category).toBe("profile");
+      expect(saved.category).toBe("user");
       expect(saved.content).toBe("retirement age: 50");
       expect(saved.injected).toBe(true); // 0.9 >= 0.7
 
@@ -100,7 +100,7 @@ describe("extractSessionPreferences", () => {
   it("marks mid-confidence rows recall-only (saved but not injected)", async () => {
     h.text = JSON.stringify({
       summary: "s",
-      facts: [{ category: "fact", content: "maybe likes gold", confidence: 0.5 }],
+      facts: [{ category: "user", content: "maybe likes gold", confidence: 0.5 }],
     });
     await withFresh(async () => {
       const threadId = seedThread();
@@ -117,7 +117,7 @@ describe("extractSessionPreferences", () => {
   it("drops sub-threshold noise (confidence < 0.3)", async () => {
     h.text = JSON.stringify({
       summary: "s",
-      facts: [{ category: "fact", content: "wild guess", confidence: 0.1 }],
+      facts: [{ category: "user", content: "wild guess", confidence: 0.1 }],
     });
     await withFresh(async () => {
       const result = await extractSessionPreferences(seedThread());
@@ -131,8 +131,8 @@ describe("extractSessionPreferences", () => {
     h.text = JSON.stringify({
       summary: "s",
       facts: [
-        { category: "fact", content: "owns NVDA", confidence: 0.8 },
-        { category: "fact", content: "Owns NVDA", confidence: 0.8 }, // dup (case-insensitive)
+        { category: "user", content: "owns NVDA", confidence: 0.8 },
+        { category: "user", content: "Owns NVDA", confidence: 0.8 }, // dup (case-insensitive)
         { category: "nonsense", content: "bad cat", confidence: 0.9 }, // invalid category
       ],
     });
@@ -183,7 +183,7 @@ describe("reconcile (add / update / skip)", () => {
   it("update against an extracted row supersedes it", async () => {
     await withFresh(async () => {
       const existing = save({
-        category: "profile",
+        category: "user",
         content: "risk tolerance: moderate",
         source: "extracted",
         confidence: 0.8,
@@ -194,7 +194,7 @@ describe("reconcile (add / update / skip)", () => {
           {
             op: "update",
             target_id: existing.id,
-            category: "profile",
+            category: "user",
             content: "risk tolerance: aggressive",
             confidence: 0.85,
           },
@@ -209,9 +209,9 @@ describe("reconcile (add / update / skip)", () => {
   it("update against an EXPLICIT row is skipped, not an override", async () => {
     await withFresh(async () => {
       const explicit = save({
-        category: "finance_context",
+        category: "user",
         content: "funds only, no individual stocks",
-        source: "user_tool",
+        source: "advisor_tool",
       });
       h.text = JSON.stringify({
         summary: "s",
@@ -219,7 +219,7 @@ describe("reconcile (add / update / skip)", () => {
           {
             op: "update",
             target_id: explicit.id,
-            category: "finance_context",
+            category: "user",
             content: "individual stocks are fine now",
             confidence: 0.9,
           },
@@ -239,7 +239,7 @@ describe("reconcile (add / update / skip)", () => {
   it("skip is a no-op (counts as no new facts)", async () => {
     await withFresh(async () => {
       const existing = save({
-        category: "fact",
+        category: "user",
         content: "owns a dog",
         source: "extracted",
         confidence: 0.8,
@@ -250,7 +250,7 @@ describe("reconcile (add / update / skip)", () => {
           {
             op: "skip",
             target_id: existing.id,
-            category: "fact",
+            category: "user",
             content: "has a dog",
             confidence: 0.9,
           },

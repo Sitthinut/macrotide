@@ -136,7 +136,7 @@ describe("closeStaleSessions backstop", () => {
             id: i,
             op: "add" as const,
             targetId: null,
-            category: "fact" as const,
+            category: "user" as const,
             content: "x",
             confidence: 0.9,
             injected: true,
