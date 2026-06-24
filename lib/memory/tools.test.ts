@@ -5,6 +5,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { freshMarketDb } from "@/tests/db-helpers";
 import { runWithDbContext } from "../db/context";
+import { save } from "../db/queries/preferences";
 import * as schema from "../db/schema";
 import { createMemoryTools, type MemoryTools } from "./tools";
 
@@ -123,6 +124,43 @@ describe("memory tools — memoryEvent (UI contract)", () => {
         id_or_substring: String(saved.memoryEvent?.id),
       });
       expect(out.memoryEvent).toMatchObject({ kind: "confirm", id: saved.memoryEvent?.id });
+    });
+  });
+});
+
+describe("memory tools — provenance attribution", () => {
+  it("list/recall mark a deliberately-saved memory `stated` and an extracted one `inferred`", async () => {
+    await withFresh(async () => {
+      const tools = createMemoryTools({ userId: null });
+      // One the user set via the tool (advisor_tool) ...
+      await run(tools, "save_preference", {
+        category: "user",
+        content: "no individual stocks, funds only",
+      });
+      // ... and one auto-extracted from a past chat (a paraphrase/inference).
+      save({
+        category: "user",
+        content: "leans conservative",
+        source: "extracted",
+        confidence: 0.8,
+      });
+
+      const listed = (await run(tools, "list_preferences", {})) as unknown as {
+        rows: Array<{ content: string; origin: string; confidence?: number }>;
+      };
+      const stated = listed.rows.find((r) => r.content.includes("individual stocks"));
+      const inferred = listed.rows.find((r) => r.content.includes("conservative"));
+      // A stated memory carries no confidence; an inferred one is flagged + scored,
+      // so the Advisor can hedge it instead of quoting it as the user's words.
+      expect(stated?.origin).toBe("stated");
+      expect(stated?.confidence).toBeUndefined();
+      expect(inferred?.origin).toBe("inferred");
+      expect(inferred?.confidence).toBe(0.8);
+
+      const recalled = (await run(tools, "recall_preferences", {
+        query: "conservative",
+      })) as unknown as { rows: Array<{ origin: string }> };
+      expect(recalled.rows[0]?.origin).toBe("inferred");
     });
   });
 });
