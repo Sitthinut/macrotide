@@ -38,7 +38,7 @@ plan, and journal — including plan edits it proposes as accept/reject cards.
 
 - **Grounded streaming chat** — knows your real portfolio, plan, and journal, with tool-calls, accept/reject proposal cards, performance-vs-index and plan-anchored rebalancing guidance
 - **In-chat vision** — attach images for multi-image holdings reconciliation (snapshot vs transaction-history auto-detected) into an editable importer, plus chart and factsheet Q&A
-- **Long-term memory + chat archival** — recall, full-text search, and session lifecycle with preference extraction; you correct the Advisor in words (no ratings bar) and it remembers, with every write shown inline and reversible
+- **Long-term memory + chat archival** — the Advisor remembers durable facts and preferences across sessions and keeps that memory bounded, current, and self-tidying (duplicates merged, out-of-date facts retired); you correct it in plain words (no ratings bar), and every memory is searchable, shown inline, and reversible
 - **Built to be reliable** — empty-turn recovery, multi-provider fallback, a configurable cheap-paid public tier with token and cost caps, and a committed eval harness in CI
 
 **Funds & markets**

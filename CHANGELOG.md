@@ -25,6 +25,18 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   memory no longer clutters "Recently forgotten" with old versions. Each memory
   keeps a short headline plus optional longer detail recalled when needed.
 
+- **The Advisor acts on a memory you change mid-chat right away, and stops holding
+  stale contradictions.** Saving, updating, or forgetting a memory during a
+  conversation now takes effect for the rest of that chat (e.g. "I just retired —
+  play it safe now" changes the advice immediately) instead of waiting for the next
+  session. Behind the scenes, when two saved facts about the same thing conflict
+  the background sweep retires the outdated one (the more recent wins; an explicitly
+  stated fact is never overridden by something inferred), and a newly-learned detail
+  folds into the note it extends instead of piling up a near-duplicate. And when you
+  ask what it remembers, the Advisor speaks of its memories as its own notes —
+  hedging the ones it inferred from conversation rather than quoting them back as
+  your exact words.
+
 - **Chart popovers no longer hide behind the side panel.** The tap-to-define term
   tooltip, the `Cash` first-use hint, and the `+ Compare` and `+ Add` menus now
   float above the open detail panel (rendered in a portal) instead of being clipped

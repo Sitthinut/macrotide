@@ -56,7 +56,8 @@ env-overridable — see the `*_REASONING_*` rows in configuration.md.
 | Public chat | `PUBLIC_TIER_MODELS` | `openrouter/free` | `google/gemini-2.5-flash-lite,google/gemini-3.1-flash-lite,openai/gpt-4.1-mini` | `none` (`PUBLIC_REASONING_EFFORT`; set `low` if you run grok) |
 | Demo chat | `DEMO_TIER_MODELS` | `openrouter/free` | `openrouter/free` | `none` (`DEMO_REASONING_EFFORT`) + retry-on-400 |
 | Title | `TITLE_MODELS` | `openrouter/free` | `openrouter/free,google/gemini-2.5-flash-lite,google/gemini-3.1-flash-lite` | `none` |
-| Memory extract | `EXTRACT_MODELS` | `openrouter/free` (via `TITLE_MODELS`) | `google/gemini-2.5-flash-lite,google/gemini-3.1-flash-lite,openai/gpt-4.1-mini` | `none` (reasoning corrupts its JSON) |
+| Memory extract | `EXTRACT_MODELS` | `openrouter/free` (via `TITLE_MODELS`) | `google/gemini-2.5-flash-lite,google/gemini-3.1-flash-lite,openai/gpt-4.1-mini` | `none` (a summarize-extract pass doesn't need CoT; reasoning just spends the output budget) |
+| Memory consolidate | `CONSOLIDATE_MODELS` | `openai/gpt-oss-20b:free,cohere/north-mini-code:free,openrouter/free` | `openai/gpt-oss-20b:free,cohere/north-mini-code:free,google/gemini-2.5-flash-lite,google/gemini-3.1-flash-lite` (last = paid backstop, ~$0.10–0.40/M) | `low` (`CONSOLIDATE_REASONING_EFFORT`) — reasoning **ON** |
 | Vision (chat) | `VISION_CHAT_MODELS` | `google/gemini-2.5-flash-lite,google/gemini-3.1-flash-lite` | = default | `none` (structured-output guard) |
 | OCR (import) | `OCR_MODELS` | `google/gemini-2.5-flash-lite,google/gemini-3.1-flash-lite` | = default | `none`/`low` |
 | Vision escalate | `VISION_CHAT_ESCALATE_MODELS` | unset | unset (cheap vision handles charts) | owner/trusted only |
@@ -67,8 +68,30 @@ is mandatory / cannot be disabled" (free models that can't disable reasoning), s
 disable-path turn isn't lost; and the **`*_REASONING_*` env overrides**, so the
 reasoning policy tracks the chosen model (point public at grok → `PUBLIC_REASONING_EFFORT=low`).
 Why **extract is paid-primary**: a probe found `openrouter/free` extraction is a
-quality lottery (1–6 facts, and *empty/unparseable JSON* at default reasoning),
+quality lottery (1–6 facts, and sometimes *empty/unparseable JSON* from the weak free
+models it lands on — not a reasoning artefact: reasoning rides its own channel),
 while `gemini-2.5-flash-lite` returned 9/9 facts, clean JSON, ~1.7s, ~$0.0005/run.
+Extraction still pins reasoning `none` simply because a summarize-and-extract pass
+doesn't need chain-of-thought and it would only spend the limited output budget.
+
+Why **consolidate is reasoning-ON** while extract is `none`: the consolidation sweep
+(`resolveConsolidateProvider`) is **offline + infrequent**, so it can afford
+chain-of-thought to judge which saved memories are genuine duplicates and propose
+merges — exactly where reasoning improves precision. Reasoning lands in OpenRouter's
+**own channel** (verified 2026-06-23 — true even for the `openrouter/free` meta-router,
+which *does* honour a reasoning request and routes it to a reasoning-capable free
+model), so it never pollutes the JSON the proposer parses. We pin **known-good free
+reasoning models** on **different providers** (`openai/gpt-oss-20b:free` + `cohere/north-mini-code:free`,
+both probed clean on the real prompt 2026-06-24) ahead of `openrouter/free` not for the
+JSON channel but for **quality consistency**: the meta-router picks an arbitrary free
+model each call and can land on a tiny one that ignores the JSON-only instruction (a
+no-op run), so it sits **last** as an availability fallback. The chain does **not**
+fall back to the extractor/title chains — an unset `CONSOLIDATE_MODELS` keeps
+reasoning. Free-tier limits comfortably cover a per-user daily sweep; for a reliable paid
+backstop append `google/gemini-2.5-flash-lite,google/gemini-3.1-flash-lite` (~$0.10–0.40/M,
+bounded reasoning, also probed clean) — **not** a thinking-only model like
+`qwen3-235b-a22b-thinking`, whose mandatory reasoning ate the output budget and truncated
+the JSON in testing.
 
 **Route by tool-call reliability, not just price.**
 For an advisor, a dropped or garbled tool call puts a *wrong number on screen* —
