@@ -105,7 +105,11 @@ export async function proposeConsolidation(
         // Bump temperature on retries so a deterministic pinned model actually
         // varies its output (the meta-router already re-rolls on its own).
         temperature: attempt === 1 ? 0.1 : 0.4,
-        maxOutputTokens: 800,
+        // Generous on purpose: chain fallbacks can be reasoning-heavy models that
+        // spend 800+ tokens on CoT before emitting any JSON. A tight cap truncates the
+        // answer to finish_reason "length" (empty content → unparseable). 4096 leaves
+        // room for reasoning + the ops array even on a large category.
+        maxOutputTokens: 4096,
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: userContent }],
       });
