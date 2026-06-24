@@ -10,7 +10,13 @@ import { listActive, save } from "../db/queries/preferences";
 import * as schema from "../db/schema";
 
 // Mutable knobs shared with the hoisted module mocks below.
-const h = vi.hoisted(() => ({ ready: true, text: "", shouldThrow: false }));
+const h = vi.hoisted(() => ({
+  ready: true,
+  text: "",
+  shouldThrow: false,
+  texts: [] as string[],
+  calls: 0,
+}));
 
 vi.mock("../ai/provider", () => ({
   resolveExtractorProvider: () => ({
@@ -22,6 +28,14 @@ vi.mock("../ai/provider", () => ({
 
 vi.mock("ai", () => ({
   generateText: vi.fn(async () => {
+    h.calls++;
+    // A queue (h.texts) drives multi-call retry tests; "__throw__" simulates a
+    // transport error. An empty queue falls back to the single h.text/h.shouldThrow.
+    if (h.texts.length > 0) {
+      const t = h.texts.shift() ?? "";
+      if (t === "__throw__") throw new Error("model exploded");
+      return { text: t };
+    }
     if (h.shouldThrow) throw new Error("model exploded");
     return { text: h.text };
   }),
@@ -67,6 +81,8 @@ beforeEach(() => {
   h.ready = true;
   h.text = "";
   h.shouldThrow = false;
+  h.texts = [];
+  h.calls = 0;
 });
 
 describe("extractSessionPreferences", () => {
@@ -206,6 +222,37 @@ describe("reconcile (add / update / skip)", () => {
     });
   });
 
+  it("update that EXTENDS an extracted row folds in the combined content", async () => {
+    await withFresh(async () => {
+      const existing = save({
+        category: "user",
+        content: "risk tolerance: moderate",
+        source: "extracted",
+        confidence: 0.8,
+      });
+      // The model reconciles a newly-mentioned horizon as an EXTEND of the
+      // existing note — combined content, not a second near-duplicate row.
+      h.text = JSON.stringify({
+        summary: "s",
+        facts: [
+          {
+            op: "update",
+            target_id: existing.id,
+            category: "user",
+            content: "risk tolerance: moderate; 20-year horizon",
+            confidence: 0.82,
+          },
+        ],
+      });
+      const result = await extractSessionPreferences(seedThread());
+      expect(result.saved[0]?.applied).toBe("updated");
+      // One active row, carrying the combined content — the narrower note is gone.
+      expect(listActive().map((r) => r.content)).toEqual([
+        "risk tolerance: moderate; 20-year horizon",
+      ]);
+    });
+  });
+
   it("update against an EXPLICIT row is skipped, not an override", async () => {
     await withFresh(async () => {
       const explicit = save({
@@ -259,6 +306,34 @@ describe("reconcile (add / update / skip)", () => {
       const result = await extractSessionPreferences(seedThread());
       expect(result.skipped).toBe("no_facts");
       expect(listActive()).toHaveLength(1);
+    });
+  });
+});
+
+describe("in-session retry on unparseable output", () => {
+  it("retries past a transport error and an unparseable response, then succeeds", async () => {
+    await withFresh(async () => {
+      h.texts = [
+        "not json at all",
+        "__throw__",
+        JSON.stringify({
+          summary: "s",
+          facts: [{ category: "user", content: "likes gold", confidence: 0.9 }],
+        }),
+      ];
+      const result = await extractSessionPreferences(seedThread());
+      expect(h.calls).toBe(3);
+      expect(result.skipped).toBeUndefined();
+      expect(result.saved.map((s) => s.content)).toEqual(["likes gold"]);
+    });
+  });
+
+  it("gives up as model_error after the max attempts on persistent garbage", async () => {
+    await withFresh(async () => {
+      h.texts = ["garbage", "garbage", "garbage", "garbage"];
+      const result = await extractSessionPreferences(seedThread());
+      expect(h.calls).toBe(3);
+      expect(result.skipped).toBe("model_error");
     });
   });
 });
