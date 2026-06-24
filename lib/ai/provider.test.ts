@@ -282,6 +282,11 @@ describe("provider-agnostic cache affinity", () => {
     expect(g.body.session_id).toBeUndefined();
   });
 
+  it("caps the models fallback array at 3 (OpenRouter's limit) — extras dropped", async () => {
+    const { body } = await capture("a/one,b/two,c/three,d/four", "t-cap");
+    expect(body.models).toEqual(["a/one", "b/two", "c/three"]);
+  });
+
   it("no conversationId → no affinity signal at all", async () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
     process.env.TRUSTED_TIER_MODELS = "x-ai/grok-4.3";

@@ -61,10 +61,11 @@ const EXTRACT_MODELS_DEFAULT = ["openrouter/free"];
 // occasionally mis-merged a contradiction, so it sits LAST (a wrong merge is reversible
 // and the proposer retries on bad JSON). Bigger free models (gpt-oss-120b, nemotron)
 // are blocked by the account's strict data policy — which we KEEP, as it keeps personal
-// memory data off training-logging providers. For guaranteed completion append a cheap
-// paid model via `CONSOLIDATE_MODELS` (google/gemini-2.5-flash-lite — bounded reasoning,
-// also verified; NOT a thinking-only model like qwen3-235b-thinking, whose reasoning
-// eats the output budget and truncates the JSON). The `:free` tiers churn — re-verify
+// memory data off training-logging providers. For guaranteed completion swap the trailing
+// `openrouter/free` for a cheap paid model via `CONSOLIDATE_MODELS` (google/gemini-3.1-flash-lite
+// — bounded reasoning, also verified; NOT a thinking-only model like qwen3-235b-thinking, whose
+// reasoning eats the output budget and truncates the JSON). Keep the chain ≤ 3 (OpenRouter's
+// models[] cap — see OPENROUTER_MAX_MODELS). The `:free` tiers churn — re-verify
 // against /api/v1/models before changing.
 const CONSOLIDATE_MODELS_DEFAULT = [
   "openai/gpt-oss-20b:free",
@@ -142,6 +143,12 @@ function cacheAffinity(
   return {};
 }
 
+// OpenRouter's `models` fallback array (primary + alternates) is capped at 3 items —
+// a longer array 400s ("'models' array must have 3 items or fewer"), which dead-fails
+// EVERY request on that chain. Cap defensively so an over-long *_MODELS env degrades to
+// the first 3 (best-by-order) instead of breaking the path entirely.
+const OPENROUTER_MAX_MODELS = 3;
+
 function openrouter(apiKey: string, models: string[], opts: OpenRouterOpts = {}): LanguageModel {
   const [primary, ...rest] = models;
   const injectModels = rest.length > 0;
@@ -171,7 +178,7 @@ function openrouter(apiKey: string, models: string[], opts: OpenRouterOpts = {})
             if (init && typeof init.body === "string") {
               try {
                 const body = JSON.parse(init.body);
-                if (injectModels) body.models = models;
+                if (injectModels) body.models = models.slice(0, OPENROUTER_MAX_MODELS);
                 if (injectReasoning) body.reasoning = { effort: opts.reasoningEffort };
                 if (injectAffinityBody) Object.assign(body, affinity.body);
                 init = { ...init, body: JSON.stringify(body) };

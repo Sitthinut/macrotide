@@ -57,10 +57,14 @@ env-overridable — see the `*_REASONING_*` rows in configuration.md.
 | Demo chat | `DEMO_TIER_MODELS` | `openrouter/free` | `openrouter/free` | `none` (`DEMO_REASONING_EFFORT`) + retry-on-400 |
 | Title | `TITLE_MODELS` | `openrouter/free` | `openrouter/free,google/gemini-2.5-flash-lite,google/gemini-3.1-flash-lite` | `none` |
 | Memory extract | `EXTRACT_MODELS` | `openrouter/free` (via `TITLE_MODELS`) | `google/gemini-2.5-flash-lite,google/gemini-3.1-flash-lite,openai/gpt-4.1-mini` | `none` (a summarize-extract pass doesn't need CoT; reasoning just spends the output budget) |
-| Memory consolidate | `CONSOLIDATE_MODELS` | `openai/gpt-oss-20b:free,cohere/north-mini-code:free,openrouter/free` | `openai/gpt-oss-20b:free,cohere/north-mini-code:free,google/gemini-2.5-flash-lite,google/gemini-3.1-flash-lite` (last = paid backstop, ~$0.10–0.40/M) | `low` (`CONSOLIDATE_REASONING_EFFORT`) — reasoning **ON** |
+| Memory consolidate | `CONSOLIDATE_MODELS` | `openai/gpt-oss-20b:free,cohere/north-mini-code:free,openrouter/free` | `openai/gpt-oss-20b:free,cohere/north-mini-code:free,google/gemini-3.1-flash-lite` (last = paid backstop) | `low` (`CONSOLIDATE_REASONING_EFFORT`) — reasoning **ON** |
 | Vision (chat) | `VISION_CHAT_MODELS` | `google/gemini-2.5-flash-lite,google/gemini-3.1-flash-lite` | = default | `none` (structured-output guard) |
 | OCR (import) | `OCR_MODELS` | `google/gemini-2.5-flash-lite,google/gemini-3.1-flash-lite` | = default | `none`/`low` |
 | Vision escalate | `VISION_CHAT_ESCALATE_MODELS` | unset | unset (cheap vision handles charts) | owner/trusted only |
+
+> **Every chain is capped at 3.** OpenRouter's `models[]` fallback array rejects more
+> than 3 entries (a longer chain 400s and dead-fails every request), so `openrouter()`
+> trims to the first 3 (best-by-order). Keep suggested chains ≤ 3.
 
 Two cross-cutting mechanisms make the `none` pins robust: **retry-on-400** —
 `openrouter()` retries once without the reasoning field when a model 400s "reasoning
@@ -88,7 +92,7 @@ model each call and can land on a tiny one that ignores the JSON-only instructio
 no-op run), so it sits **last** as an availability fallback. The chain does **not**
 fall back to the extractor/title chains — an unset `CONSOLIDATE_MODELS` keeps
 reasoning. Free-tier limits comfortably cover a per-user daily sweep; for a reliable paid
-backstop append `google/gemini-2.5-flash-lite,google/gemini-3.1-flash-lite` (~$0.10–0.40/M,
+backstop swap the trailing `openrouter/free` for `google/gemini-3.1-flash-lite` (~$0.10–0.40/M,
 bounded reasoning, also probed clean) — **not** a thinking-only model like
 `qwen3-235b-a22b-thinking`, whose mandatory reasoning ate the output budget and truncated
 the JSON in testing.
