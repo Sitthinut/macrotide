@@ -991,6 +991,16 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Fixed
 
+- **Allocation tooltips tint to their chart color and stay readable in dark
+  mode.** The drift-from-target tooltip used to render near-black (the bars carry
+  color only on their cells, so the chart library had none to apply), unreadable
+  on the dark tooltip background. Both the drift and allocation-donut tooltips now
+  tint each value to its own bar/slice color, with a theme-safe fallback for any
+  element that lacks one.
+- **Long chart tooltips no longer overflow the screen on mobile.** Tooltips with
+  a long line — most visibly the drift-from-target rows — are now width-capped
+  and wrap onto multiple lines instead of running off the chart and past the
+  container edge on a narrow phone.
 - **Switching between a phone and a desktop layout no longer drops the open
   Advisor chat.** The conversation — including an in-flight reply and unsent
   composer text — is held by a single chat instance that moves between the

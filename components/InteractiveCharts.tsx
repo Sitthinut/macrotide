@@ -41,6 +41,12 @@ const TOOLTIP_STYLE: React.CSSProperties = {
   padding: "7px 10px",
   fontSize: 12,
   boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
+  // Cap the width so a long line (e.g. a drift row, or a "฿X · +Y%" value) wraps
+  // instead of running off the chart and past the container on a narrow phone.
+  // whiteSpace override is needed because recharts' built-in tooltip defaults its
+  // content to `nowrap`, which would otherwise defeat the maxWidth and clip.
+  maxWidth: "min(260px, 78vw)",
+  whiteSpace: "normal",
 };
 const TOOLTIP_LABEL: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
@@ -971,6 +977,23 @@ export function AllocationDonut({
       />
     );
   }
+  // Custom content so each value tints to its slice color (entry.color), with a
+  // theme-safe ink fallback if a slice ever lacks one — readable in either theme.
+  const renderTooltip = (props: {
+    active?: boolean;
+    payload?: readonly { payload?: AllocationSlice }[];
+  }) => {
+    const slice = props.payload?.[0]?.payload;
+    if (!props.active || !slice) return null;
+    return (
+      <div style={TOOLTIP_STYLE}>
+        <div style={TOOLTIP_LABEL}>{slice.label}</div>
+        <div style={{ color: slice.color || "var(--ink)", fontVariantNumeric: "tabular-nums" }}>
+          {`${fmtTHBClean(slice.value)} · ${slice.pct.toFixed(1)}%`}
+        </div>
+      </div>
+    );
+  };
   return (
     <ResponsiveContainer width="100%" height={height}>
       <PieChart>
@@ -989,17 +1012,7 @@ export function AllocationDonut({
             <Cell key={slice.key} fill={slice.color} />
           ))}
         </Pie>
-        <Tooltip
-          contentStyle={TOOLTIP_STYLE}
-          labelStyle={TOOLTIP_LABEL}
-          formatter={(value, _name, item) => {
-            const slice = item?.payload as AllocationSlice | undefined;
-            return [
-              `${fmtTHBClean(Number(value))} · ${(slice?.pct ?? 0).toFixed(1)}%`,
-              slice?.label,
-            ];
-          }}
-        />
+        <Tooltip content={renderTooltip} />
       </PieChart>
     </ResponsiveContainer>
   );
@@ -1033,6 +1046,28 @@ export function DriftBars({
     if (Math.abs(drift) <= tolerancePp) return "var(--gain)";
     return drift > 0 ? "var(--amber)" : "var(--info)";
   };
+  // Custom content so the detail line tints to the bar's own color (the
+  // over/under/on-target hue), with a theme-safe ink fallback. recharts' default
+  // tooltip can't do this: the color lives on per-Cell fills, so it would fall
+  // back to near-black instead.
+  const renderTooltip = (props: {
+    active?: boolean;
+    payload?: readonly { payload?: SleeveDrift }[];
+  }) => {
+    const p = props.payload?.[0]?.payload;
+    if (!props.active || !p) return null;
+    const sign = p.drift > 0 ? "+" : "";
+    return (
+      <div style={TOOLTIP_STYLE}>
+        <div style={TOOLTIP_LABEL}>{p.label}</div>
+        <div
+          style={{ color: colorFor(p.drift) || "var(--ink)", fontVariantNumeric: "tabular-nums" }}
+        >
+          {`${p.current.toFixed(1)}% now vs ${p.target.toFixed(1)}% target (${sign}${p.drift.toFixed(1)}pp)`}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -1047,19 +1082,7 @@ export function DriftBars({
           width={70}
         />
         <ReferenceLine x={0} stroke="var(--line)" />
-        <Tooltip
-          cursor={{ fill: "var(--line-soft)" }}
-          contentStyle={TOOLTIP_STYLE}
-          labelStyle={TOOLTIP_LABEL}
-          formatter={(_value, _name, item) => {
-            const p = item?.payload as SleeveDrift;
-            const sign = p.drift > 0 ? "+" : "";
-            return [
-              `${p.current.toFixed(1)}% now vs ${p.target.toFixed(1)}% target (${sign}${p.drift.toFixed(1)}pp)`,
-              p.label,
-            ];
-          }}
-        />
+        <Tooltip cursor={{ fill: "var(--line-soft)" }} content={renderTooltip} />
         <Bar dataKey="drift" radius={[2, 2, 2, 2]} isAnimationActive={false}>
           {rows.map((r) => (
             <Cell key={r.ticker} fill={colorFor(r.drift)} />
