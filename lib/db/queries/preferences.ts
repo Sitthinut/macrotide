@@ -5,23 +5,17 @@
 // Row scoping is fail-closed via {@link ownedBy} (reads the request user from
 // context — see lib/db/queries/scope.ts), identical to journal/buckets/chat.
 import "server-only";
-import { and, desc, eq, gt, isNotNull, isNull, like, lt, or, sql } from "drizzle-orm";
-import { getDb } from "../context";
+import { and, desc, eq, gt, inArray, isNotNull, isNull, like, lt, sql } from "drizzle-orm";
+import { getDb, getDbContext, getUserId } from "../context";
 import { memoryLinks, userPreferences } from "../schema";
 import { ownedBy, ownerId } from "./scope";
 
 export type Preference = typeof userPreferences.$inferSelect;
 export type MemoryLink = typeof memoryLinks.$inferSelect;
-export type PreferenceCategory = "profile" | "finance_context" | "response_style" | "fact";
-export type PreferenceSource = "user_tool" | "advisor_tool" | "extracted";
-export type PreferenceStatus = "active" | "pending";
+export type PreferenceCategory = "user" | "advisor";
+export type PreferenceSource = "advisor_tool" | "extracted";
 
-const CATEGORIES: readonly PreferenceCategory[] = [
-  "profile",
-  "finance_context",
-  "response_style",
-  "fact",
-] as const;
+const CATEGORIES: readonly PreferenceCategory[] = ["user", "advisor"] as const;
 
 export function isCategory(value: string): value is PreferenceCategory {
   return (CATEGORIES as readonly string[]).includes(value);
@@ -29,8 +23,6 @@ export function isCategory(value: string): value is PreferenceCategory {
 
 // The active set for the current request's user: their own rows (or the
 // single-owner NULL set when no user is in context), not yet superseded.
-// Includes both 'active' and 'pending' rows — `pending` is recall-only, gated
-// out of injection by inject.ts, not hidden from listing/recall.
 function activeScope() {
   return and(ownedBy(userPreferences.userId), isNull(userPreferences.validUntil));
 }
@@ -46,33 +38,74 @@ export function listActive(category?: PreferenceCategory): Preference[] {
     .all();
 }
 
-/**
- * Cold-recall complement to the always-on injection: find ACTIVE preferences
- * relevant to a free-text query. Tokenizes the query on Unicode letters/numbers
- * and returns active rows whose content matches ANY token (case-insensitive
- * substring — same matching style as resolveActive's substring path, but OR'd
- * across tokens so recall is generous). Ordered by (category, id) like
- * listActive; empty/blank queries return []. Optionally capped by `limit`.
- */
-export function recall(query: string, limit = 20): Preference[] {
-  const tokens = query.toLowerCase().match(/[\p{L}\p{N}]+/gu);
-  if (!tokens || tokens.length === 0) return [];
-  const tokenMatches = tokens.map((t) => like(userPreferences.content, `%${t}%`));
-  const rows = getDb()
-    .select()
-    .from(userPreferences)
-    .where(and(activeScope(), or(...tokenMatches)))
-    .orderBy(userPreferences.category, userPreferences.id)
-    .all();
-  return rows.slice(0, limit);
+export interface RecallResult {
+  /** Top `limit` active rows, most-relevant first (BM25). */
+  rows: Preference[];
+  /** Total active rows matching the query (≥ rows.length when truncated). */
+  total: number;
 }
 
+/** Build a safe FTS5 MATCH expression: tokenize on letters/numbers, quote each,
+ * append `*` for prefix match, OR-joined so recall stays generous ("any word")
+ * while BM25 ranks the best matches first. Returns null when no usable tokens. */
+function toFtsMatch(query: string): string | null {
+  const tokens = query.toLowerCase().match(/[\p{L}\p{N}]+/gu);
+  if (!tokens || tokens.length === 0) return null;
+  return tokens.map((t) => `"${t}"*`).join(" OR ");
+}
+
+/**
+ * Cold-recall complement to the always-on injection: find ACTIVE preferences
+ * relevant to a free-text query, ranked by **BM25** over `content` + `detail`
+ * (the `user_preferences_fts` external-content index). Best-first, capped at
+ * `limit`, with the true `total` so the caller can tell the model when the tail
+ * is truncated. Empty/blank queries return no rows.
+ */
+export function recall(query: string, limit = 50): RecallResult {
+  const match = toFtsMatch(query);
+  if (match === null) return { rows: [], total: 0 };
+  const sqlite = getDbContext().appSqlite;
+  const userId = getUserId();
+  const ownerClause = userId === null ? "p.user_id IS NULL" : "p.user_id = ?";
+  const ownerParams = userId === null ? [] : [userId];
+  // FTS ranks + scopes (active rows only, owner-scoped); ids come back best-first.
+  const baseFrom = `FROM user_preferences_fts f JOIN user_preferences p ON p.id = f.rowid
+     WHERE user_preferences_fts MATCH ? AND p.valid_until IS NULL AND ${ownerClause}`;
+  const idRows = sqlite
+    .prepare(`SELECT f.rowid AS id ${baseFrom} ORDER BY bm25(user_preferences_fts) LIMIT ?`)
+    .all(match, ...ownerParams, limit) as Array<{ id: number }>;
+  const totalRow = sqlite
+    .prepare(`SELECT COUNT(*) AS n ${baseFrom}`)
+    .get(match, ...ownerParams) as { n: number };
+  const ids = idRows.map((r) => r.id);
+  if (ids.length === 0) return { rows: [], total: totalRow.n };
+  // Hydrate to typed rows via drizzle, then restore the BM25 order.
+  const fetched = getDb()
+    .select()
+    .from(userPreferences)
+    .where(and(ownedBy(userPreferences.userId), inArray(userPreferences.id, ids)))
+    .all();
+  const byId = new Map(fetched.map((r) => [r.id, r]));
+  const rows = ids.map((id) => byId.get(id)).filter((r): r is Preference => r != null);
+  return { rows, total: totalRow.n };
+}
+
+// Recently-forgotten = rows the user DELIBERATELY forgot in the last `days`.
+// A row superseded by an update/merge also has `valid_until` set, but it is NOT
+// a forget — it carries `superseded_by`, so we exclude it (edit-history must not
+// surface in the undo queue, and restoring it would double-activate).
 export function listRecentlyForgotten(days = 30): Preference[] {
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
   return getDb()
     .select()
     .from(userPreferences)
-    .where(and(ownedBy(userPreferences.userId), gt(userPreferences.validUntil, cutoff)))
+    .where(
+      and(
+        ownedBy(userPreferences.userId),
+        gt(userPreferences.validUntil, cutoff),
+        isNull(userPreferences.supersededBy),
+      ),
+    )
     .orderBy(desc(userPreferences.validUntil))
     .all();
 }
@@ -89,12 +122,8 @@ export interface SaveInput {
   category: PreferenceCategory;
   content: string;
   source: PreferenceSource;
-  // Short index injected into the hot block; the longer `body` is recall-only.
-  summary?: string | null;
-  body?: string | null;
-  // 'pending' = captured but recall-only until the user confirms (used for
-  // money-sensitive / weak-signal writes). Defaults to 'active'.
-  status?: PreferenceStatus;
+  // Optional longer elaboration, recall-only (never injected).
+  detail?: string | null;
   sourceSessionId?: string | null;
   sourceTurnIds?: number[] | null;
   confidence?: number | null;
@@ -110,7 +139,15 @@ export function save(input: SaveInput): Preference {
   // so within one chat the Advisor can't see a fact it already saved this
   // session and may re-save the exact same line. Without this, repeated
   // "remember X" in one session piles up identical rows.
-  const norm = (s: string) => s.trim().toLowerCase();
+  // Normalize for the exact-dup check: trim, lowercase, collapse internal
+  // whitespace, strip trailing punctuation. Catches near-EXACT re-saves for free;
+  // semantic near-dups stay the consolidation sweep's job.
+  const norm = (s: string) =>
+    s
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .replace(/[.!?,;:]+$/, "");
   const dup = listActive(input.category).find((r) => norm(r.content) === norm(input.content));
   if (dup) return dup;
   return getDb()
@@ -119,9 +156,7 @@ export function save(input: SaveInput): Preference {
       userId: ownerId(),
       category: input.category,
       content: input.content,
-      summary: input.summary ?? null,
-      body: input.body ?? null,
-      status: input.status ?? "active",
+      detail: input.detail ?? null,
       source: input.source,
       sourceSessionId: input.sourceSessionId ?? null,
       sourceTurnIds: input.sourceTurnIds ?? null,
@@ -180,15 +215,15 @@ export function forget(idOrSubstring: string): ResolveResult {
 }
 
 // Confirm a fact the user affirmed: bump last_confirmed_at (the anti-stale
-// reinforcement signal — only ever set on affirmation, never on recall/inject)
-// and promote a 'pending' capture to 'active' so it begins injecting next chat.
+// reinforcement signal — only ever set on affirmation, never on recall/inject),
+// which exempts an extracted row from decay so a re-affirmed fact reads as current.
 export function confirm(idOrSubstring: string): ResolveResult {
   const resolved = resolveActive(idOrSubstring);
   if (resolved.kind !== "match" || !resolved.row) return resolved;
   const now = new Date().toISOString();
   const updated = getDb()
     .update(userPreferences)
-    .set({ lastConfirmedAt: now, status: "active", updatedAt: now })
+    .set({ lastConfirmedAt: now, updatedAt: now })
     .where(eq(userPreferences.id, resolved.row.id))
     .returning()
     .get();
@@ -200,8 +235,9 @@ export function confirm(idOrSubstring: string): ResolveResult {
 // Links pointing at the old row are re-pointed to the new row in the same txn
 // so a bitemporal supersede never orphans them.
 export interface UpdateOptions {
-  summary?: string | null;
-  body?: string | null;
+  detail?: string | null;
+  /** Optional category change (consolidation recategorize / escape path). */
+  category?: PreferenceCategory;
 }
 
 export interface UpdateResult {
@@ -226,21 +262,16 @@ export function update(
 function supersede(old: Preference, newContent: string, opts: UpdateOptions = {}): UpdateResult {
   const now = new Date().toISOString();
   return getDb().transaction((tx) => {
-    const oldRow = tx
-      .update(userPreferences)
-      .set({ validUntil: now, updatedAt: now })
-      .where(eq(userPreferences.id, old.id))
-      .returning()
-      .get();
+    // Insert the replacement first so its id exists, then end-date the old row
+    // and point its `superseded_by` at the new one (distinguishes edit-history
+    // from a deliberate forget — see listRecentlyForgotten).
     const newRow = tx
       .insert(userPreferences)
       .values({
         userId: old.userId,
-        category: old.category,
+        category: opts.category ?? old.category,
         content: newContent,
-        summary: opts.summary !== undefined ? opts.summary : old.summary,
-        body: opts.body !== undefined ? opts.body : old.body,
-        status: old.status,
+        detail: opts.detail !== undefined ? opts.detail : old.detail,
         source: old.source,
         sourceSessionId: old.sourceSessionId,
         sourceTurnIds: old.sourceTurnIds,
@@ -253,6 +284,12 @@ function supersede(old: Preference, newContent: string, opts: UpdateOptions = {}
       })
       .returning()
       .get();
+    const oldRow = tx
+      .update(userPreferences)
+      .set({ validUntil: now, supersededBy: newRow.id, updatedAt: now })
+      .where(eq(userPreferences.id, old.id))
+      .returning()
+      .get();
     // Re-point links so the supersede doesn't orphan them.
     tx.update(memoryLinks).set({ fromId: newRow.id }).where(eq(memoryLinks.fromId, old.id)).run();
     tx.update(memoryLinks).set({ toId: newRow.id }).where(eq(memoryLinks.toId, old.id)).run();
@@ -261,11 +298,10 @@ function supersede(old: Preference, newContent: string, opts: UpdateOptions = {}
 }
 
 // Supersede driven by auto-extraction. Trust-tiered guard (ADR 0006 §3/§6):
-// an extracted fact may only supersede ANOTHER extracted row — never an
-// explicit `user_tool`/`advisor_tool` note (lower-trust inference must not
-// override what the user directly stated). Returns `rejected` when the target
-// isn't an extraction-superseding candidate so the caller can fall back to a
-// pending confirmation candidate instead.
+// an extracted fact may only supersede ANOTHER extracted row — never an explicit
+// `advisor_tool` note (lower-trust inference must not override what the user
+// directly stated). Returns `rejected` when the target isn't an
+// extraction-superseding candidate so the caller can skip rather than override.
 export type ExtractionSupersedeResult =
   | { ok: true; result: UpdateResult }
   | { ok: false; rejected: "not_found" | "not_extracted" };
@@ -283,7 +319,9 @@ export function updateFromExtraction(
 }
 
 // Restore a recently-forgotten row by clearing valid_until. Scoped to the
-// current user so one account can't restore another's forgotten row.
+// current user so one account can't restore another's forgotten row. Only
+// restores a DELIBERATELY-forgotten row (`superseded_by IS NULL`): an edit-history
+// row has a live successor, so reviving it would double-activate the memory.
 export function restore(id: number): Preference | undefined {
   const now = new Date().toISOString();
   return getDb()
@@ -294,10 +332,47 @@ export function restore(id: number): Preference | undefined {
         eq(userPreferences.id, id),
         ownedBy(userPreferences.userId),
         sql`${userPreferences.validUntil} IS NOT NULL`,
+        isNull(userPreferences.supersededBy),
       ),
     )
     .returning()
     .get();
+}
+
+// Consolidation merge: collapse near-duplicate rows into one survivor. Each
+// loser is end-dated and pointed at the survivor (superseded_by) — so it's
+// edit-history, not a forget, and the bitemporal trail stays reversible. Links
+// re-point to the survivor. The survivor's content is kept verbatim (the sweep
+// picks the strongest-provenance row as survivor); no model rewrite here.
+export function mergeMemories(survivorId: number, loserIds: number[]): number {
+  const ids = loserIds.filter((id) => id !== survivorId);
+  if (ids.length === 0) return 0;
+  const now = new Date().toISOString();
+  return getDb().transaction((tx) => {
+    let merged = 0;
+    for (const loserId of ids) {
+      const res = tx
+        .update(userPreferences)
+        .set({ validUntil: now, supersededBy: survivorId, updatedAt: now })
+        .where(
+          and(
+            eq(userPreferences.id, loserId),
+            ownedBy(userPreferences.userId),
+            isNull(userPreferences.validUntil),
+          ),
+        )
+        .returning()
+        .get();
+      if (!res) continue;
+      tx.update(memoryLinks)
+        .set({ fromId: survivorId })
+        .where(eq(memoryLinks.fromId, loserId))
+        .run();
+      tx.update(memoryLinks).set({ toId: survivorId }).where(eq(memoryLinks.toId, loserId)).run();
+      merged++;
+    }
+    return merged;
+  });
 }
 
 // ── Links ──────────────────────────────────────────────────────────────────

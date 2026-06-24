@@ -8,13 +8,13 @@ import { invalidate, useResource } from "@/lib/fetchers/swr";
 // bundle, so we restate it here.
 interface PreferenceRow {
   id: number;
-  category: "profile" | "finance_context" | "response_style" | "fact";
+  category: "user" | "advisor";
   content: string;
   // The longer recall-only detail (never injected). When present, it's the rest
-  // of the memory beyond the short `content` line — shown under the memory here so
+  // of the memory beyond the short `content` hook — shown under the memory here so
   // the whole thing is visible without leaving the page.
-  body?: string | null;
-  source: "user_tool" | "advisor_tool" | "extracted";
+  detail?: string | null;
+  source: "advisor_tool" | "extracted";
   validFrom: string;
   validUntil: string | null;
   updatedAt: string;
@@ -25,30 +25,24 @@ interface MemoryResponse {
   recentlyForgotten: PreferenceRow[];
 }
 
-// Order from docs/explanation/memory.md § Architecture > Categories.
-const CATEGORY_ORDER: PreferenceRow["category"][] = [
-  "profile",
-  "finance_context",
-  "response_style",
-  "fact",
-];
+// Two-party taxonomy (docs/explanation/memory.md § Categories).
+const CATEGORY_ORDER: PreferenceRow["category"][] = ["user", "advisor"];
 
 const CATEGORY_LABEL: Record<PreferenceRow["category"], string> = {
-  profile: "Profile",
-  finance_context: "Finance context",
-  response_style: "Response style",
-  fact: "Facts",
+  user: "About you",
+  advisor: "About Advisor",
 };
 
 const MEMORY_KEY = "/api/memory/preferences";
 
-// Render UTC ISO timestamp in the user's IANA timezone as
-// "YYYY-MM-DD HH:mm (Region/City)". Falls back to the raw string on parse error.
+// Render a UTC ISO timestamp in the viewer's local time as "YYYY-MM-DD HH:mm".
+// Device-local by default (everything renders in the browser's timezone), so no
+// region label. Falls back to the raw string on parse error.
 function fmtForgottenAt(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  const parts = new Intl.DateTimeFormat("sv-SE", {
+  return new Intl.DateTimeFormat("sv-SE", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -59,7 +53,6 @@ function fmtForgottenAt(iso: string): string {
   })
     .format(d)
     .replace(",", "");
-  return `${parts} (${tz})`;
 }
 
 // Memories have no direct edit field by design — a change flows through Advisor
@@ -85,7 +78,7 @@ function askAdvisorToEdit(row: PreferenceRow) {
     subject: row.content,
     // The recall-only detail (when present) — the Advisor sees the whole memory
     // without it ever appearing in a visible/persisted message.
-    ...(row.body?.trim() ? { detail: row.body } : {}),
+    ...(row.detail?.trim() ? { detail: row.detail } : {}),
   };
   window.dispatchEvent(
     new CustomEvent("ai-prompt", { detail: { opener, context, newChat: true } }),
@@ -227,7 +220,7 @@ export function MemoryNotes() {
                         ✕
                       </button>
                     </div>
-                    {row.body && <MemoryBody body={row.body} />}
+                    {row.detail && <MemoryBody detail={row.detail} />}
                   </div>
                 ))}
               </div>
@@ -302,11 +295,11 @@ export function MemoryNotes() {
 }
 
 // The longer recall-only detail, clamped to a few lines with a Show more/less
-// toggle so a long memory doesn't dominate the list. Bodies are capped at ~2k
+// toggle so a long memory doesn't dominate the list. Detail is capped at ~4k
 // chars upstream (recall-only), so this stays in-list rather than a modal.
-function MemoryBody({ body }: { body: string }) {
+function MemoryBody({ detail }: { detail: string }) {
   const [open, setOpen] = useState(false);
-  const isLong = body.length > 180;
+  const isLong = detail.length > 180;
   return (
     <div style={{ marginTop: 4 }}>
       <div
@@ -326,7 +319,7 @@ function MemoryBody({ body }: { body: string }) {
             : {}),
         }}
       >
-        {body}
+        {detail}
       </div>
       {isLong && (
         <button
