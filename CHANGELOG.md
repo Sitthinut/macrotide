@@ -944,6 +944,13 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Changed
 
+- **The Advisor's opening greeting is now a centered welcome, not a chat
+  bubble.** Before the first message, the greeting sits centered in the empty
+  chat (like ChatGPT/Claude) and disappears the moment you send — instead of
+  lingering as the first message in every conversation. Reopening the Advisor
+  resumes your last chat only if it was active in the last few hours; after a
+  longer gap it opens a fresh chat (the previous one stays in your chat list).
+  This is per-device.
 - **The fund screener loads roughly an order of magnitude faster.** The Explore
   browse query dropped from ~0.8s to under 60ms by skipping the funds' long-form
   policy text in the list read and resolving each share class's latest fund size

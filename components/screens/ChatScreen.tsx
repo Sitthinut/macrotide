@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BrandMark } from "@/components/BrandMark";
 import { ChatThreadList } from "@/components/ChatThreadList";
 import { Icon } from "@/components/Icon";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
@@ -72,6 +73,37 @@ function imageText(m: Message): string {
 }
 
 const ACTIVE_THREAD_KEY = "macrotide_chat_active_thread";
+// Per-device timestamp (ms) of the last interaction with the active thread, and
+// the window within which reopening the app reopens that chat. After a longer
+// idle gap the Advisor starts fresh instead (the old chat stays in history). All
+// localStorage-scoped, so each device keeps its own last chat and its own timer.
+const ACTIVE_THREAD_AT_KEY = "macrotide_chat_active_at";
+const RESTORE_MAX_IDLE_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+// Stamp the active-thread pointer + "now", so a reopen within the window restores
+// it. Called on every turn and on open, so active use keeps the timer fresh.
+function rememberActiveThread(id: string) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(ACTIVE_THREAD_KEY, id);
+  window.localStorage.setItem(ACTIVE_THREAD_AT_KEY, String(Date.now()));
+}
+// Drop the pointer — on New Chat, or a stale/failed restore.
+function forgetActiveThread() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(ACTIVE_THREAD_KEY);
+  window.localStorage.removeItem(ACTIVE_THREAD_AT_KEY);
+}
+// The stored active-thread id, but only if it was touched within the idle window;
+// otherwise null so the caller starts a fresh chat. A missing/old timestamp (e.g.
+// a pointer written before this timer existed) counts as stale.
+function freshActiveThreadId(): string | null {
+  if (typeof window === "undefined") return null;
+  const id = window.localStorage.getItem(ACTIVE_THREAD_KEY);
+  if (!id) return null;
+  const at = Number(window.localStorage.getItem(ACTIVE_THREAD_AT_KEY));
+  if (!Number.isFinite(at) || Date.now() - at > RESTORE_MAX_IDLE_MS) return null;
+  return id;
+}
 
 // Remove the trailing "[N image(s) attached]" marker the server stores in a
 // user message (images aren't persisted server-side). Used on reload when we
@@ -584,6 +616,17 @@ function MemoryEventLine({ event }: { event: MemoryEvent }) {
   );
 }
 
+// The Advisor's opening line is UI chrome — a centered welcome shown on an empty
+// thread (ChatGPT/Claude style), NOT a seeded assistant message. Keeping it out of
+// `messages` means it's never sent to the model and never lingers once the chat
+// starts. EMPTY_THREAD is the canonical "no messages" value AND the stable-reference
+// sentinel the deferred new-chat / edit-opener effects compare against
+// (`messages === EMPTY_THREAD`) — so it must stay a single shared reference and is
+// only ever replaced, never mutated in place (every messages update returns a new array).
+const INTRO_GREETING =
+  "Hi, I'm your index-investing advisor. Ask me about your portfolio, your plan, or how index investing works. If you don't have a plan yet, say \"help me write my plan\" and I'll walk you through it.";
+const EMPTY_THREAD: Message[] = [];
+
 export function ChatScreen({
   persona = "advisor",
   seedPrompt,
@@ -593,19 +636,22 @@ export function ChatScreen({
 }: ChatScreenProps) {
   void persona; // single advisor persona for MVP
 
-  const initial = useMemo<Message[]>(
-    () => [
-      {
-        role: "ai",
-        text: "Hi — I'm your index-investing advisor. Ask me about your portfolio, your plan, or how index investing works. If you don't have a plan yet, say \"help me write my plan\" and I'll walk you through it.",
-        ts: Date.now(),
-        id: makeId(),
-      },
-    ],
-    [],
-  );
-
-  const [messages, setMessages] = useState<Message[]>(initial);
+  // The thread starts empty — the opening greeting is UI chrome (the centered
+  // welcome, see INTRO_GREETING / isIntro below), not a seeded assistant message.
+  const [messages, setMessages] = useState<Message[]>(EMPTY_THREAD);
+  // Gate the welcome until we know whether a previously-open thread will hydrate,
+  // so reloading into an existing conversation doesn't flash the welcome first.
+  // Reading localStorage at init is safe: the whole App is loaded ssr:false
+  // (components/ClientApp.tsx), so ChatScreen never server-renders. A fresh start
+  // (no stored thread, or a "new chat" hand-off) is settled immediately; a pending
+  // restore is settled once the mount effect's load attempt resolves.
+  const [restoreSettled, setRestoreSettled] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    if (seedPrompt && typeof seedPrompt === "object" && seedPrompt.newChat) return true;
+    // Only gate the welcome when there's a recent chat to restore; an idle-past-the-
+    // window (or absent) pointer means a fresh start, settled immediately.
+    return freshActiveThreadId() === null;
+  });
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
@@ -628,6 +674,12 @@ export function ChatScreen({
   // consumed by the first composer send so the Advisor knows which memory to
   // change and its full current detail.
   const [editContext, setEditContext] = useState<EntryContext | null>(null);
+  // The centered welcome (INTRO_GREETING) shows only before the conversation
+  // starts. The pending-seed/opener guards keep it from flashing during a
+  // Journal → Memory hand-off, where newChat() empties `messages` for one render
+  // before the queued seed or canned opener lands.
+  const isIntro =
+    restoreSettled && messages.length === 0 && !pendingNewChatSeed && !pendingEditOpener;
   // Pending image attachments for the next turn (downscaled), plus a click-to-
   // enlarge lightbox. Whether the attach affordance shows at all is gated by the
   // server-computed capability below (vision on + demo allows it).
@@ -756,9 +808,7 @@ export function ChatScreen({
           }>;
         };
         setThreadId(id);
-        if (typeof window !== "undefined") {
-          window.localStorage.setItem(ACTIVE_THREAD_KEY, id);
-        }
+        rememberActiveThread(id);
         // Re-attach any browser-cached images to their turns. Keyed by the
         // 0-based index of the user message within the thread (deterministic and
         // append-only), so the send path and this reload path agree without a
@@ -770,7 +820,7 @@ export function ChatScreen({
         let userSeq = -1;
         setMessages(
           rows.length === 0
-            ? initial
+            ? EMPTY_THREAD
             : rows.map((r) => {
                 const isUser = r.role !== "assistant";
                 if (isUser) userSeq += 1;
@@ -821,7 +871,7 @@ export function ChatScreen({
         return false;
       }
     },
-    [initial, closeOutgoing],
+    [closeOutgoing],
   );
 
   // Hydrate the most recently active thread on mount. If the server doesn't
@@ -832,16 +882,24 @@ export function ChatScreen({
     if (typeof window === "undefined") return;
     // A pending "edit in a new chat" seed (Journal → Memory) must win over thread
     // restoration — don't load the last thread, or it would clobber the fresh chat.
+    // Fresh-start paths (new-chat hand-off, no stored thread) are already settled
+    // by the restoreSettled initializer, so the welcome shows without delay.
     if (seedPrompt && typeof seedPrompt === "object" && seedPrompt.newChat) return;
-    const stored = window.localStorage.getItem(ACTIVE_THREAD_KEY);
-    if (!stored) return;
+    // Only reopen the last chat if it was active within the idle window; after a
+    // longer gap (or with no pointer) start fresh — the old chat stays in history.
+    const stored = freshActiveThreadId();
+    if (!stored) {
+      forgetActiveThread();
+      setRestoreSettled(true);
+      return;
+    }
     let cancelled = false;
     (async () => {
       const ok = await loadThread(stored);
       if (cancelled) return;
-      if (!ok && typeof window !== "undefined") {
-        window.localStorage.removeItem(ACTIVE_THREAD_KEY);
-      }
+      if (!ok) forgetActiveThread();
+      // Restore resolved — reveal the welcome if the thread was stale (no rows).
+      setRestoreSettled(true);
     })();
     return () => {
       cancelled = true;
@@ -851,16 +909,14 @@ export function ChatScreen({
   const newChat = useCallback(() => {
     // Close the session we're leaving before clearing it (real-time extraction).
     closeOutgoing(threadIdRef.current);
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem(ACTIVE_THREAD_KEY);
-    }
+    forgetActiveThread();
     setThreadId(null);
-    setMessages(initial);
+    setMessages(EMPTY_THREAD);
     setContextNotice(false);
     setAttachments([]);
     setAttachNotice(null);
     setEditContext(null);
-  }, [initial, closeOutgoing]);
+  }, [closeOutgoing]);
 
   // ── Image attachments ────────────────────────────────────────────────────
   // Downscale + stage image files (from the picker, drag-drop, or paste),
@@ -1069,10 +1125,11 @@ export function ChatScreen({
       const returnedThread = res.headers.get("x-thread-id");
       if (returnedThread && returnedThread !== threadId) {
         setThreadId(returnedThread);
-        if (typeof window !== "undefined") {
-          window.localStorage.setItem(ACTIVE_THREAD_KEY, returnedThread);
-        }
       }
+      // Refresh the active-thread pointer + idle timer on every turn, so an
+      // actively-used chat stays restorable and only goes stale after a quiet gap.
+      const activeThread = returnedThread ?? threadId;
+      if (activeThread) rememberActiveThread(activeThread);
       // Cache this turn's images in the browser (never server-side) so they
       // survive a reload, keyed by the user-message index in this thread.
       const tidForImages = returnedThread ?? threadId;
@@ -1562,12 +1619,13 @@ export function ChatScreen({
     onPromptConsumed?.();
   }, [seedPrompt]);
 
-  // Fire a queued new-chat seed once newChat() has reset `messages` to `initial`
-  // (reference equality holds — newChat does setMessages(initial)). Deferring to
-  // this render guarantees `ask` closes over the empty history, not the old chat.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `ask`/`initial` are unmemoized; fire only when the reset has landed
+  // Fire a queued new-chat seed once newChat() has reset `messages` to the empty
+  // thread (reference equality holds — newChat does setMessages(EMPTY_THREAD)).
+  // Deferring to this render guarantees `ask` closes over the empty history, not
+  // the old chat.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `ask` is unmemoized; fire only when the reset has landed
   useEffect(() => {
-    if (pendingNewChatSeed && messages === initial) {
+    if (pendingNewChatSeed && messages === EMPTY_THREAD) {
       ask(pendingNewChatSeed.display, pendingNewChatSeed.send, pendingNewChatSeed.context);
       setPendingNewChatSeed(null);
     }
@@ -1577,9 +1635,8 @@ export function ChatScreen({
   // stash its context for the user's first reply. Nothing is sent — the Advisor
   // asks, the user answers, and only that reply (carrying `editContext`) goes to
   // the server.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `initial` is unmemoized; fire only once the reset has landed
   useEffect(() => {
-    if (pendingEditOpener && messages === initial) {
+    if (pendingEditOpener && messages === EMPTY_THREAD) {
       setMessages([{ role: "ai", text: pendingEditOpener.opener, ts: Date.now(), id: makeId() }]);
       setEditContext(pendingEditOpener.context ?? null);
       setPendingEditOpener(null);
@@ -1758,6 +1815,12 @@ export function ChatScreen({
             `removeChild` throws). Carries the column+gap layout the OS host
             would otherwise strip. Mirrors `.ra-panel-body-content`. */}
         <div className="chat-stream-content">
+          {isIntro && (
+            <div className="chat-intro">
+              <BrandMark size={32} className="chat-intro-mark" />
+              <p className="chat-intro-text">{INTRO_GREETING}</p>
+            </div>
+          )}
           {messages.map((m, i) => {
             const proposal = m.proposal;
             const holdingsImport = m.holdingsImport;

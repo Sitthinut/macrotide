@@ -2305,6 +2305,33 @@ button.score-row {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  /* Fill the stream height so the empty-state greeting can center vertically;
+     for a normal conversation the messages just stack from the top as before. */
+  min-height: 100%;
+}
+/* Empty-state welcome — a centered, bubble-less greeting (ChatGPT/Claude style)
+   shown only before the first user message, then replaced by the conversation. */
+.chat-intro {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 14px;
+  padding: 24px 18px;
+}
+/* The shared BrandMark (a rounded square) clipped to a circle for the welcome —
+   one shared element, so it tracks any future logo/theme change automatically. */
+.chat-intro-mark {
+  clip-path: circle(50%);
+}
+.chat-intro-text {
+  margin: 0;
+  max-width: 34ch;
+  font-size: 15.5px;
+  line-height: 1.55;
+  color: var(--ink-soft);
 }
 .msg {
   max-width: 86%;
