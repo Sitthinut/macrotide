@@ -283,12 +283,14 @@ updated" status chip and a browsable list of saved memories. Never call them
 "notes" or "facts" in user-facing copy. **"Notes"** is reserved for the user's own saved
 entries in **Journal → Notes** (`read_journal`) — a distinct surface (and a future
 Advisor context source), so the two names must not collide. "preference" stays
-internal-only (the `save_preference` tool family, the `fact` category enum). Full
+internal-only (the `save_preference` tool family, the `user_preferences` table). Full
 table: [memory.md](./docs/explanation/memory.md).
 
-**Timestamps:** store UTC, render in the user's IANA timezone. Timezone
-itself is a `profile`-category preference in `user_preferences` (set
-default from the browser; let the user override on the Settings page).
+**Timestamps:** store UTC, render in the viewer's **device-local** timezone
+(`Intl.DateTimeFormat().resolvedOptions().timeZone`, resolved client-side — keep
+tz-dependent rendering client-only to avoid SSR hydration mismatch). Market-
+context labels may hardcode `Asia/Bangkok`. Timezone is **not** stored as a
+memory.
 
 ## When in doubt
 

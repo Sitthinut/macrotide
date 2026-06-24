@@ -55,7 +55,7 @@ aren't edited in a text box — that would lose the provenance trail; instead
 **Edit** opens a fresh chat where the *Advisor* asks what you'd like to change,
 then captures your answer like any other correction. It only acts once you've
 said what to change — there's no synthesized "change it" turn to act on
-prematurely. The memory's full `content` and longer `body` ride along as hidden
+prematurely. The memory's full `content` and longer `detail` ride along as hidden
 context on your reply (never shown in the bubble or the chat title), so the
 Advisor targets the right memory and sees the whole of it, not just the short
 `content` line.
@@ -163,21 +163,24 @@ multi-user lands):
 CREATE TABLE user_preferences (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id           TEXT REFERENCES user(id),  -- NULL = shared/owner; demo & built-in rows
-  category          TEXT NOT NULL,     -- enum, see below
-  content           TEXT NOT NULL,     -- the fact, as a short injected line
-  summary           TEXT,              -- optional shorter line to inject instead of content
-  body              TEXT,              -- optional longer detail, recall-only (never injected)
-  status            TEXT NOT NULL DEFAULT 'active',  -- vestigial; always 'active' (held-"pending" lane was dropped)
-  source            TEXT NOT NULL,     -- 'user_tool' | 'advisor_tool' | 'extracted'
+  category          TEXT NOT NULL,     -- 'user' | 'advisor' (see below)
+  content           TEXT NOT NULL,     -- the fact, as a short injected hook
+  detail            TEXT,              -- optional longer elaboration, recall-only (never injected)
+  source            TEXT NOT NULL,     -- 'advisor_tool' (saved in-chat) | 'extracted' (session-close)
   source_session_id TEXT,              -- chat_threads.id (provenance)
   source_turn_ids   TEXT,              -- JSON array of chat_messages.id
   confidence        REAL,              -- NULL for explicit (trusted), 0..1 for extracted
+  superseded_by     INTEGER REFERENCES user_preferences(id),  -- set on update/merge, NULL on a plain forget
   valid_from        TEXT NOT NULL,     -- UTC ISO-8601
   valid_until       TEXT,              -- UTC ISO-8601; NULL = active
   last_confirmed_at TEXT,              -- bumped on affirmation (reinforcement; gates decay)
   created_at        TEXT NOT NULL,
   updated_at        TEXT NOT NULL
 );
+
+-- BM25 recall index (external-content FTS5 over content + detail), kept in sync
+-- by triggers — the cold-recall tail ranks active rows best-first.
+CREATE VIRTUAL TABLE user_preferences_fts USING fts5(content, detail, content='user_preferences', content_rowid='id');
 
 -- Typed relationships between memories (e.g. a constraint and the correction that
 -- set it). Integrity is enforced by the schema, not the model: both ends FK to
@@ -193,11 +196,14 @@ CREATE TABLE memory_links (
 );
 ```
 
-The active set is always `WHERE valid_until IS NULL AND status = 'active'`.
-Updates insert a new row and end-date the old one in one transaction; nothing is
-mutated in place, and any `memory_links` re-point to the new row in that same
-transaction. Timestamps are UTC; the UI renders them in the user's timezone
-(itself a `profile` row).
+The active set is always `WHERE valid_until IS NULL`. Updates insert a new row
+and end-date the old one in one transaction; nothing is mutated in place, and any
+`memory_links` re-point to the new row in that same transaction. An end-dated row
+carries `superseded_by` (the row that replaced it) when it was an **update or
+consolidation merge**, and leaves it NULL on a **deliberate forget** — so
+edit-history never surfaces in the "Recently forgotten" undo queue and a restore
+can't double-activate a memory. Timestamps are UTC; the UI renders them in the
+viewer's **device-local** timezone.
 
 `user_preferences` is scoped fail-closed: queries default to the request user
 via `ownedBy()` (see `lib/db/queries/scope.ts`) rather than threading a `userId`
@@ -212,14 +218,16 @@ newer turns.
 
 ### Categories
 
-A small fixed enum drives both the injection budget and the Journal → Memory grouping:
+Two categories, split on **which party the memory describes** — the foolproof
+test (every memory is about exactly one of the two conversation participants):
 
-| Category | What lives here | Example |
-|---|---|---|
-| `profile` | Stable facts about the user | risk tolerance, time horizon, age, timezone |
-| `finance_context` | Accounts, tax situation, constraints | "401k at Fidelity", "Thai tax resident", "funds only" |
-| `response_style` | How the Advisor should communicate | "be concise", "show percentages not dollars" |
-| `fact` | Other durable one-offs | "wife's name is Sarah" |
+| Category | UI label | What lives here | Example |
+|---|---|---|---|
+| `user` | About you | Any fact/context about the person & their money — identity, goals, risk tolerance, holdings, accounts, tax, constraints, **and investing rules** ("no individual stocks" is advice *content* → `user`) | "risk tolerance: moderate", "Thai tax resident", "funds only" |
+| `advisor` | About Advisor | How the Advisor should **respond** — tone, length, format, language; reply *form* only | "be concise", "answer in Thai", "skip disclaimers" |
+
+The cut is **what the memory controls** (advice content vs reply form), not
+whether it's phrased as an instruction.
 
 ### Tool surface
 
@@ -228,7 +236,7 @@ Seven tools, exposed to the chat model via the Vercel AI SDK shape used across
 
 | Tool | Args | Purpose |
 |---|---|---|
-| `save_preference` | `{ category, content, detail? }` | Save a new durable fact (active immediately). `detail` → recall-only `body`. |
+| `save_preference` | `{ category, content, detail? }` | Save a new durable fact (active immediately). `content` is a short hook; `detail` is recall-only. |
 | `update_preference` | `{ id_or_substring, new_content, detail? }` | Supersede a fact with a new value. |
 | `forget_preference` | `{ id_or_substring }` | End-date a fact (kept for audit). |
 | `confirm_preference` | `{ id_or_substring }` | Reinforce a re-affirmed fact (`last_confirmed_at`; resists decay). |
@@ -253,26 +261,33 @@ Active preferences render into the system prompt at session start and are
 chat. This preserves the prefix cache (the block is byte-identical across turns,
 deterministically ordered) and avoids jarring mid-session behavior shifts. The
 inline status line records the write so the user understands the change lands
-next chat. Each line renders `summary ?? content` (the short `summary` when set,
-else the full `content`); the longer `body` is never injected.
+next chat. Each line renders the short `content` hook; the longer `detail` is
+never injected — it's reached on demand via `recall_preferences`.
 
 ```text
 ## Your stored preferences
 
-### Profile
+### About you
 - risk tolerance: moderate
-- time horizon: 10–15 years
-
-### Finance context
 - no individual stocks (funds only)
 
-### Response style
+### How to respond
 - be concise; skip disclaimers
 ```
 
-Empty categories are omitted. Per-category token budgets (≈300 profile / 500
-finance_context / 200 response_style / 500 fact, ~1500 total) cap the block;
-beyond that the long tail is reached via `recall_preferences`.
+Empty categories are omitted.
+
+**The bound.** The hot-set is capped by a **dual co-primary ceiling** —
+`USER_CAP` entries **and** `USER_CHAR_BUDGET` characters (both env-configurable;
+defaults 150 / 24 000, generous so a typical store fully injects). `advisor` has
+its own generous `ADVISOR_CAP`. While the active store is under the ceiling
+**everything injects** (never-forgetful); past it, a deterministic read-time
+selection keeps the highest-priority rows and the rest become **recall-only**,
+with one stable line telling the model how many more are stored (so it recalls).
+Selection ranks **explicit-first** (deliberate saves over inferences), then
+`created_at`, then `confidence`, then `id` — but renders in stable `(category,
+id)` order so the bytes stay identical for identical DB state. Nothing is
+deleted: overflow is always recallable.
 
 ### Confidence floor
 
@@ -319,26 +334,38 @@ Two rules keep the store self-maintaining without letting automation quietly
 rewrite what you said explicitly:
 
 - **Trust-tier guard.** An `extracted` memory may only supersede another
-  `extracted` memory — it can never overwrite an explicit (`user_tool` /
-  `advisor_tool`) fact. An extraction that conflicts with an explicit memory is
-  **skipped** (the explicit memory stands; the user can change it via the Advisor),
-  never applied silently (`updateFromExtraction` enforces this in code).
-- **Consolidate-on-write — model first.** The real defence against duplicates is
-  the Advisor checking before it saves. The injected memory block is a *frozen*
+  `extracted` memory — it can never overwrite an explicit (`advisor_tool`) fact.
+  An extraction that conflicts with an explicit memory is **skipped** (the
+  explicit memory stands; the user can change it via the Advisor), never applied
+  silently (`updateFromExtraction` enforces this in code).
+- **Consolidate-on-write — model first.** The injected memory block is a *frozen*
   snapshot from the start of the chat, so it can't show a memory saved earlier in
-  the **same** session; the system prompt therefore tells the Advisor to call
-  `list_preferences`/`recall_preferences` (which query the **live** set) before
-  `save_preference`, and to `update_preference` an existing memory rather than add a
-  near-duplicate — the same "check memory first, prefer editing over creating"
-  pattern Anthropic's memory tool bakes into its system prompt. Semantic
-  consolidation stays the model's job (and the extraction reconcile's), because
-  free-text memories are almost never byte-identical.
-- **Idempotency net.** Below that, `save()` itself collapses a *truly identical*
-  re-save: an active memory with the same category and content (trimmed,
-  case-insensitive) returns the existing row instead of inserting a copy. This is
-  only a cheap backstop for the degenerate case (a model re-saving the exact same
-  line within a frozen session) — it does nothing for near-duplicates, which is
-  why the model-side check above is the primary mechanism.
+  the **same** session; the system prompt tells the Advisor to call
+  `list_preferences`/`recall_preferences` (the **live** set) before
+  `save_preference`, and to `update_preference` an existing memory rather than add
+  a near-duplicate — the same "check memory first" pattern Anthropic's memory tool
+  bakes in.
+- **Idempotency net.** `save()` collapses a *near-identical* re-save: an active
+  memory whose normalized content matches (trimmed, lowercased, whitespace
+  collapsed, trailing punctuation stripped) returns the existing row instead of a
+  copy. A cheap deterministic backstop for the frozen-session blind spot.
+- **Consolidation sweep.** The above don't touch *semantic* near-duplicates that
+  accumulate over time ("be concise" / "keep it brief", or an explicit save plus a
+  session-close extraction of the same fact). A periodic `jobs:consolidate-memory`
+  sweep (`lib/jobs/consolidate-memory.ts`) runs **per category** and a cheap
+  **lexical pre-filter** (token-set overlap) finds plausible near-dup clusters —
+  the model is called only when there's a cluster (or, for reshape, the store is
+  over the char budget), so a store of genuinely-distinct memories spends no model
+  call. Near-dups are merged at **any** store size (redundancy shows in recall +
+  the Memory tab even below the inject ceiling); reshape (splitting a long hook
+  into hook+detail) only fires under char-budget pressure. The model just **lists
+  the ids that are duplicates** (`{op:"merge","ids":[…]}`) — survivor/loser
+  bookkeeping is too unreliable for a cheap model — and the apply layer picks the
+  survivor **explicit-first** (a user-stated fact always wins over an inference;
+  then highest confidence), folds the rest in via the bitemporal layer (reversible,
+  `superseded_by` → survivor), and re-points links. Within-category only; merge is
+  verbatim-survivor (no rewrite — synthesizing combined memories is a deferred,
+  better-model enhancement).
 
 ### Decay and staleness
 
@@ -360,16 +387,18 @@ for the demo and vanish when it ends — no special handling.
 
 ```text
 lib/db/schema/app.ts                     user_preferences + memory_links + chat_threads
-lib/db/queries/preferences.ts            CRUD + ownedBy() scope + recall + reconcile + links + decay
+lib/db/queries/preferences.ts            CRUD + ownedBy() scope + FTS5/BM25 recall + reconcile + merge + links + decay
 lib/db/queries/scope.ts                  ownedBy()/ownerId() fail-closed scoping
 lib/db/queries/chat.ts                   threads, lifecycle, summary rows
 lib/db/queries/search.ts                 sidebar full-text search (FTS5)
-lib/memory/inject.ts                     render the hot block + confidence floor + summary
+lib/memory/inject.ts                     render the hot block + the read-time bound + confidence floor
 lib/memory/tools.ts                      AI SDK tool definitions + memoryEvent
 lib/memory/extract.ts                    incremental fact extraction + reconcile (add/update/skip)
+lib/memory/consolidate.ts                model proposer for the consolidation sweep
 lib/memory/session-close.ts              close = extract + mark idle
 lib/ai/summarize.ts                      mid-chat context compression
 lib/jobs/close-stale-sessions.ts         backstop sweep
+lib/jobs/consolidate-memory.ts           periodic near-dup consolidation sweep
 lib/jobs/decay-extracted.ts              extracted-only confidence decay
 app/api/chat/route.ts                    inject at start; reactivate on resume
 app/api/chat/threads/[id]/close/route.ts real-time close endpoint

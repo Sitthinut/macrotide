@@ -15,6 +15,16 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Advisor memory is bounded, two-category, and self-tidying.** Memory now groups
+  into just **About you** and **About Advisor** (replacing four fuzzy buckets), and
+  each chat loads a bounded hot-set of the most relevant memories instead of every
+  one — so a growing store stays cheap and focused without the Advisor feeling
+  forgetful; anything beyond the hot-set is found on demand by relevance (BM25
+  search over the full memory). A background sweep merges near-duplicate memories
+  ("be concise" / "keep it brief") to keep the Memory tab clean, and editing a
+  memory no longer clutters "Recently forgotten" with old versions. Each memory
+  keeps a short headline plus optional longer detail recalled when needed.
+
 - **Chart popovers no longer hide behind the side panel.** The tap-to-define term
   tooltip, the `Cash` first-use hint, and the `+ Compare` and `+ Add` menus now
   float above the open detail panel (rendered in a portal) instead of being clipped
@@ -130,7 +140,7 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   changed), and **Journal → Memory** is the browsable, reversible record of
   everything the Advisor has learned (review, forget/restore, or ask the Advisor
   to change a memory — Edit opens a fresh chat where the Advisor asks what to
-  change, with the whole memory in view, not just its summary line). Memory
+  change, with the whole memory in view, not just its short headline). Memory
   writes are verified so a change the Advisor says it made actually lands.
   The store is self-maintaining — each write reconciles
   against what's already saved (add / update / skip) instead of piling up
