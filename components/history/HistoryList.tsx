@@ -2,9 +2,9 @@
 
 // HistoryList — the ledger as a native list: the app's `.stats-strip` for the
 // in-context performance summary, `.section-header` month groups over
-// `.holdings-list` rows (so events sit in the same grammar as Holdings), anchors
-// collected under a "Balances" header, and the shared `.rec-edit`
-// inline editor on tap. Scope = all owned buckets, or one ticker (a position's
+// `.holdings-list` rows (so events sit in the same grammar as Holdings) with
+// balances (anchors) and trades interleaved newest-first, and the shared
+// `.rec-edit` inline editor on tap. Scope = all owned buckets, or one ticker (a position's
 // record). Holdings are a projection of this ledger, so every write re-invalidates
 // holdings + portfolio views.
 
@@ -183,14 +183,11 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
     return m;
   }, [analytics]);
 
-  const { months, anchors } = useMemo(() => {
+  const months = useMemo(() => {
+    // One chronological feed: balances (anchors) and trades share the month
+    // groups so a later-dated balance sits above older activity, newest first.
     const groups = new Map<string, Transaction[]>();
-    const anchorRows: Transaction[] = [];
     for (const t of txns) {
-      if (isAnchor(t.kind as TxnKind)) {
-        anchorRows.push(t);
-        continue;
-      }
       const ym = t.tradeDate.slice(0, 7);
       let rows = groups.get(ym);
       if (!rows) {
@@ -199,11 +196,11 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
       }
       rows.push(t);
     }
-    for (const [, rows] of groups) rows.reverse();
-    return {
-      months: [...groups.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1)),
-      anchors: anchorRows.sort((a, b) => (a.tradeDate < b.tradeDate ? 1 : -1)),
-    };
+    for (const [, rows] of groups)
+      rows.sort((a, b) =>
+        a.tradeDate !== b.tradeDate ? (a.tradeDate < b.tradeDate ? 1 : -1) : b.id - a.id,
+      );
+    return [...groups.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
   }, [txns]);
 
   const hasTxns = txns.length > 0;
@@ -465,6 +462,14 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
                   onDelete={() => remove(t)}
                   busy={busy}
                 />
+              ) : isAnchor(t.kind as TxnKind) ? (
+                <EventLine
+                  key={t.id}
+                  txn={t}
+                  onOpen={() => startEdit(t)}
+                  hideTicker={!!ticker}
+                  hideVerb
+                />
               ) : (
                 <EventLine
                   key={t.id}
@@ -478,40 +483,6 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
           </div>
         </div>
       ))}
-
-      {anchors.length > 0 && (
-        <div>
-          <div
-            className="section-header"
-            style={{ padding: "0 4px", marginTop: 20, marginBottom: 4 }}
-          >
-            <h3 style={{ fontSize: 13 }}>Balances</h3>
-          </div>
-          <div className="holdings-list">
-            {anchors.map((t) =>
-              editing === t.id ? (
-                <TxnEditor
-                  key={t.id}
-                  draft={draft}
-                  onChange={setDraft}
-                  onSave={save}
-                  onCancel={cancel}
-                  onDelete={() => remove(t)}
-                  busy={busy}
-                />
-              ) : (
-                <EventLine
-                  key={t.id}
-                  txn={t}
-                  onOpen={() => startEdit(t)}
-                  hideTicker={!!ticker}
-                  hideVerb
-                />
-              ),
-            )}
-          </div>
-        </div>
-      )}
 
       <ConfirmDialog
         open={!!pendingDelete}

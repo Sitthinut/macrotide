@@ -15,6 +15,14 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **History reads as one newest-first timeline.** Balances (opening and snapshot
+  anchors) now interleave with trades in date order instead of collecting in a
+  separate section at the bottom, so a balance dated after your latest trade sits
+  at the top where you'd expect. Each row's swatch is recoloured to one hue per
+  meaning — green for money in, red for money out, periwinkle for income, blue for
+  a cash balance, amber for an asset balance, grey for fees and splits — so the
+  kinds are easy to tell apart at a glance.
+
 - **Advisor memory is bounded, two-category, and self-tidying.** Memory now groups
   into just **About you** and **About Advisor** (replacing four fuzzy buckets), and
   each chat loads a bounded hot-set of the most relevant memories instead of every

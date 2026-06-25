@@ -41,19 +41,24 @@ const ABBR: Record<TxnKind, string> = {
   cash_balance: "CASH",
 };
 
-// Swatch colour by kind (same token palette the rest of the app uses).
+// Swatch colour by kind (same token palette the rest of the app uses). One hue
+// per meaning so the swatches stay easy to tell apart: green = value in
+// (buy/deposit), red = value out (sell/withdraw), periwinkle = income
+// (dividend/reinvest), blue = a cash balance, amber = an asset balance anchor,
+// grey = a neutral no-cash event (fee/split). Income and cash avoid the
+// green-adjacent teal so they don't read as a green buy.
 const TONE: Record<TxnKind, string> = {
   buy: "var(--accent)",
   sell: "var(--loss)",
-  dividend: "var(--accent-2)",
-  reinvest: "var(--accent-2)",
+  dividend: "var(--benchmark)",
+  reinvest: "var(--benchmark)",
   fee: "var(--muted-2)",
   split: "var(--muted-2)",
   opening: "var(--amber)",
   snapshot: "var(--amber)",
   deposit: "var(--accent)",
   withdraw: "var(--loss)",
-  cash_balance: "var(--accent-2)",
+  cash_balance: "var(--info)",
 };
 
 function isAnchor(k: TxnKind): boolean {
@@ -70,9 +75,9 @@ export interface EventLineProps {
   onOpen: () => void;
   /** Hide the ticker in the title (on a position page the fund is implicit). */
   hideTicker?: boolean;
-  /** Drop the leading verb for anchors — used under the "Starting balances"
-   * header, which already says what these rows are (no "Starting balance ·" on
-   * every line). */
+  /** Drop the leading verb for anchors — the amber "BAL" swatch already says
+   * what these rows are, so the title shows just the fund (no "Balance ·" on
+   * every anchor line). */
   hideVerb?: boolean;
 }
 
@@ -101,8 +106,8 @@ export function EventLine({
   const kind = txn.kind as TxnKind;
   const anchor = isAnchor(kind);
   const verb = VERB[kind] ?? txn.kind;
-  // Under the "Starting balances" header the verb is redundant — show just the
-  // fund (or, when the fund is implicit too, fall back to the verb).
+  // With hideVerb the swatch already names the row, so the verb is redundant —
+  // show just the fund (or, when the fund is implicit too, fall back to the verb).
   // Cash accounts carry their display NAME in englishName (the ticker is the
   // upper-cased ledger identity); funds show their ticker symbol as-is.
   const label = txn.quoteSource === "cash" ? (txn.englishName ?? txn.ticker) : txn.ticker;
