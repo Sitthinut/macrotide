@@ -77,6 +77,25 @@ export const holdings = sqliteTable(
      */
     quoteSource: text("quote_source").notNull().default("market"),
     /**
+     * Stable catalog anchor (#235): the SEC `(proj_id, class_name)` of the
+     * priceable share class this holding tracks. Bound when the ticker matches the
+     * catalog; NULL for custom / cash / not-yet-resolved holdings. UNLIKE the
+     * ticker (which a fund house can RENAME over time), `(proj_id, class_name)` is
+     * permanent — so a renamed fund stays linked to its current name + NAV by this
+     * anchor even after its symbol changes and the old symbol leaves the catalog.
+     * Resolution + display of the current symbol go through it (resolveCatalogSymbol).
+     *
+     * The anchor is LAYERED, most-stable first: `catalog_isin` (global security id)
+     * → `(catalog_proj_id, catalog_class_name)`. The `(proj_id, class_name)` pair
+     * covers single-class funds (class_name = "main", constant); ISIN additionally
+     * covers a multi-class rebrand (which changes the ticker AND class_name) for the
+     * ~10% of classes that publish one. (The SEC `unique_id` field is an AMC/company
+     * code, not a security id, so it can't anchor a class.)
+     */
+    catalogProjId: text("catalog_proj_id"),
+    catalogClassName: text("catalog_class_name"),
+    catalogIsin: text("catalog_isin"),
+    /**
      * Native currency for a `cash` holding (issue #149) — e.g. "THB", "USD".
      * The ticker of a cash account is its NAME, not a symbol, so currency can't
      * be inferred and is stored here; valuation prices cash at 1.0 in this

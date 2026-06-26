@@ -413,8 +413,9 @@ describe("advisor tools — propose_holding", () => {
       return { out, count: holdingsAfter.length };
     });
     expect(result.out.ok).toBe(true);
-    // Ticker is normalized to upper-case in the proposal payload.
-    expect(result.out.holding.ticker).toBe("VOO");
+    // A custom (off-catalog) symbol keeps the typed case (#235); only a cataloged
+    // fund is normalized to its official catalog case.
+    expect(result.out.holding.ticker).toBe("voo");
     expect(result.out.holding.englishName).toBe("Vanguard S&P 500 ETF");
     expect(result.out.holding.units).toBe(12.5);
     expect(result.out.holding.avgCost).toBe(400);

@@ -10,7 +10,18 @@
 // funds on a single-VM SQLite, so clarity beats a window-function query here.
 
 import "server-only";
-import { and, eq, getTableColumns, inArray, isNotNull, isNull, not, or, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  getTableColumns,
+  inArray,
+  isNotNull,
+  isNull,
+  not,
+  or,
+  sql,
+} from "drizzle-orm";
 import { indexTypeFromManagementStyle, isIndexStyle } from "../../market/fund-classify";
 import { type FeeType, TER_FEE_TYPE } from "../../market/fund-fees";
 import {
@@ -21,7 +32,7 @@ import {
   retailTier,
 } from "../../market/retail-tier";
 import { compareClassesForList } from "../../market/share-class-select";
-import { type QuoteSource, quoteCacheKey } from "../../market/sources";
+import { type QuoteSource, quoteCacheKey, tickerKey } from "../../market/sources";
 import { searchFundIds, searchFundIdsScored } from "../../search/fund-index";
 import { getMarketDb } from "../context";
 import { fundCatalog, fundFees, fundQuotes, fundShareClasses, navHistory } from "../schema";
@@ -879,6 +890,179 @@ export function catalogQuoteSource(tickers: string[]): Map<string, QuoteSource> 
   // In the catalog → a real fund; otherwise → custom. Nothing else.
   for (const t of cleaned) out.set(t, hits.has(t) ? "thai_mutual_fund" : "manual");
   return out;
+}
+
+/**
+ * Map each input ticker to its OFFICIAL catalog case (#235). A cataloged fund is
+ * stored in the catalog's native case (`fund_share_classes.ticker` or
+ * `fund_catalog.abbr_name`, e.g. the lowercase `tsp1-preserver-SSF` family); we
+ * persist THAT case on the ledger so the user sees the real symbol and even a
+ * case-sensitive comparison lines up. A ticker with no catalog match (a custom /
+ * self-priced asset, or a cash-account name) keeps exactly what the user typed
+ * (trimmed) — its case is the user's to choose. Returned map is keyed by
+ * `tickerKey` (upper); look up with `tickerKey(input)`. The share-class ticker
+ * wins over the parent abbr on the rare overlap (it's the priceable unit).
+ */
+export function canonicalTickerMap(tickers: string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  const cleaned = [...new Set(tickers.map((t) => tickerKey(t)).filter(Boolean))];
+  if (cleaned.length === 0) return out;
+  const db = getMarketDb();
+  // Parent abbr first, then share-class ticker overwrites it (priceable unit wins).
+  for (const r of db
+    .select({ abbr: fundCatalog.abbrName })
+    .from(fundCatalog)
+    .where(inArray(sql`upper(${fundCatalog.abbrName})`, cleaned))
+    .all())
+    if (r.abbr) out.set(tickerKey(r.abbr), r.abbr);
+  for (const r of db
+    .select({ ticker: fundShareClasses.ticker })
+    .from(fundShareClasses)
+    .where(inArray(sql`upper(${fundShareClasses.ticker})`, cleaned))
+    .all())
+    out.set(tickerKey(r.ticker), r.ticker);
+  return out;
+}
+
+/**
+ * The official catalog case for one ticker, or the trimmed input when it's not a
+ * cataloged fund (custom asset / cash name keep the user's case). See
+ * {@link canonicalTickerMap}.
+ */
+export function canonicalTicker(ticker: string): string {
+  const trimmed = ticker.trim();
+  return canonicalTickerMap([trimmed]).get(tickerKey(trimmed)) ?? trimmed;
+}
+
+/**
+ * The stable catalog identity of a priceable share class (#235): the fund's
+ * CURRENT ticker plus the identifiers a holding anchors to. A fund house can
+ * rename the ticker (and, for multi-class funds, the class_name) over time, but
+ * `uid`/`isin`/`(projId, className)` are progressively more stable — so a renamed
+ * fund stays linked even after its symbol leaves the catalog.
+ */
+export interface CatalogSymbol {
+  projId: string;
+  className: string;
+  /** The fund's CURRENT symbol (catalog case) — may differ from a held old code. */
+  currentTicker: string;
+  /** Per-class ISIN — global, rename-proof; null when unpublished. */
+  isin: string | null;
+}
+
+const SHARE_CLASS_COLS = {
+  projId: fundShareClasses.projId,
+  className: fundShareClasses.className,
+  ticker: fundShareClasses.ticker,
+  isin: fundShareClasses.isinCode,
+};
+type ShareClassRow = {
+  projId: string;
+  className: string;
+  ticker: string;
+  isin: string | null;
+};
+const toSymbol = (r: ShareClassRow): CatalogSymbol => ({
+  projId: r.projId,
+  className: r.className,
+  currentTicker: r.ticker,
+  isin: r.isin,
+});
+
+/** Resolve a stored anchor `(projId, className)` to the current share class. */
+export function resolveShareClassByAnchor(projId: string, className: string): CatalogSymbol | null {
+  const db = getMarketDb();
+  const sc = db
+    .select(SHARE_CLASS_COLS)
+    .from(fundShareClasses)
+    .where(and(eq(fundShareClasses.projId, projId), eq(fundShareClasses.className, className)))
+    .get();
+  if (sc) return toSymbol(sc);
+  // A single-class fund exposes the parent abbr as the holdable ticker.
+  if (className === "main") {
+    const cat = db
+      .select({ abbr: fundCatalog.abbrName })
+      .from(fundCatalog)
+      .where(eq(fundCatalog.projId, projId))
+      .get();
+    if (cat?.abbr) return { projId, className, currentTicker: cat.abbr, isin: null };
+  }
+  return null;
+}
+
+/** Resolve a held ticker to its catalog share class (share-class match first, then
+ * parent abbr for single-class funds). Returns null for a custom / off-catalog symbol. */
+export function resolveShareClassByTicker(ticker: string): CatalogSymbol | null {
+  const key = tickerKey(ticker);
+  if (!key) return null;
+  const db = getMarketDb();
+  const sc = db
+    .select(SHARE_CLASS_COLS)
+    .from(fundShareClasses)
+    .where(sql`upper(${fundShareClasses.ticker}) = ${key}`)
+    .get();
+  if (sc) return toSymbol(sc);
+  const cat = db
+    .select({ projId: fundCatalog.projId, abbr: fundCatalog.abbrName })
+    .from(fundCatalog)
+    .where(sql`upper(${fundCatalog.abbrName}) = ${key}`)
+    .get();
+  if (cat?.abbr)
+    return { projId: cat.projId, className: "main", currentTicker: cat.abbr, isin: null };
+  return null;
+}
+
+/**
+ * Resolve a holding to its current catalog share class — the single chokepoint
+ * (#235). Tries the stored anchor in order of STABILITY: the `isin` (a global
+ * security id), then `(projId, className)` — so a multi-class rebrand that changes
+ * even the class_name still resolves wherever an ISIN was captured. Falls back to a
+ * ticker match for holdings created before the anchor was bound. Returns null for a
+ * custom / cash holding (no catalog link).
+ */
+export function resolveCatalogSymbol(input: {
+  ticker: string;
+  catalogProjId?: string | null;
+  catalogClassName?: string | null;
+  catalogIsin?: string | null;
+}): CatalogSymbol | null {
+  const db = getMarketDb();
+  if (input.catalogIsin) {
+    // An ISIN can match >1 row: a renamed class leaves a lingering stale row (the
+    // refresh never deletes), and the SEC feed has a couple of duplicate ISINs (one
+    // cross-fund). When the stored anchor also carries a proj_id, prefer the row
+    // that matches it — proj_id is stable, so this lands on the right fund even for
+    // a cross-fund ISIN collision.
+    if (input.catalogProjId) {
+      const exact = db
+        .select(SHARE_CLASS_COLS)
+        .from(fundShareClasses)
+        .where(
+          and(
+            eq(fundShareClasses.isinCode, input.catalogIsin),
+            eq(fundShareClasses.projId, input.catalogProjId),
+          ),
+        )
+        .orderBy(desc(fundShareClasses.updatedAt), sql`rowid desc`)
+        .get();
+      if (exact) return toSymbol(exact);
+    }
+    // Otherwise pick the most-recently-updated row sharing the ISIN (the nightly
+    // refresh keeps the LIVE class fresh; rowid breaks an exact-timestamp tie toward
+    // the newer row) so we always land on the current class.
+    const r = db
+      .select(SHARE_CLASS_COLS)
+      .from(fundShareClasses)
+      .where(eq(fundShareClasses.isinCode, input.catalogIsin))
+      .orderBy(desc(fundShareClasses.updatedAt), sql`rowid desc`)
+      .get();
+    if (r) return toSymbol(r);
+  }
+  if (input.catalogProjId && input.catalogClassName) {
+    const byAnchor = resolveShareClassByAnchor(input.catalogProjId, input.catalogClassName);
+    if (byAnchor) return byAnchor;
+  }
+  return resolveShareClassByTicker(input.ticker);
 }
 
 /** Look up catalog rows for a set of fund symbols (e.g. the user's holdings). */

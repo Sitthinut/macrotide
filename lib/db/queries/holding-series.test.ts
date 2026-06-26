@@ -2,7 +2,15 @@ import type Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { freshAppDb, freshMarketDb } from "@/tests/db-helpers";
 import { getMarketDb, runWithDbContext } from "../context";
-import { buckets, fundQuotes, navHistory, transactions } from "../schema";
+import {
+  buckets,
+  fundCatalog,
+  fundQuotes,
+  fundShareClasses,
+  holdings,
+  navHistory,
+  transactions,
+} from "../schema";
 import { getHoldingValueSeries } from "./series";
 
 // Mirror series.test.ts: serve the FX layer straight from seeded nav_history so
@@ -126,6 +134,48 @@ describe("getHoldingValueSeries", () => {
     expect(value.map((p) => p.value)).toEqual([1000, 1100, 1200]);
     // Cost basis is what was paid (100 × ฿10), flat across the window.
     expect(costBasis.map((p) => p.value)).toEqual([1000, 1000, 1000]);
+  });
+
+  it("bridges a fund CODE rename: prices the ledger's old code under the CURRENT code (#235)", async () => {
+    seedBucket(appDb);
+    // The ledger keeps the original code (immutable); the user holds it.
+    seedTxn(appDb, {
+      ticker: "OLD-A",
+      quoteSource: "thai_mutual_fund",
+      kind: "buy",
+      tradeDate: "2020-01-01",
+      units: 100,
+      amount: 1000,
+      pricePerUnit: 10,
+    });
+    // The holding row carries the stable anchor; the catalog has since renamed the
+    // code to NEW-B (resolveCatalogSymbol via the anchor → current ticker NEW-B).
+    appDb
+      .insert(holdings)
+      .values({
+        bucketId: "core",
+        ticker: "OLD-A",
+        englishName: "Fund",
+        quoteSource: "thai_mutual_fund",
+        catalogProjId: "P",
+        catalogClassName: "main",
+      })
+      .run();
+    marketDb
+      .insert(fundCatalog)
+      .values({ projId: "P", abbrName: "NEW-B", englishName: "Fund" })
+      .run();
+    marketDb
+      .insert(fundShareClasses)
+      .values({ projId: "P", className: "main", ticker: "NEW-B" })
+      .run();
+    // NAV lives under the CURRENT code (re-pointed on rename).
+    seedNav(marketDb, "thai_mutual_fund:NEW-B", [10, 11, 12]);
+
+    // The UI passes the current (displayed) code; without the bridge this returned
+    // an empty series (ledger filtered by NEW-B, NAV read under the dead key).
+    const { value } = await run(() => getHoldingValueSeries("NEW-B", "1mo"));
+    expect(value.map((p) => p.value)).toEqual([1000, 1100, 1200]);
   });
 
   it("contributes 0 before the position's first event — no back-projection", async () => {

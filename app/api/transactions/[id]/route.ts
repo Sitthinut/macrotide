@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { withDb } from "@/lib/api/with-db";
 import { listBuckets } from "@/lib/db/queries/buckets";
-import { catalogQuoteSource } from "@/lib/db/queries/funds";
+import { canonicalTicker, catalogQuoteSource } from "@/lib/db/queries/funds";
 import { deleteTransaction, updateTransaction } from "@/lib/db/queries/transactions";
+import { tickerKey } from "@/lib/market/sources";
 import {
   isAnchorKind,
   isCashAnchorKind,
@@ -78,8 +79,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const owned = listBuckets().map((b) => b.id);
     const anchor = isAnchorKind(t.kind);
     const pricePerUnit = t.pricePerUnit ?? null;
-    const ticker = t.ticker.trim();
-    const catalogSource = catalogQuoteSource([ticker]).get(ticker.toUpperCase());
+    const ticker = canonicalTicker(t.ticker);
+    const catalogSource = catalogQuoteSource([ticker]).get(tickerKey(ticker));
     const quoteSource = catalogSource === "thai_mutual_fund" ? catalogSource : t.quoteSource;
     const updated = updateTransaction(numId, owned, {
       tradeDate: t.tradeDate,

@@ -4,13 +4,14 @@ import { withImportToken } from "@/lib/api/broker-token-auth";
 import { withDb } from "@/lib/api/with-db";
 import { resolveAccountBucket, upsertBrokerConnection } from "@/lib/db/queries/broker-connections";
 import { listBuckets } from "@/lib/db/queries/buckets";
-import { catalogQuoteSource } from "@/lib/db/queries/funds";
+import { canonicalTickerMap, catalogQuoteSource } from "@/lib/db/queries/funds";
 import { setSetting } from "@/lib/db/queries/settings";
 import {
   insertTransactionsDeduped,
   remapExternalAccountToBucket,
   type TransactionInsert,
 } from "@/lib/db/queries/transactions";
+import { tickerKey } from "@/lib/market/sources";
 import { parseBrokerExport } from "@/lib/portfolio/broker-import";
 import { getConnectors } from "@/lib/portfolio/connector";
 import type { ExtractedTxnRow } from "@/lib/portfolio/ocr";
@@ -56,11 +57,13 @@ function toInsertRows(
   bucketId: string,
   sourceLabel: string,
   catalogSources: Map<string, string>,
+  canon: Map<string, string>,
   importBatchId: string,
 ): TransactionInsert[] {
   return rows.map((r) => {
-    const ticker = r.ticker.trim();
-    const catalogSource = catalogSources.get(ticker.toUpperCase());
+    // Store the official catalog case (#235); a custom symbol keeps the typed case.
+    const ticker = canon.get(tickerKey(r.ticker)) ?? r.ticker.trim();
+    const catalogSource = catalogSources.get(tickerKey(ticker));
     const quoteSource = catalogSource === "thai_mutual_fund" ? catalogSource : "market";
     // r.kind is gated by LEDGER_KIND_SET in commit(), so it's a valid ledger kind.
     const kind = r.kind as (typeof LEDGER_KINDS)[number];
@@ -138,6 +141,7 @@ function commit(
   const owned = listBuckets();
   let ownedIds = owned.map((b) => b.id);
   const catalogSources = catalogQuoteSource(valid.map((r) => r.ticker));
+  const canon = canonicalTickerMap(valid.map((r) => r.ticker));
   const importBatchId = randomUUID();
   const now = new Date().toISOString();
 
@@ -166,6 +170,7 @@ function commit(
       bucketId,
       sourceLabel,
       catalogSources,
+      canon,
       importBatchId,
     );
     const { inserted, skipped } = insertTransactionsDeduped(insertRows);

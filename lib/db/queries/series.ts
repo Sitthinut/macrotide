@@ -2,7 +2,7 @@ import "server-only";
 import { and, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { BASE_CURRENCY, inferHoldingCurrency } from "@/lib/market/currency";
 import { buildFxConverter } from "@/lib/market/fx";
-import { quoteCacheKey } from "@/lib/market/sources";
+import { quoteCacheKey, tickerKey } from "@/lib/market/sources";
 import { demoHoldingSeries } from "@/lib/mock/demo-history-read";
 import { type LedgerTxn, type PositionCheckpoint, reduceLots } from "@/lib/portfolio/lots";
 import {
@@ -12,9 +12,10 @@ import {
 } from "@/lib/portfolio/settlement-cash";
 import { toLedgerTxn } from "@/lib/portfolio/transaction-analytics";
 import { isAnchorKind } from "@/lib/portfolio/txn-import";
-import { getMarketDb, isDemoRequest, type MarketDb } from "../context";
-import { fundCatalog, navHistory } from "../schema";
+import { getDb, getMarketDb, isDemoRequest, type MarketDb } from "../context";
+import { fundCatalog, holdings as holdingsTable, navHistory } from "../schema";
 import { listBuckets } from "./buckets";
+import { resolveCatalogSymbol } from "./funds";
 import { listHoldings } from "./holdings";
 import { foldableEvents } from "./resolve-derived-units";
 import { listTransactionsForBuckets, type Transaction } from "./transactions";
@@ -240,11 +241,17 @@ function marketNavRows(
  */
 function holdsDistributingFund(marketDb: MarketDb, tickers: string[]): boolean {
   if (tickers.length === 0) return false;
+  // Case-fold (#235): held tickers are stored in catalog case but the catalog has
+  // lowercase-coded funds (the ttb family), so compare upper() on both sides.
+  const keys = tickers.map((t) => tickerKey(t));
   const row = marketDb
     .select({ n: sql<number>`count(*)` })
     .from(fundCatalog)
     .where(
-      and(inArray(fundCatalog.abbrName, tickers), eq(fundCatalog.distributionPolicy, "dividend")),
+      and(
+        inArray(sql`upper(${fundCatalog.abbrName})`, keys),
+        eq(fundCatalog.distributionPolicy, "dividend"),
+      ),
     )
     .get();
   return (row?.n ?? 0) > 0;
@@ -368,14 +375,43 @@ export async function getPortfolioSeries(
     arr.push(r);
   }
 
+  // Map a held (possibly renamed) ledger ticker to the fund's CURRENT code (#235),
+  // so NAV resolves under the symbol the cache + prewarm actually use. Built from
+  // the raw holdings anchors — the enriched list already shows the current code,
+  // losing the stored old one we need to bridge the ledger. Only renamed funds get
+  // an entry; everything else keeps its ledger ticker unchanged.
+  const navTickerByBucketTicker = new Map<string, string>();
+  for (const r of getDb()
+    .select({
+      bucketId: holdingsTable.bucketId,
+      ticker: holdingsTable.ticker,
+      catalogProjId: holdingsTable.catalogProjId,
+      catalogClassName: holdingsTable.catalogClassName,
+      catalogIsin: holdingsTable.catalogIsin,
+    })
+    .from(holdingsTable)
+    .where(
+      inArray(
+        holdingsTable.bucketId,
+        buckets.map((b) => b.id),
+      ),
+    )
+    .all()) {
+    const cur = resolveCatalogSymbol(r)?.currentTicker;
+    if (cur && tickerKey(cur) !== tickerKey(r.ticker))
+      navTickerByBucketTicker.set(`${r.bucketId} ${tickerKey(r.ticker)}`, cur);
+  }
+
   // One cache key + currency per (bucket, ledger ticker) — the last row's
   // quote_source wins, matching how the holdings projection routes a ticker.
   const keyByBucketTicker = new Map<string, string>();
   const keyMeta = new Map<string, { quoteSource: string; ticker: string }>();
   for (const r of events) {
-    const key = quoteCacheKey(r.quoteSource, r.ticker);
-    keyByBucketTicker.set(`${r.bucketId} ${r.ticker}`, key);
-    keyMeta.set(key, { quoteSource: r.quoteSource, ticker: r.ticker });
+    const navTicker =
+      navTickerByBucketTicker.get(`${r.bucketId} ${tickerKey(r.ticker)}`) ?? r.ticker;
+    const key = quoteCacheKey(r.quoteSource, navTicker);
+    keyByBucketTicker.set(`${r.bucketId} ${tickerKey(r.ticker)}`, key);
+    keyMeta.set(key, { quoteSource: r.quoteSource, ticker: navTicker });
   }
   const cacheKeys = Array.from(keyMeta.keys());
   // Cash carries its currency on the holding row (the ticker is the account name,
@@ -536,7 +572,9 @@ export async function getPortfolioSeries(
     };
     const cashContribAt = cumulative(cashContributionFlows(ledgerTxns));
     const reservedCashContribAt = reservedTickers
-      ? cumulative(cashContributionFlows(ledgerTxns.filter((t) => reservedTickers.has(t.ticker))))
+      ? cumulative(
+          cashContributionFlows(ledgerTxns.filter((t) => reservedTickers.has(tickerKey(t.ticker)))),
+        )
       : null;
 
     // The bucket exists on the chart from its first ledger event — never before.
@@ -564,7 +602,7 @@ export async function getPortfolioSeries(
       for (const [ticker, at] of tickerWalkers) {
         const cp = at(d);
         if (!cp || cp.units <= UNIT_EPSILON) continue;
-        const key = keyByBucketTicker.get(`${bucketId} ${ticker}`);
+        const key = keyByBucketTicker.get(`${bucketId} ${tickerKey(ticker)}`);
         // Cash: priced EXACTLY at 1.0 in its currency (no NAV), converted to THB.
         // A null rate (cold FX) drops it, reported via missingFx; never estimated.
         if (key !== undefined && keyMeta.get(key)?.quoteSource === "cash") {
@@ -573,7 +611,7 @@ export async function getPortfolioSeries(
           const thb = cp.units * rate;
           value += thb;
           heldCashThb += thb;
-          if (reservedTickers?.has(ticker)) reservedCashThb += thb;
+          if (reservedTickers?.has(tickerKey(ticker))) reservedCashThb += thb;
           continue;
         }
         const nav = key === undefined ? undefined : filled.get(key)?.get(d);
@@ -753,34 +791,68 @@ export async function getHoldingValueSeries(
   const ledger = listTransactionsForBuckets(buckets.map((b) => b.id));
   if (ledger.length === 0) return EMPTY_HOLDING_SERIES;
 
+  // Bridge a fund CODE rename (#235): the param is the symbol the UI shows (the
+  // CURRENT catalog code), but the immutable ledger keeps the original code. Find
+  // the held row for this instrument to recover its stored (ledger) code, and the
+  // current code for the NAV cache key (where the re-pointed history lives). For a
+  // never-renamed fund / custom asset these are equal, so behavior is unchanged.
+  const want = tickerKey(ticker);
+  const held = getDb()
+    .select({
+      ticker: holdingsTable.ticker,
+      catalogProjId: holdingsTable.catalogProjId,
+      catalogClassName: holdingsTable.catalogClassName,
+      catalogIsin: holdingsTable.catalogIsin,
+    })
+    .from(holdingsTable)
+    .where(
+      inArray(
+        holdingsTable.bucketId,
+        buckets.map((b) => b.id),
+      ),
+    )
+    .all();
+  const hit =
+    held.find((h) => tickerKey(h.ticker) === want) ??
+    held.find((h) => tickerKey(resolveCatalogSymbol(h)?.currentTicker ?? "") === want);
+  const ledgerTicker = hit?.ticker ?? ticker;
+  const navTicker = hit ? (resolveCatalogSymbol(hit)?.currentTicker ?? hit.ticker) : ticker;
+
   // One instrument across every bucket it appears in. `foldableEvents` is the
   // same pre-pass holdings/analytics run, so the chart can't disagree with them.
-  const events = foldableEvents(ledger).filter((r) => r.ticker === ticker);
+  const events = foldableEvents(ledger).filter(
+    (r) => tickerKey(r.ticker) === tickerKey(ledgerTicker),
+  );
   if (events.length === 0) return EMPTY_HOLDING_SERIES;
 
   const ledgerTxns: LedgerTxn[] = events.map(toLedgerTxn);
   const { positionTimeline, basisTimeline } = reduceLots(ledgerTxns);
-  const checkpoints = positionTimeline.get(ticker) ?? [];
+  // One instrument → one position; fall back to the sole entry if the folded
+  // display case differs from the stored code.
+  const checkpoints = positionTimeline.get(ledgerTicker) ?? [...positionTimeline.values()][0] ?? [];
 
   // Routing key + currency (last event's quote_source wins, mirroring the
   // holdings projection and getPortfolioSeries).
   let quoteSource = events[0].quoteSource;
   for (const r of events) quoteSource = r.quoteSource;
-  const key = quoteCacheKey(quoteSource, ticker);
+  const key = quoteCacheKey(quoteSource, ledgerTicker);
+  // NAV is cached under the CURRENT code (re-pointed on a rename); fetch by it.
+  const navKey = quoteCacheKey(quoteSource, navTicker);
   // Cash carries its currency on the ledger (tradeCurrency); the ticker is the
   // account name, so it can't be inferred from the symbol.
   const isCash = quoteSource === "cash";
   const cashCcy = isCash ? (events.find((r) => r.tradeCurrency)?.tradeCurrency ?? null) : null;
-  const currency = inferHoldingCurrency(quoteSource, ticker, cashCcy);
+  const currency = inferHoldingCurrency(quoteSource, ledgerTicker, cashCcy);
   const currencyByKey = new Map([[key, currency]]);
 
-  // NAV rows for this key only (demo fixture or market.db), merged with the
-  // ledger's trade-implied prices. Cached rows win on a date collision.
+  // NAV rows under the current code (demo fixture or market.db), merged with the
+  // ledger's trade-implied prices (keyed by the stored code). Cached rows win on
+  // a date collision.
   const navRows = (
     isDemoRequest()
-      ? demoNavRows([{ quoteSource, ticker }], since)
-      : marketNavRows(marketDb, [key], since)
-  ).filter((r) => r.ticker === key);
+      ? demoNavRows([{ quoteSource, ticker: navTicker }], since)
+      : marketNavRows(marketDb, [navKey], since)
+  ).filter((r) => r.ticker === navKey);
 
   const byDate = new Map<string, number>();
   let firstCached: string | undefined;

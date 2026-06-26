@@ -11,7 +11,12 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { type Bucket, listBuckets } from "../db/queries/buckets";
-import { findFunds, getCheaperAlternatives, getFundsByAbbr } from "../db/queries/funds";
+import {
+  canonicalTicker,
+  findFunds,
+  getCheaperAlternatives,
+  getFundsByAbbr,
+} from "../db/queries/funds";
 import { listHeldQuoteKeys, listHoldings } from "../db/queries/holdings";
 import { createJournalEntry, type JournalKind, listJournalEntries } from "../db/queries/journal";
 import { getModelPortfolio } from "../db/queries/models";
@@ -155,7 +160,8 @@ async function buildReadout(
       const a = await computeTransactionAnalytics(fundTxns, { method: "average", asOf });
       const units = a.positions.reduce((s, p) => s + (p.units > 0 ? p.units : 0), 0);
       position = {
-        ticker: want,
+        // Report the ticker in its STORED (official/typed) case, not upper (#235).
+        ticker: fundTxns[0].ticker,
         ...toLedger(a),
         marketValue: a.marketValue == null ? null : round(a.marketValue),
         units: round(units, 4),
@@ -796,7 +802,8 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
       // propose accepts; the client picks it off the stream. No DB mutation here.
       if (input.units != null) {
         const holding = {
-          ticker: input.ticker.trim().toUpperCase(),
+          // Official catalog case (#235); a custom symbol keeps the typed case.
+          ticker: canonicalTicker(input.ticker),
           englishName: input.englishName.trim(),
           thaiName: input.thaiName?.trim() ?? null,
           units: input.units,
@@ -847,7 +854,7 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
           note: input.rationale.trim(),
         },
         message:
-          `Drafted ${input.ticker.trim().toUpperCase()} — review and import it on the table ` +
+          `Drafted ${canonicalTicker(input.ticker)} — review and import it on the table ` +
           `below.${needs > 0 ? " You'll be asked to fill in a unit count." : ""}`,
       };
     },

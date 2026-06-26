@@ -251,13 +251,10 @@ export function HoldingSheet({
               // Always renameable (the rename cascades the ledger + earmark); Combobox
               // suggests the cash accounts you already track, matching the Add modal.
               <Combobox<string>
-                // Edit/show the account NAME in the user's case; the ticker stays the
-                // upper-cased identity, kept in sync so matching/rename still work (#149).
+                // The cash account NAME is the ticker, kept in the user's case (#235).
                 value={values.englishName || values.ticker}
-                onChange={(text) =>
-                  update({ englishName: text, ticker: text.trim().toUpperCase() })
-                }
-                onPick={(s) => update({ englishName: s, ticker: s.trim().toUpperCase() })}
+                onChange={(text) => update({ englishName: text, ticker: text.trim() })}
+                onPick={(s) => update({ englishName: s, ticker: s.trim() })}
                 items={cashAccounts}
                 getKey={(s) => s}
                 renderItem={(s) => s}
@@ -269,10 +266,11 @@ export function HoldingSheet({
               <input
                 className="sheet-input"
                 value={values.ticker}
-                onChange={(e) => update({ ticker: e.target.value.toUpperCase() })}
+                // Keep the typed case (#235): a cataloged fund is normalized to the
+                // official catalog case on save; a custom symbol keeps what you type.
+                onChange={(e) => update({ ticker: e.target.value })}
                 disabled={lockTicker || known}
                 placeholder="Symbol"
-                style={{ textTransform: "uppercase" }}
               />
             )}
           </FormRow>

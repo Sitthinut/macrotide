@@ -126,6 +126,7 @@ Full model (schema split, demo routing, why): [architecture.md § Two databases]
 
 - **Every route handler that queries MUST run inside `withDb`** ([lib/api/with-db.ts](./lib/api/with-db.ts)) — it reads the `macrotide_demo` cookie and routes to the right app.db (owner singleton vs per-session demo). Skip it and demo writes leak into the owner DB.
 - **`streamText`'s `onFinish` fires after `withDb` returns** — capture the context and re-enter with `runWithDbContext(ctx, …)`, or demo writes land in the owner DB. Canonical pattern: `app/api/chat/route.ts`.
+- **MULTI-USER — "owner" ≠ sole user.** The persistent `app.db` holds every user's rows (`user_id`-stamped; demo/built-in NULL). "Owner singleton" = that DB instance (vs demo); `OWNER_EMAIL` = the admin account. So **request** queries scope per user (`ownedBy`/`ownedBucketIds`); a **batch job** (no request — nightly prewarm/reconcile) reads all users directly — intended, not a leak. Don't make a batch job single-user.
 - Queries are `import "server-only"` ([lib/db/queries/](./lib/db/queries)); never import one into a client component — go through a fetcher.
 - **`holdings` is a DERIVED projection of the `transactions` ledger, not a thing you write directly** ([ADR 0004](./docs/explanation/decisions/0004-unified-ledger-positions-derived.md)). The ledger is the source of truth for positions; a `holdings` row is the home for user-editable instrument metadata (name, asset class, quote source, portfolio) that has no place in the ledger. It **stores no position at all** — `units`/`avg_cost` are folded from the ledger on READ: `listHoldings`/`getHolding` re-fold and overlay the live position ([holdings.ts](./lib/db/queries/holdings.ts) `overlayLive` → `projectBucketPositions`), so the returned `Holding` (= `HoldingRow` + computed `{units, avgCost}`) always reflects the latest NAV and can't disagree with analytics. A rebuild only reconciles which metadata rows exist (one per held ticker) — it writes no position columns. To add/edit/delete a position, write a ledger event — `createHoldingViaLedger`/`editHoldingViaLedger`/`deleteHoldingViaLedger` and `insertTransactions`/`updateTransaction`/`deleteTransaction` ([project-holdings.ts](./lib/db/queries/project-holdings.ts), [transactions.ts](./lib/db/queries/transactions.ts)) all rebuild the projection. Don't re-add `units`/`avg_cost` columns to `holdings` — they'd be a stale copy of regenerable math.
 - **Save only FACTS in the ledger; derive figures at the fold.** A row stores only the money fact the user gave — a *read* `units`, a Balance's ฿ `value`, or a trade's ฿ `amount`. NEVER write a figure DERIVED from regenerable market data (`units = value ÷ NAV(date)`, or an avg cost computed from those derived units) into a `transactions` row. The missing side is derived at the projection fold ([resolve-derived-units.ts](./lib/db/queries/resolve-derived-units.ts), run by `project-holdings` + `transaction-analytics`) and self-corrects when that date's NAV lands or is corrected — never frozen, never silently stale: a value-only Balance or an amount-only trade derives `units = value/amount ÷ NAV(date)`, and a **units-only trade** derives `amount = units × NAV(date)` (the symmetric twin — give either side, the fold fills the other). Balances and trades are symmetric: store the fact, derive the estimate at read.
@@ -175,9 +176,11 @@ degradation: [auth-and-providers.md § Market data providers](./docs/reference/a
 - Cache keys in `fund_quotes`/`nav_history` are the combined `${source}:${ticker}`,
   so one table holds quotes for every source. **Always build the key through
   `quoteCacheKey` (`lib/market/sources.ts`)** — it upper-cases the ticker (source
-  left as-is) so the catalog's native case and the always-upper-cased ledger ticker
-  resolve to one row. A second, divergently-cased builder is exactly the bug that
-  made lowercase-cataloged funds drop from holdings; there must be only one.
+  left as-is) so any stored case (the catalog's native case, a user-typed ticker,
+  or legacy all-uppercase) resolves to one row. `tickerKey` is the matching-side
+  twin for non-cache ticker comparisons. A second, divergently-cased builder is
+  exactly the bug that made lowercase-cataloged funds drop from holdings; there
+  must be only one.
 
 ## Auth conventions
 

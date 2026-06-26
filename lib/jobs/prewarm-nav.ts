@@ -1,5 +1,9 @@
 import "server-only";
-import { listActiveShareClassTickers, type ShareClassTicker } from "@/lib/db/queries/share-classes";
+import {
+  listActiveShareClassTickers,
+  listHeldShareClassTickers,
+  type ShareClassTicker,
+} from "@/lib/db/queries/share-classes";
 import { getCachedSeries } from "@/lib/market/cache";
 import { primeFundResolution, SEC_THAILAND_SOURCE } from "@/lib/market/providers/sec-thailand";
 import type { SeriesRange } from "@/lib/market/providers/types";
@@ -22,8 +26,10 @@ export interface PrewarmNavOptions {
     ok: boolean;
     error?: string;
   }) => void;
-  /** Test seam — enumerate the work-list. */
+  /** Test seam — enumerate the active-universe work-list. */
   _listTickers?: (opts: { retailOnly?: boolean }) => ShareClassTicker[];
+  /** Test seam — enumerate every user's held funds (any lifecycle status). */
+  _listHeld?: () => ShareClassTicker[];
   /** Test seam — prime the resolution cache. */
   _prime?: typeof primeFundResolution;
   /** Test seam — warm one ticker. */
@@ -67,10 +73,17 @@ export async function prewarmNav(opts: PrewarmNavOptions = {}): Promise<PrewarmN
   const concurrency = Math.max(1, opts.concurrency ?? 6);
   const range: SeriesRange = opts.range ?? "max";
   const listTickers = opts._listTickers ?? listActiveShareClassTickers;
+  const listHeld = opts._listHeld ?? listHeldShareClassTickers;
   const prime = opts._prime ?? primeFundResolution;
   const warm = opts._warm ?? getCachedSeries;
 
-  let tickers = listTickers({ retailOnly: opts.retailOnly });
+  // Active universe ∪ funds ANY user HOLDS (any status; multi-user prod). The union
+  // ensures a closed/liquidated or IPO held fund — excluded from the active-only
+  // crawl — still gets its NAV warmed, so its price doesn't silently go stale (#235).
+  const byTicker = new Map<string, ShareClassTicker>();
+  for (const t of listTickers({ retailOnly: opts.retailOnly })) byTicker.set(t.ticker, t);
+  for (const t of listHeld()) byTicker.set(t.ticker, t);
+  let tickers = [...byTicker.values()];
   if (opts.limit && opts.limit > 0) tickers = tickers.slice(0, opts.limit);
 
   // Prime resolution so fetchSeries → resolveSymbol hits the local mapping (zero
