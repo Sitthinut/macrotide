@@ -161,7 +161,15 @@ interface Row {
   provenance?: "paste" | "manual" | "image";
 }
 
-const today = (): string => new Date().toISOString().slice(0, 10);
+// The viewer's LOCAL calendar date as "YYYY-MM-DD". Not `toISOString()` (UTC):
+// near midnight, UTC-today can be a day off from the date the user is actually
+// living, which would default a trade to the wrong day.
+const today = (): string => {
+  const d = new Date();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mo}-${day}`;
+};
 
 let nextId = 1;
 const blankRow = (kind: RowKind): Row => ({
@@ -722,7 +730,7 @@ export function RecordSheet({
           const figure = native > 0 ? native : 0;
           const thb = figure * rate;
           return {
-            tradeDate: r.tradeDate || new Date().toISOString().slice(0, 10),
+            tradeDate: r.tradeDate || today(),
             kind: r.kind,
             // The cash account NAME is the ticker, kept in the user's own case (#235
             // supersedes the #149 upper-case + englishName-shadow workaround). The
@@ -757,7 +765,7 @@ export function RecordSheet({
                 ? Number(r.costTotal)
                 : 0;
           return {
-            tradeDate: r.tradeDate || new Date().toISOString().slice(0, 10),
+            tradeDate: r.tradeDate || today(),
             kind: r.kind,
             // Send the typed case; the server stores the official catalog case (#235).
             ticker: r.ticker.trim(),

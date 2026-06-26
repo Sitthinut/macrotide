@@ -295,6 +295,16 @@ tz-dependent rendering client-only to avoid SSR hydration mismatch). Market-
 context labels may hardcode `Asia/Bangkok`. Timezone is **not** stored as a
 memory.
 
+- **Never print the timezone** — no `timeZoneName`, no "GMT+7"/"ICT" suffix. The
+  device already renders local; a label is noise (and `"short"` yields "GMT+7",
+  not "ICT", anyway).
+- **Date-only values** (a NAV/trade/calendar date, no clock) render as a plain
+  date, UTC-pinned so the offset can't shift the day — parse as `…T00:00:00Z`
+  with `timeZone: "UTC"`. Only true instants (message time, created-at) render
+  device-local.
+- **Client "today" is the LOCAL day** — build it from `getFullYear/Month/Date`,
+  not `toISOString().slice(0,10)` (UTC; off by a day near midnight).
+
 ## When in doubt
 
 - For "where do I put X?" — check the table above.
