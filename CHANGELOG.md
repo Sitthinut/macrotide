@@ -1006,6 +1006,11 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Fixed
 
+- **The demo's history always looks current.** The committed demo NAV/benchmark
+  fixture is now re-dated on read so its latest point always lands on today —
+  the demo stays recent and daily-dense at any date with no periodic refresh,
+  instead of slowly going stale (and tripping date-relative tests) as time passes.
+
 - **Allocation tooltips tint to their chart color and stay readable in dark
   mode.** The drift-from-target tooltip used to render near-black (the bars carry
   color only on their cells, so the chart library had none to apply), unreadable

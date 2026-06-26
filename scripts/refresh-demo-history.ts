@@ -25,9 +25,10 @@
 //
 // CADENCE
 // -------
-// Re-run occasionally (e.g. quarterly) to roll the 5-year window forward so the
-// demo's "now" stays recent. It is NOT on the live path — stale-by-a-quarter is
-// fine. Could later ride the scheduler (background jobs) but does not need to.
+// Re-running is OPTIONAL — recency is automatic: the read path re-dates the
+// fixture so its latest point always lands on today (see lib/mock/demo-history-read.ts).
+// Re-run only to refresh the index SHAPES (a few years of new market action) or
+// extend the span; never for the dates. NOT on the live path.
 //
 // DATA SOURCES (real, public only — no real fund NAVs; see AGENTS.md):
 //   - S&P 500 (^GSPC)              → FMP real index, ~5y daily
