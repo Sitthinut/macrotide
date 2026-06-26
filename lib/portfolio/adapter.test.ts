@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adaptAggregate, adaptPortfolios } from "./adapter";
+import { adaptAggregate, adaptBucket, adaptPortfolios } from "./adapter";
 
 const sampleBucket = {
   id: "core",
@@ -91,5 +91,32 @@ describe("adaptAggregate", () => {
     const portfolios = adaptPortfolios([sampleBucket], [sampleHolding], [sampleQuote]);
     const agg = adaptAggregate(portfolios);
     expect(agg.totalValue).toBe(1200);
+  });
+
+  it("derives asOf from the aggregate series' latest date across buckets", () => {
+    const portfolios = adaptPortfolios([sampleBucket], [sampleHolding], [sampleQuote]);
+    const agg = adaptAggregate(portfolios, [
+      { date: "2026-06-23", value: 100 },
+      { date: "2026-06-24", value: 110 },
+    ]);
+    expect(agg.asOf).toBe("24 Jun 2026");
+  });
+});
+
+describe("portfolio asOf tracks the data date, not the bucket edit time", () => {
+  // Bucket last edited Jun 16 — the label must follow the latest NAV, not this.
+  const edited = { ...sampleBucket, updatedAt: "2026-06-16T08:50:56.929Z" };
+
+  it("formats the last series point as the valued-through date", () => {
+    const series = [
+      { date: "2026-06-23", value: 100 },
+      { date: "2026-06-24", value: 110 },
+    ];
+    expect(adaptBucket(edited, [], new Map(), series).asOf).toBe("24 Jun 2026");
+  });
+
+  it("is empty when the portfolio has no priced history", () => {
+    expect(adaptBucket(edited, [], new Map(), undefined).asOf).toBe("");
+    expect(adaptBucket(edited, [], new Map(), []).asOf).toBe("");
   });
 });

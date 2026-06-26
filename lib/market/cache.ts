@@ -85,6 +85,11 @@ export async function getCachedSeries(
   ticker: string,
   range: SeriesRange = "6mo",
   interval: SeriesInterval = "1d",
+  // Bypass the freshness gate and refetch even if the cached quote is <24h old.
+  // Unlike marking the row stale, this leaves `updatedAt` untouched, so a refetch
+  // that fails (upstream empty/down) preserves the real last-success timestamp
+  // instead of stranding the row at the epoch sentinel.
+  force = false,
 ): Promise<CachedSeries> {
   // The market cache lives in market.db, which demo sessions share with real
   // users — reads and write-through fills are identical. A symbol fetched once
@@ -101,6 +106,7 @@ export async function getCachedSeries(
   // history deepens on demand rather than returning a shallow cached window.
   if (
     cachedQuote &&
+    !force &&
     isFresh(cachedQuote.updatedAt, CACHE_TTL_MS) &&
     rangeCovers(cachedQuote.deepestRange, range)
   ) {
@@ -276,19 +282,15 @@ export async function refreshSymbols(
   refs: Array<{ source: string; ticker: string }>,
   range: SeriesRange = "6mo",
 ): Promise<{ source: string; ticker: string; ok: boolean; error?: string }[]> {
-  const db = getMarketDb();
   const results: { source: string; ticker: string; ok: boolean; error?: string }[] = [];
   for (const r of refs) {
     try {
-      const key = cacheKey(r.source, r.ticker);
-      // Force a refetch by marking the quote stale rather than deleting the row,
-      // so its recorded `deepest_range` survives the refresh (and a failed
-      // refetch can still serve the prior values instead of going cold).
-      db.update(fundQuotes)
-        .set({ updatedAt: "1970-01-01T00:00:00.000Z" })
-        .where(eq(fundQuotes.ticker, key))
-        .run();
-      await getCachedSeries(r.source, r.ticker, range);
+      // Force a refetch past the 24h freshness gate. `force` (not a stale-marker
+      // write) keeps the row's `updatedAt` intact, so an upstream miss preserves
+      // the true last-success time instead of stranding the row at the epoch
+      // sentinel; `deepest_range` survives and a failed refetch still serves the
+      // prior values rather than going cold.
+      await getCachedSeries(r.source, r.ticker, range, "1d", true);
       results.push({ ...r, ok: true });
     } catch (err) {
       results.push({
