@@ -188,6 +188,22 @@ describe("getBenchmarkSeries — demo mode (fixture-backed)", () => {
     expect(series.length).toBeGreaterThanOrEqual(18);
   });
 
+  it("stays daily-dense and current at a FAR-FUTURE date (re-dated fixture, no refresh)", async () => {
+    // The fixture is re-dated so its latest point lands on "today" — so the recent
+    // window stays daily and the demo looks current at ANY date, forever. Pin the
+    // clock years ahead to prove the demo never silently goes stale.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2031-03-14T12:00:00Z"));
+    try {
+      const series = await runDemo(() => getBenchmarkSeries("us_tr", "1mo"));
+      expect(series.length).toBeGreaterThanOrEqual(18);
+      // Data is re-dated up to "now" — its last point is in the (faked) present.
+      expect(series.at(-1)?.date.slice(0, 4)).toBe("2031");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("the benchmark window's first point is on/before the range start (carry-in)", async () => {
     const since = (() => {
       const d = new Date();
