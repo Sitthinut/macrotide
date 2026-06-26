@@ -15,6 +15,13 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **The portfolio "as of" date now reflects when your holdings were last
+  priced.** The date beside the total tracks the latest NAV date in the value
+  chart (a plain calendar date), instead of the moment the portfolio was last
+  edited — so it advances as fresh NAV lands and reads the same for everyone.
+  Internally, forcing a quote refresh no longer strands a fund's cache timestamp
+  when an upstream refetch comes back empty, so a fund's freshness stays honest.
+
 - **Funds stay correct when their code or name changes over time.** Tickers are
   now stored in their official catalog case (custom assets and cash accounts keep
   the case you type) and matched case-insensitively everywhere, so a fund never

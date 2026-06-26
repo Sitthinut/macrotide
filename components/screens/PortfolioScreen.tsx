@@ -1378,7 +1378,8 @@ export function PortfolioScreen({
       <div className="hero-block">
         <div className="hero-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span>
-            {activePfId === "all" ? "Combined balance" : view.name} · {view.asOf.split(",")[0]}
+            {activePfId === "all" ? "Combined balance" : view.name}
+            {view.asOf ? ` · ${view.asOf}` : ""}
           </span>
           {activePf && (
             <button

@@ -212,6 +212,23 @@ function lookbackPct(raw: { date: string; value: number }[] | undefined, days: n
   return ((latest.value - start.value) / start.value) * 100;
 }
 
+/**
+ * The latest valued date in a portfolio's value series, formatted "24 Jun 2026".
+ * This is the portfolio's NAV-as-of date — it advances whenever fresh NAV lands,
+ * NOT when the portfolio row is edited. NAV dates are end-of-day calendar dates,
+ * so no clock time or timezone is shown. Empty when there's no priced history.
+ */
+function formatAsOf(rawSeries?: { date: string; value: number }[]): string {
+  const date = rawSeries?.at(-1)?.date;
+  if (!date) return "";
+  return new Date(`${date}T00:00:00Z`).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 export function adaptBucket(
   bucket: Bucket,
   bucketHoldings: DbHolding[],
@@ -236,16 +253,7 @@ export function adaptBucket(
     targetModelId: bucket.targetModelId ?? null,
     initialInvestment,
     totalValue,
-    asOf: new Date(bucket.updatedAt).toLocaleString("en-GB", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-      timeZone: "Asia/Bangkok",
-      timeZoneName: "short",
-    }),
+    asOf: formatAsOf(rawSeries),
     brokerage: bucket.brokerage,
     perfPct: {
       d7: lookbackPct(rawSeries, 7),
@@ -312,7 +320,7 @@ export function adaptAggregate(
       ytd: weightedPct(allHoldings, totalValue, "ytd"),
       y1: weightedPct(allHoldings, totalValue, "y1"),
     },
-    asOf: portfolios[0]?.asOf ?? "",
+    asOf: formatAsOf(rawSeries),
     brokerage: portfolios[0]?.brokerage ?? "",
     holdings: allHoldings,
     series: toSeriesPoints(rawSeries),
