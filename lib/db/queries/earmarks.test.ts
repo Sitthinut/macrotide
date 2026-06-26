@@ -49,7 +49,7 @@ const BUCKET = {
 };
 
 describe("earmarks queries", () => {
-  it("sets an account earmark, upper-cases the ticker, lists it", () => {
+  it("sets an account earmark in the typed case (#235), lists it", () => {
     withFresh(() => {
       createBucket(BUCKET);
       const e = setAccountEarmark({
@@ -59,7 +59,8 @@ describe("earmarks queries", () => {
         currency: "THB",
         purpose: "Emergency",
       });
-      expect(e.ticker).toBe("SAVINGS");
+      // The cash account name keeps the user's case (no upper-casing workaround).
+      expect(e.ticker).toBe("savings");
       expect(e.scope).toBe("account");
       expect(e.amount).toBe(200_000);
       expect(listEarmarks()).toHaveLength(1);

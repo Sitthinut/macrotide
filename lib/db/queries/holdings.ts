@@ -1,9 +1,10 @@
 import "server-only";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
-import { quoteCacheKey } from "@/lib/market/sources";
+import { quoteCacheKey, tickerKey } from "@/lib/market/sources";
 import type { ProjectedPosition } from "@/lib/portfolio/project-positions";
 import { getDb } from "../context";
 import { buckets, holdings, transactions } from "../schema";
+import { resolveCatalogSymbol } from "./funds";
 import { enrichHoldingsWithCatalog } from "./holding-enrichment";
 import { projectBucketPositions } from "./project-holdings";
 import { ownedBy } from "./scope";
@@ -61,7 +62,7 @@ function syncedBrokerForBuckets(bucketIds: string[]): Map<string, string> {
     .where(and(inArray(transactions.bucketId, bucketIds), isNotNull(transactions.externalId)))
     .all();
   for (const r of rows) {
-    const key = `${r.bucketId} ${r.ticker}`;
+    const key = `${r.bucketId} ${tickerKey(r.ticker)}`;
     if (out.has(key)) continue; // first synced row wins; stable label per holding
     const broker = r.source?.trim() || (r.externalId ?? "").split(":")[0];
     if (broker) out.set(key, broker);
@@ -77,18 +78,18 @@ function overlayLive(rows: HoldingRow[]): Holding[] {
   const buckets = new Set(rows.map((h) => h.bucketId));
   const live = new Map<string, ProjectedPosition>();
   for (const b of buckets)
-    for (const p of projectBucketPositions(b)) live.set(`${b} ${p.ticker}`, p);
+    for (const p of projectBucketPositions(b)) live.set(`${b} ${tickerKey(p.ticker)}`, p);
   const synced = syncedBrokerForBuckets([...buckets]);
   const out: Holding[] = [];
   for (const h of rows) {
-    const p = live.get(`${h.bucketId} ${h.ticker}`);
+    const p = live.get(`${h.bucketId} ${tickerKey(h.ticker)}`);
     if (!p) continue;
     out.push({
       ...h,
       units: p.units,
       avgCost: p.avgCost,
       acquiredOn: h.acquiredOn ?? p.acquiredOn,
-      syncedBroker: synced.get(`${h.bucketId} ${h.ticker}`) ?? null,
+      syncedBroker: synced.get(`${h.bucketId} ${tickerKey(h.ticker)}`) ?? null,
     });
   }
   return out;
@@ -116,17 +117,26 @@ function ownedBucketIds() {
  */
 export function listHeldQuoteRefs(): { source: string; ticker: string }[] {
   const rows = getDb()
-    .select({ ticker: holdings.ticker, source: holdings.quoteSource })
+    .select({
+      ticker: holdings.ticker,
+      source: holdings.quoteSource,
+      catalogProjId: holdings.catalogProjId,
+      catalogClassName: holdings.catalogClassName,
+      catalogIsin: holdings.catalogIsin,
+    })
     .from(holdings)
     .where(inArray(holdings.bucketId, ownedBucketIds()))
     .all();
   const seen = new Set<string>();
   const out: { source: string; ticker: string }[] = [];
   for (const r of rows) {
-    const key = `${r.source}:${r.ticker}`;
+    // Refresh/look up NAV under the fund's CURRENT code (#235): a renamed fund's
+    // stored ticker is the old code, but the catalog + cache live under the new one.
+    const ticker = resolveCatalogSymbol(r)?.currentTicker ?? r.ticker;
+    const key = `${r.source}:${ticker}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ source: r.source, ticker: r.ticker });
+    out.push({ source: r.source, ticker });
   }
   return out;
 }
@@ -170,9 +180,11 @@ export function getHolding(id: number): Holding | undefined {
   if (!row) return undefined;
   // Load by id even when the ledger folds to no position (units 0) — the metadata
   // row exists and may need editing.
-  const p = projectBucketPositions(row.bucketId).find((x) => x.ticker === row.ticker);
+  const p = projectBucketPositions(row.bucketId).find(
+    (x) => tickerKey(x.ticker) === tickerKey(row.ticker),
+  );
   const syncedBroker =
-    syncedBrokerForBuckets([row.bucketId]).get(`${row.bucketId} ${row.ticker}`) ?? null;
+    syncedBrokerForBuckets([row.bucketId]).get(`${row.bucketId} ${tickerKey(row.ticker)}`) ?? null;
   return enrichHoldingsWithCatalog([
     { ...row, units: p?.units ?? 0, avgCost: p?.avgCost ?? null, syncedBroker },
   ])[0];

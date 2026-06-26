@@ -1,5 +1,6 @@
 import "server-only";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { tickerKey } from "@/lib/market/sources";
 import {
   type ProjectedPosition,
   type ProjectionEvent,
@@ -7,9 +8,18 @@ import {
 } from "@/lib/portfolio/project-positions";
 import { getDb } from "../context";
 import { earmarks, holdings, transactions } from "../schema";
+import { canonicalTicker, resolveCatalogSymbol, resolveShareClassByTicker } from "./funds";
 import type { Holding, HoldingRow } from "./holdings";
 import { foldableEvents } from "./resolve-derived-units";
 import type { Transaction, TransactionInsert } from "./transactions";
+
+/** Case-insensitive ticker match for a WHERE clause (#235): tickers are stored in
+ * official catalog case, so a cascade/lookup must fold case to stay correct even
+ * if a row's case drifts (legacy data, custom mixed-case). */
+const tickerEqSql = (
+  col: typeof transactions.ticker | typeof earmarks.ticker | typeof holdings.ticker,
+  ticker: string,
+) => sql`upper(${col}) = ${tickerKey(ticker)}`;
 
 // Holdings-as-projection orchestration (ADR 0004). The ledger (`transactions`)
 // is the source of truth for POSITIONS; `holdings` is a derived cache that this
@@ -82,7 +92,9 @@ export function countHeldByExternalAccount(
 /** Build the read-model Holding (stored row + folded position) — the same overlay
  * listHoldings/getHolding do, inlined here to avoid a holdings.ts import cycle. */
 function withFoldedPosition(row: HoldingRow): Holding {
-  const p = projectBucketPositions(row.bucketId).find((x) => x.ticker === row.ticker);
+  const p = projectBucketPositions(row.bucketId).find(
+    (x) => tickerKey(x.ticker) === tickerKey(row.ticker),
+  );
   return { ...row, units: p?.units ?? 0, avgCost: p?.avgCost ?? null };
 }
 
@@ -100,7 +112,18 @@ export function rebuildHoldingsForBucket(bucketId: string): void {
   const positions = projectBucketPositions(bucketId);
 
   const existing = db.select().from(holdings).where(eq(holdings.bucketId, bucketId)).all();
-  const byTicker = new Map(existing.map((h) => [h.ticker, h]));
+  // Group by the case-folded ticker (#235): the ledger and the holdings row store
+  // the official catalog case, but a case drift must still resolve to ONE row, not
+  // silently fork into a duplicate. If legacy data already has two rows that fold
+  // to the same key (e.g. "voo" + "VOO"), keep the first and DROP the rest — else
+  // both would overlay the one folded position and double-count it.
+  const byTicker = new Map<string, (typeof existing)[number]>();
+  const dupIds: number[] = [];
+  for (const h of existing) {
+    const k = tickerKey(h.ticker);
+    if (byTicker.has(k)) dupIds.push(h.id);
+    else byTicker.set(k, h);
+  }
   const now = new Date().toISOString();
 
   // Cash accounts carry their currency on the ledger (tradeCurrency); surface it +
@@ -115,23 +138,40 @@ export function rebuildHoldingsForBucket(bucketId: string): void {
     .from(transactions)
     .where(eq(transactions.bucketId, bucketId))
     .all()) {
-    if (t.quoteSource === "cash") cashCurrency.set(t.ticker, t.currency ?? null);
+    if (t.quoteSource === "cash") cashCurrency.set(tickerKey(t.ticker), t.currency ?? null);
   }
 
   db.transaction((tx) => {
     const seen = new Set<string>();
     for (const p of positions) {
-      seen.add(p.ticker);
-      const prev = byTicker.get(p.ticker);
+      seen.add(tickerKey(p.ticker));
+      const prev = byTicker.get(tickerKey(p.ticker));
+      // Bind the stable catalog anchor (#235) from the CURRENT ticker. A renamed
+      // fund's stored (old) ticker no longer matches the catalog → keep the
+      // existing anchor rather than nulling it (the anchor is what survives a
+      // rename). A custom / cash position resolves to null and stays unanchored.
+      const sc = resolveShareClassByTicker(p.ticker);
       if (prev) {
         // Refresh only the ledger-carried identity; leave metadata untouched. No
         // position columns to write — units/avgCost are folded on read.
         tx.update(holdings)
           .set({
+            // Adopt the folded display case (#235) so the row's ticker tracks the
+            // ledger's canonical case after a case-normalizing rename/backfill.
+            ticker: p.ticker,
             quoteSource: p.quoteSource,
             englishName: p.englishName || prev.englishName,
             source: p.source ?? prev.source,
             acquiredOn: prev.acquiredOn ?? p.acquiredOn,
+            // Only (re)bind when the current ticker resolves; never wipe a renamed
+            // fund's anchor with the now-stale ticker's miss.
+            ...(sc
+              ? {
+                  catalogProjId: sc.projId,
+                  catalogClassName: sc.className,
+                  catalogIsin: sc.isin,
+                }
+              : {}),
             updatedAt: now,
           })
           .where(eq(holdings.id, prev.id))
@@ -147,8 +187,11 @@ export function rebuildHoldingsForBucket(bucketId: string): void {
             ticker: p.ticker,
             englishName: p.englishName || p.ticker,
             quoteSource: p.quoteSource,
+            catalogProjId: sc?.projId,
+            catalogClassName: sc?.className,
+            catalogIsin: sc?.isin,
             assetClass: isCash ? "cash" : undefined,
-            currency: isCash ? (cashCurrency.get(p.ticker) ?? null) : undefined,
+            currency: isCash ? (cashCurrency.get(tickerKey(p.ticker)) ?? null) : undefined,
             source: p.source,
             acquiredOn: p.acquiredOn,
             createdAt: now,
@@ -159,8 +202,11 @@ export function rebuildHoldingsForBucket(bucketId: string): void {
     }
     // Drop holdings whose ticker no longer nets to a held position.
     for (const h of existing) {
-      if (!seen.has(h.ticker)) tx.delete(holdings).where(eq(holdings.id, h.id)).run();
+      if (!seen.has(tickerKey(h.ticker))) tx.delete(holdings).where(eq(holdings.id, h.id)).run();
     }
+    // Drop any case-variant duplicate rows (legacy data) so one position can't
+    // be double-counted by two rows that fold to the same ticker.
+    for (const dupId of dupIds) tx.delete(holdings).where(eq(holdings.id, dupId)).run();
   });
 }
 
@@ -239,10 +285,12 @@ export function createHoldingViaLedger(input: CreateHoldingInput): Holding | und
   // rebuild nests as a savepoint (better-sqlite3 native transaction).
   return db.transaction(() => {
     const avgCost = input.avgCost ?? null;
+    // Persist the official catalog case (#235); a custom asset keeps the typed case.
+    const ticker = canonicalTicker(input.ticker);
     db.insert(transactions)
       .values({
         bucketId: input.bucketId,
-        ticker: input.ticker,
+        ticker,
         englishName: input.englishName,
         quoteSource: input.quoteSource,
         kind: "opening",
@@ -263,7 +311,7 @@ export function createHoldingViaLedger(input: CreateHoldingInput): Holding | und
     const row = db
       .select()
       .from(holdings)
-      .where(and(eq(holdings.bucketId, input.bucketId), eq(holdings.ticker, input.ticker)))
+      .where(and(eq(holdings.bucketId, input.bucketId), tickerEqSql(holdings.ticker, ticker)))
       .get();
     if (row && Object.keys(meta).length > 0) {
       db.update(holdings)
@@ -297,10 +345,14 @@ export function editHoldingViaLedger(id: number, patch: EditHoldingPatch): Holdi
   return db.transaction(() => {
     const bucketId = h.bucketId;
     const oldTicker = h.ticker;
-    const newTicker = (patch.ticker ?? oldTicker).trim() || oldTicker;
+    // A ticker edit re-resolves to the official catalog case (#235); a custom asset
+    // keeps the typed case. A pure case-normalization still cascades below.
+    const newTicker = patch.ticker ? canonicalTicker(patch.ticker) || oldTicker : oldTicker;
     const now = new Date().toISOString();
     // Current position folded from the ledger — units/avgCost aren't stored on the row.
-    const cur = projectBucketPositions(bucketId).find((p) => p.ticker === oldTicker);
+    const cur = projectBucketPositions(bucketId).find(
+      (p) => tickerKey(p.ticker) === tickerKey(oldTicker),
+    );
     const curUnits = cur?.units ?? 0;
     const curAvg = cur?.avgCost ?? null;
 
@@ -313,7 +365,9 @@ export function editHoldingViaLedger(id: number, patch: EditHoldingPatch): Holdi
     if (Object.keys(idSet).length > 0) {
       db.update(transactions)
         .set(idSet)
-        .where(and(eq(transactions.bucketId, bucketId), eq(transactions.ticker, oldTicker)))
+        .where(
+          and(eq(transactions.bucketId, bucketId), tickerEqSql(transactions.ticker, oldTicker)),
+        )
         .run();
     }
 
@@ -324,7 +378,9 @@ export function editHoldingViaLedger(id: number, patch: EditHoldingPatch): Holdi
       const events = db
         .select()
         .from(transactions)
-        .where(and(eq(transactions.bucketId, bucketId), eq(transactions.ticker, newTicker)))
+        .where(
+          and(eq(transactions.bucketId, bucketId), tickerEqSql(transactions.ticker, newTicker)),
+        )
         .orderBy(transactions.tradeDate, transactions.id)
         .all();
       if (events.length === 1) {
@@ -369,7 +425,7 @@ export function editHoldingViaLedger(id: number, patch: EditHoldingPatch): Holdi
       // account's Investable/Reserved designation would orphan.
       db.update(earmarks)
         .set({ ticker: newTicker, updatedAt: now })
-        .where(and(eq(earmarks.bucketId, bucketId), eq(earmarks.ticker, oldTicker)))
+        .where(and(eq(earmarks.bucketId, bucketId), tickerEqSql(earmarks.ticker, oldTicker)))
         .run();
     }
 
@@ -404,13 +460,83 @@ export function deleteHoldingViaLedger(id: number): boolean {
   // (precious app.db). The inner rebuild nests as a savepoint.
   return db.transaction(() => {
     db.delete(transactions)
-      .where(and(eq(transactions.bucketId, h.bucketId), eq(transactions.ticker, h.ticker)))
+      .where(and(eq(transactions.bucketId, h.bucketId), tickerEqSql(transactions.ticker, h.ticker)))
+      .run();
+    // Cascade the cash Purpose: an earmark is keyed by (bucketId, ticker), so
+    // deleting the account must drop its earmark too — or it orphans and would
+    // re-attach if the same name is re-added (mirrors editHoldingViaLedger's rename
+    // cascade, which the delete path previously forgot).
+    db.delete(earmarks)
+      .where(and(eq(earmarks.bucketId, h.bucketId), tickerEqSql(earmarks.ticker, h.ticker)))
       .run();
     rebuildHoldingsForBucket(h.bucketId);
     // Defensive: if the holding had no ledger events at all (legacy row), drop it.
     db.delete(holdings).where(eq(holdings.id, id)).run();
     return true;
   });
+}
+
+/**
+ * Reconcile holdings against the live catalog (#235) — the seamless no-data → data
+ * transition. A custom (`manual`) holding whose ticker has since JOINED the catalog
+ * (a fund newly listed, or a crawl that finally reached it) is promoted to
+ * `thai_mutual_fund` so it starts pricing automatically, with no re-create; and any
+ * holding whose catalog anchor is missing/stale is (re)bound from its current
+ * ticker. Routing lives on both the ledger and the holdings row, so the source
+ * upgrade is written to both. Idempotent — a second run finds nothing to do.
+ *
+ * Run after the nightly catalog refresh. macrotide is MULTI-USER in prod: as a
+ * batch job (no request context) this intentionally sweeps EVERY user's holdings
+ * — the all-users pattern, not a per-user scope. Each write stays in its own row's
+ * bucket, so there is no cross-user effect. Returns the counts.
+ */
+export function reconcileHoldingCatalog(): { promoted: number; bound: number } {
+  const db = getDb();
+  // All users' holdings (multi-user prod) — a nightly batch reconciles everyone.
+  const rows = db.select().from(holdings).all();
+  let promoted = 0;
+  let bound = 0;
+  for (const h of rows) {
+    // Cash accounts are never cataloged funds — even if a user names one like a
+    // real fund code, it must not pick up catalog metadata or get promoted (#235).
+    if (h.quoteSource === "cash") continue;
+    // Resolve via the STORED ANCHOR first (resolveCatalogSymbol), so a holding that
+    // was already renamed still resolves and gets its anchor refreshed (e.g. an
+    // ISIN added to the class later) — a bare ticker lookup would miss it.
+    const sc = resolveCatalogSymbol(h);
+    if (!sc) continue; // not (yet) a cataloged fund — nothing to reconcile
+    const anchorStale =
+      h.catalogProjId !== sc.projId ||
+      h.catalogClassName !== sc.className ||
+      h.catalogIsin !== sc.isin;
+    const promote = h.quoteSource === "manual";
+    if (!anchorStale && !promote) continue;
+    db.transaction(() => {
+      if (promote) {
+        db.update(transactions)
+          .set({ quoteSource: "thai_mutual_fund" })
+          .where(
+            and(eq(transactions.bucketId, h.bucketId), tickerEqSql(transactions.ticker, h.ticker)),
+          )
+          .run();
+        promoted++;
+      }
+      db.update(holdings)
+        .set({
+          ...(promote ? { quoteSource: "thai_mutual_fund" } : {}),
+          catalogProjId: sc.projId,
+          catalogClassName: sc.className,
+          catalogIsin: sc.isin,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(holdings.id, h.id))
+        .run();
+      // Count a pure anchor refresh; a promotion already implies the anchor write,
+      // so don't double-count it in the summary.
+      if (anchorStale && !promote) bound++;
+    });
+  }
+  return { promoted, bound };
 }
 
 /**

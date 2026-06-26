@@ -96,8 +96,9 @@ describe("applyHoldingProposal — per-user scoping", () => {
       const result = applyHoldingProposal({ bucketId: "b", ...HOLDING });
       expect(result.ok).toBe(true);
       expect(result.holding?.bucketId).toBe("b");
-      // Ticker normalized to upper-case on write.
-      expect(result.holding?.ticker).toBe("VOO");
+      // A custom (off-catalog) symbol keeps the typed case (#235); only a cataloged
+      // fund is normalized to its official catalog case.
+      expect(result.holding?.ticker).toBe("voo");
       expect(listHoldings()).toHaveLength(1);
     });
   });

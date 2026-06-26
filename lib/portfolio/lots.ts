@@ -187,6 +187,32 @@ export interface LotEngineResult {
 // Units below this are treated as zero (float dust after a full exit).
 const UNIT_EPSILON = 1e-9;
 
+/**
+ * Collapse case-variant tickers to ONE display case before folding (#235). Two
+ * ledger rows that differ only in case (a custom symbol free-typed as "voo" then
+ * "VOO") are the SAME holding, so they must fold to one position — not silently
+ * fork. The most-recent (by trade date, then input order) non-empty case wins as
+ * the display case — the explicit input-index tiebreak keeps the winner
+ * deterministic on a same-date tie without relying on sort stability. For a
+ * cataloged fund the ledger already carries one canonical (catalog) case, so this
+ * is a no-op there; it only changes the very mixed-case rows it fixes.
+ */
+export function foldTickerCase<T extends { ticker: string; tradeDate: string }>(
+  rows: readonly T[],
+): T[] {
+  const display = new Map<string, string>();
+  for (const { r } of rows
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) =>
+      a.r.tradeDate < b.r.tradeDate ? -1 : a.r.tradeDate > b.r.tradeDate ? 1 : a.i - b.i,
+    ))
+    if (r.ticker) display.set(r.ticker.trim().toUpperCase(), r.ticker);
+  return rows.map((r) => {
+    const d = display.get(r.ticker.trim().toUpperCase());
+    return d && d !== r.ticker ? { ...r, ticker: d } : r;
+  });
+}
+
 interface AverageState {
   units: number;
   basis: number;
@@ -207,7 +233,7 @@ export function reduceLots(
   txns: readonly LedgerTxn[],
   method: CostBasisMethod = "average",
 ): LotEngineResult {
-  const sorted = [...txns].sort(compareTxns);
+  const sorted = [...foldTickerCase(txns)].sort(compareTxns);
 
   // Per-ticker state. Average tracks {units, basis}; FIFO tracks a lot queue.
   const avg = new Map<string, AverageState>();

@@ -296,7 +296,10 @@ export const fundShareClasses = sqliteTable(
     investorType: text("investor_type"),
     // Per-class tax wrapper: 'SSF' | 'RMF' | 'ThaiESG' | NULL.
     taxIncentiveType: text("tax_incentive_type"),
-    // Per-class ISIN.
+    // Per-class ISIN — a global, rename-proof security identifier (~10% coverage in
+    // the live feed). The most stable per-class anchor we actually have (#235); the
+    // SEC `unique_id` field is an AMC/company code, NOT a security id, so it can't
+    // anchor a class.
     isinCode: text("isin_code"),
     // Per-class current total expense ratio %, derived from fund_fees
     // (projId, className, 'total_expense', active period). NULL when unpublished.
@@ -310,6 +313,7 @@ export const fundShareClasses = sqliteTable(
     index("idx_fund_share_classes_proj").on(table.projId),
     index("idx_fund_share_classes_tax").on(table.taxIncentiveType),
     index("idx_fund_share_classes_investor").on(table.investorType),
+    index("idx_fund_share_classes_isin").on(table.isinCode),
   ],
 );
 

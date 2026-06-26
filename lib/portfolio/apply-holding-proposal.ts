@@ -57,7 +57,9 @@ function normalizeQuoteSource(value: string | null | undefined): QuoteSource {
  * tagged error rather than throwing so the route can map it to a status code.
  */
 export function applyHoldingProposal(input: HoldingProposalInput): HoldingProposalResult {
-  const ticker = input.ticker.trim().toUpperCase();
+  // Keep the typed case (#235); createHoldingViaLedger canonicalizes a cataloged
+  // fund to the official catalog case and leaves a custom asset's case alone.
+  const ticker = input.ticker.trim();
   const units = Number(input.units);
   if (!ticker || !Number.isFinite(units) || units <= 0) {
     return { ok: false, error: "invalid" };

@@ -155,6 +155,20 @@
       "when": 1782254597397,
       "tag": "0021_memory_overhaul",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1782378348550,
+      "tag": "0022_many_inertia",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1782432355626,
+      "tag": "0023_uneven_sway",
+      "breakpoints": true
     }
   ]
 }

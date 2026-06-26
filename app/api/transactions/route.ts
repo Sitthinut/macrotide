@@ -3,13 +3,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { withDb } from "@/lib/api/with-db";
 import { listBuckets } from "@/lib/db/queries/buckets";
-import { catalogQuoteSource } from "@/lib/db/queries/funds";
+import { canonicalTickerMap, catalogQuoteSource } from "@/lib/db/queries/funds";
 import {
   insertTransactions,
   listTransactionsByBucket,
   listTransactionsForBuckets,
   type TransactionInsert,
 } from "@/lib/db/queries/transactions";
+import { tickerKey } from "@/lib/market/sources";
 import {
   isAnchorKind,
   isCashAnchorKind,
@@ -120,7 +121,11 @@ export async function POST(req: Request) {
       .filter((t) => isAnchorKind(t.kind))
       .map((t) => t.ticker);
     const kinds = promoteAnchorKinds(alreadyAnchored, transactions);
-    const catalogSources = catalogQuoteSource(transactions.map((t) => t.ticker));
+    const tickers = transactions.map((t) => t.ticker);
+    const catalogSources = catalogQuoteSource(tickers);
+    // Store the OFFICIAL catalog case (#235); a custom asset / cash name keeps the
+    // typed case. Comparisons elsewhere are case-folded via tickerKey regardless.
+    const canon = canonicalTickerMap(tickers);
 
     // FACTS-ONLY LEDGER (ADR 0004). The route does NO derivation — it stores only the
     // money facts the user gave: a read `units`, a Balance's ฿ `value`, or a trade's ฿
@@ -132,8 +137,8 @@ export async function POST(req: Request) {
     const rows: TransactionInsert[] = transactions.map((t, i) => {
       const kind = kinds[i];
       const anchor = isAnchorKind(kind);
-      const ticker = t.ticker.trim();
-      const catalogSource = catalogSources.get(ticker.toUpperCase());
+      const ticker = canon.get(tickerKey(t.ticker)) ?? t.ticker.trim();
+      const catalogSource = catalogSources.get(tickerKey(ticker));
       const quoteSource = catalogSource === "thai_mutual_fund" ? catalogSource : t.quoteSource;
       return {
         bucketId,

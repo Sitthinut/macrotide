@@ -171,7 +171,8 @@ const DEMO_CASH_BUCKET = "main";
 
 export const DEMO_CASH: DemoCashAccount[] = [
   {
-    ticker: "SCB SAVINGS",
+    // Cash tickers ARE the account name in its own case (#235); no upper-casing.
+    ticker: "SCB Savings",
     name: "SCB Savings",
     events: [
       { kind: "cash_balance", date: "2024-06-17", balance: 100000 },
@@ -183,7 +184,7 @@ export const DEMO_CASH: DemoCashAccount[] = [
     ],
   },
   {
-    ticker: "EMERGENCY SAVINGS",
+    ticker: "Emergency Savings",
     name: "Emergency Savings",
     reserved: "Emergency",
     events: [
@@ -192,7 +193,7 @@ export const DEMO_CASH: DemoCashAccount[] = [
     ],
   },
   {
-    ticker: "BROKERAGE CASH",
+    ticker: "Brokerage Cash",
     name: "Brokerage Cash",
     events: [{ kind: "cash_balance", date: "2025-12-01", balance: 45000 }],
   },

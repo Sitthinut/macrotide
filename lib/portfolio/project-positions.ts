@@ -15,7 +15,7 @@
 // snapshot adapter already had; the analytics path (transaction-analytics) does
 // the proper FX conversion.
 
-import { type CostBasisMethod, type LedgerTxn, reduceLots } from "./lots";
+import { type CostBasisMethod, foldTickerCase, type LedgerTxn, reduceLots } from "./lots";
 
 /** The ledger fields the projection reads to build a holding row. */
 export interface ProjectionEvent extends LedgerTxn {
@@ -50,7 +50,10 @@ export function projectPositions(
   events: readonly ProjectionEvent[],
   method: CostBasisMethod = "average",
 ): ProjectedPosition[] {
-  const lots = reduceLots(events, method);
+  // Collapse case-variant tickers to one display case first (#235), so the
+  // identity pass keys line up with reduceLots's (which folds case internally).
+  const folded = foldTickerCase(events);
+  const lots = reduceLots(folded, method);
 
   // Identity + earliest-date pass, in chronological order so "latest non-empty"
   // is simply last-write-wins.
@@ -58,7 +61,7 @@ export function projectPositions(
     string,
     { quoteSource: string; englishName: string | null; source: string | null; acquiredOn: string }
   >();
-  const ordered = [...events].sort((a, b) =>
+  const ordered = [...folded].sort((a, b) =>
     a.tradeDate < b.tradeDate ? -1 : a.tradeDate > b.tradeDate ? 1 : 0,
   );
   for (const e of ordered) {

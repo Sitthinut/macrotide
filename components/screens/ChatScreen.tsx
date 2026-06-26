@@ -385,7 +385,7 @@ function HoldingProposalCard({
         style={{ background: "var(--accent-soft)", borderColor: "transparent" }}
       >
         <div className="label">
-          <span>✓ ADDED · {holding.ticker.toUpperCase()}</span>
+          <span>✓ ADDED · {holding.ticker}</span>
         </div>
         <div style={{ fontSize: 12.5, color: "var(--accent-ink)" }}>
           Saved to your portfolio. View it in your holdings.
@@ -407,7 +407,7 @@ function HoldingProposalCard({
             letterSpacing: "0.04em",
           }}
         >
-          ○ SKIPPED · {holding.ticker.toUpperCase()}
+          ○ SKIPPED · {holding.ticker}
         </div>
       </div>
     );
@@ -422,7 +422,7 @@ function HoldingProposalCard({
     <div className="plan-proposal">
       <div className="label">
         <Icon name="sparkle" size={12} />
-        <span>ADD HOLDING · {holding.ticker.toUpperCase()}</span>
+        <span>ADD HOLDING · {holding.ticker}</span>
       </div>
       <div className="diff">
         <span className="add">
@@ -479,7 +479,7 @@ function HoldingsImportCard({ data, onOpen }: { data: HoldingsImport; onOpen: ()
             // biome-ignore lint/suspicious/noArrayIndexKey: import-preview rows can share a ticker and never reorder
             <tr key={`${r.ticker}-${i}`}>
               <td data-label="Symbol">
-                <span className="t">{r.ticker.toUpperCase()}</span>
+                <span className="t">{r.ticker}</span>
               </td>
               <td data-label="Units" style={{ textAlign: "right" }}>
                 {r.needsUnits ? (
@@ -548,7 +548,7 @@ function TransactionsImportCard({
             <tr key={`${r.ticker}-${r.tradeDate ?? ""}-${i}`}>
               <td data-label="Date">{r.tradeDate ?? "—"}</td>
               <td data-label="Symbol">
-                <span className="t">{r.ticker.toUpperCase()}</span>
+                <span className="t">{r.ticker}</span>
               </td>
               <td data-label="Type">{r.kind ?? "—"}</td>
               <td data-label="Units" style={{ textAlign: "right" }}>

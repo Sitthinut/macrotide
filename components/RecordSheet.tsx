@@ -724,9 +724,10 @@ export function RecordSheet({
           return {
             tradeDate: r.tradeDate || new Date().toISOString().slice(0, 10),
             kind: r.kind,
-            // The ticker is the upper-cased identity (matching/cache keys); the
-            // account NAME keeps the user's case for display (#149).
-            ticker: r.ticker.trim().toUpperCase(),
+            // The cash account NAME is the ticker, kept in the user's own case (#235
+            // supersedes the #149 upper-case + englishName-shadow workaround). The
+            // server stores it as typed; matching is case-folded everywhere.
+            ticker: r.ticker.trim(),
             englishName: r.ticker.trim() || undefined,
             units: figure > 0 ? figure : undefined,
             value: r.kind === "cash_balance" && thb > 0 ? thb : undefined,
@@ -758,7 +759,8 @@ export function RecordSheet({
           return {
             tradeDate: r.tradeDate || new Date().toISOString().slice(0, 10),
             kind: r.kind,
-            ticker: r.ticker.trim().toUpperCase(),
+            // Send the typed case; the server stores the official catalog case (#235).
+            ticker: r.ticker.trim(),
             englishName: r.englishName,
             // Send units when read; otherwise omit and send the ฿ value so the
             // server derives units from NAV(tradeDate) (#130).
@@ -785,7 +787,7 @@ export function RecordSheet({
         return {
           tradeDate: d.tradeDate,
           kind: d.kind,
-          ticker: d.ticker.toUpperCase(),
+          ticker: d.ticker,
           englishName: r.englishName,
           units: d.units,
           pricePerUnit: d.pricePerUnit,
@@ -813,8 +815,10 @@ export function RecordSheet({
           (r.cashRole === "reserved" || (r.cashLabel ?? "").trim())
         ) {
           await saveEarmark({
+            // Match the ledger ticker's natural case (#235); setAccountEarmark
+            // canonicalizes + matches case-insensitively anyway.
+            ticker: r.ticker.trim(),
             bucketId,
-            ticker: r.ticker.trim().toUpperCase(),
             role: r.cashRole ?? "investable",
             amount: null,
             purpose: r.cashLabel,

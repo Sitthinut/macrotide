@@ -45,15 +45,29 @@ export const BENCHMARK_TR_SOURCE = "benchmark_tr";
 /**
  * The composite cache key for the `fund_quotes` / `nav_history` tables:
  * `${source}:${TICKER}`. The ticker is normalized to trimmed UPPER case so the
- * SAME row is hit no matter where the ticker came from — a lowercase-cataloged
- * fund (ttb SSF/RMF family) and the always-uppercased ledger ticker must resolve
- * to one key, or a value-only Balance can never find its NAV and silently drops
- * from holdings (#134). The source is a fixed lowercase taxonomy value and is
- * left as-is; only the ticker is normalized.
+ * SAME row is hit no matter the stored case — a lowercase-cataloged fund (ttb
+ * SSF/RMF family) and a ledger ticker stored in its official catalog case must
+ * resolve to one key, or a value-only Balance can never find its NAV and silently
+ * drops from holdings (#134). The source is a fixed lowercase taxonomy value and
+ * is left as-is; only the ticker is normalized. (Tickers are STORED in catalog
+ * case now (#235); `tickerKey` is the matching-side twin of this normalization.)
  *
  * Every writer and reader of those tables MUST build the key through here — the
  * casing only stays consistent if there is exactly one builder.
  */
 export function quoteCacheKey(source: string, ticker: string): string {
   return `${source}:${ticker.trim().toUpperCase()}`;
+}
+
+/**
+ * The canonical comparison key for a ticker: trimmed + upper-cased. Tickers are
+ * STORED in their official catalog case (a cataloged fund keeps the SEC's
+ * `abbr_name` case; a custom asset keeps what the user typed), so any equality,
+ * Set membership, or Map keying that must match two tickers regardless of case
+ * MUST go through here — never compare raw `.ticker` strings. This is the single
+ * comparison chokepoint, the read-side twin of `quoteCacheKey`'s write-side
+ * normalization. (Stored case is for display; matching is always case-folded.)
+ */
+export function tickerKey(ticker: string): string {
+  return ticker.trim().toUpperCase();
 }

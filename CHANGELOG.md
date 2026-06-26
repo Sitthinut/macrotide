@@ -15,6 +15,19 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Funds stay correct when their code or name changes over time.** Tickers are
+  now stored in their official catalog case (custom assets and cash accounts keep
+  the case you type) and matched case-insensitively everywhere, so a fund never
+  shows up twice from a stray capital letter. When a Thai fund house renames a
+  fund — its long name or its short code — your holding follows the change
+  automatically: it keeps showing the current name and symbol, stays priced, and
+  the value chart stays continuous across the rename, while your transaction
+  history keeps the original code as its record. Funds you hold are also priced
+  through their whole life: a brand-new fund starts pricing the moment data
+  appears, a fund that's closed or delisted stays valued at its last known price
+  instead of disappearing, and a custom asset you entered by hand starts pricing
+  on its own once it's listed in the catalog.
+
 - **History reads as one newest-first timeline.** Balances (opening and snapshot
   anchors) now interleave with trades in date order instead of collecting in a
   separate section at the bottom, so a balance dated after your latest trade sits

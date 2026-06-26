@@ -2,6 +2,7 @@ import "server-only";
 import { eq, inArray, sql } from "drizzle-orm";
 import { getMarketDb } from "../context";
 import { fundCatalog, fundShareClasses } from "../schema";
+import { resolveCatalogSymbol } from "./funds";
 import type { Holding } from "./holdings";
 
 export interface CatalogHoldingMetadata {
@@ -118,10 +119,35 @@ export function isCatalogHolding(ticker: string): boolean {
   return catalogMetadataForHoldings([ticker]).has(ticker.trim().toUpperCase());
 }
 
+/**
+ * Overlay live catalog metadata onto holdings (#235). Each holding is resolved to
+ * its current share class through {@link resolveCatalogSymbol} — by the stable
+ * `(projId, className)` anchor first, so a fund whose SYMBOL changed still resolves
+ * (its old code has left the catalog), falling back to a ticker match. The current
+ * name/metadata AND the current symbol are overlaid, so a renamed fund seamlessly
+ * shows its new name and code while the ledger keeps the old code as identity.
+ */
 export function enrichHoldingsWithCatalog<T extends Holding>(holdings: T[]): T[] {
-  const metadata = catalogMetadataForHoldings(holdings.map((h) => h.ticker));
-  return holdings.map((h) => {
-    const meta = metadata.get(h.ticker.trim().toUpperCase());
-    return meta ? ({ ...h, ...meta } as T) : h;
+  const resolved = holdings.map((h) => ({
+    h,
+    sym: resolveCatalogSymbol({
+      ticker: h.ticker,
+      catalogProjId: h.catalogProjId,
+      catalogClassName: h.catalogClassName,
+      catalogIsin: h.catalogIsin,
+    }),
+  }));
+  const metadata = catalogMetadataForHoldings(
+    resolved.map((r) => r.sym?.currentTicker ?? r.h.ticker),
+  );
+  return resolved.map(({ h, sym }) => {
+    const lookupTicker = sym?.currentTicker ?? h.ticker;
+    const meta = metadata.get(lookupTicker.trim().toUpperCase());
+    if (!meta) return h;
+    // Show the CURRENT symbol when the fund was renamed (stored ledger ticker is
+    // the old code); a no-op when the held ticker is already current.
+    const tickerOverlay =
+      sym && sym.currentTicker !== h.ticker ? { ticker: sym.currentTicker } : {};
+    return { ...h, ...meta, ...tickerOverlay } as T;
   });
 }

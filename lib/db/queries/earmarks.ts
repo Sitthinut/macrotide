@@ -1,7 +1,9 @@
 import "server-only";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
+import { tickerKey } from "@/lib/market/sources";
 import { getDb } from "../context";
 import { earmarks } from "../schema";
+import { canonicalTicker } from "./funds";
 import { ownedBy, ownerId } from "./scope";
 
 // Cash earmarks — a designation that part (or all) of a cash account is RESERVED for a
@@ -33,13 +35,31 @@ export interface SetEarmarkInput {
 /**
  * Create or replace the `account`-scope earmark for one cash account. Keyed on
  * (bucketId, ticker, scope) — NOT a holding id (the holdings projection drops/recreates
- * rows, so an id FK would dangle). The ticker is upper-cased to match the always-upper
- * ledger ticker and the resolver's case-insensitive compare.
+ * rows, so an id FK would dangle). The ticker is stored in its official case (#235) —
+ * a cash account name keeps the case the user typed — matching the ledger ticker; the
+ * resolver compares case-insensitively, and a rename cascades the case here too.
  */
 export function setAccountEarmark(input: SetEarmarkInput): Earmark {
   const now = new Date().toISOString();
-  const ticker = input.ticker.trim().toUpperCase();
-  return getDb()
+  const db = getDb();
+  // Case-insensitive upsert (#235): the unique index is case-sensitive, so re-set
+  // the SAME account in a different case onto its existing row (don't fork). Reuse
+  // the stored ticker as the conflict target; a brand-new account takes the
+  // official/typed case.
+  const existing = db
+    .select({ ticker: earmarks.ticker })
+    .from(earmarks)
+    .where(
+      and(
+        ownedBy(earmarks.userId),
+        eq(earmarks.bucketId, input.bucketId),
+        eq(earmarks.scope, "account"),
+        sql`upper(${earmarks.ticker}) = ${tickerKey(input.ticker)}`,
+      ),
+    )
+    .get();
+  const ticker = existing?.ticker ?? canonicalTicker(input.ticker);
+  return db
     .insert(earmarks)
     .values({
       userId: ownerId(),
@@ -76,7 +96,7 @@ export function deleteAccountEarmark(bucketId: string, ticker: string): void {
         ownedBy(earmarks.userId),
         eq(earmarks.bucketId, bucketId),
         eq(earmarks.scope, "account"),
-        eq(earmarks.ticker, ticker.trim().toUpperCase()),
+        sql`upper(${earmarks.ticker}) = ${tickerKey(ticker)}`,
       ),
     )
     .run();
