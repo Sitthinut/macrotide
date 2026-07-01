@@ -68,6 +68,12 @@ or rename a route.
 | `/api/quote-source` | GET | Resolve each `tickers=A,B,C` symbol's price source against the real catalog — the single authority: in the catalog → `thai_mutual_fund`, otherwise → `manual` (custom). No shape guessing. Powers the importer's on-the-fly source badge |
 | `/api/funds/[projId]` | GET | Fund detail + enrichment + share classes (accepts a proj_id, parent abbr, or class ticker) |
 | `/api/funds/[projId]/series` | GET | Daily NAV + AUM history for one share class (`range` param) |
+| `/api/us-securities` | GET | US-listed **stock & ETF** catalog for the Explore US segment + Add-holding autofill: search by `query` (symbol prefix / name), filter `type` (`stock` \| `etf`), `sort` (`symbol` \| `name`), paged via `limit`/`offset` |
+| `/api/us-securities/[symbol]` | GET | One US security's catalog row (symbol, name, type, exchange) |
+| `/api/us-securities/[symbol]/series` | GET | Daily price history (USD) for one US stock / ETF (`range` param), through the shared market cache |
+| `/api/us-securities/[symbol]/view` | POST | Fire-and-forget demand signal on a real detail open (bumps `view_count`) — kept off the series GET so the chart's cache key stays prefetch-warmable |
+| `/api/search` | GET | Unified Explore **"All"** search across both catalogs (Thai funds + US stocks & ETFs): `query` (free text → flat relevance), `type` (`all` \| `thai` \| `us` \| `us_stock` \| `us_etf`), paged via `limit`/`offset`. Idle (no `query`) ranks by popularity (US) / AUM (Thai) |
+| `/api/explore/shelves` | GET | Explore "All" **idle browse** — curated cross-asset shelves (low-cost Thai index funds, low-cost index ETFs, popular US stocks), each ranked by its own signal. Searching uses `/api/search` instead |
 
 ## Chat & Advisor
 

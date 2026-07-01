@@ -110,6 +110,9 @@ OWNER_EMAIL=you@actual-email   # must match the passkey account you register
 # Twelve Data ETF proxy → Yahoo. See reference/auth-and-providers.md.
 FMP_API_KEY=...     # REAL US index levels (^GSPC/^NDX/^DJI)
 EODHD_API_KEY=...   # REAL global index levels + the Thai SET index
+ALPACA_API_KEY_ID=...      # keyed fallback for arbitrary US stocks/ETFs (datacenter-safe)
+ALPACA_API_SECRET_KEY=...  # (paired with the key id; free IEX feed, no card/KYC)
+OPENFIGI_API_KEY=...       # optional; ticker→FIGI rename anchor for US holdings (works keyless)
 ```
 
 Cookies stay host-scoped by default (better-auth) — do not configure a
@@ -452,6 +455,8 @@ timer fires; the app process itself schedules nothing. The roster, in run order:
 | `jobs:refresh-market` | `refresh-tracked-market.ts` | **Freshness** — NAV for held positions + indicators (held `market` positions deepened to `max`) | 12:30 daily |
 | `jobs:prewarm-nav` | `prewarm-nav.ts` | **Coverage** — NAV/AUM for the *whole* catalog | one-off backfill; optional daily append 02:00 |
 | `jobs:prewarm-benchmark` | `prewarm-benchmark.ts` | **Coverage** — total-return benchmark series (`benchmark_tr`) for the curated proxy set | one-off backfill; daily append 23:30 |
+| `jobs:refresh-us-securities` | `refresh-us-securities.ts` | US stock/ETF catalog from the Nasdaq directory + a bounded FIGI-identity enrichment (OpenFIGI) + FIGI-detected rename → NAV bridge | 01:30 daily |
+| `jobs:refresh-popular` | `refresh-popular.ts` | **Coverage** — warm the derived popular US set (most-actives dollar-volume + demand) so common charts open instantly | 02:30 daily |
 | `jobs:close-stale` | `close-stale-sessions.ts` | Session-expiry backstop (real-time path is primary) | optional |
 
 `jobs:refresh-market` (freshness) and `jobs:prewarm-nav` (coverage) are a

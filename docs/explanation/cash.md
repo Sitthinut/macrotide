@@ -208,7 +208,8 @@ richer version belongs to the goals / wealth-path planner
 read-only overlay referencing accounts — never a money container (that's the
 double-counting trap when one balance feeds several goals). Deferred there or on
 the board: named goals with a target amount and date, multiple earmark slices in
-one account, reserving *funds* (not just cash), and FX for non-baht cash.
+one account, reserving *funds* (not just cash), FX for non-baht cash, and Advisor
+cash import.
 
 ## Where this lives
 
@@ -219,11 +220,6 @@ one account, reserving *funds* (not just cash), and FX for non-baht cash.
   `lib/db/queries/earmarks.ts`, `app/api/earmarks/route.ts`.
 - The return-basis parameter on the analytics path:
   `app/api/transactions/analytics/route.ts` (`?cash=funds`).
-- Recording cash from Advisor chat (describe a balance / deposit / withdrawal →
-  the same editable importer, THB for now): the `propose_cash_import` tool in
-  `lib/advisor/tools.ts` → the cash card in `components/screens/ChatScreen.tsx`
-  → `RecordSheet`'s cash rows (`seedCashToRow`), saved via the same
-  `POST /api/transactions` + `/api/earmarks` path as the manual "Add cash" flow.
 - The one-ledger model cash extends:
   [Balances and History](./balances-and-history.md),
   [ADR 0004](./decisions/0004-unified-ledger-positions-derived.md).

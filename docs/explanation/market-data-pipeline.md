@@ -1,12 +1,13 @@
 # Market data pipeline
 
-*Last updated: 2026-06-06*
+*Last updated: 2026-06-26*
 
-How market data gets into `market.db` and stays fresh — the **fund catalog
-crawl** (SEC reference data) and the **NAV/quote series cache** (prices over
-time), the jobs that drive them, and the limits that bound them. This is the
-mental model for anyone touching classification, fund metadata, or historical
-price/return charts.
+How market data gets into `market.db` and stays fresh — the **Thai fund catalog
+crawl** (SEC reference data), the **US securities catalog** (Nasdaq directory +
+FIGI identity), and the shared **NAV/quote series cache** (prices over time), the
+jobs that drive them, and the limits that bound them. This is the mental model for
+anyone touching classification, instrument metadata, or historical price/return
+charts.
 
 It's an *understanding* doc: it links out to where each fact actually lives
 rather than copying it, so the numbers don't drift. The authoritative homes —
@@ -22,34 +23,41 @@ rather than copying it, so the numbers don't drift. The authoritative homes —
   [decisions log § Picks](./decisions/README.md#picks) ("Background job
   scheduling").
 
-## Two pipelines, one database
+## Two kinds of flow, one database
 
-`market.db` is fed by two independent flows. They share a database and a
-nightly cadence but nothing else — different sources, different tables,
-different shapes.
+`market.db` is fed by **catalog** flows (what instruments exist + what they are)
+and one shared **series cache** (how a price moved over time). They share a
+database and a nightly cadence but nothing else — different sources, tables, shapes.
 
 ```text
                          ┌─────────────────────────────────────────────┐
-  Thai SEC Open Data ───▶│  catalog crawl (ELT)                         │
+  Thai SEC Open Data ───▶│  Thai catalog crawl (ELT)                    │
   (mutual-fund API)      │  sec_raw  ──transform──▶  fund_catalog,       │
                          │  (verbatim)               fees, share_classes │
                          └─────────────────────────────────────────────┘
+  Nasdaq directory  ────▶┌─────────────────────────────────────────────┐
+  (nasdaqtraded.txt)     │  US catalog (parse → upsert) + FIGI identity │
+  OpenFIGI (ticker→FIGI) │  us_securities (symbol, figi, popularity…)   │
+                         └─────────────────────────────────────────────┘
                          ┌─────────────────────────────────────────────┐
-  SEC NAV endpoint  ────▶│  series cache (write-through)                │
-  FMP/EODHD/TwelveData/  │  getCachedSeries() ──▶ nav_history,           │
-  Frankfurter/Yahoo      │                        fund_quotes            │
+  SEC NAV / TwelveData / │  series cache (write-through, SHARED)        │
+  Alpaca / Frankfurter / │  getCachedSeries() ──▶ nav_history,           │
+  Yahoo                  │                        fund_quotes            │
                          └─────────────────────────────────────────────┘
 ```
 
-1. **Catalog crawl — *what funds exist and what they are.*** Reference data:
-   the fund universe, fees/TER, AUM, asset-class/risk classification, share
-   classes. Sourced only from the Thai SEC mutual-fund API.
-2. **Series cache — *how a price moved over time.*** Time series: daily NAV (for
-   funds) and index/FX/commodity levels (for `market` symbols), plus the latest
-   quote derived from each series. Multi-provider.
+1. **Thai catalog crawl — *what funds exist and what they are.*** The fund
+   universe, fees/TER, AUM, asset-class/risk classification, share classes. Thai
+   SEC mutual-fund API only.
+2. **US securities catalog — *what's US-listed and its stable identity.*** The
+   US stock/ETF universe, exchange, popularity, and the rename-persistent FIGI.
+   Nasdaq directory + OpenFIGI.
+3. **Series cache — *how a price moved over time.*** Daily NAV (funds), index/FX/
+   commodity levels and US stock/ETF closes (`market` symbols), plus the latest
+   quote per series. Multi-provider; shared by Thai and US.
 
-Keep them straight: a classification bug is a **catalog** problem (fix in the
-transform); a short or stale chart is a **series-cache** problem.
+Keep them straight: a classification or wrong-name bug is a **catalog** problem; a
+short or stale chart is a **series-cache** problem.
 
 ## Pipeline 1 — the fund catalog (ELT)
 
@@ -71,6 +79,40 @@ fund-name matching. The catalog of landable endpoints/fields lives in the
 
 `jobs:refresh-share-classes` runs after the catalog (FK dependency) to populate
 the priceable share-class tickers the series cache keys on.
+
+## The US securities catalog (+ FIGI identity)
+
+US stocks & ETFs get their own flat catalog (`us_securities`) — they have no AIMC
+peer group, tax wrapper, or share-class structure, so they don't fit the Thai
+`fund_catalog`. Fed by two nightly jobs; both are bounded and **non-destructive**
+(a delisted symbol is kept, never deleted).
+
+- `jobs:refresh-us-securities` (`refresh-us-securities.ts`) — fetch the official,
+  keyless **Nasdaq Trader directory** (`nasdaqtraded.txt`: one flat file, ~12.9k
+  symbols with name / exchange / ETF flag), parse → upsert. A `seen_at`
+  run-marker flips any symbol the latest directory dropped to `delisted` (kept for
+  held history); a returning symbol re-lists. One file, not 20 endpoints — so no
+  `sec_raw`-style raw landing.
+- **FIGI identity (same job).** Each run also enriches a bounded batch of
+  still-unmapped symbols with their **composite FIGI** from OpenFIGI — the
+  rename-persistent, openly-licensed (MIT) security id. A held US holding anchors
+  on it (`holdings.catalog_figi`), so a ticker rename (FB→META) resolves to the
+  current symbol/name at read while the ledger keeps the old code — the US
+  analogue of the Thai ISIN/`(proj_id, class_name)` anchor (#235). A delisted
+  symbol whose FIGI now belongs to an active one IS a rename: the job bridges the
+  NAV cache old→new (`repointUsNav`). OpenFIGI works keyless; `OPENFIGI_API_KEY`
+  (free) just makes the backfill faster.
+- `jobs:refresh-popular` (`refresh-popular.ts`) — keeps the *popular* US set warm
+  so its chart opens instantly. The set is **derived, not hardcoded**: Alpaca's
+  most-actives screener → ranked by dollar volume (leveraged/inverse name-filtered)
+  → blended with a per-symbol demand counter (real detail opens) → top-N warmed
+  nightly, stale scores decayed.
+
+US **prices** ride the shared series cache below (not a US store): a held US
+ticker prices through `market:${symbol}` via the Twelve Data → Alpaca → Yahoo
+chain. Held US holdings + the demand/popular set warm through it; there is
+deliberately **no whole-US-catalog NAV prewarm** (12.9k symbols would blow the
+free quotas and bloat the append-only `nav_history`).
 
 ## Pipeline 2 — the NAV/quote series cache
 
@@ -134,6 +176,13 @@ touching the portfolio "All" chart:
   This doesn't breach the freshness/coverage boundary: the boundary is *scope*
   (never enumerate the catalog), not depth — held refs are still only what's
   tracked.
+- **US stocks & ETFs → held + popular deep, long tail lazy.** Held US positions
+  warm to `max` via `refresh-market` (they're `market`-sourced) like any held
+  non-fund ref; the *popular* set (most-traded + demanded) is warmed nightly by
+  `refresh-popular` so a common chart opens instantly; the ~12.9k-symbol long tail
+  fills lazily on first open (one ~1–2s cold fetch, then cached). There is no
+  whole-US-catalog prewarm — the free quotas and the append-only `nav_history`
+  rule it out.
 - **FX is not a limiter.** THB↔USD conversion history rides on Frankfurter
   (keyless, ECB-backed, deep to 1999), so the currency leg of a blended "All"
   chart never bottlenecks it.
@@ -157,6 +206,8 @@ synthetic data as its own returns.
 | You're changing… | Start in |
 |---|---|
 | Fund classification / fees / metadata | the transform (`transform-catalog.ts`), then re-run `jobs:transform-catalog` |
+| The US securities catalog / FIGI identity / ticker renames | `refresh-us-securities.ts`, [lib/market/figi.ts](../../lib/market/figi.ts), `lib/db/queries/us-securities.ts` |
+| The instant-popular US warm set | `refresh-popular.ts`, [lib/market/screener.ts](../../lib/market/screener.ts) |
 | A new SEC field not yet landed | the crawl's `sec_raw` landing (`refresh-fund-catalog.ts`) |
 | Price-series freshness, depth, or fallback | [lib/market/cache.ts](../../lib/market/cache.ts) |
 | Provider chain / a new market provider | [lib/market/providers/](../../lib/market/providers), then [auth-and-providers.md](../reference/auth-and-providers.md#market-data-providers-indices--fx--stocks) |
