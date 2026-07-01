@@ -754,3 +754,209 @@ export const feederLookThroughHoldings = sqliteTable(
     index("idx_feeder_look_through_proj").on(table.projId),
   ],
 );
+
+// ───────────────────────────────────────────────────────────────────────────
+// US securities catalog — the universe of US-listed stocks & ETFs, refreshed
+// nightly from the official, keyless Nasdaq Trader symbol directory
+// (nasdaqtraded.txt — the consolidated NYSE / NYSE Arca / Cboe / Nasdaq list).
+// Powers Explore browse/search/filter for US instruments alongside the Thai
+// `fund_catalog`, and ticker autofill in the Add-holding flow. Pricing for a
+// held US ticker comes from the live-quote chain (Twelve Data → Alpaca → Yahoo),
+// cached in fund_quotes / nav_history under `market:${SYMBOL}` — NOT from here.
+//
+// Distinct from `fund_catalog` (Thai SEC, deeply Thai-shaped): a US security has
+// no AIMC peer group, tax wrapper, feeder/master linkage, or per-class share
+// structure, so it gets its own flat table rather than polluting the Thai one.
+//
+// Source is a single flat file (no 20-endpoint SEC crawl), so there is no
+// sec_raw-style raw landing: the refresh parses the directory and upserts
+// directly. Regenerable → market.db, unbacked.
+// ───────────────────────────────────────────────────────────────────────────
+export const usSecurities = sqliteTable(
+  "us_securities",
+  {
+    // Ticker symbol as published by the Nasdaq directory (e.g. "AAPL", "VOO",
+    // "BRK.A"). PK. Stored verbatim; the NAV cache-key tail upper-cases via
+    // quoteCacheKey, and lookups match case-insensitively.
+    symbol: text("symbol").primaryKey(),
+    // Official security name (e.g. "Apple Inc. - Common Stock").
+    name: text("name").notNull(),
+    // 'stock' (Nasdaq ETF flag = N) | 'etf' (flag = Y). The primary Explore
+    // filter; finer asset class (a bond ETF vs an equity ETF) is a later
+    // enrichment and stays NULL until then.
+    securityType: text("security_type", { enum: ["stock", "etf"] }).notNull(),
+    // Listing exchange, mapped from the directory's single-letter code:
+    // 'NYSE' | 'NYSE American' | 'NYSE Arca' | 'Cboe BZX' | 'Nasdaq' | NULL.
+    exchange: text("exchange"),
+    // Reserved for future enrichment ('equity' | 'bond' | 'commodity' | …);
+    // the directory doesn't carry it, so NULL = not yet classified.
+    assetClass: text("asset_class"),
+    // Composite FIGI (OpenFIGI) — the rename-PERSISTENT, security-level identifier
+    // (the US analogue of a Thai fund's ISIN). Survives a ticker rename (FB→META
+    // keep one FIGI), so a held holding anchored by FIGI resolves to the current
+    // symbol at read. Enriched nightly (bounded) from api.openfigi.com; NULL until
+    // enriched (the holding then falls back to a bare-ticker anchor like #235).
+    figi: text("figi"),
+    // US-listed → priced and reported in USD; converted to THB via the FX chain.
+    currency: text("currency").notNull().default("USD"),
+    // 'active' = present in the latest directory; 'delisted' = a row that was
+    // active but the latest refresh no longer lists (kept for held-history).
+    status: text("status", { enum: ["active", "delisted"] })
+      .notNull()
+      .default("active"),
+    // ── Demand + popularity (drive the prewarm warm-set; see refresh-popular) ──
+    // These are NOT touched by the nightly Nasdaq catalog upsert (its
+    // onConflictDoUpdate sets only catalog columns), so they accumulate across
+    // catalog refreshes.
+    // User demand: bumped when the detail sheet is opened (a real view, not a
+    // prefetch or the warm job). Seeds the demand half of the warm set.
+    viewCount: integer("view_count").notNull().default(0),
+    lastViewedAt: text("last_viewed_at"),
+    // Market popularity: a normalized score (0–1) set by the daily most-actives
+    // pass (dollar-volume ranked, leveraged/inverse filtered), decayed when a
+    // symbol stops ranking. Drives the popular half of the warm set.
+    popularityScore: real("popularity_score").notNull().default(0),
+    lastScoredAt: text("last_scored_at"),
+    // ── Detail enrichment: profile + fundamentals + computed ratios ──
+    // Slowly-changing detail-page data, filled by a bounded nightly pass
+    // (oldest last_enriched_at first). All PUBLIC-DOMAIN: profile + SIC industry
+    // from SEC submissions, fundamentals from SEC XBRL companyfacts, ratios
+    // computed against our own price; GICS sector from the public S&P 500 dataset;
+    // ETF expense ratio (ter) from the 485BPOS prospectus iXBRL. NULL until enriched.
+    cik: text("cik"),
+    sic: text("sic"),
+    // SIC description, the public industry label (e.g. "Electronic Computers").
+    industry: text("industry"),
+    // GICS sector / sub-industry — richer taxonomy, but the public dataset covers
+    // S&P 500 members only, so NULL for everything else (fall back to `industry`).
+    gicsSector: text("gics_sector"),
+    gicsSubIndustry: text("gics_sub_industry"),
+    // Index membership as comma-joined keys (e.g. "sp500,nasdaq100"); the detail
+    // page's "member of" chips. Public open datasets; NULL = not in a tracked index.
+    indices: text("indices"),
+    // For an ETF: the index key it TRACKS (e.g. "sp500", "sector:it"), DERIVED
+    // from holdings overlap (lib/market/etf-tracking) — the "own the index"
+    // cross-link. NULL for stocks and for ETFs whose holdings match no index we
+    // cover. Regenerated whenever holdings refresh; never a licensed identifier.
+    tracksIndex: text("tracks_index"),
+    sharesOutstanding: integer("shares_outstanding"),
+    marketCap: real("market_cap"),
+    epsDiluted: real("eps_diluted"),
+    peRatio: real("pe_ratio"),
+    pbRatio: real("pb_ratio"),
+    netMargin: real("net_margin"),
+    // ETF expense ratio as a fraction (0.0003 = 0.03%); NULL for stocks.
+    ter: real("ter"),
+    // End date of the most recent fundamentals fact used (data "as of").
+    fundamentalsAsOf: text("fundamentals_as_of"),
+    // Drives the bounded nightly enrichment selection (NULLs/oldest first).
+    lastEnrichedAt: text("last_enriched_at"),
+    // ETF holdings cache (rows live in us_etf_holdings): the filing's report-period
+    // date and when we last fetched it — drive the as-of label + JIT/bounded refresh.
+    holdingsAsOf: text("holdings_as_of"),
+    holdingsFetchedAt: text("holdings_fetched_at"),
+    // TOTAL number of portfolio holdings in the latest filing (before the top-N
+    // cap we store). The count that tells a full-replication S&P 500 fund (~505)
+    // from a total-market fund (~3,600) whose top holdings look identical — used by
+    // the tracks_index derivation. NULL until a holdings refresh records it.
+    holdingsCount: integer("holdings_count"),
+    // Dividend cache (rows in us_dividends): when we last fetched the symbol's
+    // dividend history — drives the as-of + JIT/bounded refresh.
+    dividendsFetchedAt: text("dividends_fetched_at"),
+    createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
+    updatedAt: text("updated_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
+  },
+  (table) => [
+    index("idx_us_securities_type").on(table.securityType),
+    index("idx_us_securities_status").on(table.status),
+    // Name column the Explore search LIKE-matches on; prefix/anchored matches
+    // and ordering use this even though a leading-wildcard LIKE cannot.
+    index("idx_us_securities_name").on(table.name),
+    // The warm-set selection ranks by these — top-N popular, top-M recently viewed.
+    index("idx_us_securities_popularity").on(table.popularityScore),
+    index("idx_us_securities_last_viewed").on(table.lastViewedAt),
+    // Rename resolution looks up the current symbol by a held holding's anchor FIGI.
+    index("idx_us_securities_figi").on(table.figi),
+    // Bounded nightly enrichment picks the least-recently-enriched symbols first.
+    index("idx_us_securities_enriched").on(table.lastEnrichedAt),
+    // ETF-holdings refresh picks the least-recently-fetched ETFs first.
+    index("idx_us_securities_holdings_fetched").on(table.holdingsFetchedAt),
+    // Reverse lookup: the ETFs that track a given index ("own the index" list).
+    index("idx_us_securities_tracks_index").on(table.tracksIndex),
+  ],
+);
+
+// ── ETF holdings (SEC N-PORT) — the constituents of a US ETF from its latest
+// NPORT-P filing (quarterly, ~60-day lag). Powers the detail page's holdings list
+// and the derived country / asset-category exposure. The whole set for a symbol is
+// replaced on each refresh. Regenerable → market.db. ──
+export const usEtfHoldings = sqliteTable(
+  "us_etf_holdings",
+  {
+    // The ETF ticker (us_securities.symbol); no cross-row FK so a refresh can
+    // replace freely.
+    symbol: text("symbol").notNull(),
+    // 1 = largest weight (holdings are stored top-N by weight).
+    rank: integer("rank").notNull(),
+    name: text("name").notNull(),
+    cusip: text("cusip"),
+    isin: text("isin"),
+    // Percent of NAV (8.04 = 8.04%).
+    weightPct: real("weight_pct"),
+    // ISO-2 country of the investment (NPORT invCountry).
+    country: text("country"),
+    // Human-readable asset category (mapped from the NPORT assetCat code).
+    assetCat: text("asset_cat"),
+    // For a derivative (a leveraged/inverse ETF's swap), the contract counterparty
+    // (NPORT <counterpartyName>, e.g. "Cowen Group"). The name/isin describe the
+    // UNDERLYING the swap references; this is the extra fact a derivative row carries.
+    // Null for a direct holding.
+    counterparty: text("counterparty"),
+    // The constituent's ticker (us_securities.symbol), resolved from cusip/isin via
+    // OpenFIGI (security_id_map cache). Null until stamped, or when the holding has
+    // no mappable US listing (bonds, cash, derivatives). Denormalized so a holding
+    // row is directly tappable and a stock's reverse "held via" lookup is one query.
+    // Wiped when an ETF's holdings are replaced; re-stamped from the cache (cheap).
+    resolvedSymbol: text("resolved_symbol"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.symbol, t.rank] }),
+    index("idx_us_etf_holdings_symbol").on(t.symbol),
+    // Reverse lookup: "which ETFs hold ticker X" (stock detail's "held via" list).
+    index("idx_us_etf_holdings_resolved").on(t.resolvedSymbol),
+  ],
+);
+
+// ── Security-id → ticker crosswalk cache (OpenFIGI ID_ISIN / ID_CUSIP → ticker).
+// Survives holdings refreshes and is shared across ETFs (a constituent like AAPL
+// appears in many funds → resolved once). A row with ticker = NULL records an
+// ATTEMPTED-but-unresolvable id (bond/cash/derivative), so we don't re-hit the API
+// every run. → market.db (regenerable). ──
+export const securityIdMap = sqliteTable("security_id_map", {
+  // The ISIN or CUSIP string, as it appears on the holdings row.
+  idValue: text("id_value").primaryKey(),
+  // Resolved US ticker, or NULL when OpenFIGI returned no US listing.
+  ticker: text("ticker"),
+  // When resolution was last attempted (ISO) — drives re-resolution TTL.
+  resolvedAt: text("resolved_at").notNull(),
+});
+
+// ── US dividend history (Alpaca corporate actions) — the detail page's dividend
+// list + trailing yield. Replaced wholesale per symbol on refresh. → market.db. ──
+export const usDividends = sqliteTable(
+  "us_dividends",
+  {
+    symbol: text("symbol").notNull(),
+    // Ex-dividend date (YYYY-MM-DD) — the natural per-symbol key.
+    exDate: text("ex_date").notNull(),
+    payableDate: text("payable_date"),
+    recordDate: text("record_date"),
+    // Cash per share (USD).
+    cashAmount: real("cash_amount"),
+    special: integer("special", { mode: "boolean" }).notNull().default(false),
+  },
+  (t) => [
+    primaryKey({ columns: [t.symbol, t.exDate] }),
+    index("idx_us_dividends_symbol").on(t.symbol),
+  ],
+);
