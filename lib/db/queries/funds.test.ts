@@ -977,10 +977,25 @@ describe("retail-availability gate + zero-TER sort (#117)", () => {
 
     it("tags any NON-catalog symbol as custom — no shape guessing", () => {
       withDb(() => {
-        // PTT.BK / ^GSPC look like market symbols, but the catalog is the SINGLE
-        // authority: not in it → custom (until stocks/ETFs join the catalog too).
+        // PTT.BK / ^GSPC look like market symbols but are in neither catalog (Thai
+        // funds nor us_securities) → custom.
         expect(catalogQuoteSource(["PTT.BK"]).get("PTT.BK")).toBe("manual");
         expect(catalogQuoteSource(["^GSPC"]).get("^GSPC")).toBe("manual");
+      });
+    });
+
+    it("tags a US-listed stock/ETF in us_securities as market (not custom)", () => {
+      withDb(() => {
+        getMarketDb()
+          .insert(schema.usSecurities)
+          .values([
+            { symbol: "AAPL", name: "Apple Inc.", securityType: "stock", status: "active" },
+            { symbol: "QQQ", name: "Invesco QQQ Trust", securityType: "etf", status: "active" },
+          ])
+          .run();
+        expect(catalogQuoteSource(["aapl"]).get("AAPL")).toBe("market"); // case-insensitive
+        expect(catalogQuoteSource(["QQQ"]).get("QQQ")).toBe("market");
+        expect(catalogQuoteSource(["ZZNOTREAL"]).get("ZZNOTREAL")).toBe("manual");
       });
     });
 
