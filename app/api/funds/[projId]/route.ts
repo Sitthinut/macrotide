@@ -26,7 +26,7 @@ import { eq, or } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
 import { getMarketDb } from "@/lib/db/context";
-import { getFeederEnrichment } from "@/lib/db/queries/feeder-enrichment";
+import { getFeederEnrichment, resolveMasterSymbol } from "@/lib/db/queries/feeder-enrichment";
 import { getFundEnrichment } from "@/lib/db/queries/fund-enrichment";
 import { getShareClassByTicker, listShareClassesByProj } from "@/lib/db/queries/share-classes";
 import { fundCatalog } from "@/lib/db/schema";
@@ -79,6 +79,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ projId:
       ...feederEnrichment,
       shareClasses,
       selectedClassTicker,
+      // The master fund resolved to a US ETF by name (its ISIN is unreliable).
+      masterSymbol: resolveMasterSymbol(feederEnrichment.masterMap),
     });
   });
 }

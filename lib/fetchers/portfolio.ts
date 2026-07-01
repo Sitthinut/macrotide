@@ -7,6 +7,7 @@ import type { JournalEntry } from "@/lib/db/queries/journal";
 import type { ModelPortfolio as DbModelPortfolio } from "@/lib/db/queries/models";
 import type { Plan } from "@/lib/db/queries/plan";
 import type { FundQuote } from "@/lib/db/queries/quotes";
+import type { UsSecurityDetail } from "@/lib/db/queries/us-detail";
 import type { IndicatorDef } from "@/lib/market/indicators";
 import type { LookThrough } from "@/lib/portfolio/health";
 import { invalidate, useResource } from "./swr";
@@ -187,6 +188,34 @@ export function useFundSeries(projId: string | null, range: SeriesRange = "1y") 
       ? `/api/funds/${encodeURIComponent(projId)}/series?range=${encodeURIComponent(range)}`
       : null,
     { keepPreviousData: true },
+  );
+}
+
+/**
+ * Daily price history for one US stock / ETF, powering the US fund-detail chart.
+ * `symbol` is the bare ticker (= `market:${SYMBOL}` cache key tail); null while
+ * the sheet is closed. Prices are the provider's native USD close. Re-fetches
+ * when the range changes; keeps the prior curve on a range switch.
+ */
+export function useUsSecuritySeries(symbol: string | null, range: SeriesRange = "1y") {
+  return useResource<FundSeriesResponse>(
+    symbol
+      ? `/api/us-securities/${encodeURIComponent(symbol)}/series?range=${encodeURIComponent(range)}`
+      : null,
+    { keepPreviousData: true },
+  );
+}
+
+/**
+ * The full US detail payload (profile, ratios, TER, dividends, ETF holdings +
+ * exposure, index cross-links) for one symbol. Cache-first: returns whatever is
+ * stored now; the sheet also POSTs /view to JIT-warm the cold tail, and SWR
+ * revalidation picks up the filled sections. Null while the sheet is closed.
+ */
+export function useUsSecurityDetail(symbol: string | null) {
+  return useResource<UsSecurityDetail>(
+    symbol ? `/api/us-securities/${encodeURIComponent(symbol)}` : null,
+    { keepPreviousData: false },
   );
 }
 

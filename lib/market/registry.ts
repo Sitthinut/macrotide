@@ -15,6 +15,7 @@
 // at 1.0 in its own currency (× FX). Both are valued inline by the series /
 // analytics fold, never routed here.
 
+import { alpacaProvider } from "./providers/alpaca";
 import { eodhdProvider } from "./providers/eodhd";
 import { fmpProvider } from "./providers/fmp";
 import { frankfurterProvider } from "./providers/frankfurter";
@@ -26,18 +27,24 @@ import { yahooProvider } from "./providers/yahoo";
 // Order matters: preferred sources first, then fallbacks. For the `market`
 // logical source the chain is:
 //   fmp (keyed, REAL US indices)  → eodhd (keyed, REAL global indices + SET)
-//     → twelveData (keyed, ETF proxies)  → frankfurter (keyless, FX only)
-//       → yahoo (keyless)
+//     → twelveData (keyed, ETF proxies + arbitrary US stocks/ETFs)
+//       → alpaca (keyed, arbitrary US stocks/ETFs fallback)
+//         → frankfurter (keyless, FX only)  → yahoo (keyless)
 //
 // Real index levels are preferred where a source serves them: FMP first (its
 // 250/day free quota is the most generous and it covers ^GSPC/^NDX/^DJI), then
 // EODHD (20/day, broader — adds Nikkei + the Thai SET index). Both only `match`
 // the specific index symbols they map AND only when their key is set, so for any
 // other ticker — or with no keys configured — they drop out and the chain is
-// exactly the prior behaviour: Twelve Data ETF proxy → Frankfurter FX → Yahoo.
-// FX pairs (USD/THB) fall back to ECB-backed Frankfurter (which, unlike Yahoo,
-// doesn't block datacenter IPs); MSCI ACWI has no free real index and stays a
-// Twelve Data ETF proxy (ACWI); Gold stays the XAU/USD commodity (GC=F).
+// exactly the prior behaviour: Twelve Data → Alpaca → Frankfurter FX → Yahoo.
+// For arbitrary US stocks/ETFs (AAPL, VOO) Twelve Data is the keyed primary
+// (official consolidated close) and Alpaca the keyed fallback (free IEX daily
+// bars, 200 req/min, no "personal use" clause); both are datacenter-safe. Only
+// equity-shaped tickers reach Alpaca — it skips caret indices and FX pairs (see
+// its `matches`), which stay with the index providers and ECB-backed Frankfurter.
+// FX pairs (USD/THB) fall back to Frankfurter (which, unlike Yahoo, doesn't block
+// datacenter IPs); MSCI ACWI has no free real index and stays a Twelve Data ETF
+// proxy (ACWI); Gold stays the XAU/USD commodity (GC=F).
 //
 // The `benchmark_tr` source is served solely by twelveDataAdjustedProvider
 // (`adjust=all` total-return close); no other provider matches it, so its
@@ -47,6 +54,7 @@ const providers: Provider[] = [
   fmpProvider,
   eodhdProvider,
   twelveDataProvider,
+  alpacaProvider,
   twelveDataAdjustedProvider,
   frankfurterProvider,
   yahooProvider,

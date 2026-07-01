@@ -24,8 +24,10 @@ import { getPlan } from "../db/queries/plan";
 import { listFundQuotes } from "../db/queries/quotes";
 import { getPortfolioSeries } from "../db/queries/series";
 import { listTransactionsForBuckets, type Transaction } from "../db/queries/transactions";
+import { findUsSecurities } from "../db/queries/us-securities";
 import { BENCHMARK_TR_OPTIONS, getBenchmarkReturnPct } from "../market/benchmarks";
 import { QUOTE_SOURCES } from "../market/sources";
+import { cleanUsSecurityName } from "../market/us-security-name";
 import { adaptModelPortfolio, adaptPortfolios } from "../portfolio/adapter";
 import { deriveRowsWithNav } from "../portfolio/derive-rows";
 import { assessConcentration, computeHealth, summarizeHealth } from "../portfolio/health";
@@ -1095,116 +1097,6 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
     },
   });
 
-  const propose_cash_import = tool({
-    description:
-      "Propose recording one or more CASH events — a bank/savings/brokerage-cash " +
-      "balance, a deposit, or a withdrawal — into the portfolio importer. Use THIS " +
-      "tool (NOT propose_holdings_import / propose_transactions_import, which are for " +
-      "FUNDS) whenever the user states a cash action in words: 'set my SCB savings to " +
-      "฿100,000', 'my emergency fund is 200k', 'I deposited ฿20,000 to my savings', " +
-      "'I withdrew ฿5,000 from Krungsri'. It does NOT write anything: it shows a compact " +
-      "table that opens the importer, pre-filled, where the user reviews and saves. " +
-      "Pick the KIND from the phrasing: " +
-      "(a) 'cash_balance' (Set balance) — the account NOW HOLDS ฿X (a stated total: " +
-      "'set … to', 'my savings is', 'the balance is'). The change vs the prior balance " +
-      "counts as money in/out by default; this is the usual case. " +
-      "(b) 'deposit' — money the user ADDED to the account ('deposited', 'added', 'put in'). " +
-      "(c) 'withdraw' — money the user TOOK OUT ('withdrew', 'took out', 'spent from'). " +
-      "The `ticker` is the account NAME as the user says it (e.g. 'SCB Savings', " +
-      "'Emergency fund') — cash accounts are identified by name, not a fund symbol. " +
-      "`amount` is a POSITIVE ฿ magnitude (the kind carries the direction). Amounts are " +
-      "in Thai baht. Only on a Set balance: set `cashRole` to 'reserved' when the user " +
-      "says the money is set aside / an emergency fund / earmarked for a goal (kept out " +
-      "of investment return); leave it 'investable' (the default — dry powder) otherwise, " +
-      "and pass `cashLabel` for a stated objective ('Emergency', 'House'). NOTHING IS SAVED " +
-      "by this tool — it only drafts a review table the user must open and save themselves. " +
-      "So after calling it, confirm in ONE brief sentence that you DRAFTED it for review " +
-      "(e.g. 'Drafted a cash balance below — review and import when ready.') — NEVER tell " +
-      "the user the balance is already set / updated / saved / recorded, and do NOT restate " +
-      "the rows or describe the table.",
-    inputSchema: z.object({
-      rows: z
-        .array(
-          z.object({
-            kind: z
-              .enum(["deposit", "withdraw", "cash_balance"])
-              .describe(
-                "cash_balance = Set balance (account now holds ฿X); deposit = money added; " +
-                  "withdraw = money taken out.",
-              ),
-            ticker: z
-              .string()
-              .min(1)
-              .max(40)
-              .describe("The cash account NAME as the user says it (e.g. 'SCB Savings')."),
-            amount: z
-              .number()
-              .positive()
-              .describe("Baht amount — the asserted total (cash_balance) or the sum moved."),
-            tradeDate: z
-              .string()
-              .optional()
-              .describe("ISO date YYYY-MM-DD, if the user gives one; omit for 'now'/today."),
-            reconcile: z
-              .boolean()
-              .optional()
-              .describe(
-                "Set balance only: true when the change is NOT new money — interest " +
-                  "credited, a correction, or reasserting parked sale proceeds.",
-              ),
-            cashRole: z
-              .enum(["investable", "reserved"])
-              .optional()
-              .describe(
-                "Set balance only: 'reserved' for set-aside / emergency / goal savings " +
-                  "(excluded from investment return); 'investable' (default) for dry powder.",
-              ),
-            cashLabel: z
-              .string()
-              .max(60)
-              .optional()
-              .describe("Set balance only: the account's stated objective (e.g. 'Emergency')."),
-          }),
-        )
-        .min(1)
-        .max(40)
-        .describe("One entry per cash event."),
-      source: z
-        .string()
-        .max(80)
-        .optional()
-        .describe("Provenance label shown in the UI (e.g. bank name)."),
-      note: z.string().max(300).optional().describe("One short line shown above the table."),
-    }),
-    execute: async ({ rows, source, note }) => {
-      // The `cashImport` field carries the shape ChatScreen's CashImportCard
-      // expects; the client picks it off the stream and renders the table, which
-      // opens the importer in cash mode (RecordSheet cashSeed → deposit/withdraw/
-      // Set-balance rows). No DB mutation here — saving happens in the importer.
-      // THB-only today (non-THB cash FX is deferred, #233).
-      const out = rows.map((r) => {
-        const isBalance = r.kind === "cash_balance";
-        return {
-          ticker: r.ticker.trim(),
-          kind: r.kind,
-          amount: r.amount,
-          tradeDate: r.tradeDate?.trim(),
-          // Designation fields are meaningful only on a Set balance.
-          reconcile: isBalance ? (r.reconcile ?? false) : undefined,
-          cashRole: isBalance ? (r.cashRole ?? "investable") : undefined,
-          cashLabel: isBalance ? r.cashLabel?.trim() || undefined : undefined,
-        };
-      });
-      return {
-        ok: true as const,
-        cashImport: { rows: out, source: source?.trim() ?? null, note: note?.trim() ?? null },
-        message:
-          `Drafted ${out.length} cash ${out.length === 1 ? "entry" : "entries"} — review and ` +
-          "import on the table below.",
-      };
-    },
-  });
-
   // ─── fee-aware fund finder ─────────────────────────────────────────────────
   //
   // STANCE: Macrotide is an index-investing companion, not a stock picker. These
@@ -1550,6 +1442,86 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
     },
   });
 
+  const find_us_securities = tool({
+    description:
+      "Search the catalog of US-listed stocks & ETFs (the official Nasdaq directory) " +
+      "by symbol or name, optionally filtered to ETFs or single stocks. Use this to " +
+      "RESOLVE or DESCRIBE a US ticker the user mentions ('what is VOO', 'is QQQ a " +
+      "stock or an ETF', 'find the Vanguard S&P 500 ETF', 'list US tech ETFs'), to " +
+      "confirm a symbol before proposing a holding, or to browse US ETFs for a target " +
+      "exposure. Returns symbol, name, type (stock/etf), and listing exchange. " +
+      "IMPORTANT: Macrotide is an index-investing companion. Prefer a broad, low-cost " +
+      "ETF over a single stock — when the user asks about an individual US stock, you " +
+      "can identify it here, but steer toward a diversified ETF that captures the same " +
+      "exposure and explain why concentration in one name carries idiosyncratic risk. " +
+      "For Thai mutual funds use find_funds instead; this tool is US-listed only and " +
+      "does not carry fees, tax wrappers, or NAV.",
+    inputSchema: z.object({
+      query: z
+        .string()
+        .optional()
+        .describe(
+          "Free-text search over symbol (prefix) and name (contains). E.g. 'VOO', " +
+            "'Vanguard', 'semiconductor'. Exact symbol matches rank first.",
+        ),
+      type: z
+        .enum(["stock", "etf"])
+        .optional()
+        .describe("Restrict to 'etf' (preferred for diversified exposure) or 'stock'."),
+      sort: z
+        .enum(["symbol", "name"])
+        .optional()
+        .describe("Sort order — 'symbol' (default) or 'name'."),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(30)
+        .optional()
+        .describe("Max securities to return (default 10). Keep small — present the top matches."),
+    }),
+    execute: async ({ query, type, sort, limit }) => {
+      const { items, total } = findUsSecurities({
+        query,
+        securityType: type,
+        sort: sort ?? "symbol",
+        limit: limit ?? 10,
+      });
+
+      if (items.length === 0) {
+        return {
+          ok: true as const,
+          count: 0,
+          securities: [],
+          message:
+            "No US securities found for that search. Check the symbol spelling, or drop the " +
+            "stock/ETF type filter. Thai mutual funds aren't in this catalog — use find_funds.",
+        };
+      }
+
+      const securities = items.map((s) => ({
+        symbol: s.symbol,
+        name: cleanUsSecurityName(s.name),
+        type: s.securityType,
+        exchange: s.exchange ?? null,
+        currency: s.currency,
+      }));
+      const etfCount = securities.filter((s) => s.type === "etf").length;
+
+      return {
+        ok: true as const,
+        count: total,
+        securities,
+        message:
+          `Found ${total} US-listed match${total === 1 ? "" : "es"}` +
+          (total > securities.length ? ` (showing the first ${securities.length})` : "") +
+          `. ${etfCount} of ${securities.length} are ETFs. ` +
+          "Prefer a diversified ETF over a single stock for the same exposure; these are " +
+          "US-listed, priced in USD, and shown in THB when held.",
+      };
+    },
+  });
+
   return {
     read_portfolio,
     read_performance,
@@ -1560,9 +1532,9 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
     propose_holding,
     propose_holdings_import,
     propose_transactions_import,
-    propose_cash_import,
     find_funds,
     find_cheaper_alternatives,
+    find_us_securities,
   };
 }
 

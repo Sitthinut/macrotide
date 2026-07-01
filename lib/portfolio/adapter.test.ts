@@ -35,6 +35,7 @@ const sampleHolding = {
   catalogProjId: null,
   catalogClassName: null,
   catalogIsin: null,
+  catalogFigi: null,
   currency: null,
   acquiredOn: null,
   createdAt: "2026-01-01",
