@@ -126,6 +126,7 @@ const MOCK_PORTFOLIO: FundPortfolioRow[] = [
     assetliabValue: 950000000,
     percentNav: 93.21,
     lastUpdDate: "2024-12-31",
+    resolvedSymbol: "ACWI",
   },
   {
     id: 2,
@@ -140,6 +141,7 @@ const MOCK_PORTFOLIO: FundPortfolioRow[] = [
     assetliabValue: 34500000,
     percentNav: 3.38,
     lastUpdDate: "2024-12-31",
+    resolvedSymbol: null,
   },
 ];
 

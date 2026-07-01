@@ -4,7 +4,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { BrandMark } from "@/components/BrandMark";
 import { ModelDonut } from "@/components/charts";
-import { FundDetailSheet } from "@/components/FundDetailSheet";
+import { DetailSheetHost } from "@/components/DetailSheetHost";
 import { type HoldingFormValues, HoldingSheet } from "@/components/HoldingSheet";
 import { RecentActivityPeek } from "@/components/history/RecentActivityPeek";
 import { Icon } from "@/components/Icon";
@@ -42,6 +42,7 @@ import { invalidate } from "@/lib/fetchers/swr";
 import { fmtPct } from "@/lib/format";
 import { BENCHMARK_TR_OPTIONS } from "@/lib/market/benchmark-options";
 import { DEFAULT_QUOTE_SOURCE, isQuoteSource } from "@/lib/market/sources";
+import { DetailStackProvider, useDetailStack } from "@/lib/nav/detail-stack";
 import { feeCreepKey } from "@/lib/portfolio/action-item-key";
 import { REASON_CHIPS, type ReasonChip } from "@/lib/portfolio/action-item-resurface";
 import { formatTooltipDate, NAV_CHART_HEIGHT, seriesReturnPct } from "@/lib/portfolio/adapter";
@@ -749,7 +750,17 @@ export interface PortfolioScreenProps {
   showMenu?: boolean;
 }
 
-export function PortfolioScreen({
+// Wraps the screen in a DetailStackProvider so its detail overlays share one
+// "modal as page" stack (host rendered inside). The body is PortfolioScreenInner.
+export function PortfolioScreen(props: PortfolioScreenProps) {
+  return (
+    <DetailStackProvider>
+      <PortfolioScreenInner {...props} />
+    </DetailStackProvider>
+  );
+}
+
+function PortfolioScreenInner({
   onOpenSettings,
   onOpenModels,
   onOpenImport,
@@ -807,7 +818,17 @@ export function PortfolioScreen({
   // per-row Edit affordance opens the edit form (holdingSheet). Reading a
   // holding no longer drops the user straight into an edit form.
   const [holdingSheet, setHoldingSheet] = useState<Holding | null>(null);
-  const [detailHolding, setDetailHolding] = useState<Holding | null>(null);
+  // Detail overlays share one stack (modal-as-page): a US holding opens the US
+  // sheet, whose cross-links push a Thai fund on top (Back returns to it); a Thai
+  // holding opens the holding view. One host renders the top; ✕ closes all.
+  const detailStack = useDetailStack();
+  const openHoldingDetail = (h: Holding) => {
+    detailStack.push(
+      h.quoteSource === "market"
+        ? { kind: "us", symbol: h.ticker }
+        : { kind: "holding", holding: h },
+    );
+  };
   // Whether the "See details" page is open — the full-screen sub-view that
   // houses the fee-check list with per-item Archive / "Not for me" and the
   // Hidden-checks (N) restore list. The Portfolio tab's inline section is
@@ -2324,7 +2345,7 @@ export function PortfolioScreen({
               <button
                 type="button"
                 aria-label={`Open ${h.ticker} position`}
-                onClick={() => (onOpenPosition ? onOpenPosition(h.ticker) : setDetailHolding(h))}
+                onClick={() => (onOpenPosition ? onOpenPosition(h.ticker) : openHoldingDetail(h))}
                 style={{
                   display: "grid",
                   gridTemplateColumns: "32px 1fr auto",
@@ -2397,7 +2418,13 @@ export function PortfolioScreen({
                       // Fund details don't apply to a cash account.
                       ...(h.quoteSource === "cash"
                         ? []
-                        : [{ label: "Fund details", onClick: () => setDetailHolding(h) }]),
+                        : [
+                            {
+                              label:
+                                h.quoteSource === "market" ? "Security details" : "Fund details",
+                              onClick: () => openHoldingDetail(h),
+                            },
+                          ]),
                       { label: "Edit holding", onClick: () => setHoldingSheet(h) },
                     ]}
                   />
@@ -2485,29 +2512,9 @@ export function PortfolioScreen({
         idleCash={idleCash}
       />
 
-      <FundDetailSheet
-        holding={detailHolding}
-        onEdit={
-          detailHolding?.id !== undefined
-            ? () => {
-                // Hand off from view to edit: close the detail, open the form.
-                const h = detailHolding;
-                setDetailHolding(null);
-                setHoldingSheet(h);
-              }
-            : undefined
-        }
-        onHistory={
-          detailHolding && onOpenPosition
-            ? () => {
-                const t = detailHolding.ticker;
-                setDetailHolding(null);
-                onOpenPosition(t);
-              }
-            : undefined
-        }
-        onClose={() => setDetailHolding(null)}
-      />
+      {/* One host for every detail overlay: holding view, US security, and the
+          Thai funds its cross-links push — one modal with Back/Close. */}
+      <DetailSheetHost onEditHolding={setHoldingSheet} onOpenPosition={onOpenPosition} />
 
       <HoldingSheet
         open={!!holdingSheet}

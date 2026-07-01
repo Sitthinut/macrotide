@@ -12,6 +12,7 @@ import { Icon } from "@/components/Icon";
 import { NavChart } from "@/components/InteractiveChartsLazy";
 import { Modal } from "@/components/Modal";
 import { KebabMenu } from "@/components/ui/KebabMenu";
+import { ShowMoreToggle } from "@/components/ui/ShowMoreToggle";
 import { Skeleton, SkeletonRows } from "@/components/ui/Skeleton";
 import type {
   FeederLookThroughHoldingRow,
@@ -63,6 +64,8 @@ export type FundDetailResponse = FundWithTer & {
   shareClasses: ShareClass[];
   /** Ticker of the class to show first (the opened class, else a heuristic default). */
   selectedClassTicker: string | null;
+  /** The feeder's master fund resolved to a US ETF ticker (by name), or null. */
+  masterSymbol: string | null;
 };
 
 // ─── Section wrapper ──────────────────────────────────────────────────────────
@@ -349,7 +352,13 @@ function TopHoldingsSection({ rows }: { rows: FundTopHoldingRow[] }) {
 
 const PORTFOLIO_PREVIEW = 10;
 
-function PortfolioSection({ rows }: { rows: FundPortfolioRow[] }) {
+function PortfolioSection({
+  rows,
+  onOpenSymbol,
+}: {
+  rows: FundPortfolioRow[];
+  onOpenSymbol?: (symbol: string) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set());
   const scrollRef = useScrollFadeX("Portfolio holdings table");
@@ -373,7 +382,6 @@ function PortfolioSection({ rows }: { rows: FundPortfolioRow[] }) {
     budget -= groupRows.length;
     shownGroups.push({ ...g, rows: groupRows, multi: g.rows.length > 1 });
   }
-  const hidden = totalHoldings - shownGroups.reduce((s, g) => s + g.rows.length, 0);
 
   // derive the period label from the first row
   const period = rows[0]?.period;
@@ -400,6 +408,9 @@ function PortfolioSection({ rows }: { rows: FundPortfolioRow[] }) {
   const renderRow = (row: PortfolioDisplayRow) => {
     const isGroup = (row.members?.length ?? 0) > 0;
     const isOpen = isGroup && openGroups.has(row.key);
+    // A single US-listed line (the feeder's master ETF) drills into that ETF's
+    // detail; a collapse group toggles instead — the two are mutually exclusive.
+    const canOpen = !isGroup && !!(onOpenSymbol && row.resolvedSymbol);
     const toggle = () =>
       setOpenGroups((prev) => {
         const next = new Set(prev);
@@ -408,13 +419,22 @@ function PortfolioSection({ rows }: { rows: FundPortfolioRow[] }) {
         return next;
       });
     const main = (
-      <tr key={row.key}>
+      // The whole row is tappable when it opens a US security; a collapse group
+      // toggles from its label cell instead. The trailing chevron cell is the
+      // end-of-row affordance (mirrors the US detail's related rows).
+      <tr
+        key={row.key}
+        onClick={canOpen ? () => onOpenSymbol?.(row.resolvedSymbol as string) : undefined}
+        style={{ cursor: canOpen ? "pointer" : undefined }}
+        title={canOpen ? `Open ${row.resolvedSymbol}` : undefined}
+      >
         <td
           style={{
             // Label starts at 14px whether or not there's a toggle — the arrow
             // sits in the indent gutter (fixed 12px slot) instead of pushing it.
             padding: isGroup ? "4px 4px 4px 2px" : "4px 4px 4px 14px",
-            color: "var(--ink-soft)",
+            color: canOpen ? "var(--ink)" : "var(--ink-soft)",
+            fontWeight: canOpen ? 500 : undefined,
             fontSize: 11.5,
             borderBottom: cellBorder,
             maxWidth: 200,
@@ -423,13 +443,18 @@ function PortfolioSection({ rows }: { rows: FundPortfolioRow[] }) {
             whiteSpace: "nowrap",
             cursor: isGroup ? "pointer" : undefined,
           }}
-          title={[row.label, row.issuer, row.category].filter(Boolean).join(" · ") || undefined}
+          title={
+            canOpen
+              ? undefined
+              : [row.label, row.issuer, row.category].filter(Boolean).join(" · ") || undefined
+          }
           onClick={isGroup ? toggle : undefined}
         >
-          <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 1, overflow: "hidden" }}>
             {isGroup && (
               <span
                 style={{
+                  flexShrink: 0,
                   display: "inline-block",
                   width: 10,
                   textAlign: "center",
@@ -440,7 +465,7 @@ function PortfolioSection({ rows }: { rows: FundPortfolioRow[] }) {
                 {isOpen ? "▾" : "▸"}
               </span>
             )}
-            {row.label}
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{row.label}</span>
           </span>
           {row.issuer && (
             <span
@@ -483,6 +508,22 @@ function PortfolioSection({ rows }: { rows: FundPortfolioRow[] }) {
         >
           {fmtNavPct(row.percentNav)}
         </td>
+        <td
+          style={{
+            padding: "4px 4px 4px 0",
+            width: 16,
+            color: "var(--muted)",
+            borderBottom: cellBorder,
+            verticalAlign: "middle",
+            lineHeight: 0,
+          }}
+        >
+          {canOpen && (
+            <span style={{ display: "inline-flex" }}>
+              <Icon name="chevron-right" size={14} />
+            </span>
+          )}
+        </td>
       </tr>
     );
     if (!isOpen || !row.members) return [main];
@@ -516,6 +557,7 @@ function PortfolioSection({ rows }: { rows: FundPortfolioRow[] }) {
         >
           {fmtNavPct(m.percentNav)}
         </td>
+        <td style={{ borderBottom: cellBorder }} />
       </tr>
     ));
     return [main, ...memberRows];
@@ -538,6 +580,9 @@ function PortfolioSection({ rows }: { rows: FundPortfolioRow[] }) {
               </th>
               <th scope="col" style={srOnly}>
                 %NAV
+              </th>
+              <th scope="col" style={srOnly}>
+                Open
               </th>
             </tr>
           </thead>
@@ -584,6 +629,7 @@ function PortfolioSection({ rows }: { rows: FundPortfolioRow[] }) {
                 >
                   {g.multi ? fmtNavPct(g.totalPct) : ""}
                 </td>
+                <td style={{ borderBottom: cellBorder }} />
               </tr>,
               ...g.rows.flatMap(renderRow),
             ])}
@@ -591,44 +637,11 @@ function PortfolioSection({ rows }: { rows: FundPortfolioRow[] }) {
         </table>
       </div>
 
-      {!expanded && hidden > 0 && (
-        <button
-          type="button"
-          onClick={() => setExpanded(true)}
-          style={{
-            marginTop: 6,
-            background: "none",
-            border: "none",
-            padding: "4px 0",
-            cursor: "pointer",
-            fontSize: 11.5,
-            color: "var(--accent)",
-            fontFamily: "var(--font-mono)",
-            letterSpacing: "0.02em",
-          }}
-        >
-          Show all {totalHoldings} holdings ↓
-        </button>
-      )}
-      {expanded && (
-        <button
-          type="button"
-          onClick={() => setExpanded(false)}
-          style={{
-            marginTop: 6,
-            background: "none",
-            border: "none",
-            padding: "4px 0",
-            cursor: "pointer",
-            fontSize: 11.5,
-            color: "var(--muted)",
-            fontFamily: "var(--font-mono)",
-            letterSpacing: "0.02em",
-          }}
-        >
-          Show less ↑
-        </button>
-      )}
+      <ShowMoreToggle
+        expanded={expanded}
+        moreCount={Math.max(0, totalHoldings - PORTFOLIO_PREVIEW)}
+        onToggle={() => setExpanded((v) => !v)}
+      />
     </>
   );
 }
@@ -707,17 +720,22 @@ const LOOK_THROUGH_PREVIEW = 20;
 
 function LookThroughSection({
   masterMap,
+  masterSymbol,
   rows,
+  onOpenSymbol,
 }: {
   masterMap: FeederMasterMapRow | null;
+  /** The master fund's US ETF ticker (resolved by name), making its label tappable. */
+  masterSymbol?: string | null;
   rows: FeederLookThroughHoldingRow[];
+  /** Open a constituent's US detail (rows with a resolved ticker become tappable). */
+  onOpenSymbol?: (symbol: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const scrollRef = useScrollFadeX("Look-through holdings table");
   if (!masterMap && rows.length === 0) return null;
 
   const visible = expanded ? rows : rows.slice(0, LOOK_THROUGH_PREVIEW);
-  const hidden = rows.length - LOOK_THROUGH_PREVIEW;
 
   const asOfDate = rows[0]?.asOfDate;
   const masterLabel = masterMap?.masterName ?? masterMap?.masterIsin ?? "Master Fund";
@@ -730,17 +748,55 @@ function LookThroughSection({
       {masterMap && (
         <div
           style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
             fontSize: 11.5,
-            color: "var(--ink-soft)",
             marginBottom: 8,
             fontFamily: "var(--font-mono)",
           }}
         >
-          Master fund: <span style={{ color: "var(--ink)", fontWeight: 500 }}>{masterLabel}</span>
-          {masterMap.masterIsin && masterMap.masterName && (
-            <span style={{ color: "var(--muted)" }}>
-              {" · "}
-              {masterMap.masterIsin}
+          <span style={{ color: "var(--muted)", flexShrink: 0 }}>Master fund:</span>
+          {onOpenSymbol && masterSymbol ? (
+            // Tappable: the name drills into the master ETF; a trailing chevron (same
+            // size/tone as every drill-in row) is the affordance, so the raw ISIN is
+            // dropped as noise — the master's own detail carries its identifiers.
+            <button
+              type="button"
+              onClick={() => onOpenSymbol(masterSymbol)}
+              title={`Open ${masterSymbol}`}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                minWidth: 0,
+                background: "none",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+                font: "inherit",
+                color: "var(--ink)",
+                fontWeight: 500,
+              }}
+            >
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {masterLabel}
+              </span>
+              <span style={{ display: "inline-flex", color: "var(--muted)", flexShrink: 0 }}>
+                <Icon name="chevron-right" size={14} />
+              </span>
+            </button>
+          ) : (
+            // Not openable (a foreign master with no US listing): keep the ISIN as its
+            // only identifier, no chevron.
+            <span style={{ color: "var(--ink)", fontWeight: 500, minWidth: 0 }}>
+              {masterLabel}
+              {masterMap.masterIsin && masterMap.masterName && (
+                <span style={{ color: "var(--muted)", fontWeight: 400 }}>
+                  {" · "}
+                  {masterMap.masterIsin}
+                </span>
+              )}
             </span>
           )}
         </div>
@@ -831,129 +887,139 @@ function LookThroughSection({
                   >
                     Weight
                   </th>
+                  <th
+                    style={{ width: 16, borderBottom: "1px solid var(--line-soft)" }}
+                    aria-hidden
+                  />
                 </tr>
               </thead>
               <tbody>
-                {visible.map((row) => (
-                  <tr key={row.rank}>
-                    <td
-                      style={{
-                        padding: "4px 4px",
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 10.5,
-                        color: "var(--muted)",
-                        borderBottom: "1px solid var(--line-soft)",
-                        whiteSpace: "nowrap",
-                        minWidth: 22,
-                      }}
+                {visible.map((row) => {
+                  const canOpen = !!(onOpenSymbol && row.resolvedSymbol);
+                  return (
+                    <tr
+                      key={row.rank}
+                      onClick={
+                        canOpen ? () => onOpenSymbol?.(row.resolvedSymbol as string) : undefined
+                      }
+                      style={{ cursor: canOpen ? "pointer" : undefined }}
+                      title={canOpen ? `Open ${row.resolvedSymbol}` : undefined}
                     >
-                      {row.rank}
-                    </td>
-                    <td
-                      style={{
-                        padding: "4px 4px",
-                        color: "var(--ink-soft)",
-                        fontSize: 11.5,
-                        borderBottom: "1px solid var(--line-soft)",
-                        maxWidth: 180,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                      title={row.name}
-                    >
-                      <span
-                        style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis" }}
+                      <td
+                        style={{
+                          padding: "4px 4px",
+                          fontFamily: "var(--font-mono)",
+                          fontSize: 10.5,
+                          color: "var(--muted)",
+                          borderBottom: "1px solid var(--line-soft)",
+                          whiteSpace: "nowrap",
+                          minWidth: 22,
+                        }}
                       >
-                        {row.name}
-                      </span>
-                      {row.assetClass && (
+                        {row.rank}
+                      </td>
+                      <td
+                        style={{
+                          padding: "4px 4px",
+                          // A tappable row leads with an ink, medium-weight name (like
+                          // the portfolio rows and the US ETF top-holdings identity);
+                          // an unopenable constituent stays muted.
+                          color: canOpen ? "var(--ink)" : "var(--ink-soft)",
+                          fontSize: 11.5,
+                          borderBottom: "1px solid var(--line-soft)",
+                          maxWidth: 180,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                        title={row.name}
+                      >
                         <span
                           style={{
-                            fontSize: 10,
-                            color: "var(--muted)",
-                            fontFamily: "var(--font-mono)",
+                            display: "block",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            fontWeight: canOpen ? 500 : undefined,
                           }}
                         >
-                          {row.assetClass}
+                          {row.name}
                         </span>
-                      )}
-                    </td>
-                    <td
-                      style={{
-                        padding: "4px 4px",
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 11,
-                        color: "var(--ink-soft)",
-                        borderBottom: "1px solid var(--line-soft)",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {row.ticker ||
-                        (row.isin ? (
+                        {row.assetClass && (
+                          <span
+                            style={{
+                              fontSize: 10,
+                              color: "var(--muted)",
+                              fontFamily: "var(--font-mono)",
+                            }}
+                          >
+                            {row.assetClass}
+                          </span>
+                        )}
+                      </td>
+                      <td
+                        style={{
+                          padding: "4px 4px",
+                          fontFamily: "var(--font-mono)",
+                          fontSize: 11,
+                          color: "var(--ink-soft)",
+                          borderBottom: "1px solid var(--line-soft)",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {row.resolvedSymbol ? (
+                          <span style={{ color: "var(--ink)", fontWeight: 500 }}>
+                            {row.resolvedSymbol}
+                          </span>
+                        ) : row.ticker ? (
+                          row.ticker
+                        ) : row.isin ? (
                           <span style={{ fontSize: 10, color: "var(--muted)" }}>{row.isin}</span>
                         ) : (
                           "—"
-                        ))}
-                    </td>
-                    <td
-                      style={{
-                        padding: "4px 4px",
-                        textAlign: "right",
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 11.5,
-                        fontWeight: 500,
-                        color: "var(--ink)",
-                        borderBottom: "1px solid var(--line-soft)",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {fmtNavPct(row.weightPct)}
-                    </td>
-                  </tr>
-                ))}
+                        )}
+                      </td>
+                      <td
+                        style={{
+                          padding: "4px 4px",
+                          textAlign: "right",
+                          fontFamily: "var(--font-mono)",
+                          fontSize: 11.5,
+                          fontWeight: 500,
+                          color: "var(--ink)",
+                          borderBottom: "1px solid var(--line-soft)",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {fmtNavPct(row.weightPct)}
+                      </td>
+                      <td
+                        style={{
+                          padding: "4px 4px 4px 0",
+                          width: 16,
+                          color: "var(--muted)",
+                          borderBottom: "1px solid var(--line-soft)",
+                          verticalAlign: "middle",
+                          lineHeight: 0,
+                        }}
+                      >
+                        {canOpen && (
+                          <span style={{ display: "inline-flex" }}>
+                            <Icon name="chevron-right" size={14} />
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
 
-          {!expanded && hidden > 0 && (
-            <button
-              type="button"
-              onClick={() => setExpanded(true)}
-              style={{
-                marginTop: 6,
-                background: "none",
-                border: "none",
-                padding: "4px 0",
-                cursor: "pointer",
-                fontSize: 11.5,
-                color: "var(--accent)",
-                fontFamily: "var(--font-mono)",
-                letterSpacing: "0.02em",
-              }}
-            >
-              Show all {rows.length} holdings ↓
-            </button>
-          )}
-          {expanded && (
-            <button
-              type="button"
-              onClick={() => setExpanded(false)}
-              style={{
-                marginTop: 6,
-                background: "none",
-                border: "none",
-                padding: "4px 0",
-                cursor: "pointer",
-                fontSize: 11.5,
-                color: "var(--muted)",
-                fontFamily: "var(--font-mono)",
-                letterSpacing: "0.02em",
-              }}
-            >
-              Show less ↑
-            </button>
-          )}
+          <ShowMoreToggle
+            expanded={expanded}
+            moreCount={rows.length - LOOK_THROUGH_PREVIEW}
+            onToggle={() => setExpanded((v) => !v)}
+          />
         </>
       )}
     </>
@@ -1429,7 +1495,15 @@ function FundNavChartSection({ ticker }: { ticker: string | null }) {
   );
 }
 
-function FundDetailBody({ projId, holding }: { projId: string; holding?: Holding | null }) {
+function FundDetailBody({
+  projId,
+  holding,
+  onOpenSymbol,
+}: {
+  projId: string;
+  holding?: Holding | null;
+  onOpenSymbol?: (symbol: string) => void;
+}) {
   const { data, isLoading, error } = useResource<FundDetailResponse>(
     projId ? `/api/funds/${encodeURIComponent(projId)}` : null,
   );
@@ -1488,10 +1562,15 @@ function FundDetailBody({ projId, holding }: { projId: string; holding?: Holding
       <PerformanceSection rows={data.performance} />
       <AssetAllocationSection rows={data.assetAllocation} />
       <TopHoldingsSection rows={data.topHoldings} />
-      <PortfolioSection rows={data.portfolio} />
+      <PortfolioSection rows={data.portfolio} onOpenSymbol={onOpenSymbol} />
       <PortfolioAssetTypeSection rows={data.portfolioAssetType} />
       {(data.masterMap != null || data.lookThroughHoldings.length > 0) && (
-        <LookThroughSection masterMap={data.masterMap} rows={data.lookThroughHoldings} />
+        <LookThroughSection
+          masterMap={data.masterMap}
+          masterSymbol={data.masterSymbol}
+          rows={data.lookThroughHoldings}
+          onOpenSymbol={onOpenSymbol}
+        />
       )}
     </div>
   );
@@ -1525,6 +1604,14 @@ export interface FundDetailSheetProps {
    * hide it (e.g. the holding view).
    */
   onAskAdvisor?: (ticker: string) => void;
+  /** Hosted mode (DetailSheetHost): render a Back chevron + defer Back to the host. */
+  hosted?: boolean;
+  /** Hosted: pop one level (renders the header Back chevron when set). */
+  onBack?: () => void;
+  /** Render just the header+body content (no own Modal) — the host wraps it. */
+  asContent?: boolean;
+  /** Hosted: open a look-through constituent's US detail (pushes onto the stack). */
+  onOpenSymbol?: (symbol: string) => void;
   onClose: () => void;
 }
 
@@ -1534,6 +1621,10 @@ export function FundDetailSheet({
   onEdit,
   onHistory,
   onAskAdvisor,
+  hosted,
+  onBack,
+  asContent,
+  onOpenSymbol,
   onClose,
 }: FundDetailSheetProps) {
   // A holding looks up the catalog by its ticker (= abbr_name); Explore passes a
@@ -1562,11 +1653,16 @@ export function FundDetailSheet({
     );
   };
 
-  return (
-    <Modal open={open} onClose={onClose} variant="detail" labelledBy="fund-detail-title">
+  // Hosted, the DetailSheetHost's Modal labels itself by "detail-sheet-title", so the
+  // content header must use that id. Standalone, use an own id so two sheets (or a
+  // standalone + the host) can't collide on one DOM id and break aria-labelledby.
+  const titleId = asContent ? "detail-sheet-title" : "fund-detail-title";
+  const content = (
+    <>
       <Modal.Header
         title={holding ? "Holding detail" : "Fund detail"}
-        id="fund-detail-title"
+        id={titleId}
+        back={onBack}
         action={
           // Ask + (holding) Edit, both 28px icon-btns so they line up with the ✕.
           lookupId ? (
@@ -1598,7 +1694,18 @@ export function FundDetailSheet({
           ) : undefined
         }
       />
-      <Modal.Body>{open && <FundDetailBody projId={lookupId} holding={holding} />}</Modal.Body>
+      <Modal.Body scrollResetKey={lookupId}>
+        {open && <FundDetailBody projId={lookupId} holding={holding} onOpenSymbol={onOpenSymbol} />}
+      </Modal.Body>
+    </>
+  );
+
+  // Hosted (asContent): the DetailSheetHost owns one persistent Modal and swaps
+  // this content in — no per-sheet Modal remount, so a fund↔security hop is smooth.
+  if (asContent) return content;
+  return (
+    <Modal open={open} onClose={onClose} variant="detail" labelledBy={titleId} manageBack={!hosted}>
+      {content}
     </Modal>
   );
 }
