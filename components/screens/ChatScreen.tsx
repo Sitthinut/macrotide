@@ -1798,7 +1798,18 @@ export function ChatScreen({
           source: holding.source,
         }),
       });
-      if (!res.ok) throw new Error(`holding save ${res.status}`);
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as {
+          error?: string;
+          broker?: string;
+        } | null;
+        if (body?.error === "synced_duplicate") {
+          throw new Error(
+            `${holding.ticker} is already synced from ${body.broker ?? "a connected broker"} in this portfolio`,
+          );
+        }
+        throw new Error(`holding save ${res.status}`);
+      }
       invalidate(/^\/api\/holdings/);
     } catch (err) {
       // Roll back the optimistic apply and surface the error inline.

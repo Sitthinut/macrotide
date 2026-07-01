@@ -388,7 +388,8 @@ function DisconnectModal({
       <Modal.Body gap={8}>
         <p style={{ fontSize: 13, color: "var(--ink-soft)", lineHeight: 1.5, margin: 0 }}>
           Syncing stops and the installed userscript is deactivated. You can reconnect any time.
-          Choose what to do with the history already imported:
+          Choose what to do with the holdings already imported — keep them as manual entries you can
+          edit, or remove them:
         </p>
       </Modal.Body>
       <Modal.Footer

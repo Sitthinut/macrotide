@@ -20,15 +20,15 @@ export function SettingsScreen({
   onBack,
   onConnectBroker,
 }: SettingsScreenProps) {
-  // Source labels — distinct values across the user's holdings, with counts, so
-  // they can be renamed in bulk (one rename rewrites every holding using it).
-  const { data: holdingRows } = useResource<{ source: string | null }[]>("/api/holdings");
-  const sourceCounts = new Map<string, number>();
-  for (const h of holdingRows ?? []) {
-    const s = h.source?.trim();
-    if (s) sourceCounts.set(s, (sourceCounts.get(s) ?? 0) + 1);
-  }
-  const sources = [...sourceCounts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  // Source labels the user typed themselves (e.g. "My Bank"), with counts, so they
+  // can be renamed in bulk (one rename rewrites every holding using it). Broker-
+  // synced labels are excluded here (they live under Connections), so this list is
+  // manual-only; the API still returns the managed flag so we can filter them out
+  // and detect the all-synced empty state.
+  const { data: sourceData } = useResource<{
+    sources: { source: string; count: number; managed: boolean }[];
+  }>("/api/holdings/source");
+  const sources = sourceData?.sources ?? [];
   const [renamingFrom, setRenamingFrom] = useState<string | null>(null);
   const [renameTo, setRenameTo] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
@@ -46,15 +46,107 @@ export function SettingsScreen({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ from, to }),
       });
-      if (!res.ok) throw new Error(`rename failed (${res.status})`);
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        if (body?.error === "managed_target") {
+          throw new Error(
+            `"${to}" is synced from a connection — you can't rename a source into it.`,
+          );
+        }
+        if (body?.error === "managed_source") {
+          throw new Error(`"${from}" is synced from a connection and can't be renamed here.`);
+        }
+        throw new Error(`Failed to rename source (${res.status}).`);
+      }
       await invalidate(/^\/api\/holdings/);
       setRenamingFrom(null);
-    } catch {
-      window.alert("Failed to rename source.");
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "Failed to rename source.");
     } finally {
       setRenameBusy(false);
     }
   };
+
+  // Manual labels only — synced ones live under Connections. hasSynced lets the
+  // empty state reassure an all-synced user their broker holdings are over there.
+  const manualSources = sources.filter((s) => !s.managed);
+  const hasSynced = sources.some((s) => s.managed);
+
+  const renderSourceRow = (
+    { source: src, count }: { source: string; count: number },
+    i: number,
+  ) => (
+    <div
+      key={src}
+      className="row between"
+      style={{
+        padding: "10px 12px",
+        gap: 8,
+        borderTop: i === 0 ? undefined : "1px solid var(--line-soft)",
+      }}
+    >
+      {renamingFrom === src ? (
+        <>
+          <input
+            className="mt-select"
+            value={renameTo}
+            onChange={(e) => setRenameTo(e.target.value)}
+            style={{ flex: 1 }}
+          />
+          <div className="row" style={{ gap: 6 }}>
+            <button
+              type="button"
+              className="btn ghost sm"
+              onClick={() => submitRename(src)}
+              disabled={renameBusy}
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              onClick={() => setRenamingFrom(null)}
+              disabled={renameBusy}
+              style={{
+                background: "transparent",
+                border: 0,
+                color: "var(--muted)",
+                cursor: "pointer",
+                fontSize: 12.5,
+                padding: "4px 6px",
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div style={{ minWidth: 0 }}>
+            <div
+              className="row"
+              style={{ gap: 6, fontSize: 13.5, fontWeight: 500, letterSpacing: "-0.01em" }}
+            >
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {src}
+              </span>
+            </div>
+            <div style={{ fontSize: 11, color: "var(--muted)", fontFamily: "var(--font-mono)" }}>
+              {count} holding{count === 1 ? "" : "s"}
+            </div>
+          </div>
+          <button
+            className="btn ghost sm"
+            onClick={() => {
+              setRenamingFrom(src);
+              setRenameTo(src);
+            }}
+          >
+            Rename
+          </button>
+        </>
+      )}
+    </div>
+  );
 
   const themeOpts = [
     {
@@ -199,77 +291,15 @@ export function SettingsScreen({
         <div className="section-header">
           <h3>Sources</h3>
         </div>
-        {sources.length === 0 ? (
-          <div className="card" style={{ fontSize: 12.5, color: "var(--muted)" }}>
-            No sources yet — tag holdings with where they're held when you add them.
+        {manualSources.length === 0 ? (
+          <div className="card" style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
+            {hasSynced
+              ? "Holdings synced from a broker are managed under Connections above. Labels you add yourself will show here."
+              : "No manual sources yet. Add a holding and give it a source label to see it here."}
           </div>
         ) : (
           <div className="card" style={{ padding: 0 }}>
-            {sources.map(([src, count]) => (
-              <div key={src} className="row between" style={{ padding: "10px 12px", gap: 8 }}>
-                {renamingFrom === src ? (
-                  <>
-                    <input
-                      className="mt-select"
-                      value={renameTo}
-                      onChange={(e) => setRenameTo(e.target.value)}
-                      style={{ flex: 1 }}
-                    />
-                    <div className="row" style={{ gap: 6 }}>
-                      <button
-                        type="button"
-                        className="btn ghost sm"
-                        onClick={() => submitRename(src)}
-                        disabled={renameBusy}
-                      >
-                        Save
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setRenamingFrom(null)}
-                        disabled={renameBusy}
-                        style={{
-                          background: "transparent",
-                          border: 0,
-                          color: "var(--muted)",
-                          cursor: "pointer",
-                          fontSize: 12.5,
-                          padding: "4px 6px",
-                        }}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div>
-                      <div style={{ fontSize: 13.5, fontWeight: 500, letterSpacing: "-0.01em" }}>
-                        {src}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color: "var(--muted)",
-                          fontFamily: "var(--font-mono)",
-                        }}
-                      >
-                        {count} holding{count === 1 ? "" : "s"}
-                      </div>
-                    </div>
-                    <button
-                      className="btn ghost sm"
-                      onClick={() => {
-                        setRenamingFrom(src);
-                        setRenameTo(src);
-                      }}
-                    >
-                      Rename
-                    </button>
-                  </>
-                )}
-              </div>
-            ))}
+            {manualSources.map(renderSourceRow)}
           </div>
         )}
         <div
@@ -280,7 +310,8 @@ export function SettingsScreen({
             lineHeight: 1.5,
           }}
         >
-          Renaming updates the label on every holding that uses it.
+          Renaming updates the label on every holding that uses it. Synced holdings are managed
+          under <strong style={{ fontWeight: 500, color: "var(--ink-soft)" }}>Connections</strong>.
         </div>
       </div>
 
@@ -292,28 +323,6 @@ export function SettingsScreen({
           What Advisor remembers about you lives in{" "}
           <strong style={{ fontWeight: 500, color: "var(--ink-soft)" }}>Journal → Memory</strong> —
           review, forget, or ask Advisor to change a memory there.
-        </div>
-      </div>
-
-      <div className="section">
-        <div className="section-header">
-          <h3>About</h3>
-        </div>
-        <div className="card">
-          <ul className="bullet-list">
-            <li>
-              <span className="marker">v0.1</span>Open-source AI investment companion · MIT licensed
-            </li>
-            <li>
-              <span className="marker">↗</span>github.com/Sitthinut/macrotide
-            </li>
-            <li>
-              <span className="marker">⚠</span>Educational tool — not licensed financial advice
-            </li>
-            <li>
-              <span className="marker">∞</span>Built with Claude · runs your data locally
-            </li>
-          </ul>
         </div>
       </div>
     </div>

@@ -39,8 +39,13 @@ export async function POST(req: Request) {
     });
 
     if (!result.ok) {
-      const status = result.error === "invalid" ? 400 : result.error === "no_bucket" ? 409 : 404;
-      return NextResponse.json({ error: result.error }, { status });
+      const status =
+        result.error === "invalid"
+          ? 400
+          : result.error === "no_bucket" || result.error === "synced_duplicate"
+            ? 409
+            : 404;
+      return NextResponse.json({ error: result.error, broker: result.broker }, { status });
     }
     return NextResponse.json(result.holding, { status: 201 });
   });

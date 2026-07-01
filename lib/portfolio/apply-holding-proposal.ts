@@ -12,7 +12,7 @@
 // insert against a bucketId we haven't confirmed the user owns.
 import { getBucket, listBuckets } from "@/lib/db/queries/buckets";
 import type { Holding } from "@/lib/db/queries/holdings";
-import { createHoldingViaLedger } from "@/lib/db/queries/project-holdings";
+import { createHoldingViaLedger, syncedBrokerForTicker } from "@/lib/db/queries/project-holdings";
 import { QUOTE_SOURCES, type QuoteSource } from "@/lib/market/sources";
 
 export interface HoldingProposalInput {
@@ -38,12 +38,15 @@ export interface HoldingProposalInput {
 export type HoldingProposalError =
   | "no_bucket" // user has no buckets at all — nothing to attach to
   | "bucket_not_found" // bucketId given but not owned by / known to the user
+  | "synced_duplicate" // a broker connection already syncs this ticker into the bucket
   | "invalid"; // payload failed validation
 
 export interface HoldingProposalResult {
   ok: boolean;
   holding?: Holding;
   error?: HoldingProposalError;
+  /** Broker label when `error === "synced_duplicate"`. */
+  broker?: string;
 }
 
 function normalizeQuoteSource(value: string | null | undefined): QuoteSource {
@@ -77,6 +80,11 @@ export function applyHoldingProposal(input: HoldingProposalInput): HoldingPropos
     if (buckets.length === 0) return { ok: false, error: "no_bucket" };
     bucketId = buckets[0].id;
   }
+
+  // A broker connection already syncs this ticker into the bucket — accepting
+  // would fold on top of the synced lots and silently double-count. Reject.
+  const broker = syncedBrokerForTicker(bucketId, ticker);
+  if (broker) return { ok: false, error: "synced_duplicate", broker };
 
   const avgCost =
     input.avgCost != null && Number.isFinite(Number(input.avgCost)) ? Number(input.avgCost) : null;

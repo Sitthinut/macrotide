@@ -15,6 +15,7 @@ import { freshMarketDb } from "@/tests/db-helpers";
 import { type DbContext, runWithDbContext } from "../db/context";
 import { createBucket } from "../db/queries/buckets";
 import { getHolding, listHoldings } from "../db/queries/holdings";
+import { rebuildHoldingsForBucket } from "../db/queries/project-holdings";
 import * as schema from "../db/schema";
 import { user } from "../db/schema";
 import { applyHoldingProposal } from "./apply-holding-proposal";
@@ -196,6 +197,50 @@ describe("applyHoldingProposal — per-user scoping", () => {
       const result = applyHoldingProposal({ bucketId: null, ...HOLDING });
       expect(result.ok).toBe(false);
       expect(result.error).toBe("no_bucket");
+    });
+  });
+
+  it("rejects a ticker a broker connection already syncs into the bucket (synced_duplicate)", () => {
+    const { sqlite, db, marketDb, marketSqlite } = freshDb();
+    const ctx: DbContext = {
+      appDb: db,
+      appSqlite: sqlite,
+      marketDb,
+      marketSqlite,
+      isDemo: false,
+      sessionId: "s",
+      userId: null,
+    };
+    runWithDbContext(ctx, () => {
+      createBucket({ ...BUCKET, id: "b" });
+      // A synced buy for VOO (external_id set) already feeds this bucket.
+      db.insert(schema.transactions)
+        .values({
+          bucketId: "b",
+          ticker: "VOO",
+          englishName: "VOO",
+          quoteSource: "market",
+          kind: "buy",
+          tradeDate: "2026-01-01",
+          units: 5,
+          pricePerUnit: 400,
+          amount: -2000,
+          tradeCurrency: "THB",
+          fxToThb: 1,
+          source: "Broker One",
+          externalId: "broker-one:AC-001:ord-1",
+          externalAccount: "AC-001",
+          importBatchId: "test-sync",
+        })
+        .run();
+      rebuildHoldingsForBucket("b");
+
+      const result = applyHoldingProposal({ bucketId: "b", ...HOLDING });
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe("synced_duplicate");
+      expect(result.broker).toBe("Broker One");
+      // Nothing was double-written: only the synced row exists.
+      expect(listHoldings("b")).toHaveLength(1);
     });
   });
 
