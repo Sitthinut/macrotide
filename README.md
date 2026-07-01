@@ -19,7 +19,7 @@ real holdings.
 
 A responsive app built around **five main tabs** — Portfolio, Markets, Explore,
 Advisor, and Journal — across mobile / tablet / desktop with light/dark/system
-themes. At its core: hold your Thai mutual-fund holdings,
+themes. At its core: hold Thai mutual funds plus US stocks and ETFs,
 visualize allocation, fees, and NAV trends, pull a live market view from free
 public sources, and chat with an AI advisor grounded in your real portfolio,
 plan, and journal — including plan edits it proposes as accept/reject cards.
@@ -43,8 +43,8 @@ plan, and journal — including plan edits it proposes as accept/reject cards.
 
 **Funds & markets**
 
-- **Fund finder & screener** — fuzzy, feeder-aware search over priceable **share classes** with per-class fee, tax wrapper, and 1-year return; screen by tracked index (S&P 500, SET50…) for the cheapest trackers; shows buyable funds by default while search finds any active fund you might hold; TER ranking
-- **Fund detail** — per-share-class price and fund-size (AUM) history, holdings by asset type, and feeder look-through to the underlying holdings
+- **Fund & stock finder** — fuzzy, feeder-aware search across priceable Thai **share classes** and the full US **stock & ETF** universe; screen by tracked index (S&P 500, SET50…) for the cheapest trackers, ranked by fee, with ticker-aware autofill when you add a holding
+- **Fund & stock detail** — price and fund-size (AUM) history, holdings, and feeder look-through; US names add a daily chart and honest ETF holdings (a leveraged fund shown by its underlying, not its swap counterparty), and link to the cheapest funds with the same exposure — all derived from real holdings, so it stays comprehensive and self-updating
 - **Market data** — live index levels, FX, Thai fund NAVs and history (Thai SEC), and RSS news, over a resilient stale-on-error cache
 - **Benchmarks & models** — match-or-beat the market on a total-return basis (global, US, regional, and Thai indices); browse, fork, and set a model portfolio as the target that drives drift and health checks
 

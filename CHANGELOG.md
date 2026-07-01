@@ -36,6 +36,61 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   edited — so it advances as fresh NAV lands and reads the same for everyone.
   Internally, forcing a quote refresh no longer strands a fund's cache timestamp
   when an upstream refetch comes back empty, so a fund's freshness stays honest.
+- **US stocks & ETFs are first-class.** Explore now has a market toggle (Thai
+  funds | US stocks & ETFs): browse, search by symbol or name, filter to stocks
+  or ETFs, sort, and tap any row for a detail view with a daily price chart. The
+  catalog covers the whole US-listed universe (~12.9k symbols), refreshed nightly
+  from the official Nasdaq directory. Adding a US holding now recognizes the
+  ticker and fills in its name and asset class for you, and the Advisor can search
+  and describe US securities (steering toward diversified ETFs over single names).
+  Prices come from a free, datacenter-safe chain (Twelve Data, with Alpaca as a
+  fallback), end-of-day, converted to THB wherever a US security is held. Popular
+  US charts open instantly: on-screen rows are prefetched, and a nightly job keeps
+  a dynamically-derived popular set warm (most-traded by dollar value, blended with
+  what users actually open) — no hardcoded ticker list, it self-updates daily. A
+  held US security also survives a ticker rename (FB→META): it stays linked to its
+  current symbol, name, and price history through a stable FIGI identifier, and a
+  custom holding starts pricing automatically once its symbol lists.
+
+- **See what's inside an index fund, and how to own a stock through one.** A US
+  ETF's detail lists its holdings with tickers you can tap to open each one. A
+  leveraged or inverse ETF reads honestly too: its swap holdings show the
+  underlying they track (an "Apple, Inc." swap, not the dealer's name) with the
+  counterparty labelled "via …", plus a note that the figures are notional and can
+  exceed 100%. A
+  stock's detail has an "Own the index" list of the low-cost index ETFs that
+  give you that exposure — each showing both how much of the stock it holds ("holds
+  6.6%") and its annual fee, cheapest first, so a fund that both tracks the index
+  and holds the stock appears once instead of twice with two confusing percentages.
+  The list is grouped so the routes stay distinct: the broad index funds (the cheap
+  default), then the stock's own sector funds (a concentrated, usually higher-fee
+  way to own it — surfaced in their own group so they aren't buried under the cheap
+  broad ones), then any other fund that simply holds it; each group shows a few with
+  a "show more".
+  Thai index funds appear alongside the US ETFs and show the same look-through
+  weight (how much of the stock they hold via their master fund), priced by the
+  cheapest share class. Constituents are matched to tickers from public identifiers
+  (ISIN/CUSIP), so it needs no licensed data. A Thai feeder fund's detail drills
+  the other way too: its master fund, its portfolio's master-ETF line, and each
+  look-through constituent open that US ETF or stock's detail — resolved from the
+  security's own identifiers, so a feeder's master line lands on the right ETF even
+  when its stored master ISIN is unreliable.
+
+- **"Own the index" now knows which ETFs actually track an index.** The ETFs
+  suggested for a stock or index ETF are derived from real holdings overlap instead
+  of a hand-picked list, so the set is comprehensive (every ETF that tracks the S&P
+  500 / Nasdaq-100 / Dow, plus the 11 S&P sector ETFs) and updates itself as
+  holdings change — all from public data, no licensed feed. A single-sector fund is
+  never mistaken for a broad index it happens to sit inside (a tech-only ETF holds
+  only S&P 500 names, but it tracks a sector, not the S&P 500), so it resolves to
+  its sector slice or to nothing rather than a wrong "S&P 500" label.
+
+- **One Explore search across everything you can invest in.** The "All" view
+  searches Thai funds, US ETFs, and US stocks from a single bar and ranks them
+  together by relevance, so a Thai S&P 500 feeder fund and VOO sit side by side for
+  comparison. With the bar empty it leads with curated low-cost shelves — Thai
+  index funds, then index ETFs, then popular US stocks — as an index-investing
+  starting point, each fund and ETF showing its annual fee (TER) inline.
 
 - **Funds stay correct when their code or name changes over time.** Tickers are
   now stored in their official catalog case (custom assets and cash accounts keep

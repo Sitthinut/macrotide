@@ -159,7 +159,7 @@ The rules that prevent mistakes:
 
 Every holding's `quote_source` column (NOT NULL, default `"market"`) routes its
 NAV/price fetch: `"thai_mutual_fund"` → Thai SEC Open API; `"market"` → the
-index/FX/stock chain (FMP → EODHD → Twelve Data → Frankfurter → Yahoo, first that
+index/FX/stock chain (FMP → EODHD → Twelve Data → Alpaca → Frankfurter → Yahoo, first that
 returns data wins). The full chain, quotas, per-symbol mapping, and graceful
 degradation: [auth-and-providers.md § Market data providers](./docs/reference/auth-and-providers.md).
 

@@ -200,7 +200,9 @@ FMP (keyed, REAL US indices)
 | --- | --- | --- | --- |
 | FMP (Financial Modeling Prep) | `FMP_API_KEY` | ≈ 250 req/day | REAL US index levels — `^GSPC` (S&P 500), `^NDX` (Nasdaq-100), `^DJI` (Dow) |
 | EODHD (EOD Historical Data) | `EODHD_API_KEY` | ≈ 20 req/day | REAL global index levels via `{CODE}.INDX` — incl. Nikkei (`N225.INDX`) and the Thai SET (`SET.INDX`) that FMP's free tier lacks |
-| Twelve Data | `TWELVE_DATA_API_KEY` | ≈ 800 req/day | ETF proxies (SPY/QQQ/DIA/THD/…) for index symbols not on a free real-index plan |
+| Twelve Data | `TWELVE_DATA_API_KEY` | ≈ 800 req/day | ETF proxies (SPY/QQQ/DIA/THD/…) for index symbols not on a free real-index plan, **and** arbitrary US stocks/ETFs (AAPL, VOO) |
+| Alpaca | `ALPACA_API_KEY_ID` + `ALPACA_API_SECRET_KEY` | ≈ 200 req/min | keyed fallback for arbitrary US stocks/ETFs (IEX daily bars, 7+ yr); datacenter-safe, no card/KYC, no personal-use clause; used after Twelve Data. Equity-shaped tickers only (skips caret indices + FX pairs) |
+| OpenFIGI | `OPENFIGI_API_KEY` (optional) | 25/min anon, 25/6s keyed | ticker → composite **FIGI** (rename-persistent US security id, MIT-licensed). Anchors a US holding so a renamed ticker still resolves; enriches `us_securities.figi` nightly. Works keyless |
 | Frankfurter | (none) | unmetered | FX only (USD/THB), ECB-backed; works with no key and no datacenter-IP block |
 | Yahoo | (none) | — | keyless fallback; hard-429s datacenter IPs, hence the keyed providers above |
 
