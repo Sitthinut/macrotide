@@ -2513,6 +2513,7 @@ export function PortfolioScreen({
         open={!!holdingSheet}
         holdingId={holdingSheet?.id}
         lockTicker
+        syncedBroker={holdingSheet?.syncedBroker}
         initial={
           holdingSheet
             ? holdingToFormValues(

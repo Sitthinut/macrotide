@@ -36,6 +36,9 @@ export interface HoldingSheetProps {
   initial: HoldingFormValues;
   /** When editing, true if the ticker should be locked. */
   lockTicker?: boolean;
+  /** Broker name when this holding is synced from a connection. Locks the Source
+   * label (the connection owns it) and explains why. */
+  syncedBroker?: string | null;
   /** Optional list of buckets so the user can move a holding between them. */
   bucketOptions?: { id: string; name: string }[];
   onClose: () => void;
@@ -56,12 +59,14 @@ export function HoldingSheet({
   holdingId,
   initial,
   lockTicker = false,
+  syncedBroker,
   bucketOptions,
   onClose,
   onSave,
   onDelete,
 }: HoldingSheetProps) {
   const isEdit = holdingId !== undefined;
+  const synced = !!syncedBroker;
   const [values, setValues] = useState<HoldingFormValues>(initial);
   const [submitting, setSubmitting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -457,19 +462,25 @@ export function HoldingSheet({
                     disabled={known}
                   />
                 </FormRow>
-                <FormRow label="Source" hint="Where this came from">
+                <FormRow
+                  label="Source"
+                  hint={synced ? `Synced from ${syncedBroker}` : "Where this came from"}
+                >
                   <input
                     className="sheet-input"
                     list="edit-source-suggestions"
                     value={values.source}
                     onChange={(e) => update({ source: e.target.value })}
                     placeholder="Type or pick a source"
+                    disabled={synced}
                   />
-                  <datalist id="edit-source-suggestions">
-                    {sourceOptions.map((s) => (
-                      <option key={s} value={s} />
-                    ))}
-                  </datalist>
+                  {!synced && (
+                    <datalist id="edit-source-suggestions">
+                      {sourceOptions.map((s) => (
+                        <option key={s} value={s} />
+                      ))}
+                    </datalist>
+                  )}
                 </FormRow>
               </div>
             </>

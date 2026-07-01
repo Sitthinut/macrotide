@@ -32,6 +32,22 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     // Editing a holding is sugar over the ledger: position changes write events,
     // metadata updates the row (ADR 0004).
     const existing = getHolding(Number(id));
+    // A synced holding's identity is owned by its broker connection: changing its
+    // source (or ticker) here would desync and split it on the next sync. Block
+    // those edits; other metadata (name, class, TER, price source) stays editable.
+    if (existing?.syncedBroker) {
+      const changesSource = body.source !== undefined && body.source !== existing.source;
+      const changesTicker =
+        typeof body.ticker === "string" &&
+        !!body.ticker.trim() &&
+        body.ticker.trim().toLowerCase() !== existing.ticker.toLowerCase();
+      if (changesSource || changesTicker) {
+        return NextResponse.json(
+          { error: "managed_source", broker: existing.syncedBroker },
+          { status: 409 },
+        );
+      }
+    }
     const rawPatch = {
       ticker: body.ticker,
       englishName: body.englishName,

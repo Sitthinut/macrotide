@@ -4,6 +4,7 @@ import { quoteCacheKey, tickerKey } from "@/lib/market/sources";
 import type { ProjectedPosition } from "@/lib/portfolio/project-positions";
 import { getDb } from "../context";
 import { buckets, holdings, transactions } from "../schema";
+import { listBrokerConnections } from "./broker-connections";
 import { resolveCatalogSymbol } from "./funds";
 import { enrichHoldingsWithCatalog } from "./holding-enrichment";
 import { projectBucketPositions } from "./project-holdings";
@@ -212,4 +213,64 @@ export function renameHoldingSource(bucketIds: string[], from: string, to: strin
     .where(and(eq(holdings.source, from), inArray(holdings.bucketId, bucketIds)))
     .run();
   return res.changes;
+}
+
+/**
+ * The source labels in these buckets that belong to a LIVE broker connection: the
+ * provenance (`source`) of ledger rows carrying an `external_id` whose
+ * `external_account` still maps to a current `brokerConnections` row. Renaming one
+ * would desync it from the connector — the next sync re-stamps the old label and
+ * the source splits in two — so the rename flow refuses these. Once a broker is
+ * disconnected its connection rows are gone, so its label drops out of this set and
+ * becomes renamable again (no live sync can re-stamp it).
+ */
+export function managedSourceLabels(bucketIds: string[]): Set<string> {
+  const out = new Set<string>();
+  if (bucketIds.length === 0) return out;
+  const liveAccounts = listBrokerConnections().map((c) => c.accountCode);
+  if (liveAccounts.length === 0) return out;
+  const rows = getDb()
+    .select({ source: transactions.source })
+    .from(transactions)
+    .where(
+      and(
+        inArray(transactions.bucketId, bucketIds),
+        isNotNull(transactions.externalId),
+        inArray(transactions.externalAccount, liveAccounts),
+        isNotNull(transactions.source),
+      ),
+    )
+    .all();
+  for (const r of rows) {
+    const s = r.source?.trim();
+    if (s) out.add(s);
+  }
+  return out;
+}
+
+/**
+ * Distinct source labels across the given buckets with their holding counts, each
+ * flagged `managed` when it belongs to a live broker connection (see
+ * {@link managedSourceLabels}). Drives Settings → Sources: a managed label is kept
+ * in step with its connection, so it's shown read-only rather than free-text
+ * renamable.
+ */
+export function sourceLabelSummary(
+  bucketIds: string[],
+): { source: string; count: number; managed: boolean }[] {
+  if (bucketIds.length === 0) return [];
+  const rows = getDb()
+    .select({ source: holdings.source })
+    .from(holdings)
+    .where(and(inArray(holdings.bucketId, bucketIds), isNotNull(holdings.source)))
+    .all();
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    const s = r.source?.trim();
+    if (s) counts.set(s, (counts.get(s) ?? 0) + 1);
+  }
+  const managed = managedSourceLabels(bucketIds);
+  return [...counts.entries()]
+    .map(([source, count]) => ({ source, count, managed: managed.has(source) }))
+    .sort((a, b) => a.source.localeCompare(b.source));
 }

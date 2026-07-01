@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { tickerKey } from "@/lib/market/sources";
 import {
   type ProjectedPosition,
@@ -87,6 +87,29 @@ export function countHeldByExternalAccount(
     )
     .all();
   return projectPositions(foldableEvents(events).map(toProjectionEvent), DEFAULT_METHOD).length;
+}
+
+/**
+ * The broker that already syncs this (bucket, ticker), or null. A ledger row with
+ * a non-null `external_id` is the reliable "came from a broker import" marker (a
+ * hand-typed `source` never qualifies). Its `source` is the broker label. Used to
+ * block a manual add of a ticker that a connection already feeds into the same
+ * portfolio, which would silently double-count the position.
+ */
+export function syncedBrokerForTicker(bucketId: string, ticker: string): string | null {
+  const row = getDb()
+    .select({ source: transactions.source })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.bucketId, bucketId),
+        tickerEqSql(transactions.ticker, ticker),
+        isNotNull(transactions.externalId),
+      ),
+    )
+    .get();
+  if (!row) return null;
+  return row.source?.trim() || "a connected broker";
 }
 
 /** Build the read-model Holding (stored row + folded position) — the same overlay

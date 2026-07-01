@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
 import { getBucket } from "@/lib/db/queries/buckets";
 import { getHolding, listHoldings } from "@/lib/db/queries/holdings";
-import { createHoldingViaLedger } from "@/lib/db/queries/project-holdings";
+import { createHoldingViaLedger, syncedBrokerForTicker } from "@/lib/db/queries/project-holdings";
 
 export async function GET(req: Request) {
   const bucket = new URL(req.url).searchParams.get("bucket") ?? undefined;
@@ -31,6 +31,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "bucket_not_found" }, { status: 404 });
     }
     if (!ticker) return NextResponse.json({ error: "ticker_required" }, { status: 400 });
+
+    // A broker connection already feeds this ticker into this portfolio: a manual
+    // add would fold on top of the synced lots and silently double-count. Block it
+    // and point the user at the synced holding instead.
+    const broker = syncedBrokerForTicker(bucketId, ticker);
+    if (broker) {
+      return NextResponse.json({ error: "synced_duplicate", broker }, { status: 409 });
+    }
 
     // A holding is created by writing an `opening` anchor to the ledger; the
     // holding row is then the projection of it (ADR 0004).

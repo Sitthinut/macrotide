@@ -21,6 +21,14 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   table it uses for holdings — open it to check and save, with the account's
   Purpose (Investable or Reserved) carried through. Previously the Advisor could
   import funds but not cash.
+- **Broker-synced sources and manual holdings no longer collide.** A source
+  label that belongs to a live broker connection is shown as managed in
+  Settings → Sources — it takes its name from the connection and can't be
+  renamed there, so a rename can never split one synced source into two. Adding a
+  holding manually for a ticker a connection already syncs into the same
+  portfolio is blocked, naming the broker, so synced and manual entries can't
+  silently double-count. Disconnecting a broker spells out that kept holdings
+  become editable manual entries.
 
 - **The portfolio "as of" date now reflects when your holdings were last
   priced.** The date beside the total tracks the latest NAV date in the value

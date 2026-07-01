@@ -12,13 +12,21 @@ import { describe, expect, it } from "vitest";
 import { freshMarketDb } from "@/tests/db-helpers";
 import { type DbContext, getDb, getMarketDb, runWithDbContext } from "../context";
 import * as schema from "../schema";
+import { deleteBrokerConnection, upsertBrokerConnection } from "./broker-connections";
 import { createBucket } from "./buckets";
-import { getHolding, listHoldings, renameHoldingSource } from "./holdings";
+import {
+  getHolding,
+  listHoldings,
+  managedSourceLabels,
+  renameHoldingSource,
+  sourceLabelSummary,
+} from "./holdings";
 import {
   createHoldingViaLedger,
   deleteHoldingViaLedger,
   editHoldingViaLedger,
   rebuildHoldingsForBucket,
+  syncedBrokerForTicker,
 } from "./project-holdings";
 
 function freshDb() {
@@ -380,6 +388,97 @@ describe("renameHoldingSource", () => {
     };
     runWithDbContext(ctx, () => {
       expect(renameHoldingSource([], "SCB", "Y")).toBe(0);
+    });
+  });
+});
+
+// A source label is "managed" when it belongs to a LIVE broker connection: the
+// provenance of a synced ledger row (external_id set) whose external_account
+// still maps to a brokerConnections row. Managed labels can't be free-text
+// renamed (that would desync the connector); a manual label always can. And a
+// broker connection that already feeds a ticker into a bucket blocks a manual
+// add of the same ticker there, so the two can't silently double-count.
+describe("managed sources (Sources × Connections)", () => {
+  /** A broker-imported buy (external_id set) + its live connection row. */
+  function seedSyncedWithConnection(
+    bucketId: string,
+    ticker: string,
+    opts: { source: string; sourceTag: string; account: string },
+  ) {
+    getDb()
+      .insert(schema.transactions)
+      .values({
+        bucketId,
+        ticker,
+        englishName: ticker,
+        quoteSource: "thai_mutual_fund",
+        kind: "buy",
+        tradeDate: "2026-01-01",
+        units: 10,
+        pricePerUnit: 10,
+        amount: -100,
+        tradeCurrency: "THB",
+        fxToThb: 1,
+        source: opts.source,
+        externalId: `${opts.sourceTag}:${opts.account}:ord-1`,
+        externalAccount: opts.account,
+        importBatchId: "test-sync",
+      })
+      .run();
+    rebuildHoldingsForBucket(bucketId);
+    upsertBrokerConnection({ source: opts.sourceTag, accountCode: opts.account, bucketId });
+  }
+
+  it("flags a live-connection label as managed and a manual label as not", () => {
+    runWithDbContext(ctx(), () => {
+      createBucket({ ...BUCKET, id: "b1" });
+      seedSyncedWithConnection("b1", "EXAMPLE-FUND-A", {
+        source: "Broker One",
+        sourceTag: "broker-one",
+        account: "AC-001",
+      });
+      seedHolding("b1", "EXAMPLE-FUND-B", "My Bank"); // hand-typed, no connection
+
+      expect(managedSourceLabels(["b1"])).toEqual(new Set(["Broker One"]));
+
+      const summary = new Map(sourceLabelSummary(["b1"]).map((s) => [s.source, s]));
+      expect(summary.get("Broker One")?.managed).toBe(true);
+      expect(summary.get("Broker One")?.count).toBe(1);
+      expect(summary.get("My Bank")?.managed).toBe(false);
+    });
+  });
+
+  it("stops treating a label as managed once its connection is disconnected", () => {
+    runWithDbContext(ctx(), () => {
+      createBucket({ ...BUCKET, id: "b1" });
+      seedSyncedWithConnection("b1", "EXAMPLE-FUND-A", {
+        source: "Broker One",
+        sourceTag: "broker-one",
+        account: "AC-001",
+      });
+      expect(managedSourceLabels(["b1"]).has("Broker One")).toBe(true);
+
+      // Disconnect keeps the imported rows (external_id intact) but drops the
+      // connection → the label is no longer managed and can be renamed again.
+      deleteBrokerConnection("broker-one", "AC-001");
+      expect(managedSourceLabels(["b1"]).has("Broker One")).toBe(false);
+      expect(sourceLabelSummary(["b1"])[0].managed).toBe(false);
+    });
+  });
+
+  it("reports the broker for a synced ticker, null for a manual one", () => {
+    runWithDbContext(ctx(), () => {
+      createBucket({ ...BUCKET, id: "b1" });
+      seedSyncedWithConnection("b1", "EXAMPLE-FUND-A", {
+        source: "Broker One",
+        sourceTag: "broker-one",
+        account: "AC-001",
+      });
+      seedHolding("b1", "EXAMPLE-FUND-B", "My Bank");
+
+      expect(syncedBrokerForTicker("b1", "EXAMPLE-FUND-A")).toBe("Broker One");
+      expect(syncedBrokerForTicker("b1", "example-fund-a")).toBe("Broker One"); // case-fold
+      expect(syncedBrokerForTicker("b1", "EXAMPLE-FUND-B")).toBeNull();
     });
   });
 });
