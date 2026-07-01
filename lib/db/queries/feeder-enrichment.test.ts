@@ -11,11 +11,16 @@ vi.mock("../context", () => ({
   getMarketDb: vi.fn(),
 }));
 
+import { freshMarketDb } from "@/tests/db-helpers";
 import { getMarketDb } from "../context";
+import { usSecurities } from "../schema";
 import {
+  type FeederMasterMapRow,
   getFeederEnrichment,
   getFeederLookThroughHoldings,
   getFeederMasterMap,
+  getFeederWeightsForSymbol,
+  resolveMasterSymbol,
   upsertFeederLookThroughHoldings,
   upsertFeederMasterMap,
 } from "./feeder-enrichment";
@@ -35,8 +40,13 @@ function makeMockDb(rows: unknown[] = []) {
   const insert = vi.fn().mockReturnValue({ values });
   const deleteFrom = vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ run }) });
   const txFn = vi.fn((cb: (tx: typeof mockDb) => void) => cb(mockDb));
+  const from = vi.fn().mockReturnValue({
+    where,
+    innerJoin: vi.fn().mockReturnValue({ where }),
+    leftJoin: vi.fn().mockReturnValue({ where }),
+  });
   const mockDb = {
-    select: vi.fn().mockReturnValue({ from: vi.fn().mockReturnValue({ where }) }),
+    select: vi.fn().mockReturnValue({ from }),
     insert,
     delete: deleteFrom,
     transaction: txFn,
@@ -52,6 +62,25 @@ describe("feeder-enrichment queries", () => {
   beforeEach(() => {
     mockDb = makeMockDb();
     vi.mocked(getMarketDb).mockReturnValue(mockDb as unknown as ReturnType<typeof getMarketDb>);
+  });
+
+  // ─── getFeederWeightsForSymbol ─────────────────────────────────────────────
+
+  describe("getFeederWeightsForSymbol", () => {
+    it("maps feeder proj_id → the symbol's transitive weight, skipping nulls", () => {
+      const db = makeMockDb([
+        { projId: "P1", weightPct: 6.65 },
+        { projId: "P2", weightPct: null },
+      ]);
+      vi.mocked(getMarketDb).mockReturnValue(db as unknown as ReturnType<typeof getMarketDb>);
+      const m = getFeederWeightsForSymbol("AAPL");
+      expect(m.get("P1")).toBe(6.65);
+      expect(m.has("P2")).toBe(false);
+    });
+
+    it("returns an empty map for a blank symbol (no query)", () => {
+      expect(getFeederWeightsForSymbol("").size).toBe(0);
+    });
   });
 
   // ─── upsertFeederMasterMap ─────────────────────────────────────────────────
@@ -149,5 +178,49 @@ describe("feeder-enrichment queries", () => {
         lookThroughHoldings: [],
       });
     });
+  });
+});
+
+describe("resolveMasterSymbol (real DB, name-match)", () => {
+  const master = (masterName: string | null): FeederMasterMapRow =>
+    ({ masterName }) as FeederMasterMapRow;
+
+  function seed() {
+    const { db } = freshMarketDb();
+    vi.mocked(getMarketDb).mockReturnValue(db as unknown as ReturnType<typeof getMarketDb>);
+    for (const [symbol, name] of [
+      ["IVV", "iShares Core S&P 500 ETF"],
+      ["ACWI", "iShares MSCI ACWI ETF"],
+      ["ACWX", "iShares MSCI ACWI ex U.S. ETF"],
+    ] as const) {
+      db.insert(usSecurities).values({ symbol, name, securityType: "etf" }).run();
+    }
+    return db;
+  }
+
+  it("resolves a master fund to its US ETF by exact (case-insensitive) name", () => {
+    seed();
+    expect(resolveMasterSymbol(master("iShares Core S&P 500 ETF"))).toBe("IVV");
+    expect(resolveMasterSymbol(master("ISHARES CORE S&P 500 ETF"))).toBe("IVV");
+  });
+
+  it("strips the Thai กองทุน prefix and collapses whitespace before matching", () => {
+    seed();
+    expect(resolveMasterSymbol(master("กองทุน iShares Core S&P 500 ETF"))).toBe("IVV");
+    expect(resolveMasterSymbol(master("iShares  Core   S&P 500 ETF"))).toBe("IVV");
+  });
+
+  it("does NOT fuzzy-match — ACWI must not resolve to ACWX (and vice versa)", () => {
+    seed();
+    expect(resolveMasterSymbol(master("iShares MSCI ACWI ETF"))).toBe("ACWI");
+    expect(resolveMasterSymbol(master("iShares MSCI ACWI ex U.S. ETF"))).toBe("ACWX");
+  });
+
+  it("returns null for an unmatched name or a missing/blank master name", () => {
+    seed();
+    expect(resolveMasterSymbol(master("Some European UCITS With No US Listing"))).toBeNull();
+    expect(resolveMasterSymbol(master(null))).toBeNull();
+    expect(resolveMasterSymbol(master("กองทุน"))).toBeNull(); // strips to empty
+    expect(resolveMasterSymbol(null)).toBeNull();
   });
 });

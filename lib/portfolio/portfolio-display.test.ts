@@ -17,6 +17,7 @@ function row(p: Partial<FundPortfolioRow> & { id: number }): FundPortfolioRow {
     assetliabValue: p.assetliabValue ?? null,
     percentNav: p.percentNav ?? null,
     lastUpdDate: null,
+    resolvedSymbol: p.resolvedSymbol ?? null,
   };
 }
 
@@ -52,6 +53,30 @@ describe("buildPortfolioDisplayRows — label leads with the security identity",
     expect(r.label).toBe("KASIKORNBANK PCL.");
     expect(r.issuer).toBeNull(); // would just repeat the label
     expect(r.category).toBe("เงินฝากธนาคารประเภทออมทรัพย์");
+  });
+
+  it("exposes resolvedSymbol on a single US-listed line (the master ETF drills in)", () => {
+    const [r] = buildPortfolioDisplayRows([
+      row({
+        id: 1,
+        assetliabDesc: "หน่วยลงทุนของกองทุนตราสารทุน",
+        issueCode: "US46138G6492",
+        isinCode: "US46138G6492",
+        issuer: "Invesco Capital Management LLC.",
+        percentNav: 102.63,
+        resolvedSymbol: "QQQM",
+      }),
+    ]);
+    expect(r.resolvedSymbol).toBe("QQQM");
+  });
+
+  it("nulls resolvedSymbol on a collapsed group even if a member resolves (a ladder isn't openable)", () => {
+    const [r] = buildPortfolioDisplayRows([
+      row({ id: 1, issuer: "X Bank", assetliabDesc: "PN", percentNav: 1, resolvedSymbol: "AAA" }),
+      row({ id: 2, issuer: "X Bank", assetliabDesc: "PN", percentNav: 1, resolvedSymbol: "AAA" }),
+    ]);
+    expect(r.members).toHaveLength(2);
+    expect(r.resolvedSymbol).toBeNull();
   });
 
   it("falls back to the issue_code for an anonymous single row (no issuer/ISIN)", () => {

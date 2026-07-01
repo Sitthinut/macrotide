@@ -28,6 +28,7 @@ import {
   upsertFundPortfolio,
   upsertFundPortfolioAssetType,
   upsertFundTopHoldings,
+  usTickerFromIssueCode,
 } from "./fund-enrichment";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -45,7 +46,9 @@ function makeMockDb(rows: unknown[] = []) {
   const deleteFrom = vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ run }) });
   const txFn = vi.fn((cb: (tx: typeof mockDb) => void) => cb(mockDb));
   const mockDb = {
-    select: vi.fn().mockReturnValue({ from: vi.fn().mockReturnValue({ where }) }),
+    select: vi.fn().mockReturnValue({
+      from: vi.fn().mockReturnValue({ where, leftJoin: vi.fn().mockReturnValue({ where }) }),
+    }),
     insert,
     delete: deleteFrom,
     transaction: txFn,
@@ -54,6 +57,25 @@ function makeMockDb(rows: unknown[] = []) {
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
+
+describe("usTickerFromIssueCode", () => {
+  it("extracts a US ticker from a Bloomberg-style issue_code", () => {
+    expect(usTickerFromIssueCode("QQQM US")).toBe("QQQM");
+    expect(usTickerFromIssueCode("AAPL UW")).toBe("AAPL");
+    expect(usTickerFromIssueCode("BRK.B UN")).toBe("BRK.B");
+    expect(usTickerFromIssueCode("  VOO US  ")).toBe("VOO"); // trimmed
+  });
+
+  it("rejects Thai internal codes and anything not a US Bloomberg ticker", () => {
+    expect(usTickerFromIssueCode("USD-CASH-NDQ100-UH")).toBeNull();
+    expect(usTickerFromIssueCode("SCBT89745-2")).toBeNull();
+    expect(usTickerFromIssueCode("KKP MP FUND")).toBeNull(); // 2 words but not a venue code
+    expect(usTickerFromIssueCode("QQQM")).toBeNull(); // no venue suffix
+    expect(usTickerFromIssueCode("QQQM LN")).toBeNull(); // London, not a US venue
+    expect(usTickerFromIssueCode(null)).toBeNull();
+    expect(usTickerFromIssueCode("")).toBeNull();
+  });
+});
 
 describe("fund-enrichment queries", () => {
   let mockDb: ReturnType<typeof makeMockDb>;

@@ -34,6 +34,10 @@ export interface PortfolioDisplayRow {
   percentNav: number | null;
   /** SEC asset category (assetliab_desc) — used to bucket rows under a header. */
   category: string;
+  /** The holding's US ticker (resolved from its ISIN), when it's a single US-listed
+   *  security the app can open — makes the row a drill-in. Null for collapsed
+   *  groups, UCITS masters, deposits, and FX forwards. */
+  resolvedSymbol: string | null;
   /** Underlying rows when this is a collapsed group (>1 member); else undefined. */
   members?: FundPortfolioRow[];
 }
@@ -126,6 +130,7 @@ export function buildPortfolioDisplayRows(rows: FundPortfolioRow[]): PortfolioDi
         isin: first.isinCode?.trim() || null,
         percentNav: first.percentNav ?? null,
         category: categoryOf(first),
+        resolvedSymbol: first.resolvedSymbol ?? null,
       });
       continue;
     }
@@ -141,6 +146,9 @@ export function buildPortfolioDisplayRows(rows: FundPortfolioRow[]): PortfolioDi
       isin: named ? first.isinCode?.trim() || null : null,
       percentNav: sum,
       category: categoryOf(first),
+      // A collapsed group is a ladder of tranches/hedges, not one openable
+      // security — never a drill-in even if a member happens to resolve.
+      resolvedSymbol: null,
       members,
     });
   }
