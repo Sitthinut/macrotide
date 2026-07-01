@@ -47,6 +47,7 @@ export type TurnPart = { type: "text"; text: string } | { type: "memory"; event:
 export interface TurnCards {
   holdingsImport?: unknown;
   transactionsImport?: unknown;
+  cashImport?: unknown;
   holdings?: unknown[];
   proposal?: unknown;
   // The turn's prose and memory indicators in the order they occurred, so the
@@ -86,6 +87,7 @@ export function extractCards(steps: ReadonlyArray<StepLike>): TurnCards | null {
       const o = out as Record<string, unknown>;
       if (o.holdingsImport) cards.holdingsImport = o.holdingsImport;
       if (o.transactionsImport) cards.transactionsImport = o.transactionsImport;
+      if (o.cashImport) cards.cashImport = o.cashImport;
       if (o.proposal) cards.proposal = o.proposal;
       if (o.holding) {
         cards.holdings ??= [];

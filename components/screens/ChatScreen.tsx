@@ -25,7 +25,9 @@ import { loadChatThreadCards, saveChatCard } from "@/lib/stores/chat-cards";
 import { type ChatImage, loadChatThreadImages, saveChatImages } from "@/lib/stores/chat-images";
 import { consumeLoadTarget, setActiveThreadId, useChatUi } from "@/lib/stores/chat-ui";
 import {
+  type CashSeedRow,
   type ImportSeedRow,
+  requestCashImportWithRows,
   requestImportWithRows,
   requestTxnImportWithRows,
 } from "@/lib/stores/import-seed";
@@ -132,6 +134,7 @@ function attachmentCount(json: string | null | undefined): number {
 function parseCards(json: string | null | undefined): {
   holdingsImport?: HoldingsImport;
   transactionsImport?: TransactionsImport;
+  cashImport?: CashImport;
   holdings?: HoldingProposal[];
   proposal?: PlanProposal;
   // The authoritative ordered body for new rows.
@@ -206,6 +209,14 @@ interface TransactionsImport {
   note: string | null;
 }
 
+// The advisor's propose_cash_import tool output: cash events (deposit / withdraw /
+// Set balance) → a compact table that opens the importer in Cash mode.
+interface CashImport {
+  rows: CashSeedRow[];
+  source: string | null;
+  note: string | null;
+}
+
 // `MemoryEvent` is the shared `MemoryEventData` (imported above): a memory write
 // the Advisor made this turn (save/update/forget/confirm), surfaced as a muted
 // status line. It rides an ordered `memory` TurnPart so its position relative to
@@ -229,6 +240,8 @@ interface Message {
   holdingsImport?: HoldingsImport;
   // A batch transaction-import table from propose_transactions_import.
   transactionsImport?: TransactionsImport;
+  // A cash-import table (deposit/withdraw/Set balance) from propose_cash_import.
+  cashImport?: CashImport;
   // A turn can yield MANY holding proposals (one per extracted statement row),
   // so unlike `proposal` these are a keyed list with per-card accept/reject
   // state tracked by index.
@@ -573,6 +586,69 @@ function TransactionsImportCard({
   );
 }
 
+// The advisor's propose_cash_import review table: cash events (deposit / withdraw /
+// Set balance) → opens the importer in Cash mode. Mirrors TransactionsImportCard.
+const CASH_VERB: Record<CashSeedRow["kind"], string> = {
+  deposit: "Deposit",
+  withdraw: "Withdraw",
+  cash_balance: "Set balance",
+};
+
+function CashImportCard({ data, onOpen }: { data: CashImport; onOpen: () => void }) {
+  const fmt = (n: number | undefined) =>
+    n === undefined || !Number.isFinite(n)
+      ? "—"
+      : `฿${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+  return (
+    <div className="plan-proposal">
+      <div className="label">
+        <Icon name="sparkle" size={12} />
+        <span>
+          REVIEW CASH · {data.rows.length} ROW{data.rows.length === 1 ? "" : "S"}
+        </span>
+      </div>
+      {data.note && (
+        <div style={{ fontSize: 11.5, color: "var(--ink-soft)", lineHeight: 1.45 }}>
+          {data.note}
+        </div>
+      )}
+      <table className="chat-import-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Account</th>
+            <th>Type</th>
+            <th style={{ textAlign: "right" }}>Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.rows.map((r, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: import-preview rows can share account+date and never reorder
+            <tr key={`${r.ticker}-${r.tradeDate ?? ""}-${i}`}>
+              <td data-label="Date">{r.tradeDate ?? "—"}</td>
+              <td data-label="Account">
+                <span className="t">{r.ticker}</span>
+              </td>
+              <td data-label="Type">
+                {CASH_VERB[r.kind]}
+                {r.kind === "cash_balance" && r.cashRole === "reserved" ? " · Reserved" : ""}
+              </td>
+              <td data-label="Amount" style={{ textAlign: "right" }}>
+                {fmt(r.amount)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="actions">
+        <button className="btn primary sm" onClick={onOpen} style={{ flex: 1 }}>
+          <Icon name="arrowRight" size={12} /> Review &amp; import
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // A quiet grey status line under a turn — "Memory updated" etc. Deliberately
 // minimal: no chip, no border, no leading icon. Clicking it expands
 // to reveal what changed, with a "View in Memory" link to the durable record in
@@ -851,6 +927,7 @@ export function ChatScreen({
                   images: imgs,
                   holdingsImport: dbCards?.holdingsImport ?? card?.holdingsImport,
                   transactionsImport: dbCards?.transactionsImport ?? card?.transactionsImport,
+                  cashImport: dbCards?.cashImport ?? card?.cashImport,
                   holdings: dbCards?.holdings,
                   proposal: dbCards?.proposal,
                   // Prefer the server-persisted ordered parts (cross-device), then
@@ -1317,6 +1394,23 @@ export function ChatScreen({
                   prev.map((m) => (m.id === placeholderId ? { ...m, transactionsImport } : m)),
                 );
                 if (tidForImages) saveChatCard(tidForImages, userSeq, { transactionsImport });
+              }
+            }
+            // propose_cash_import emits a `cashImport` batch — attach it so
+            // CashImportCard renders the deposit/withdraw/Set-balance table.
+            if (toolOut && typeof toolOut === "object" && "cashImport" in toolOut) {
+              const ci = (toolOut as { cashImport?: unknown }).cashImport;
+              if (ci && typeof ci === "object" && Array.isArray((ci as { rows?: unknown }).rows)) {
+                const raw = ci as { rows: CashSeedRow[]; source?: unknown; note?: unknown };
+                const cashImport: CashImport = {
+                  rows: raw.rows,
+                  source: typeof raw.source === "string" ? raw.source : null,
+                  note: typeof raw.note === "string" ? raw.note : null,
+                };
+                setMessages((prev) =>
+                  prev.map((m) => (m.id === placeholderId ? { ...m, cashImport } : m)),
+                );
+                if (tidForImages) saveChatCard(tidForImages, userSeq, { cashImport });
               }
             }
             // examine_image returns `{ observation }`: the vision model's reading
@@ -1825,9 +1919,16 @@ export function ChatScreen({
             const proposal = m.proposal;
             const holdingsImport = m.holdingsImport;
             const transactionsImport = m.transactionsImport;
+            const cashImport = m.cashImport;
             // The actively-streaming assistant message is the last one while
             // loading — don't offer per-turn actions until it's finished writing.
             const isStreaming = loading && i === messages.length - 1;
+            // #222 renders the body as ordered parts (prose ↔ memory chips) that grow
+            // live; an import card is the turn's SETTLED artifact, not an inline part.
+            // Reveal it only once the body stops streaming so it lands below the
+            // finished prose (matching the "review the table below" copy) instead of
+            // flashing in above the still-arriving text and getting shoved down.
+            const showImportCards = m.role === "ai" && !isStreaming;
             // Per-turn actions appear at the foot of a finished assistant reply.
             const showActions = m.role === "ai" && i > 0 && !!m.text && !isStreaming;
             // Save-to-Notes is meaningless on a card-bearing reply (the value is
@@ -1837,7 +1938,8 @@ export function ChatScreen({
               !m.proposal &&
               !m.holdings?.length &&
               !m.holdingsImport &&
-              !m.transactionsImport;
+              !m.transactionsImport &&
+              !m.cashImport;
             // Regenerate only the latest reply, and not mid-stream.
             const canRegenerate = showActions && i === lastAiIndex && !loading;
             // The Advisor turn's body as ordered parts (prose ↔ memory chips). Fall
@@ -1855,14 +1957,19 @@ export function ChatScreen({
               !!renderParts?.length ||
               !!proposal ||
               !!m.holdings?.length ||
-              !!holdingsImport ||
-              !!transactionsImport ||
+              (showImportCards && (!!holdingsImport || !!transactionsImport || !!cashImport)) ||
               !!m.canRetry ||
               !!m.images?.length;
             return (
               <Fragment key={m.id}>
                 {(m.role !== "ai" || aiHasContent) && (
-                  <div className={`msg ${m.role}`}>
+                  <div
+                    className={`msg ${m.role}${
+                      showImportCards && (holdingsImport || transactionsImport || cashImport)
+                        ? " has-card"
+                        : ""
+                    }`}
+                  >
                     {m.role === "ai" && (
                       <div className="meta">
                         Advisor ·{" "}
@@ -1946,16 +2053,22 @@ export function ChatScreen({
                         onReject={() => rejectHolding(i, hIdx)}
                       />
                     ))}
-                    {holdingsImport && (
+                    {showImportCards && holdingsImport && (
                       <HoldingsImportCard
                         data={holdingsImport}
                         onOpen={() => requestImportWithRows(holdingsImport.rows)}
                       />
                     )}
-                    {transactionsImport && (
+                    {showImportCards && transactionsImport && (
                       <TransactionsImportCard
                         data={transactionsImport}
                         onOpen={() => requestTxnImportWithRows(transactionsImport.rows)}
+                      />
+                    )}
+                    {showImportCards && cashImport && (
+                      <CashImportCard
+                        data={cashImport}
+                        onOpen={() => requestCashImportWithRows(cashImport.rows)}
                       />
                     )}
                     {/* Per-turn actions, foot of the reply (Claude/ChatGPT style):

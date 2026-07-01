@@ -1095,6 +1095,116 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
     },
   });
 
+  const propose_cash_import = tool({
+    description:
+      "Propose recording one or more CASH events — a bank/savings/brokerage-cash " +
+      "balance, a deposit, or a withdrawal — into the portfolio importer. Use THIS " +
+      "tool (NOT propose_holdings_import / propose_transactions_import, which are for " +
+      "FUNDS) whenever the user states a cash action in words: 'set my SCB savings to " +
+      "฿100,000', 'my emergency fund is 200k', 'I deposited ฿20,000 to my savings', " +
+      "'I withdrew ฿5,000 from Krungsri'. It does NOT write anything: it shows a compact " +
+      "table that opens the importer, pre-filled, where the user reviews and saves. " +
+      "Pick the KIND from the phrasing: " +
+      "(a) 'cash_balance' (Set balance) — the account NOW HOLDS ฿X (a stated total: " +
+      "'set … to', 'my savings is', 'the balance is'). The change vs the prior balance " +
+      "counts as money in/out by default; this is the usual case. " +
+      "(b) 'deposit' — money the user ADDED to the account ('deposited', 'added', 'put in'). " +
+      "(c) 'withdraw' — money the user TOOK OUT ('withdrew', 'took out', 'spent from'). " +
+      "The `ticker` is the account NAME as the user says it (e.g. 'SCB Savings', " +
+      "'Emergency fund') — cash accounts are identified by name, not a fund symbol. " +
+      "`amount` is a POSITIVE ฿ magnitude (the kind carries the direction). Amounts are " +
+      "in Thai baht. Only on a Set balance: set `cashRole` to 'reserved' when the user " +
+      "says the money is set aside / an emergency fund / earmarked for a goal (kept out " +
+      "of investment return); leave it 'investable' (the default — dry powder) otherwise, " +
+      "and pass `cashLabel` for a stated objective ('Emergency', 'House'). NOTHING IS SAVED " +
+      "by this tool — it only drafts a review table the user must open and save themselves. " +
+      "So after calling it, confirm in ONE brief sentence that you DRAFTED it for review " +
+      "(e.g. 'Drafted a cash balance below — review and import when ready.') — NEVER tell " +
+      "the user the balance is already set / updated / saved / recorded, and do NOT restate " +
+      "the rows or describe the table.",
+    inputSchema: z.object({
+      rows: z
+        .array(
+          z.object({
+            kind: z
+              .enum(["deposit", "withdraw", "cash_balance"])
+              .describe(
+                "cash_balance = Set balance (account now holds ฿X); deposit = money added; " +
+                  "withdraw = money taken out.",
+              ),
+            ticker: z
+              .string()
+              .min(1)
+              .max(40)
+              .describe("The cash account NAME as the user says it (e.g. 'SCB Savings')."),
+            amount: z
+              .number()
+              .positive()
+              .describe("Baht amount — the asserted total (cash_balance) or the sum moved."),
+            tradeDate: z
+              .string()
+              .optional()
+              .describe("ISO date YYYY-MM-DD, if the user gives one; omit for 'now'/today."),
+            reconcile: z
+              .boolean()
+              .optional()
+              .describe(
+                "Set balance only: true when the change is NOT new money — interest " +
+                  "credited, a correction, or reasserting parked sale proceeds.",
+              ),
+            cashRole: z
+              .enum(["investable", "reserved"])
+              .optional()
+              .describe(
+                "Set balance only: 'reserved' for set-aside / emergency / goal savings " +
+                  "(excluded from investment return); 'investable' (default) for dry powder.",
+              ),
+            cashLabel: z
+              .string()
+              .max(60)
+              .optional()
+              .describe("Set balance only: the account's stated objective (e.g. 'Emergency')."),
+          }),
+        )
+        .min(1)
+        .max(40)
+        .describe("One entry per cash event."),
+      source: z
+        .string()
+        .max(80)
+        .optional()
+        .describe("Provenance label shown in the UI (e.g. bank name)."),
+      note: z.string().max(300).optional().describe("One short line shown above the table."),
+    }),
+    execute: async ({ rows, source, note }) => {
+      // The `cashImport` field carries the shape ChatScreen's CashImportCard
+      // expects; the client picks it off the stream and renders the table, which
+      // opens the importer in cash mode (RecordSheet cashSeed → deposit/withdraw/
+      // Set-balance rows). No DB mutation here — saving happens in the importer.
+      // THB-only today (non-THB cash FX is deferred, #233).
+      const out = rows.map((r) => {
+        const isBalance = r.kind === "cash_balance";
+        return {
+          ticker: r.ticker.trim(),
+          kind: r.kind,
+          amount: r.amount,
+          tradeDate: r.tradeDate?.trim(),
+          // Designation fields are meaningful only on a Set balance.
+          reconcile: isBalance ? (r.reconcile ?? false) : undefined,
+          cashRole: isBalance ? (r.cashRole ?? "investable") : undefined,
+          cashLabel: isBalance ? r.cashLabel?.trim() || undefined : undefined,
+        };
+      });
+      return {
+        ok: true as const,
+        cashImport: { rows: out, source: source?.trim() ?? null, note: note?.trim() ?? null },
+        message:
+          `Drafted ${out.length} cash ${out.length === 1 ? "entry" : "entries"} — review and ` +
+          "import on the table below.",
+      };
+    },
+  });
+
   // ─── fee-aware fund finder ─────────────────────────────────────────────────
   //
   // STANCE: Macrotide is an index-investing companion, not a stock picker. These
@@ -1450,6 +1560,7 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
     propose_holding,
     propose_holdings_import,
     propose_transactions_import,
+    propose_cash_import,
     find_funds,
     find_cheaper_alternatives,
   };

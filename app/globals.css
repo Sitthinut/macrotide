@@ -2355,6 +2355,14 @@ button.score-row {
   font-size: 13.5px;
   line-height: 1.5;
 }
+/* A turn carrying an import card (holdings / transactions / cash) stretches to the
+   full column width. Otherwise the borderless AI block hugs its content, and a
+   card that streams in BEFORE any prose collapses to the stacked-table min-width
+   (the narrow container query fires and the row values cramp/wrap). Stretching lets
+   the card's container query measure the real panel width and lay out cleanly. */
+.msg.ai.has-card {
+  align-self: stretch;
+}
 .msg.ai .meta {
   font-family: var(--font-mono);
   font-size: 9.5px;

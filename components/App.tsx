@@ -37,7 +37,7 @@ import type { AdvisorScreenContext } from "@/lib/portfolio/chat-suggestions";
 import type { ExtractedTxnRow } from "@/lib/portfolio/ocr";
 import { getScrollRoot, saveScreenScroll } from "@/lib/screenScroll";
 import type { Portfolio } from "@/lib/static/types";
-import { type ImportSeedRow, useImportSeed } from "@/lib/stores/import-seed";
+import { type CashSeedRow, type ImportSeedRow, useImportSeed } from "@/lib/stores/import-seed";
 import { setActiveId, usePortfolioUi } from "@/lib/stores/portfolio-ui";
 import { syncThemeColor } from "@/lib/theme-color";
 import { usePointer } from "@/lib/usePointer";
@@ -342,6 +342,9 @@ export function App({ isDemo }: { isDemo: boolean }) {
   // into the Add sheet's Activity mode. The all-activity ledger is now its own
   // screen (setScreen("activity")), not a modal.
   const [txnSeed, setTxnSeed] = useState<ExtractedTxnRow[] | null>(null);
+  // `cashSeed` carries cash events (deposit/withdraw/Set balance) the Advisor's
+  // in-chat cash table hands to the importer — opened straight into Cash mode.
+  const [cashSeed, setCashSeed] = useState<CashSeedRow[] | null>(null);
   // Ticker for the per-position drill-in screen (One Truth: a holding opens its
   // own record — summary above the history that produced it).
   const [positionTicker, setPositionTicker] = useState<string | null>(null);
@@ -352,12 +355,16 @@ export function App({ isDemo }: { isDemo: boolean }) {
     txnRows: txnRequest,
     txnNonce,
     consumeTxnImportSeed,
+    cashRows: cashRequest,
+    cashNonce,
+    consumeCashImportSeed,
   } = useImportSeed();
   const handledSeedNonce = useRef(0);
   useEffect(() => {
     if (seedNonce > 0 && seedNonce !== handledSeedNonce.current && seedRequest) {
       handledSeedNonce.current = seedNonce;
       setTxnSeed(null);
+      setCashSeed(null);
       setImportSeed(seedRequest);
       setAddMode("snapshot");
       setAddOpen(true);
@@ -371,12 +378,28 @@ export function App({ isDemo }: { isDemo: boolean }) {
     if (txnNonce > 0 && txnNonce !== handledTxnNonce.current && txnRequest) {
       handledTxnNonce.current = txnNonce;
       setImportSeed(null);
+      setCashSeed(null);
       setTxnSeed(txnRequest);
       setAddMode("snapshot");
       setAddOpen(true);
       consumeTxnImportSeed();
     }
   }, [txnNonce, txnRequest, consumeTxnImportSeed]);
+  // Parallel handoff for the Advisor's cash-import card: seed the Add modal with
+  // cash rows and open it straight into Cash mode.
+  const handledCashNonce = useRef(0);
+  useEffect(() => {
+    if (cashNonce > 0 && cashNonce !== handledCashNonce.current && cashRequest) {
+      handledCashNonce.current = cashNonce;
+      setImportSeed(null);
+      setTxnSeed(null);
+      setCashSeed(cashRequest);
+      setAddEntryMode("cash");
+      setAddMode("snapshot");
+      setAddOpen(true);
+      consumeCashImportSeed();
+    }
+  }, [cashNonce, cashRequest, consumeCashImportSeed]);
   const [, setSavedReading] = useState<unknown[]>([]);
   const planSelectedModelId = useSelectedModelId();
   const { data: plan } = usePlan();
@@ -898,16 +921,19 @@ export function App({ isDemo }: { isDemo: boolean }) {
         defaultBucketId={activeId === "all" ? undefined : activeId}
         holdingsSeed={importSeed}
         txnSeed={txnSeed}
+        cashSeed={cashSeed}
         onClose={() => {
           setAddOpen(false);
           setImportSeed(null);
           setTxnSeed(null);
+          setCashSeed(null);
           setAddEntryMode("investment"); // next open defaults to Investment
         }}
         onConnectBroker={() => {
           setAddOpen(false);
           setImportSeed(null);
           setTxnSeed(null);
+          setCashSeed(null);
           openConnect();
         }}
         onSaved={() => navigate("activity")}

@@ -15,6 +15,13 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **The Advisor can now record cash for you from chat.** Tell it "set my SCB
+  savings to ฿100,000", "I deposited ฿20,000", or "I withdrew ฿5,000" and it
+  drafts the matching Set balance / deposit / withdrawal into the same review
+  table it uses for holdings — open it to check and save, with the account's
+  Purpose (Investable or Reserved) carried through. Previously the Advisor could
+  import funds but not cash.
+
 - **The portfolio "as of" date now reflects when your holdings were last
   priced.** The date beside the total tracks the latest NAV date in the value
   chart (a plain calendar date), instead of the moment the portfolio was last
