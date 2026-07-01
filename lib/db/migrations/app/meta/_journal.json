@@ -169,6 +169,13 @@
       "when": 1782432355626,
       "tag": "0023_uneven_sway",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1782443995884,
+      "tag": "0024_superb_magus",
+      "breakpoints": true
     }
   ]
 }

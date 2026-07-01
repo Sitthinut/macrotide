@@ -96,6 +96,14 @@ export const holdings = sqliteTable(
     catalogClassName: text("catalog_class_name"),
     catalogIsin: text("catalog_isin"),
     /**
+     * Stable catalog anchor for a US `market` holding: the composite FIGI of the
+     * security (the US analogue of `catalog_isin`). FIGI is rename-persistent, so a
+     * held US ticker that gets renamed (FB→META) stays linked to its current symbol
+     * + NAV through this anchor. Bound at holding creation via OpenFIGI; NULL when
+     * OpenFIGI is unavailable or the symbol isn't US (then the bare ticker anchors).
+     */
+    catalogFigi: text("catalog_figi"),
+    /**
      * Native currency for a `cash` holding (issue #149) — e.g. "THB", "USD".
      * The ticker of a cash account is its NAME, not a symbol, so currency can't
      * be inferred and is stored here; valuation prices cash at 1.0 in this
