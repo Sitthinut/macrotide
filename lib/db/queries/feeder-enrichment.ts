@@ -6,16 +6,48 @@
 // Read side: typed getters for the API route and FundDetailSheet.
 
 import "server-only";
-import { eq } from "drizzle-orm";
+import { and, eq, getTableColumns, isNotNull, sql } from "drizzle-orm";
+import { tickerKey } from "../../market/sources";
 import { getMarketDb } from "../context";
-import { feederLookThroughHoldings, feederMasterMap } from "../schema";
+import { feederLookThroughHoldings, feederMasterMap, securityIdMap, usSecurities } from "../schema";
+
+/**
+ * Resolve a feeder's master fund to its US ETF ticker by NAME. The master_isin
+ * in the source is UNRELIABLE (one placeholder ISIN is shared across many S&P
+ * masters and resolves to AGG, a bond ETF) — but master_name is reliable and is
+ * present verbatim in us_securities (e.g. "iShares Core S&P 500 ETF" = IVV). So
+ * match on the cleaned name, case-insensitively and EXACTLY (no fuzzy match, so no
+ * ACWI-vs-ACWX false positives). Returns null with no confident match (e.g. a
+ * European UCITS master with no US listing). No hardcoded map — us_securities is
+ * the source of truth.
+ */
+export function resolveMasterSymbol(masterMap: FeederMasterMapRow | null): string | null {
+  const clean = masterMap?.masterName?.replace(/กองทุน/g, "").trim().replace(/\s+/g, " ");
+  if (!clean) return null;
+  const hit = getMarketDb()
+    .select({ symbol: usSecurities.symbol })
+    .from(usSecurities)
+    .where(
+      and(
+        sql`UPPER(${usSecurities.name}) = ${clean.toUpperCase()}`,
+        eq(usSecurities.securityType, "etf"),
+        eq(usSecurities.status, "active"),
+      ),
+    )
+    .get();
+  return hit?.symbol ?? null;
+}
 
 // ─── Inferred row types ───────────────────────────────────────────────────────
 
 export type FeederMasterMapRow = typeof feederMasterMap.$inferSelect;
 export type FeederMasterMapInsert = typeof feederMasterMap.$inferInsert;
 
-export type FeederLookThroughHoldingRow = typeof feederLookThroughHoldings.$inferSelect;
+export type FeederLookThroughHoldingRow = typeof feederLookThroughHoldings.$inferSelect & {
+  /** The constituent's US ticker (resolved from its ISIN via the crosswalk), or null
+   *  when it isn't a US-listed security we can open — drives row tappability. */
+  resolvedSymbol: string | null;
+};
 export type FeederLookThroughHoldingInsert = typeof feederLookThroughHoldings.$inferInsert;
 
 // ─── Write side ──────────────────────────────────────────────────────────────
@@ -66,6 +98,45 @@ export function listFeederMasterMap(): FeederMasterMapRow[] {
   return getMarketDb().select().from(feederMasterMap).all();
 }
 
+/**
+ * Transitive weight of a US security in each Thai feeder fund — how much of the
+ * fund is that stock, seen through its master ETF's holdings. A feeder is ~100%
+ * invested in its master, so the master's weight IS the feeder's. Keyed by feeder
+ * proj_id. The feeder look-through carries no ticker (N-PORT names only), so it's
+ * matched on ISIN through the same OpenFIGI crosswalk (security_id_map) that
+ * resolves US ETF holdings — no licensed identifier is exposed.
+ */
+export function getFeederWeightsForSymbol(symbol: string): Map<string, number> {
+  const key = tickerKey(symbol);
+  const out = new Map<string, number>();
+  if (!key) return out;
+  const rows = getMarketDb()
+    .select({
+      projId: feederLookThroughHoldings.projId,
+      weightPct: feederLookThroughHoldings.weightPct,
+    })
+    .from(feederLookThroughHoldings)
+    // id_value is stored upper-cased; upper-case the isin side so a lower-case
+    // ISIN still matches (one-sided keeps the id_value PK index seekable).
+    .innerJoin(
+      securityIdMap,
+      eq(securityIdMap.idValue, sql`UPPER(${feederLookThroughHoldings.isin})`),
+    )
+    .where(
+      and(
+        sql`UPPER(${securityIdMap.ticker}) = ${key}`,
+        isNotNull(feederLookThroughHoldings.weightPct),
+      ),
+    )
+    .all();
+  for (const r of rows) {
+    if (r.weightPct == null) continue;
+    // One master per feeder, but guard against dupes by keeping the largest.
+    out.set(r.projId, Math.max(out.get(r.projId) ?? 0, r.weightPct));
+  }
+  return out;
+}
+
 /** Feeder → master mapping for one fund. Returns null if not mapped. */
 export function getFeederMasterMap(projId: string): FeederMasterMapRow | null {
   return (
@@ -79,12 +150,25 @@ export function getFeederMasterMap(projId: string): FeederMasterMapRow | null {
  * rank ascending (largest holding first = rank 1).
  */
 export function getFeederLookThroughHoldings(projId: string): FeederLookThroughHoldingRow[] {
-  return getMarketDb()
-    .select()
-    .from(feederLookThroughHoldings)
-    .where(eq(feederLookThroughHoldings.projId, projId))
-    .orderBy(feederLookThroughHoldings.rank)
-    .all();
+  // Resolve each holding's ISIN to its US ticker via the crosswalk so a US
+  // constituent (a stock/ETF the app can open) becomes a tappable drill-in.
+  return (
+    getMarketDb()
+      .select({
+        ...getTableColumns(feederLookThroughHoldings),
+        resolvedSymbol: securityIdMap.ticker,
+      })
+      .from(feederLookThroughHoldings)
+      // id_value is stored upper-cased; upper-case the isin side so a lower-case ISIN
+      // still resolves (one-sided keeps the id_value PK index seekable).
+      .leftJoin(
+        securityIdMap,
+        eq(securityIdMap.idValue, sql`UPPER(${feederLookThroughHoldings.isin})`),
+      )
+      .where(eq(feederLookThroughHoldings.projId, projId))
+      .orderBy(feederLookThroughHoldings.rank)
+      .all()
+  );
 }
 
 /**

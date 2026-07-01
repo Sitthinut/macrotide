@@ -6,7 +6,7 @@
 // Read side: typed getters for API routes and the advisor tool.
 
 import "server-only";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, getTableColumns, inArray, ne, sql } from "drizzle-orm";
 import { getMarketDb } from "../context";
 import {
   fundAssetAllocation,
@@ -21,6 +21,8 @@ import {
   fundStatistics,
   fundSubscriptionMinimums,
   fundTopHoldings,
+  securityIdMap,
+  usSecurities,
 } from "../schema";
 
 // SEC assetliab code for the "net asset value" / grand-total summary line
@@ -57,7 +59,13 @@ export type FundAssetAllocationInsert = typeof fundAssetAllocation.$inferInsert;
 export type FundTopHoldingRow = typeof fundTopHoldings.$inferSelect;
 export type FundTopHoldingInsert = typeof fundTopHoldings.$inferInsert;
 
-export type FundPortfolioRow = typeof fundPortfolio.$inferSelect;
+export type FundPortfolioRow = typeof fundPortfolio.$inferSelect & {
+  /** The holding's US ticker, resolved from its ISIN via the OpenFIGI crosswalk,
+   *  or null when it isn't a US-listed security we can open (a UCITS master, a
+   *  bank deposit, an FX forward). Drives row tappability — a feeder's master ETF
+   *  line becomes a drill-in to that ETF's detail. */
+  resolvedSymbol: string | null;
+};
 export type FundPortfolioInsert = typeof fundPortfolio.$inferInsert;
 
 export type FundPortfolioAssetTypeRow = typeof fundPortfolioAssetType.$inferSelect;
@@ -426,6 +434,18 @@ export function getFundTopHoldings(projId: string): FundTopHoldingRow[] {
     .all();
 }
 
+// A Bloomberg-style US ticker as some AMCs report it in a portfolio row's
+// issue_code — "<TICKER> <US-exchange-code>", e.g. "QQQM US", "AAPL UW". Not every
+// AMC fills isin_code for a US holding (KKP reports only this), so it's the
+// fallback resolution path. Returns the bare ticker, or null when the code isn't a
+// US Bloomberg ticker (a Thai internal code like "USD-CASH-NDQ100-UH" won't match:
+// the suffix must be a space-delimited 2-letter US venue code at the very end).
+const US_BLOOMBERG_TICKER = /^([A-Z][A-Z.]{0,5}) (US|UN|UW|UQ|UP|UR|UA|UV|UF)$/;
+export function usTickerFromIssueCode(issueCode: string | null | undefined): string | null {
+  const m = issueCode?.trim().match(US_BLOOMBERG_TICKER);
+  return m ? m[1] : null;
+}
+
 /**
  * Full portfolio for one fund — LATEST period only.
  * The SEC /v2/fund/outstanding/portfolio endpoint returns every reported
@@ -434,9 +454,21 @@ export function getFundTopHoldings(projId: string): FundTopHoldingRow[] {
  * sum to 100%. Defensive against the ingest storing more than one period.
  */
 export function getFundPortfolio(projId: string): FundPortfolioRow[] {
-  return getMarketDb()
-    .select()
+  // Resolve each holding to its US ticker so a feeder's master-ETF line becomes a
+  // tappable drill-in. Primary path: isin_code via the OpenFIGI crosswalk (the
+  // master's real US ISIN — unlike the corrupt master_isin in feeder_master_map).
+  // Fallback: some AMCs (e.g. KKP) leave isin_code blank but report the Bloomberg
+  // ticker in issue_code ("QQQM US") — parse it and confirm it's a real US listing.
+  const rows = getMarketDb()
+    .select({
+      ...getTableColumns(fundPortfolio),
+      resolvedSymbol: securityIdMap.ticker,
+    })
     .from(fundPortfolio)
+    // security_id_map.id_value is stored upper-cased (ISINs are upper-case per
+    // ISO 6166); upper-case the portfolio side too so a stray lower-case ISIN
+    // still resolves. One-sided so the id_value PK index still seeks.
+    .leftJoin(securityIdMap, eq(securityIdMap.idValue, sql`UPPER(${fundPortfolio.isinCode})`))
     .where(
       and(
         eq(fundPortfolio.projId, projId),
@@ -448,6 +480,31 @@ export function getFundPortfolio(projId: string): FundPortfolioRow[] {
       ),
     )
     .all();
+
+  // Fallback for isin-less rows: validate the parsed Bloomberg ticker against the
+  // live US catalog (one batched lookup), so we only link a real, active symbol.
+  const candidates = new Map<number, string>();
+  for (const r of rows) {
+    if (r.resolvedSymbol) continue;
+    const t = usTickerFromIssueCode(r.issueCode);
+    if (t) candidates.set(r.id, t);
+  }
+  if (candidates.size > 0) {
+    const wanted = [...new Set(candidates.values())];
+    const valid = new Set(
+      getMarketDb()
+        .select({ symbol: usSecurities.symbol })
+        .from(usSecurities)
+        .where(and(inArray(usSecurities.symbol, wanted), eq(usSecurities.status, "active")))
+        .all()
+        .map((s) => s.symbol.toUpperCase()),
+    );
+    for (const r of rows) {
+      const t = candidates.get(r.id);
+      if (t && valid.has(t.toUpperCase())) r.resolvedSymbol = t;
+    }
+  }
+  return rows;
 }
 
 /**
