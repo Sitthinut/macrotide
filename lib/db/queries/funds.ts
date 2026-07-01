@@ -35,7 +35,14 @@ import { compareClassesForList } from "../../market/share-class-select";
 import { type QuoteSource, quoteCacheKey, tickerKey } from "../../market/sources";
 import { searchFundIds, searchFundIdsScored } from "../../search/fund-index";
 import { getMarketDb } from "../context";
-import { fundCatalog, fundFees, fundQuotes, fundShareClasses, navHistory } from "../schema";
+import {
+  fundCatalog,
+  fundFees,
+  fundQuotes,
+  fundShareClasses,
+  navHistory,
+  usSecurities,
+} from "../schema";
 import { listShareClassesByProj } from "./share-classes";
 
 export type Fund = typeof fundCatalog.$inferSelect;
@@ -887,8 +894,21 @@ export function catalogQuoteSource(tickers: string[]): Map<string, QuoteSource> 
     .where(inArray(sql`upper(${fundCatalog.abbrName})`, cleaned))
     .all())
     if (r.abbr) hits.add(r.abbr.toUpperCase());
-  // In the catalog → a real fund; otherwise → custom. Nothing else.
-  for (const t of cleaned) out.set(t, hits.has(t) ? "thai_mutual_fund" : "manual");
+  // Not a Thai fund? A US-listed stock/ETF/index is market-priced (checked after
+  // the Thai catalog so a Thai code always wins its own catalog). Everything else
+  // is custom.
+  const usHits = new Set<string>();
+  const unmatched = cleaned.filter((t) => !hits.has(t));
+  if (unmatched.length > 0) {
+    for (const r of db
+      .select({ symbol: usSecurities.symbol })
+      .from(usSecurities)
+      .where(inArray(sql`upper(${usSecurities.symbol})`, unmatched))
+      .all())
+      usHits.add(r.symbol.toUpperCase());
+  }
+  for (const t of cleaned)
+    out.set(t, hits.has(t) ? "thai_mutual_fund" : usHits.has(t) ? "market" : "manual");
   return out;
 }
 
