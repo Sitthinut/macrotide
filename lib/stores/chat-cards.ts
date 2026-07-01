@@ -11,11 +11,12 @@
 
 import type { TurnPart } from "@/lib/advisor/turn-persist";
 import type { ExtractedTxnRow } from "@/lib/portfolio/ocr";
-import type { ImportSeedRow } from "@/lib/stores/import-seed";
+import type { CashSeedRow, ImportSeedRow } from "@/lib/stores/import-seed";
 
 export interface ChatCard {
   holdingsImport?: { rows: ImportSeedRow[]; source: string | null; note: string | null };
   transactionsImport?: { rows: ExtractedTxnRow[]; source: string | null; note: string | null };
+  cashImport?: { rows: CashSeedRow[]; source: string | null; note: string | null };
   // The assistant turn's ordered body (prose + memory indicators) — a browser
   // fallback so the interleaved render survives a reload before / without the
   // server-persisted `cards.parts`. The durable record is server-side.
@@ -80,6 +81,7 @@ export function saveChatCard(threadId: string, seq: number, card: ChatCard): voi
     !threadId ||
     (!card.holdingsImport &&
       !card.transactionsImport &&
+      !card.cashImport &&
       !card.parts?.length &&
       !card.memoryEvents?.length)
   ) {

@@ -27,6 +27,17 @@ describe("turn-persist — extractCards", () => {
     });
   });
 
+  it("captures a cash import payload", () => {
+    const payload = {
+      rows: [{ ticker: "SCB Savings", kind: "cash_balance", amount: 100000 }],
+      source: null,
+      note: null,
+    };
+    expect(extractCards(result({ ok: true, cashImport: payload }))).toEqual({
+      cashImport: payload,
+    });
+  });
+
   it("captures a holdings import payload (incl. propose_holding's value-only branch)", () => {
     const payload = { rows: [{ ticker: "K-USA-A", estimated: true }], source: null, note: null };
     expect(extractCards(result({ ok: true, holdingsImport: payload }))).toEqual({

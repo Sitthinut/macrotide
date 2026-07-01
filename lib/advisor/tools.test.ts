@@ -580,6 +580,85 @@ describe("advisor tools — propose_holdings_import", () => {
   });
 });
 
+describe("advisor tools — propose_cash_import", () => {
+  type CashOut = {
+    ok: boolean;
+    cashImport: {
+      rows: Array<{
+        ticker: string;
+        kind: "deposit" | "withdraw" | "cash_balance";
+        amount: number;
+        tradeDate?: string;
+        reconcile?: boolean;
+        cashRole?: "investable" | "reserved";
+        cashLabel?: string;
+      }>;
+      source: string | null;
+      note: string | null;
+    };
+    message: string;
+  };
+
+  it("returns the cashImport payload for a mix of kinds and writes nothing", async () => {
+    const result = await withFresh(async () => {
+      const tools = createAdvisorTools({ userId: null });
+      const out = (await run(tools.propose_cash_import, {
+        rows: [
+          { kind: "cash_balance", ticker: "SCB Savings", amount: 100000 },
+          { kind: "deposit", ticker: "SCB Savings", amount: 20000, tradeDate: "2026-06-01" },
+          { kind: "withdraw", ticker: "Krungsri", amount: 5000 },
+        ],
+        source: "Bank",
+      })) as CashOut;
+      return { out, count: listHoldings().length };
+    });
+    expect(result.out.ok).toBe(true);
+    expect(result.out.cashImport.rows).toHaveLength(3);
+    expect(result.out.cashImport.rows[0]).toMatchObject({
+      ticker: "SCB Savings",
+      kind: "cash_balance",
+      amount: 100000,
+      // A Set balance defaults to investable, "money moved" (reconcile false).
+      cashRole: "investable",
+      reconcile: false,
+    });
+    expect(result.out.cashImport.rows[1]).toMatchObject({
+      kind: "deposit",
+      tradeDate: "2026-06-01",
+    });
+    expect(result.out.cashImport.source).toBe("Bank");
+    // Proposing must not write anything to the ledger / holdings.
+    expect(result.count).toBe(0);
+  });
+
+  it("carries a Reserved Purpose + label on a Set balance, and omits designation on deltas", async () => {
+    const out = (await withFresh(async () => {
+      const tools = createAdvisorTools({ userId: null });
+      return run(tools.propose_cash_import, {
+        rows: [
+          {
+            kind: "cash_balance",
+            ticker: "Emergency",
+            amount: 200000,
+            cashRole: "reserved",
+            cashLabel: "Emergency",
+            reconcile: true,
+          },
+          // A deposit ignores designation fields even if the model sends them.
+          { kind: "deposit", ticker: "Emergency", amount: 1000, cashRole: "reserved" },
+        ],
+      });
+    })) as CashOut;
+    expect(out.cashImport.rows[0]).toMatchObject({
+      cashRole: "reserved",
+      cashLabel: "Emergency",
+      reconcile: true,
+    });
+    expect(out.cashImport.rows[1].cashRole).toBeUndefined();
+    expect(out.cashImport.rows[1].reconcile).toBeUndefined();
+  });
+});
+
 describe("accept path — persistPlanEdit", () => {
   it("applies an additive edit into an existing section and persists it", async () => {
     const md = await withFresh(async () => {
