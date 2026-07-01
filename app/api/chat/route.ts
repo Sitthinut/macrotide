@@ -367,6 +367,20 @@ function streamAdvisorResponse(opts: AdvisorStreamOptions): Response {
         console.warn(`[advisor] retrying turn after error (${opts.path})`);
         a = await run(opts.messages, true);
       }
+      // Retry-on-empty: the generation SUCCEEDED but produced nothing — no prose
+      // AND no tool call. The tiny free model does this intermittently. There's
+      // nothing to recover (no tool ran) or persist, so the turn would dead-end on
+      // the client's try-again fallback and then vanish on reload (an empty turn
+      // isn't persisted). Re-roll once; the router may serve a fresher model.
+      // (recover-on-empty below handles the tool-ran-but-no-prose case.)
+      if (a.ok) {
+        const producedNothing =
+          !(joinStepText(a.steps) || a.text).trim() && !a.steps.some((s) => s.toolCalls.length > 0);
+        if (producedNothing) {
+          console.warn(`[advisor] retrying empty completion (${opts.path})`);
+          a = await run(opts.messages, true);
+        }
+      }
 
       let text = "";
       let modelId: string | null = null;
@@ -472,14 +486,17 @@ function streamAdvisorResponse(opts: AdvisorStreamOptions): Response {
       const cardsToPersist: TurnCards | null = parts.length > 0 ? { ...cards, parts } : cards;
 
       runWithDbContext(opts.ctx, () => {
-        if (text.trim()) opts.persist(text, modelId, cardsToPersist);
+        // Persist when there's prose OR a card — a card-bearing turn whose prose
+        // recovery came back empty must still survive reload (else the card, and
+        // the whole assistant turn, vanishes leaving only the user's message).
+        if (text.trim() || cards) opts.persist(text, modelId, cardsToPersist);
         opts.recordUsageFor?.({ inputTokens, outputTokens, modelId });
       });
     },
     onError: (err) => {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[advisor] stream error (${opts.path}): ${msg}`);
-      return "Something interrupted that reply — your dashboard and notes are unaffected. Please try again.";
+      return "Something interrupted that reply. Please try again.";
     },
   });
 

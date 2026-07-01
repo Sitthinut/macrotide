@@ -1454,8 +1454,8 @@ export function ChatScreen({
         const fallback = hadTool
           ? toolMessages.join("\n\n")
           : hasImages
-            ? "I couldn't read that image just now — please try again in a moment. Your dashboard and notes are unaffected."
-            : "I didn't have a reply for that — your dashboard and notes are unaffected.";
+            ? "I couldn't read that image just now. Please try again."
+            : "I couldn't put a reply together just now. Please try again.";
         setMessages((prev) =>
           prev.map((m) =>
             // Offer retry only on a genuinely empty turn (no tool ran). When a
