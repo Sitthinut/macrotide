@@ -1,9 +1,11 @@
 import "server-only";
 import { eq, inArray, sql } from "drizzle-orm";
+import { cleanUsSecurityName } from "../../market/us-security-name";
 import { getMarketDb } from "../context";
 import { fundCatalog, fundShareClasses } from "../schema";
 import { resolveCatalogSymbol } from "./funds";
 import type { Holding } from "./holdings";
+import { resolveUsHolding } from "./us-securities";
 
 export interface CatalogHoldingMetadata {
   thaiName: string | null;
@@ -128,19 +130,44 @@ export function isCatalogHolding(ticker: string): boolean {
  * shows its new name and code while the ledger keeps the old code as identity.
  */
 export function enrichHoldingsWithCatalog<T extends Holding>(holdings: T[]): T[] {
+  // Thai holdings resolve through the SEC anchor + batched catalog metadata
+  // (unchanged from #235). US (`market`) holdings resolve through their own
+  // FIGI anchor against us_securities — same lifecycle, separate catalog.
   const resolved = holdings.map((h) => ({
     h,
-    sym: resolveCatalogSymbol({
-      ticker: h.ticker,
-      catalogProjId: h.catalogProjId,
-      catalogClassName: h.catalogClassName,
-      catalogIsin: h.catalogIsin,
-    }),
+    sym:
+      h.quoteSource === "market"
+        ? null
+        : resolveCatalogSymbol({
+            ticker: h.ticker,
+            catalogProjId: h.catalogProjId,
+            catalogClassName: h.catalogClassName,
+            catalogIsin: h.catalogIsin,
+          }),
   }));
   const metadata = catalogMetadataForHoldings(
-    resolved.map((r) => r.sym?.currentTicker ?? r.h.ticker),
+    resolved
+      .filter((r) => r.h.quoteSource !== "market")
+      .map((r) => r.sym?.currentTicker ?? r.h.ticker),
   );
   return resolved.map(({ h, sym }) => {
+    if (h.quoteSource === "market") {
+      const us = resolveUsHolding({ ticker: h.ticker, catalogFigi: h.catalogFigi });
+      if (!us) return h;
+      // Catalog owns the name; keep a non-null asset class the catalog lacks, and
+      // overlay the CURRENT symbol after a rename (ledger keeps the old code).
+      const tickerOverlay = us.currentSymbol !== h.ticker ? { ticker: us.currentSymbol } : {};
+      return {
+        ...h,
+        englishName: cleanUsSecurityName(us.name),
+        assetClass: us.assetClass ?? h.assetClass,
+        region: "United States",
+        // Overlay the catalog ETF TER so blended-fee/health count US ETFs — but a
+        // user-entered TER wins (broker fee on top, or a stock the user set).
+        ter: h.ter ?? us.ter,
+        ...tickerOverlay,
+      } as T;
+    }
     const lookupTicker = sym?.currentTicker ?? h.ticker;
     const meta = metadata.get(lookupTicker.trim().toUpperCase());
     if (!meta) return h;
