@@ -12,6 +12,7 @@ import { canonicalTicker, resolveCatalogSymbol, resolveShareClassByTicker } from
 import type { Holding, HoldingRow } from "./holdings";
 import { foldableEvents } from "./resolve-derived-units";
 import type { Transaction, TransactionInsert } from "./transactions";
+import { getUsSecurityFigi, resolveUsHolding } from "./us-securities";
 
 /** Case-insensitive ticker match for a WHERE clause (#235): tickers are stored in
  * official catalog case, so a cascade/lookup must fold case to stay correct even
@@ -174,6 +175,10 @@ export function rebuildHoldingsForBucket(bucketId: string): void {
       // existing anchor rather than nulling it (the anchor is what survives a
       // rename). A custom / cash position resolves to null and stays unanchored.
       const sc = resolveShareClassByTicker(p.ticker);
+      // US (`market`) holdings anchor on the rename-persistent FIGI from the US
+      // catalog (null until the symbol is FIGI-enriched, then the bare ticker
+      // anchors — like a Thai class with no ISIN).
+      const usFigi = p.quoteSource === "market" ? getUsSecurityFigi(p.ticker) : null;
       if (prev) {
         // Refresh only the ledger-carried identity; leave metadata untouched. No
         // position columns to write — units/avgCost are folded on read.
@@ -195,6 +200,7 @@ export function rebuildHoldingsForBucket(bucketId: string): void {
                   catalogIsin: sc.isin,
                 }
               : {}),
+            ...(usFigi ? { catalogFigi: usFigi } : {}),
             updatedAt: now,
           })
           .where(eq(holdings.id, prev.id))
@@ -213,6 +219,7 @@ export function rebuildHoldingsForBucket(bucketId: string): void {
             catalogProjId: sc?.projId,
             catalogClassName: sc?.className,
             catalogIsin: sc?.isin,
+            catalogFigi: usFigi ?? undefined,
             assetClass: isCash ? "cash" : undefined,
             currency: isCash ? (cashCurrency.get(tickerKey(p.ticker)) ?? null) : undefined,
             source: p.source,
@@ -527,37 +534,75 @@ export function reconcileHoldingCatalog(): { promoted: number; bound: number } {
     // was already renamed still resolves and gets its anchor refreshed (e.g. an
     // ISIN added to the class later) — a bare ticker lookup would miss it.
     const sc = resolveCatalogSymbol(h);
-    if (!sc) continue; // not (yet) a cataloged fund — nothing to reconcile
-    const anchorStale =
-      h.catalogProjId !== sc.projId ||
-      h.catalogClassName !== sc.className ||
-      h.catalogIsin !== sc.isin;
-    const promote = h.quoteSource === "manual";
-    if (!anchorStale && !promote) continue;
-    db.transaction(() => {
-      if (promote) {
-        db.update(transactions)
-          .set({ quoteSource: "thai_mutual_fund" })
-          .where(
-            and(eq(transactions.bucketId, h.bucketId), tickerEqSql(transactions.ticker, h.ticker)),
-          )
+    if (sc) {
+      const anchorStale =
+        h.catalogProjId !== sc.projId ||
+        h.catalogClassName !== sc.className ||
+        h.catalogIsin !== sc.isin;
+      const promote = h.quoteSource === "manual";
+      if (!anchorStale && !promote) continue;
+      db.transaction(() => {
+        if (promote) {
+          db.update(transactions)
+            .set({ quoteSource: "thai_mutual_fund" })
+            .where(
+              and(
+                eq(transactions.bucketId, h.bucketId),
+                tickerEqSql(transactions.ticker, h.ticker),
+              ),
+            )
+            .run();
+          promoted++;
+        }
+        db.update(holdings)
+          .set({
+            ...(promote ? { quoteSource: "thai_mutual_fund" } : {}),
+            catalogProjId: sc.projId,
+            catalogClassName: sc.className,
+            catalogIsin: sc.isin,
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(holdings.id, h.id))
           .run();
-        promoted++;
-      }
-      db.update(holdings)
-        .set({
-          ...(promote ? { quoteSource: "thai_mutual_fund" } : {}),
-          catalogProjId: sc.projId,
-          catalogClassName: sc.className,
-          catalogIsin: sc.isin,
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(holdings.id, h.id))
-        .run();
-      // Count a pure anchor refresh; a promotion already implies the anchor write,
-      // so don't double-count it in the summary.
-      if (anchorStale && !promote) bound++;
-    });
+        // Count a pure anchor refresh; a promotion already implies the anchor write,
+        // so don't double-count it in the summary.
+        if (anchorStale && !promote) bound++;
+      });
+      continue;
+    }
+    // US: a `market` holding (refresh its FIGI anchor + current symbol) or a
+    // `manual` holding whose ticker now matches the US catalog (promote → market).
+    if (h.quoteSource === "market" || h.quoteSource === "manual") {
+      const us = resolveUsHolding({ ticker: h.ticker, catalogFigi: h.catalogFigi });
+      if (!us) continue;
+      const usPromote = h.quoteSource === "manual";
+      const usFigi = getUsSecurityFigi(us.currentSymbol);
+      const usStale = h.catalogFigi !== usFigi;
+      if (!usPromote && !usStale) continue;
+      db.transaction(() => {
+        if (usPromote) {
+          db.update(transactions)
+            .set({ quoteSource: "market" })
+            .where(
+              and(
+                eq(transactions.bucketId, h.bucketId),
+                tickerEqSql(transactions.ticker, h.ticker),
+              ),
+            )
+            .run();
+          promoted++;
+        }
+        db.update(holdings)
+          .set({
+            ...(usPromote ? { quoteSource: "market" } : {}),
+            ...(usFigi ? { catalogFigi: usFigi } : {}),
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(holdings.id, h.id))
+          .run();
+        if (usStale && !usPromote) bound++;
+      });
+    }
   }
   return { promoted, bound };
 }

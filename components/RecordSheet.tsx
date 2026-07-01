@@ -47,7 +47,7 @@ import {
   type RowInvalidReason,
   rowValidity,
 } from "@/lib/portfolio/txn-import";
-import type { CashSeedRow, ImportSeedRow } from "@/lib/stores/import-seed";
+import type { ImportSeedRow } from "@/lib/stores/import-seed";
 
 // localStorage flag: user dismissed the "connect your broker" CTA in the Add sheet.
 const BROKER_CTA_DISMISS_KEY = "macrotide_hide_broker_cta";
@@ -288,35 +288,6 @@ function seedTxnToRow(e: ExtractedTxnRow, asOf = ""): Row {
   };
 }
 
-// Map a cash event from the Advisor's in-chat cash table → an editable cash Row.
-// A Set balance (cash_balance) carries its asserted ฿ total in `value` (the field
-// the cash editor binds), deposit/withdraw carry the moved ฿ sum in `amount` — the
-// same split submit() reads. Priced as cash, locked so a ticker edit can't re-infer.
-function seedCashToRow(e: CashSeedRow): Row {
-  const isBalance = e.kind === "cash_balance";
-  const figure = e.amount != null ? String(e.amount) : "";
-  return {
-    id: nextId++,
-    kind: e.kind,
-    tradeDate: normalizeDate(e.tradeDate ?? "") || (isBalance ? today() : ""),
-    ticker: e.ticker,
-    englishName: e.englishName,
-    units: "",
-    price: "",
-    value: isBalance ? figure : undefined,
-    amount: isBalance ? "" : figure,
-    fee: "",
-    currency: (e.currency || "THB").trim() || "THB",
-    fxToThb: e.fxToThb != null ? String(e.fxToThb) : undefined,
-    reconcile: isBalance ? !!e.reconcile : undefined,
-    cashRole: isBalance ? (e.cashRole ?? "investable") : undefined,
-    cashLabel: isBalance ? e.cashLabel : undefined,
-    quoteSource: "cash",
-    quoteSourceLocked: true,
-    provenance: "image",
-  };
-}
-
 export interface RecordSheetProps {
   open: boolean;
   onClose: () => void;
@@ -331,8 +302,6 @@ export interface RecordSheetProps {
   holdingsSeed?: ImportSeedRow[] | null;
   /** Rows seeded from a handoff (→ activity). */
   txnSeed?: ExtractedTxnRow[] | null;
-  /** Cash rows seeded from the Advisor's in-chat cash table (→ cash mode). */
-  cashSeed?: CashSeedRow[] | null;
   /** Open the standalone broker-connect wizard (closes this sheet first). */
   onConnectBroker?: () => void;
 }
@@ -346,7 +315,6 @@ export function RecordSheet({
   defaultMode = "investment",
   holdingsSeed,
   txnSeed,
-  cashSeed,
   onConnectBroker,
 }: RecordSheetProps) {
   const { data: buckets } = useBuckets();
@@ -419,22 +387,18 @@ export function RecordSheet({
     const seeded: Row[] = [];
     if (holdingsSeed?.length) seeded.push(...holdingsSeed.map((s) => seedHoldingToRow(s)));
     if (txnSeed?.length) seeded.push(...txnSeed.map((e) => seedTxnToRow(e)));
-    if (cashSeed?.length) seeded.push(...cashSeed.map((e) => seedCashToRow(e)));
     if (seeded.length) {
       seededRef.current = true;
       setRows(seeded);
-      // Cash rows need the Cash form so the currency/Purpose fields render; the
-      // holdings/txn seeds are always fund rows (Investment mode).
-      if (cashSeed?.length) setMode("cash");
     }
-  }, [open, holdingsSeed, txnSeed, cashSeed]);
+  }, [open, holdingsSeed, txnSeed]);
 
   // On open with no seeds, start with ONE editable row (opened in the editor) so
   // the modal is immediately usable instead of blank. Runs on the open transition
   // only; a fresh open also clears a previous, cancelled session.
   // biome-ignore lint/correctness/useExhaustiveDependencies: open-transition only
   useEffect(() => {
-    if (!open || holdingsSeed?.length || txnSeed?.length || cashSeed?.length) return;
+    if (!open || holdingsSeed?.length || txnSeed?.length) return;
     // Open straight into the requested family — "cash" (the split-button "Add cash"
     // path) seeds a scoped Set-balance row; otherwise the usual fund row.
     const r =

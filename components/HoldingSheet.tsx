@@ -8,9 +8,11 @@ import { Combobox } from "@/components/ui/Combobox";
 import { mergeCashPurposes } from "@/lib/data/cash-purposes";
 import { mergeSourceSuggestions } from "@/lib/data/sources";
 import type { ShareClassListItem } from "@/lib/db/queries/funds";
+import type { UsSecurity } from "@/lib/db/queries/us-securities";
 import { saveEarmark, useEarmarks, useHoldings } from "@/lib/fetchers/portfolio";
 import { useResource } from "@/lib/fetchers/swr";
 import { QUOTE_SOURCE_LABELS, QUOTE_SOURCES, type QuoteSource } from "@/lib/market/sources";
+import { cleanUsSecurityName } from "@/lib/market/us-security-name";
 import type { AssetClass } from "@/lib/static/types";
 
 export interface HoldingFormValues {
@@ -90,6 +92,33 @@ export function HoldingSheet({
   // Promote: a custom (manual-priced) holding whose symbol now matches the
   // catalog should adopt the fund's official details + live price.
   const canPromote = known && values.quoteSource === "manual";
+
+  // Is this a recognized US-listed stock / ETF? When the user picks the
+  // "Stock / ETF / Index" source and types a known symbol, autofill its official
+  // name + asset class from the us_securities catalog. Skipped for a Thai
+  // catalog match (that path owns the row) and for cash.
+  const wantUsLookup = values.quoteSource === "market" && q.length >= 1 && !known && !isEdit;
+  const { data: usMatches } = useResource<{ items: UsSecurity[]; total: number }>(
+    wantUsLookup ? `/api/us-securities?query=${encodeURIComponent(q)}&limit=8` : null,
+  );
+  const usMatch = (usMatches?.items ?? []).find(
+    (m) => m.symbol.trim().toUpperCase() === q.toUpperCase(),
+  );
+
+  // Autofill name + asset class from a recognized US security WITHOUT clobbering
+  // anything the user already typed (blank name → official name; "unknown" class
+  // → equity). Keyed on the matched symbol so it fires once per resolution.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fire once per matched symbol; setValues reads the latest values
+  useEffect(() => {
+    if (!usMatch) return;
+    setValues((v) => {
+      if (v.quoteSource !== "market") return v;
+      const patch: Partial<HoldingFormValues> = {};
+      if (!v.englishName.trim()) patch.englishName = cleanUsSecurityName(usMatch.name);
+      if (v.assetClass === "unknown") patch.assetClass = "equity";
+      return Object.keys(patch).length > 0 ? { ...v, ...patch } : v;
+    });
+  }, [usMatch?.symbol]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: initial is intentionally captured only on open; the parent recreates it while the sheet is open.
   useEffect(() => {
@@ -298,6 +327,30 @@ export function HoldingSheet({
               <span>
                 We track this fund — its name, details, and price come from our data. You can still
                 move it between portfolios and edit the source.
+              </span>
+            </div>
+          )}
+
+          {usMatch && !known && (
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "flex-start",
+                padding: "9px 12px",
+                borderRadius: 8,
+                background: "var(--accent-soft)",
+                fontSize: 12,
+                lineHeight: 1.45,
+                color: "var(--accent-ink)",
+              }}
+            >
+              <Icon name="check" size={14} />
+              <span>
+                Recognized: {cleanUsSecurityName(usMatch.name)} —{" "}
+                {usMatch.securityType === "etf" ? "ETF" : "Stock"}
+                {usMatch.exchange ? ` · ${usMatch.exchange}` : ""}. Priced in {usMatch.currency},
+                shown in THB. We filled the name for you.
               </span>
             </div>
           )}

@@ -93,6 +93,19 @@ describe("getPortfolioSeries — demo mode (fixture-backed)", () => {
     return total;
   }
 
+  // Direct US holdings have no demo NAV fixture, so the chart trade-prices them at
+  // cost (units × trade price = cost) — a flat line flagged estimated. Their live
+  // USD→THB value only shows in the current-value view, not the fixture chart.
+  function fullMarketValue(): number {
+    let total = 0;
+    for (const p of PORTFOLIOS) {
+      for (const h of p.holdings) {
+        if (h.quoteSource === "market") total += h.cost;
+      }
+    }
+    return total;
+  }
+
   // Demo cash terminal balances (#149): cash_balance asserts a level; deposits add,
   // withdrawals subtract. Cash is valued 1.0 (THB), so the terminal balance is its value.
   function fullCashValue(): number {
@@ -124,8 +137,9 @@ describe("getPortfolioSeries — demo mode (fixture-backed)", () => {
     const { aggregate } = await runDemo(() => getPortfolioSeries("max"));
     const lastTotal = aggregate.at(-1)?.value as number;
     // Terminal replayed units × last fixture NAV per holding (the trade story always
-    // folds back to data.ts's unit counts), plus the explicit cash terminal balances.
-    expect(lastTotal).toBeCloseTo(fullBookValue() + fullCashValue(), 0);
+    // folds back to data.ts's unit counts), plus the explicit cash terminal balances,
+    // plus the direct US holdings trade-priced at cost (no fixture NAV).
+    expect(lastTotal).toBeCloseTo(fullBookValue() + fullCashValue() + fullMarketValue(), 0);
   });
 
   it("a shorter range returns fewer points (range filter applies)", async () => {
@@ -139,15 +153,17 @@ describe("getPortfolioSeries — demo mode (fixture-backed)", () => {
     // With market.db empty, owner mode can price only from the ledger's own
     // trades — a handful of event-dated, estimate-flagged points. If the owner
     // branch ever read the fixture, this would be a dense multi-hundred-point
-    // series with estimatedThrough = null (like the demo assertions above).
+    // series (like the demo assertions above).
     const owner = await runOwner(() => getPortfolioSeries("max"));
     expect(owner.aggregate.length).toBeGreaterThan(0);
     expect(owner.aggregate.length).toBeLessThan(30);
     expect(owner.estimatedThrough).not.toBeNull();
 
+    // Demo reads the fixture → a dense multi-hundred-point series. (It also carries
+    // an estimatedThrough now: the direct US holdings have no fixture NAV and are
+    // trade-priced, so density — not the estimate flag — is what proves fixture use.)
     const demo = await runDemo(() => getPortfolioSeries("max"));
     expect(demo.aggregate.length).toBeGreaterThanOrEqual(300);
-    expect(demo.estimatedThrough).toBeNull();
   });
 
   it("hasDistributingHolding reflects the shared market.db catalog in demo mode", async () => {

@@ -363,6 +363,10 @@ export function seedDemoData(db: Db): void {
       .run();
 
     for (const [holdingIndex, h] of p.holdings.entries()) {
+      // Most demo holdings are real Thai mutual funds (SEC Open API); a few are
+      // direct US positions (quoteSource "market") priced in USD via the market
+      // chain and converted to THB by the shared FX path.
+      const holdingSource = h.quoteSource ?? DEMO_QUOTE_SOURCE;
       db.insert(holdings)
         .values({
           bucketId: p.id,
@@ -375,9 +379,7 @@ export function seedDemoData(db: Db): void {
           // Position (units/avgCost) is folded from the opening anchor below, not stored.
           ter: h.ter,
           source: h.source,
-          // All demo seed holdings are real Thai mutual funds — route NAV
-          // lookups through the SEC Open API against the shared market.db.
-          quoteSource: DEMO_QUOTE_SOURCE,
+          quoteSource: holdingSource,
           acquiredOn: null,
           createdAt: now,
           updatedAt: now,
@@ -392,7 +394,7 @@ export function seedDemoData(db: Db): void {
             bucketId: p.id,
             ticker: h.ticker,
             englishName: h.name,
-            quoteSource: DEMO_QUOTE_SOURCE,
+            quoteSource: holdingSource,
             kind: leg.kind,
             tradeDate: leg.tradeDate,
             units: leg.units,

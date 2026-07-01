@@ -37,7 +37,7 @@ import type { AdvisorScreenContext } from "@/lib/portfolio/chat-suggestions";
 import type { ExtractedTxnRow } from "@/lib/portfolio/ocr";
 import { getScrollRoot, saveScreenScroll } from "@/lib/screenScroll";
 import type { Portfolio } from "@/lib/static/types";
-import { type CashSeedRow, type ImportSeedRow, useImportSeed } from "@/lib/stores/import-seed";
+import { type ImportSeedRow, useImportSeed } from "@/lib/stores/import-seed";
 import { setActiveId, usePortfolioUi } from "@/lib/stores/portfolio-ui";
 import { syncThemeColor } from "@/lib/theme-color";
 import { usePointer } from "@/lib/usePointer";
@@ -111,6 +111,12 @@ const MOBILE_NAV: { id: Screen; icon: string; label: string }[] = [
 // The bottom-tab roots: switching between them is lateral, not a drill-in, so a
 // tab tap abandons any open drill-in rather than stacking onto Back history.
 const ROOT_SCREENS = new Set<Screen>(["portfolio", "markets", "funds", "chat", "journal"]);
+
+// The heavy root tabs are KEPT MOUNTED once visited (hidden, not unmounted) so all
+// their state — filters, scroll, open sheets, sub-tabs — survives leaving and
+// returning, like a browser tab. Chat is excluded: it already persists via its own
+// re-parented host. Transient sub-screens (position, settings, …) still unmount.
+const KEEPALIVE_ROOTS: Screen[] = ["portfolio", "markets", "funds", "journal"];
 
 // Wide shell drops "chat" from the rail — chat lives in the right dock instead.
 const WIDE_NAV: { id: Screen; icon: string; label: string }[] = [
@@ -342,9 +348,6 @@ export function App({ isDemo }: { isDemo: boolean }) {
   // into the Add sheet's Activity mode. The all-activity ledger is now its own
   // screen (setScreen("activity")), not a modal.
   const [txnSeed, setTxnSeed] = useState<ExtractedTxnRow[] | null>(null);
-  // `cashSeed` carries cash events (deposit/withdraw/Set balance) the Advisor's
-  // in-chat cash table hands to the importer — opened straight into Cash mode.
-  const [cashSeed, setCashSeed] = useState<CashSeedRow[] | null>(null);
   // Ticker for the per-position drill-in screen (One Truth: a holding opens its
   // own record — summary above the history that produced it).
   const [positionTicker, setPositionTicker] = useState<string | null>(null);
@@ -355,16 +358,12 @@ export function App({ isDemo }: { isDemo: boolean }) {
     txnRows: txnRequest,
     txnNonce,
     consumeTxnImportSeed,
-    cashRows: cashRequest,
-    cashNonce,
-    consumeCashImportSeed,
   } = useImportSeed();
   const handledSeedNonce = useRef(0);
   useEffect(() => {
     if (seedNonce > 0 && seedNonce !== handledSeedNonce.current && seedRequest) {
       handledSeedNonce.current = seedNonce;
       setTxnSeed(null);
-      setCashSeed(null);
       setImportSeed(seedRequest);
       setAddMode("snapshot");
       setAddOpen(true);
@@ -378,28 +377,12 @@ export function App({ isDemo }: { isDemo: boolean }) {
     if (txnNonce > 0 && txnNonce !== handledTxnNonce.current && txnRequest) {
       handledTxnNonce.current = txnNonce;
       setImportSeed(null);
-      setCashSeed(null);
       setTxnSeed(txnRequest);
       setAddMode("snapshot");
       setAddOpen(true);
       consumeTxnImportSeed();
     }
   }, [txnNonce, txnRequest, consumeTxnImportSeed]);
-  // Parallel handoff for the Advisor's cash-import card: seed the Add modal with
-  // cash rows and open it straight into Cash mode.
-  const handledCashNonce = useRef(0);
-  useEffect(() => {
-    if (cashNonce > 0 && cashNonce !== handledCashNonce.current && cashRequest) {
-      handledCashNonce.current = cashNonce;
-      setImportSeed(null);
-      setTxnSeed(null);
-      setCashSeed(cashRequest);
-      setAddEntryMode("cash");
-      setAddMode("snapshot");
-      setAddOpen(true);
-      consumeCashImportSeed();
-    }
-  }, [cashNonce, cashRequest, consumeCashImportSeed]);
   const [, setSavedReading] = useState<unknown[]>([]);
   const planSelectedModelId = useSelectedModelId();
   const { data: plan } = usePlan();
@@ -771,8 +754,16 @@ export function App({ isDemo }: { isDemo: boolean }) {
     </>
   );
 
-  const renderScreen = () => {
-    if (screen === "portfolio") {
+  // Each keep-alive root is added the first time it becomes active, so it mounts
+  // while VISIBLE (charts measure correctly) and is hidden — never unmounted —
+  // thereafter. Updated during render; `screen` changing is what re-renders.
+  const visitedRoots = useRef<Set<Screen>>(new Set());
+  if (KEEPALIVE_ROOTS.includes(screen)) visitedRoots.current.add(screen);
+
+  // The keep-alive root tabs. Rendered for every visited root (active shown,
+  // others hidden); see renderScreen.
+  const renderRoot = (s: Screen) => {
+    if (s === "portfolio") {
       return (
         <PortfolioScreen
           onOpenSettings={openMobileMenu}
@@ -798,6 +789,30 @@ export function App({ isDemo }: { isDemo: boolean }) {
         />
       );
     }
+    if (s === "markets") {
+      return <MarketsScreen onOpenSettings={openMobileMenu} showMenu={!isWide} />;
+    }
+    if (s === "funds") {
+      return <FundSelectScreen onOpenSettings={openMobileMenu} showMenu={!isWide} />;
+    }
+    if (s === "journal") {
+      return (
+        <JournalScreen
+          onOpenChat={openChat}
+          onOpenModels={() => navigate("models")}
+          onOpenSettings={openMobileMenu}
+          showMenu={!isWide}
+          initialTab={journalTab}
+          onTabConsumed={() => setJournalTab(null)}
+        />
+      );
+    }
+    return null;
+  };
+
+  // Transient screens — sub-screens (and mobile chat) that render only while
+  // active and unmount on leave.
+  const renderTransient = () => {
     if (screen === "portfolios") {
       return <PortfoliosScreen onBack={goBack} />;
     }
@@ -824,12 +839,6 @@ export function App({ isDemo }: { isDemo: boolean }) {
         />
       );
     }
-    if (screen === "markets") {
-      return <MarketsScreen onOpenSettings={openMobileMenu} showMenu={!isWide} />;
-    }
-    if (screen === "funds") {
-      return <FundSelectScreen onOpenSettings={openMobileMenu} showMenu={!isWide} />;
-    }
     // Mobile full-screen chat: an empty mount-point for the persistent chat host
     // (see chatHost note); the single ChatScreen is portaled into it. Guarded to
     // mobile — on wide, `screen === "chat"` is transient (the effect at L509
@@ -837,18 +846,6 @@ export function App({ isDemo }: { isDemo: boolean }) {
     // second chat-slot in main alongside the panel's.
     if (screen === "chat" && !isWide) {
       return <div ref={setChatSlot} className="chat-mount" />;
-    }
-    if (screen === "journal") {
-      return (
-        <JournalScreen
-          onOpenChat={openChat}
-          onOpenModels={() => navigate("models")}
-          onOpenSettings={openMobileMenu}
-          showMenu={!isWide}
-          initialTab={journalTab}
-          onTabConsumed={() => setJournalTab(null)}
-        />
-      );
     }
     if (screen === "models") {
       return (
@@ -898,6 +895,25 @@ export function App({ isDemo }: { isDemo: boolean }) {
     return null;
   };
 
+  // Keep every visited root tab mounted; show the active one (boxless, so layout
+  // is unchanged), hide the rest with display:none — which also removes them from
+  // tab order and the accessibility tree. A transient sub-screen (or mobile chat)
+  // renders on top only while it's the active screen.
+  const renderScreen = () => (
+    <>
+      {[...visitedRoots.current].map((s) => (
+        <div
+          key={s}
+          className="screen-keepalive"
+          style={{ display: screen === s ? "contents" : "none" }}
+        >
+          {renderRoot(s)}
+        </div>
+      ))}
+      {!KEEPALIVE_ROOTS.includes(screen) && renderTransient()}
+    </>
+  );
+
   // Modals rendered outside the layout swap so they survive mobile↔wide.
   const sharedModals = (
     <>
@@ -921,19 +937,16 @@ export function App({ isDemo }: { isDemo: boolean }) {
         defaultBucketId={activeId === "all" ? undefined : activeId}
         holdingsSeed={importSeed}
         txnSeed={txnSeed}
-        cashSeed={cashSeed}
         onClose={() => {
           setAddOpen(false);
           setImportSeed(null);
           setTxnSeed(null);
-          setCashSeed(null);
           setAddEntryMode("investment"); // next open defaults to Investment
         }}
         onConnectBroker={() => {
           setAddOpen(false);
           setImportSeed(null);
           setTxnSeed(null);
-          setCashSeed(null);
           openConnect();
         }}
         onSaved={() => navigate("activity")}
@@ -961,12 +974,20 @@ export function App({ isDemo }: { isDemo: boolean }) {
                 sibling OUTSIDE it, so it keeps positioning against the window).
                 With a coarse pointer the slot is a direct child as before, so
                 the native document-scroll path is byte-for-byte unchanged. */}
+          {/* DISTINCT KEYS are load-bearing: both branches render a <div>, so
+              without keys React REUSES the element when `customScroll` flips
+              (e.g. DevTools device-mode toggling `pointer: coarse`). When the
+              wrapper was the OverlayScrollbars-managed `.app-scroll`, OS has
+              moved `.screen-slot` into its generated `os-viewport`, so React's
+              attempt to removeChild the (now-relocated) inner node throws
+              "removeChild: not a child". Different keys force a clean unmount of
+              `.app-scroll` as a whole unit instead. */}
           {customScroll ? (
-            <div className="app-scroll" ref={appScrollRef}>
+            <div key="app-scroll" className="app-scroll" ref={appScrollRef}>
               <div ref={setScreenSlot} className="screen-slot" />
             </div>
           ) : (
-            <div ref={setScreenSlot} className="screen-slot" />
+            <div key="native-scroll" ref={setScreenSlot} className="screen-slot" />
           )}
           {!hideNav && (
             <nav className="bottom-nav">

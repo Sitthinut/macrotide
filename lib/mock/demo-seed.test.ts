@@ -44,13 +44,24 @@ describe("seedDemoData (app-only demo DB)", () => {
       .n;
     expect(bucketCount).toBe(PORTFOLIOS.length);
 
-    const expectedFundHoldings = PORTFOLIOS.reduce((sum, p) => sum + p.holdings.length, 0);
+    // Holdings split by quote source: Thai funds (default) vs direct US positions
+    // seeded with quoteSource "market".
+    const allHoldings = PORTFOLIOS.flatMap((p) => p.holdings);
+    const expectedFundHoldings = allHoldings.filter((h) => h.quoteSource !== "market").length;
+    const expectedMarketHoldings = allHoldings.filter((h) => h.quoteSource === "market").length;
     const fundHoldings = (
       sqlite
         .prepare("SELECT COUNT(*) AS n FROM holdings WHERE quote_source = 'thai_mutual_fund'")
         .get() as { n: number }
     ).n;
     expect(fundHoldings).toBe(expectedFundHoldings);
+
+    const marketHoldings = (
+      sqlite.prepare("SELECT COUNT(*) AS n FROM holdings WHERE quote_source = 'market'").get() as {
+        n: number;
+      }
+    ).n;
+    expect(marketHoldings).toBe(expectedMarketHoldings);
 
     const cashHoldings = (
       sqlite.prepare("SELECT COUNT(*) AS n FROM holdings WHERE quote_source = 'cash'").get() as {

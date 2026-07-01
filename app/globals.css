@@ -1185,6 +1185,13 @@ textarea.sheet-input {
   flex: 0 0 auto;
   margin: -4px -4px 0 0;
 }
+/* Leading Back chevron — mirrors .modal-close: same -4px top pull (so it aligns
+   with the ✕) and the same -4px pull into its edge (so the left and right insets
+   from the modal edges match). */
+.modal-back {
+  flex: 0 0 auto;
+  margin: -4px 0 0 -4px;
+}
 
 /* Body — the ONLY scroll region. Padding is horizontal only; the header/footer
    own the vertical breathing room so scrolled content meets the edges cleanly.
@@ -1984,6 +1991,22 @@ button.score-row {
   margin-top: 2px;
   line-height: 1.35;
 }
+/* Bottom-align the value so a row of cards stays aligned even when labels wrap to
+   a different number of lines (e.g. the US detail sheet's 3-up grid, where
+   "Dividend yield" wraps but "Net margin" doesn't). Opt-in — the base cards keep
+   their natural top-to-bottom flow. */
+.stat-cards--eq .stat-card {
+  display: flex;
+  flex-direction: column;
+}
+.stat-cards--eq .stat-card__value {
+  margin-top: auto;
+}
+/* Uppercase labels to match the History/Position stat strips (which pass
+   already-uppercase strings). */
+.stat-cards--eq .stat-card__label {
+  text-transform: uppercase;
+}
 
 /* Range chips (pill segmented control) */
 .range-pills {
@@ -2354,14 +2377,6 @@ button.score-row {
   padding: 2px 2px 2px 0;
   font-size: 13.5px;
   line-height: 1.5;
-}
-/* A turn carrying an import card (holdings / transactions / cash) stretches to the
-   full column width. Otherwise the borderless AI block hugs its content, and a
-   card that streams in BEFORE any prose collapses to the stacked-table min-width
-   (the narrow container query fires and the row values cramp/wrap). Stretching lets
-   the card's container query measure the real panel width and lay out cleanly. */
-.msg.ai.has-card {
-  align-self: stretch;
 }
 .msg.ai .meta {
   font-family: var(--font-mono);

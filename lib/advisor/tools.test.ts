@@ -14,6 +14,7 @@ import { createHoldingViaLedger } from "../db/queries/project-holdings";
 import { upsertFundQuote } from "../db/queries/quotes";
 import { upsertShareClasses } from "../db/queries/share-classes";
 import { insertTransactions } from "../db/queries/transactions";
+import { upsertUsSecurities } from "../db/queries/us-securities";
 import * as schema from "../db/schema";
 import { persistPlanEdit } from "../portfolio/apply-plan-edit";
 import { quoteCacheKey } from "../portfolio/derive-rows";
@@ -580,85 +581,6 @@ describe("advisor tools — propose_holdings_import", () => {
   });
 });
 
-describe("advisor tools — propose_cash_import", () => {
-  type CashOut = {
-    ok: boolean;
-    cashImport: {
-      rows: Array<{
-        ticker: string;
-        kind: "deposit" | "withdraw" | "cash_balance";
-        amount: number;
-        tradeDate?: string;
-        reconcile?: boolean;
-        cashRole?: "investable" | "reserved";
-        cashLabel?: string;
-      }>;
-      source: string | null;
-      note: string | null;
-    };
-    message: string;
-  };
-
-  it("returns the cashImport payload for a mix of kinds and writes nothing", async () => {
-    const result = await withFresh(async () => {
-      const tools = createAdvisorTools({ userId: null });
-      const out = (await run(tools.propose_cash_import, {
-        rows: [
-          { kind: "cash_balance", ticker: "SCB Savings", amount: 100000 },
-          { kind: "deposit", ticker: "SCB Savings", amount: 20000, tradeDate: "2026-06-01" },
-          { kind: "withdraw", ticker: "Krungsri", amount: 5000 },
-        ],
-        source: "Bank",
-      })) as CashOut;
-      return { out, count: listHoldings().length };
-    });
-    expect(result.out.ok).toBe(true);
-    expect(result.out.cashImport.rows).toHaveLength(3);
-    expect(result.out.cashImport.rows[0]).toMatchObject({
-      ticker: "SCB Savings",
-      kind: "cash_balance",
-      amount: 100000,
-      // A Set balance defaults to investable, "money moved" (reconcile false).
-      cashRole: "investable",
-      reconcile: false,
-    });
-    expect(result.out.cashImport.rows[1]).toMatchObject({
-      kind: "deposit",
-      tradeDate: "2026-06-01",
-    });
-    expect(result.out.cashImport.source).toBe("Bank");
-    // Proposing must not write anything to the ledger / holdings.
-    expect(result.count).toBe(0);
-  });
-
-  it("carries a Reserved Purpose + label on a Set balance, and omits designation on deltas", async () => {
-    const out = (await withFresh(async () => {
-      const tools = createAdvisorTools({ userId: null });
-      return run(tools.propose_cash_import, {
-        rows: [
-          {
-            kind: "cash_balance",
-            ticker: "Emergency",
-            amount: 200000,
-            cashRole: "reserved",
-            cashLabel: "Emergency",
-            reconcile: true,
-          },
-          // A deposit ignores designation fields even if the model sends them.
-          { kind: "deposit", ticker: "Emergency", amount: 1000, cashRole: "reserved" },
-        ],
-      });
-    })) as CashOut;
-    expect(out.cashImport.rows[0]).toMatchObject({
-      cashRole: "reserved",
-      cashLabel: "Emergency",
-      reconcile: true,
-    });
-    expect(out.cashImport.rows[1].cashRole).toBeUndefined();
-    expect(out.cashImport.rows[1].reconcile).toBeUndefined();
-  });
-});
-
 describe("accept path — persistPlanEdit", () => {
   it("applies an additive edit into an existing section and persists it", async () => {
     const md = await withFresh(async () => {
@@ -680,5 +602,54 @@ describe("accept path — persistPlanEdit", () => {
     expect(plan?.markdown).toContain("- max 30% drawdown");
     // selectedModelId carried through the edit (not cleared).
     expect(plan?.selectedModelId).toBe("balanced-60-40");
+  });
+});
+
+describe("advisor tools — find_us_securities", () => {
+  const SEED = [
+    {
+      symbol: "AAPL",
+      name: "Apple Inc. - Common Stock",
+      securityType: "stock" as const,
+      exchange: "Nasdaq",
+    },
+    {
+      symbol: "VOO",
+      name: "Vanguard S&P 500 ETF",
+      securityType: "etf" as const,
+      exchange: "NYSE Arca",
+    },
+    { symbol: "QQQ", name: "Invesco QQQ Trust", securityType: "etf" as const, exchange: "Nasdaq" },
+  ];
+
+  it("resolves a symbol and cleans the stock-class suffix", async () => {
+    const out = (await withFresh(async () => {
+      upsertUsSecurities(SEED, "2026-06-25T00:00:00Z");
+      const tools = createAdvisorTools({ userId: null });
+      return run(tools.find_us_securities, { query: "AAPL" });
+    })) as { count: number; securities: { symbol: string; name: string; type: string }[] };
+    expect(out.securities[0].symbol).toBe("AAPL");
+    expect(out.securities[0].name).toBe("Apple Inc.");
+    expect(out.securities[0].type).toBe("stock");
+  });
+
+  it("filters to ETFs only", async () => {
+    const out = (await withFresh(async () => {
+      upsertUsSecurities(SEED, "2026-06-25T00:00:00Z");
+      const tools = createAdvisorTools({ userId: null });
+      return run(tools.find_us_securities, { type: "etf" });
+    })) as { securities: { symbol: string; type: string }[] };
+    expect(out.securities.map((s) => s.symbol).sort()).toEqual(["QQQ", "VOO"]);
+    expect(out.securities.every((s) => s.type === "etf")).toBe(true);
+  });
+
+  it("returns a helpful message when nothing matches", async () => {
+    const out = (await withFresh(async () => {
+      upsertUsSecurities(SEED, "2026-06-25T00:00:00Z");
+      const tools = createAdvisorTools({ userId: null });
+      return run(tools.find_us_securities, { query: "NOTREAL" });
+    })) as { count: number; message: string };
+    expect(out.count).toBe(0);
+    expect(out.message).toMatch(/find_funds/);
   });
 });
