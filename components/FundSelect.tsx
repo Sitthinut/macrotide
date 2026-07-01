@@ -12,14 +12,22 @@
 // fees, and tax wrapper are all per class. A small demo seed ensures the list is
 // non-empty in demo mode before the daily SEC refresh has run.
 
-import { type Ref, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, type Ref, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { DetailSheetHost } from "@/components/DetailSheetHost";
+import { ExploreFilterBar } from "@/components/ExploreFilterBar";
 import { FundDetailSheet } from "@/components/FundDetailSheet";
 import { Icon } from "@/components/Icon";
+import { UnifiedAssetList } from "@/components/UnifiedAssetList";
+import { UsSecuritySelect } from "@/components/UsSecuritySelect";
+import { MiniTag } from "@/components/ui/MiniTag";
 import { Skeleton, SkeletonRows } from "@/components/ui/Skeleton";
+import { METRIC_LABEL_STYLE, TER_CHIP_STYLE, terBg, terColor } from "@/components/ui/TerBadge";
 import type { ShareClassListItem, TrackedIndexFamily } from "@/lib/db/queries/funds";
 import { prefetchResource, useResource } from "@/lib/fetchers/swr";
 import { RETAIL_TIER_BADGE } from "@/lib/market/retail-tier";
+import { DetailStackProvider, useOptionalDetailStack } from "@/lib/nav/detail-stack";
 import { matchIndexFamily } from "@/lib/search/index-alias";
+import { useExploreQuery } from "@/lib/stores/explore-ui";
 import { useFlipUp } from "@/lib/useFlipUp";
 import { useListboxKeyboard } from "@/lib/useListboxKeyboard";
 
@@ -157,75 +165,6 @@ const CLICK_STEP = 100;
 /** How many top rows get their detail + series warmed for instant opens. */
 const PREFETCH_ROWS = 6;
 
-// ─── TER colour ──────────────────────────────────────────────────────────────
-// TER is the controllable edge — the headline number on every row. Shown as
-// plain text (like the 1Y return), fee-level colored: green ≤ 0.5%, amber
-// 0.5–1.5%, red > 1.5%; muted when unpublished.
-function terColor(ter: number | null): string {
-  if (ter == null) return "var(--muted)";
-  return ter <= 0.5 ? "var(--gain)" : ter <= 1.5 ? "var(--amber, #f59e0b)" : "var(--loss)";
-}
-
-function terBg(ter: number | null): string {
-  if (ter == null) return "var(--card-soft)";
-  return ter <= 0.5
-    ? "var(--gain-soft, rgba(34,197,94,0.1))"
-    : ter <= 1.5
-      ? "var(--amber-soft, rgba(245,158,11,0.1))"
-      : "var(--loss-soft, rgba(220,38,38,0.08))";
-}
-
-// Grey, bold label ("TER" / "1Y") sitting left of its value.
-const METRIC_LABEL_STYLE: React.CSSProperties = {
-  fontFamily: "var(--font-mono)",
-  fontSize: 10.5,
-  fontWeight: 600,
-  color: "var(--muted)",
-  letterSpacing: "0.04em",
-  textAlign: "right",
-  whiteSpace: "nowrap",
-};
-
-// ─── compact fund badges ──────────────────────────────────────────────────────
-
-function MiniTag({
-  label,
-  title,
-  color = "var(--accent)",
-  bg = "var(--accent-soft)",
-  clamp = false,
-}: {
-  label: string;
-  title?: string;
-  color?: string;
-  bg?: string;
-  clamp?: boolean;
-}) {
-  return (
-    <span
-      title={title}
-      style={{
-        fontSize: 9.5,
-        fontFamily: "var(--font-mono)",
-        fontWeight: 600,
-        color,
-        background: bg,
-        borderRadius: 4,
-        padding: "1px 5px",
-        letterSpacing: "0.04em",
-        whiteSpace: "nowrap",
-        // A long feeder master-fund name would otherwise overflow the card and
-        // trigger a horizontal scrollbar. Clamp it with an ellipsis (the full
-        // name stays in the title tooltip); minWidth:0 lets it shrink as a flex
-        // item, and it wraps to its own line when it can't fit alongside others.
-        ...(clamp ? { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" } : null),
-      }}
-    >
-      {label}
-    </span>
-  );
-}
-
 // Short asset-class label for the badge row.
 const ASSET_CLASS_LABELS: Record<string, string> = {
   equity: "Equity",
@@ -249,7 +188,7 @@ function FundClassTags({ cls }: { cls: ShareClassListItem }) {
         <MiniTag
           label="ACC"
           title="Accumulating — reinvests income, no cash distributions"
-          color="var(--accent)"
+          color="var(--accent-ink)"
           bg="var(--accent-soft)"
         />
       )}
@@ -257,7 +196,7 @@ function FundClassTags({ cls }: { cls: ShareClassListItem }) {
         <MiniTag
           label="DIV"
           title="Dividend — pays out income as cash distributions"
-          color="var(--accent)"
+          color="var(--accent-ink)"
           bg="var(--accent-soft)"
         />
       )}
@@ -265,8 +204,8 @@ function FundClassTags({ cls }: { cls: ShareClassListItem }) {
         <MiniTag
           label="INDEX"
           title={`Management style: ${cls.managementStyle} — passive/index-tracking`}
-          color="var(--gain)"
-          bg="var(--gain-soft, rgba(34,197,94,0.1))"
+          color="var(--accent-ink)"
+          bg="var(--accent-soft)"
         />
       )}
       {tax && (
@@ -279,7 +218,7 @@ function FundClassTags({ cls }: { cls: ShareClassListItem }) {
                 ? "Thai ESG Fund — tax deductible up to 30% of income"
                 : "Retirement Mutual Fund — tax deductible up to 30% of income"
           }
-          color="var(--accent)"
+          color="var(--accent-ink)"
           bg="var(--accent-soft)"
         />
       )}
@@ -400,26 +339,21 @@ function FundRow({
           cursor: "pointer",
         }}
       >
-        {/* Rank badge — emphasises the cheapest-first ordering */}
-        <div
+        {/* Plain rank number — shared with the other Explore tabs (the cheapest-
+            first ordering is conveyed by position, not a colored badge). */}
+        <span
           style={{
-            minWidth: 22,
-            height: 22,
-            borderRadius: 11,
-            background: rank === 1 ? "var(--accent)" : "var(--surface)",
-            color: rank === 1 ? "var(--accent-fg, #fff)" : "var(--muted)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 10,
+            minWidth: 18,
             fontFamily: "var(--font-mono)",
-            fontWeight: 600,
-            marginTop: 1,
+            fontSize: 11,
+            color: "var(--muted)",
+            textAlign: "right",
+            marginTop: 2,
             flexShrink: 0,
           }}
         >
           {rank}
-        </div>
+        </span>
 
         {/* Fund identity */}
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -428,7 +362,7 @@ function FundRow({
             <span
               style={{
                 fontFamily: "var(--font-mono)",
-                fontSize: 12,
+                fontSize: 13,
                 fontWeight: 600,
                 letterSpacing: "0.02em",
                 color: "var(--ink)",
@@ -487,14 +421,9 @@ function FundRow({
           <span style={METRIC_LABEL_STYLE}>TER</span>
           <span
             style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 11,
-              fontWeight: 600,
+              ...TER_CHIP_STYLE,
               color: terColor(cls.ter),
               background: terBg(cls.ter),
-              borderRadius: 6,
-              padding: "2px 7px",
-              whiteSpace: "nowrap",
               justifySelf: "end",
             }}
             title="Total expense ratio (annual fee)"
@@ -772,36 +701,20 @@ function FacetDropdown({
       <button
         ref={triggerRef}
         type="button"
+        // Flat worded control matching the asset-type segment + chart toolbar; a
+        // non-default value goes accent-soft via data-active and shows its value
+        // pill in place of the facet name.
+        className="chart-toolbtn"
+        data-active={active || undefined}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`${menuLabel}: ${active ? selectedPill : hasDefault ? selectedPill : "any"}`}
         onClick={toggle}
         title={title}
-        style={{
-          // Compact chip-styled trigger (xs chip look + a caret). Fixed height
-          // so every pill and the clear button share one baseline.
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 4,
-          height: 24,
-          boxSizing: "border-box",
-          padding: "0 8px",
-          borderRadius: 6,
-          border: "1px solid",
-          borderColor: active ? "var(--accent)" : "var(--line-soft)",
-          background: active ? "var(--accent-soft)" : "var(--paper)",
-          fontSize: 11.5,
-          cursor: "pointer",
-          color: active ? "var(--accent-ink)" : "var(--muted)",
-          fontWeight: active ? 600 : 400,
-          whiteSpace: "nowrap",
-          flexShrink: 0,
-        }}
+        style={{ whiteSpace: "nowrap", flexShrink: 0 }}
       >
         {pillText}
-        <span aria-hidden="true" style={{ fontSize: 9, lineHeight: 1 }}>
-          ▾
-        </span>
+        <Icon name="chevron-down" size={12} />
       </button>
       {open && (
         <div
@@ -883,9 +796,11 @@ function TracksFacet({ value, onChange }: { value: string; onChange: (family: st
 export interface FundSelectProps {
   /** Called when user taps the chat icon on a fund row. */
   onAskAdvisor?: (prompt: string) => void;
+  /** Rendered as the first element of the filter row (the asset-type segment). */
+  leadingFilter?: ReactNode;
 }
 
-export function FundSelect({ onAskAdvisor }: FundSelectProps) {
+export function FundSelect({ onAskAdvisor, leadingFilter }: FundSelectProps) {
   const [assetClass, setAssetClass] = useState<AssetClassFilter>("");
   const [indexType, setIndexType] = useState<IndexTypeFilter>("");
   const [taxIncentive, setTaxIncentive] = useState<TaxIncentiveFilter>("");
@@ -898,12 +813,18 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
   // (which qualifying high-net-worth investors can buy), or "all" (the entire
   // active universe, including provident/institutional).
   const [access, setAccess] = useState<AccessFilter>("retail");
-  const [queryInput, setQueryInput] = useState("");
+  // Search text lives in the Explore store so it's shared across asset-type tabs
+  // and survives leaving/returning to the screen.
+  const [queryInput, setQueryInput] = useExploreQuery();
   // Debounce the search query so we don't fire on every keystroke.
   const [query, setQuery] = useState("");
   // Selected share-class ticker for the detail sheet. The detail route resolves
   // a class ticker and defaults its chart to that exact class.
   const [detailTicker, setDetailTicker] = useState<string | null>(null);
+  // Inside Explore, route through the shared detail stack (modal-as-page).
+  const detailStack = useOptionalDetailStack();
+  const openFund = (ticker: string) =>
+    detailStack ? detailStack.push({ kind: "fund", id: ticker }) : setDetailTicker(ticker);
   // How many rows to request. Streams up by AUTO_STEP on scroll, then jumps by
   // CLICK_STEP per "Load more"; resets to the first step when filters/search change.
   const [limit, setLimit] = useState(AUTO_STEP);
@@ -1093,193 +1014,159 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
 
   return (
     <>
-      <FundDetailSheet
-        projId={detailTicker}
-        onAskAdvisor={handleAskAdvisor}
-        onClose={() => setDetailTicker(null)}
-      />
+      {!detailStack && (
+        <FundDetailSheet
+          projId={detailTicker}
+          onAskAdvisor={handleAskAdvisor}
+          onClose={() => setDetailTicker(null)}
+        />
+      )}
       <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
         {/* Filters */}
-        <div style={{ padding: "10px 14px 8px", borderBottom: "1px solid var(--line-soft)" }}>
-          {/* Free-text search */}
-          <div style={{ position: "relative", marginBottom: 8 }}>
-            <span
-              style={{
-                position: "absolute",
-                left: 10,
-                top: "50%",
-                transform: "translateY(-50%)",
-                color: "var(--muted)",
-                pointerEvents: "none",
-                display: "flex",
-                alignItems: "center",
-              }}
-            >
-              <Icon name="search" size={13} />
-            </span>
-            <input
-              className="sheet-input"
-              type="search"
-              placeholder="Search by name, index, theme… (e.g. S&P 500, gold)"
-              value={queryInput}
-              onChange={(e) => setQueryInput(e.target.value)}
-              style={{ paddingLeft: 30, width: "100%", boxSizing: "border-box" }}
-            />
-          </div>
-
-          {/* Tracked-index suggestion — one tap from a fuzzy text search to the
-              exact facet (clears the text; browse ordering = cheapest first). */}
-          {showTrackSuggestion && (
-            <button
-              type="button"
-              onClick={applyTrackSuggestion}
-              style={{
-                display: "block",
-                width: "100%",
-                marginBottom: 8,
-                padding: "6px 10px",
-                borderRadius: 8,
-                border: "1px solid var(--accent)",
-                background: "var(--accent-soft)",
-                color: "var(--accent-ink)",
-                fontSize: 11.5,
-                textAlign: "left",
-                cursor: "pointer",
-              }}
-            >
-              Show every fund tracking <strong>{suggestedFamily}</strong>, cheapest first →
-            </button>
-          )}
-
-          {/* One pill per facet — every option lives in its dropdown, so the
-              block stays a single slim row even on a phone. flexWrap as the
-              rare-overflow fallback (long pill values): a scroll container
-              would clip the popups. */}
-          <div style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
-            <FacetDropdown
-              name="Class"
-              clearLabel="All classes"
-              menuLabel="Asset class"
-              value={assetClass}
-              onChange={(v) => setAssetClass(v as AssetClassFilter)}
-              options={ASSET_CLASS_OPTIONS.filter((o) => o.value).map((o) => ({
-                value: o.value,
-                label: o.label,
-                pill: o.label,
-              }))}
-            />
-            {/* Index/active — the star facet for passive investors. */}
-            <FacetDropdown
-              name="Style"
-              clearLabel="Any style"
-              menuLabel="Management style"
-              value={indexType}
-              onChange={(v) => setIndexType(v as IndexTypeFilter)}
-              options={INDEX_TYPE_OPTIONS.map((o) => ({
-                value: o.value,
-                label: o.label,
-                pill: o.label,
-                title: o.title,
-              }))}
-            />
-            <FacetDropdown
-              name="Region"
-              clearLabel="Any region"
-              menuLabel="Region"
-              value={region}
-              onChange={(v) => setRegion(v as RegionFilter)}
-              options={REGION_OPTIONS.map((o) => ({
-                value: o.value,
-                label: o.label,
-                pill: o.label,
-              }))}
-            />
-            <FacetDropdown
-              name="Tax"
-              clearLabel="Any tax saving"
-              menuLabel="Tax wrapper"
-              value={taxIncentive}
-              onChange={(v) => setTaxIncentive(v as TaxIncentiveFilter)}
-              options={TAX_INCENTIVE_OPTIONS.map((o) => ({
-                value: o.value,
-                label: o.label,
-                pill: o.label,
-                title: o.title,
-              }))}
-            />
-            {/* Tracking restricts to index-style funds by itself, so it
+        {/* Shared filter bar: search + the one filter row (asset-type segment,
+            divider, then the facet pills below as its children). */}
+        <ExploreFilterBar
+          placeholder="Search by name, index, theme… (e.g. S&P 500, gold)"
+          value={queryInput}
+          onChange={setQueryInput}
+        >
+          {leadingFilter}
+          {leadingFilter && <FilterDivider />}
+          <FacetDropdown
+            name="Class"
+            clearLabel="All classes"
+            menuLabel="Asset class"
+            value={assetClass}
+            onChange={(v) => setAssetClass(v as AssetClassFilter)}
+            options={ASSET_CLASS_OPTIONS.filter((o) => o.value).map((o) => ({
+              value: o.value,
+              label: o.label,
+              pill: o.label,
+            }))}
+          />
+          {/* Index/active — the star facet for passive investors. */}
+          <FacetDropdown
+            name="Style"
+            clearLabel="Any style"
+            menuLabel="Management style"
+            value={indexType}
+            onChange={(v) => setIndexType(v as IndexTypeFilter)}
+            options={INDEX_TYPE_OPTIONS.map((o) => ({
+              value: o.value,
+              label: o.label,
+              pill: o.label,
+              title: o.title,
+            }))}
+          />
+          <FacetDropdown
+            name="Region"
+            clearLabel="Any region"
+            menuLabel="Region"
+            value={region}
+            onChange={(v) => setRegion(v as RegionFilter)}
+            options={REGION_OPTIONS.map((o) => ({
+              value: o.value,
+              label: o.label,
+              pill: o.label,
+            }))}
+          />
+          <FacetDropdown
+            name="Tax"
+            clearLabel="Any tax saving"
+            menuLabel="Tax wrapper"
+            value={taxIncentive}
+            onChange={(v) => setTaxIncentive(v as TaxIncentiveFilter)}
+            options={TAX_INCENTIVE_OPTIONS.map((o) => ({
+              value: o.value,
+              label: o.label,
+              pill: o.label,
+              title: o.title,
+            }))}
+          />
+          {/* Tracking restricts to index-style funds by itself, so it
                 composes with (and doesn't need) the Style facet. */}
-            <TracksFacet value={trackingIndex} onChange={setTrackingIndex} />
-            {/* Investor eligibility — "General investor" (default) lists funds
+          <TracksFacet value={trackingIndex} onChange={setTrackingIndex} />
+          {/* Investor eligibility — "General investor" (default) lists funds
                 anyone can buy; the other choices filter EXCLUSIVELY to funds
                 restricted to qualifying high-net-worth (accredited) and/or
                 ultra-high-net-worth (ultra-accredited) investors. The default is
                 a real filter (the SEC's "general investors", value `retail`), so
                 it shows as an explicit pill rather than the neutral facet name. */}
-            <FacetDropdown
-              name="Access"
-              clearLabel="General investor"
-              menuLabel="Investor access"
-              title="Which investor audience to list funds for"
-              value={access}
-              defaultValue="retail"
-              onChange={(v) => setAccess(v as AccessFilter)}
-              options={[
-                {
-                  value: "retail",
-                  label: "General investor",
-                  pill: "General",
-                  title: "Funds open to all (general) investors",
-                },
-                {
-                  value: "accredited",
-                  label: "Accredited investor",
-                  pill: "Accredited",
-                  title: "Funds for qualifying high-net-worth investors",
-                },
-                {
-                  value: "ultra",
-                  label: "Ultra-accredited investor",
-                  pill: "Ultra",
-                  title: "Funds for qualifying ultra-high-net-worth investors",
-                },
-                {
-                  value: "both",
-                  label: "Accredited + Ultra",
-                  pill: "Accredited + Ultra",
-                  title: "Both accredited and ultra-accredited investor funds",
-                },
-              ]}
-            />
-            {anyFilterActive && (
-              // Clear-all as an icon pill — the app's dismiss affordance is the
-              // close icon in a small bordered button, sized here to match the
-              // facet pills.
-              <button
-                type="button"
-                onClick={clearAllFilters}
-                aria-label="Clear all filters"
-                title="Reset all filters and the search text"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  height: 24,
-                  boxSizing: "border-box",
-                  padding: "0 7px",
-                  borderRadius: 6,
-                  border: "1px solid var(--line-soft)",
-                  background: "var(--paper)",
-                  color: "var(--muted)",
-                  cursor: "pointer",
-                  flexShrink: 0,
-                }}
-              >
-                <Icon name="close" size={11} />
-              </button>
-            )}
-          </div>
-        </div>
+          <FacetDropdown
+            name="Access"
+            clearLabel="General investor"
+            menuLabel="Investor access"
+            title="Which investor audience to list funds for"
+            value={access}
+            defaultValue="retail"
+            onChange={(v) => setAccess(v as AccessFilter)}
+            options={[
+              {
+                value: "retail",
+                label: "General investor",
+                pill: "General",
+                title: "Funds open to all (general) investors",
+              },
+              {
+                value: "accredited",
+                label: "Accredited investor",
+                pill: "Accredited",
+                title: "Funds for qualifying high-net-worth investors",
+              },
+              {
+                value: "ultra",
+                label: "Ultra-accredited investor",
+                pill: "Ultra",
+                title: "Funds for qualifying ultra-high-net-worth investors",
+              },
+              {
+                value: "both",
+                label: "Accredited + Ultra",
+                pill: "Accredited + Ultra",
+                title: "Both accredited and ultra-accredited investor funds",
+              },
+            ]}
+          />
+          {anyFilterActive && (
+            // Clear-all as an icon pill — the app's dismiss affordance is the
+            // close icon in a small bordered button, sized here to match the
+            // facet pills.
+            <button
+              type="button"
+              className="chart-toolbtn"
+              onClick={clearAllFilters}
+              aria-label="Clear all filters"
+              title="Reset all filters and the search text"
+              style={{ flexShrink: 0 }}
+            >
+              <Icon name="close" size={11} />
+            </button>
+          )}
+        </ExploreFilterBar>
+
+        {/* Tracked-index suggestion — one tap from a fuzzy text search to the
+            exact facet (clears the text; browse ordering = cheapest first). A
+            full-width banner BELOW the bar, so it never shifts the filter row. */}
+        {showTrackSuggestion && (
+          <button
+            type="button"
+            onClick={applyTrackSuggestion}
+            style={{
+              display: "block",
+              width: "100%",
+              padding: "8px 14px",
+              border: "none",
+              borderBottom: "1px solid var(--line-soft)",
+              background: "var(--accent-soft)",
+              color: "var(--accent-ink)",
+              fontSize: 11.5,
+              textAlign: "left",
+              cursor: "pointer",
+            }}
+          >
+            Show every fund tracking <strong>{suggestedFamily}</strong>, cheapest first →
+          </button>
+        )}
 
         {/* Legend bar — search results are relevance-ranked, browse is fee-ranked */}
         <FeeLegend ordering={query.trim() ? "best match first" : "cheapest first"} />
@@ -1343,7 +1230,7 @@ export function FundSelect({ onAskAdvisor }: FundSelectProps) {
                   key={cls.ticker}
                   cls={cls}
                   rank={i + 1}
-                  onSelect={setDetailTicker}
+                  onSelect={openFund}
                   focusRef={i === firstNewRow.current ? newRowRef : undefined}
                 />
               ))}
@@ -1419,23 +1306,102 @@ export interface FundSelectScreenProps {
   showMenu?: boolean;
 }
 
-export function FundSelectScreen({ onOpenSettings, showMenu = true }: FundSelectScreenProps) {
-  return (
-    <div className="screen" style={{ display: "flex", flexDirection: "column" }}>
-      <div className="topbar">
-        <div className="brand" style={{ flex: 1 }}>
-          <span>Explore</span>
-        </div>
-        {showMenu && onOpenSettings && (
-          <button className="icon-btn" aria-label="More" onClick={onOpenSettings}>
-            <Icon name="ellipsis-vertical" size={13} />
-          </button>
-        )}
-      </div>
+type AssetTab = "all" | "thai" | "us_etf" | "us_stock";
 
-      <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
-        <FundSelect />
-      </div>
+const ASSET_TABS: { value: AssetTab; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "thai", label: "Thai funds" },
+  { value: "us_etf", label: "US ETFs" },
+  { value: "us_stock", label: "US stocks" },
+];
+
+// The asset-type selector — a segmented control that leads every tab's filter
+// row (it sits in the SAME row as that tab's contextual filters, directly under
+// the one search bar, so there's no separate toggle row above the search).
+function AssetTypeSegment({ tab, onChange }: { tab: AssetTab; onChange: (t: AssetTab) => void }) {
+  // Flat worded buttons in a toolbar part — the same control style as the main
+  // chart toolbar (a divider follows in the filter row when contextual facets do).
+  return (
+    <div className="toolbar-part" role="tablist" aria-label="Asset type">
+      {ASSET_TABS.map((t) => (
+        <button
+          key={t.value}
+          type="button"
+          role="tab"
+          className="chart-toolbtn"
+          aria-selected={tab === t.value}
+          data-active={tab === t.value || undefined}
+          onClick={() => onChange(t.value)}
+        >
+          {t.label}
+        </button>
+      ))}
     </div>
+  );
+}
+
+/** Vertical rule between the asset-type segment and the contextual facets,
+ *  matching the chart toolbar's part divider. */
+function FilterDivider() {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        width: 1,
+        height: 16,
+        background: "var(--line)",
+        flexShrink: 0,
+        alignSelf: "center",
+      }}
+    />
+  );
+}
+
+export function FundSelectScreen({ onOpenSettings, showMenu = true }: FundSelectScreenProps) {
+  // The asset-type pill narrows the unified Explore: "All" is one search bar
+  // across every catalog; the others drop into that type's full-featured
+  // screener (the Thai fee-finder facets, the US type/sort screener).
+  // Local state — the keep-alive (App.tsx) keeps this screen mounted, so the
+  // selected asset type survives leaving and returning without a store.
+  const [tab, setTab] = useState<AssetTab>("all");
+  // Keep each visited asset-type screener mounted (hidden, not unmounted) so its
+  // facets, paging, and scroll survive toggling away and back — like the main
+  // tabs do. A screener is added the first time its tab is selected.
+  const visitedTabs = useRef<Set<AssetTab>>(new Set());
+  visitedTabs.current.add(tab);
+
+  return (
+    <DetailStackProvider>
+      <div className="screen" style={{ display: "flex", flexDirection: "column" }}>
+        {/* One host for the whole Explore screen: every cross-link (US↔US, US↔fund,
+            row taps) pushes onto a single stack (modal-as-page), instead of
+            stacking modal-on-modal. */}
+        <DetailSheetHost />
+        <div className="topbar">
+          <div className="brand" style={{ flex: 1 }}>
+            <span>Explore</span>
+          </div>
+          {showMenu && onOpenSettings && (
+            <button className="icon-btn" aria-label="More" onClick={onOpenSettings}>
+              <Icon name="ellipsis-vertical" size={13} />
+            </button>
+          )}
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+          {[...visitedTabs.current].map((t) => {
+            const seg = <AssetTypeSegment tab={tab} onChange={setTab} />;
+            return (
+              <div key={t} style={{ display: tab === t ? "contents" : "none" }}>
+                {t === "all" && <UnifiedAssetList leadingFilter={seg} onSeeAll={setTab} />}
+                {t === "thai" && <FundSelect leadingFilter={seg} />}
+                {t === "us_etf" && <UsSecuritySelect initialType="etf" leadingFilter={seg} />}
+                {t === "us_stock" && <UsSecuritySelect initialType="stock" leadingFilter={seg} />}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </DetailStackProvider>
   );
 }

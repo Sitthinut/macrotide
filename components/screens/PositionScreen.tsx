@@ -6,7 +6,7 @@
 // HistoryList). Reached by tapping a holding; back is a chevron.
 
 import { useState } from "react";
-import { FundDetailSheet } from "@/components/FundDetailSheet";
+import { DetailSheetHost } from "@/components/DetailSheetHost";
 import { HistoryList } from "@/components/history/HistoryList";
 import { Icon } from "@/components/Icon";
 import { NavChart } from "@/components/InteractiveCharts";
@@ -20,6 +20,7 @@ import {
 } from "@/lib/fetchers/portfolio";
 import { useResource } from "@/lib/fetchers/swr";
 import { fmtPct, fmtRatioPct, fmtTHBClean, fmtTHBSigned } from "@/lib/format";
+import { DetailStackProvider, useDetailStack } from "@/lib/nav/detail-stack";
 import { NAV_CHART_HEIGHT } from "@/lib/portfolio/adapter";
 import type { TransactionAnalytics } from "@/lib/portfolio/transaction-analytics";
 import { usePrivacy } from "@/lib/stores/privacy";
@@ -44,10 +45,22 @@ export interface PositionScreenProps {
   onRecord: () => void;
 }
 
-export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps) {
+// Wraps the position page in a DetailStackProvider so its detail overlays share
+// one "modal as page" stack (host rendered inside).
+export function PositionScreen(props: PositionScreenProps) {
+  return (
+    <DetailStackProvider>
+      <PositionScreenInner {...props} />
+    </DetailStackProvider>
+  );
+}
+
+function PositionScreenInner({ ticker, onBack, onRecord }: PositionScreenProps) {
   const { hidden: valuesHidden } = usePrivacy();
   const [range, setRange] = useState<SeriesRange>("6mo");
-  const [fundOpen, setFundOpen] = useState(false);
+  // Detail overlays share one stack (modal-as-page): the US security sheet's
+  // cross-links push a Thai fund on top, and one host renders the top with Back/✕.
+  const detailStack = useDetailStack();
   const { data: holdings } = useHoldings();
   const { data: a } = useResource<AnalyticsResponse>(
     `/api/transactions/analytics?ticker=${encodeURIComponent(ticker)}`,
@@ -58,6 +71,9 @@ export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps
   // Cash accounts (#149) get a balance-focused view, not the fund metrics (avg
   // cost / NAV / unrealised / cost basis / realized all collapse to noise).
   const isCash = holding?.quoteSource === "cash";
+  // US stocks & ETFs open the rich US security sheet, not the Thai fund sheet
+  // (which would 404 on a US symbol).
+  const isMarket = holding?.quoteSource === "market";
   const { data: earmarks } = useEarmarks();
   const cashMark = (earmarks ?? []).find(
     (e) => e.scope === "account" && (e.ticker ?? "").toUpperCase() === ticker.toUpperCase(),
@@ -106,8 +122,15 @@ export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps
             spacer so the buttons stay right-aligned. */}
         <div style={{ flex: 1 }} />
         {holding && holding.quoteSource !== "cash" && (
-          <button className="btn ghost sm" onClick={() => setFundOpen(true)}>
-            Fund details
+          <button
+            className="btn ghost sm"
+            onClick={() =>
+              detailStack.push(
+                isMarket ? { kind: "us", symbol: ticker } : { kind: "fund", id: ticker },
+              )
+            }
+          >
+            {isMarket ? "Security details" : "Fund details"}
           </button>
         )}
         <button
@@ -294,7 +317,9 @@ export function PositionScreen({ ticker, onBack, onRecord }: PositionScreenProps
         <HistoryList ticker={ticker} showRecap={false} onAddEntry={onRecord} />
       </div>
 
-      <FundDetailSheet projId={fundOpen ? ticker : null} onClose={() => setFundOpen(false)} />
+      {/* One host: US security or Thai fund detail, plus the funds its cross-links
+          push — one modal with Back/Close (modal-as-page). */}
+      <DetailSheetHost />
     </div>
   );
 }

@@ -88,6 +88,12 @@ export interface ModalProps {
   role?: "dialog" | "alertdialog";
   /** Extra class on the panel (e.g. a width modifier like `modal--txnwide`). */
   className?: string;
+  /**
+   * Whether this Modal registers its own browser-Back layer (default true). Set
+   * false when a host owns a multi-level back stack itself (DetailSheetHost) and
+   * needs Back to pop one level at a time rather than close the whole modal.
+   */
+  manageBack?: boolean;
   children: React.ReactNode;
 }
 
@@ -98,6 +104,7 @@ export function Modal({
   labelledBy,
   role,
   className,
+  manageBack = true,
   children,
 }: ModalProps) {
   const viewport = useViewport();
@@ -109,8 +116,9 @@ export function Modal({
 
   // Hardware/gesture Back (and the desktop Back button) closes the dialog before
   // it pops the screen beneath — the native-app expectation. Stacked dialogs
-  // (a confirm over a form) unwind one Back at a time, LIFO.
-  useBackDismiss(open, onClose);
+  // (a confirm over a form) unwind one Back at a time, LIFO. A host that manages
+  // its own multi-level stack opts out (manageBack=false) and owns the layers.
+  useBackDismiss(manageBack && open, onClose);
 
   // Portals need a DOM target; defer until mounted on the client.
   useEffect(() => setMounted(true), []);
@@ -222,15 +230,22 @@ export interface ModalHeaderProps {
   showClose?: boolean;
   /** Optional right-side action (e.g. an Edit button) rendered left of the ✕. */
   action?: React.ReactNode;
+  /** When set, a leading Back chevron pops one navigation level (modal-as-page). */
+  back?: () => void;
   children?: React.ReactNode;
 }
 
-function ModalHeader({ title, subtitle, id, showClose, action, children }: ModalHeaderProps) {
+function ModalHeader({ title, subtitle, id, showClose, action, back, children }: ModalHeaderProps) {
   const { variant, onClose } = useModalContext();
   const close = showClose ?? variant === "detail";
 
   return (
     <div className="modal-header">
+      {back && (
+        <button type="button" className="icon-btn modal-back" onClick={back} aria-label="Back">
+          <Icon name="arrow-left" size={16} />
+        </button>
+      )}
       <div className="modal-header-text">
         <div className="modal-title" id={id}>
           {title}
@@ -262,10 +277,16 @@ function ModalHeader({ title, subtitle, id, showClose, action, children }: Modal
 export interface ModalBodyProps {
   /** Vertical gap between direct children (px). */
   gap?: number;
+  /**
+   * Scroll the body back to the top whenever this value changes — for a host that
+   * swaps the body content in place (modal-as-page navigation) without remounting,
+   * so a deep-scrolled page doesn't carry its scroll into the next one.
+   */
+  scrollResetKey?: string | number | null;
   children: React.ReactNode;
 }
 
-function ModalBody({ gap, children }: ModalBodyProps) {
+function ModalBody({ gap, scrollResetKey, children }: ModalBodyProps) {
   const { isWide, setFooterShadow } = useModalContext();
   const bodyRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -295,6 +316,17 @@ function ModalBody({ gap, children }: ModalBodyProps) {
       getInstance()?.destroy();
     };
   }, [isWide, initOverlayScrollbars, getInstance]);
+
+  // Reset scroll to the top when the content identity changes (a navigation
+  // within one mounted body — modal-as-page). A remount already starts at top.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: isWide/getInstance only pick the scroll element; the reset is keyed on scrollResetKey.
+  useEffect(() => {
+    if (scrollResetKey == null) return;
+    const viewport = isWide
+      ? (getInstance()?.elements().viewport ?? bodyRef.current)
+      : bodyRef.current;
+    viewport?.scrollTo({ top: 0 });
+  }, [scrollResetKey]);
 
   // Footer-shadow IntersectionObserver. Re-binds when `isWide` flips because the
   // scroll root changes: the OS-generated viewport (wide) vs the body element

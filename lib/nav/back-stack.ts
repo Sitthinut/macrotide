@@ -76,6 +76,20 @@ export function clearBackLayers(): void {
   window.history.go(-n);
 }
 
+// Reclaim the TOP `n` layers in a single history.go(-n) — for a modal-as-page
+// stack closing all its levels at once (the detail-stack ✕). Batching avoids the
+// n separate, async history.back() calls the per-layer release() would make, which
+// could interleave with a synchronous pushState from a modal opened right after.
+// Only the top n are dropped; deeper layers (an underlying screen drill-in) stay.
+export function releaseTopLayers(n: number): void {
+  if (typeof window === "undefined") return;
+  const count = Math.min(n, stack.length);
+  if (count <= 0) return;
+  stack.length -= count;
+  pendingIgnore += count; // swallow the count echo popstates go(-count) fires
+  window.history.go(-count);
+}
+
 // Hook form for components with an `open` boolean (the Modal primitive). Pushes
 // a layer while open; routes Back to the latest onClose via a ref so an inline
 // onClose identity change doesn't churn the history entry.
