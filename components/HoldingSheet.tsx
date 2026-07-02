@@ -53,7 +53,7 @@ const ASSET_CLASSES: { value: AssetClass; label: string }[] = [
   { value: "bond", label: "Bond" },
   { value: "alternative", label: "Alternative" },
   { value: "cash", label: "Cash" },
-  { value: "unknown", label: "Unknown" },
+  { value: "unknown", label: "Unclassified" },
 ];
 
 export function HoldingSheet({

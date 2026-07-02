@@ -108,9 +108,9 @@ describe("advisor tools — read_portfolio", () => {
     expect(out.ok).toBe(true);
     expect(out.hasHoldings).toBe(true);
     expect(out.totalValue).toBe(1000);
-    // 60% stocks / 40% bonds.
-    const stocks = out.byClass.find((s) => s.label === "Stocks");
-    expect(stocks?.pct).toBe(60);
+    // 60% equity / 40% bonds.
+    const equity = out.byClass.find((s) => s.label === "Equity");
+    expect(equity?.pct).toBe(60);
     // Blended TER = (600*0.03 + 400*0.05) / 1000 = 0.038.
     expect(out.blendedTer).toBeCloseTo(0.038, 3);
     expect(out.concentration.holdingCount).toBe(2);

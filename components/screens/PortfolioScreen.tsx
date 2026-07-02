@@ -20,6 +20,7 @@ import { BenchmarkPicker } from "@/components/portfolio/BenchmarkPicker";
 import { ReturnsBreakdownSheet } from "@/components/ReturnsBreakdownSheet";
 import { SyncedIcon } from "@/components/SyncedBadge";
 import { KebabMenu } from "@/components/ui/KebabMenu";
+import { MiniTag } from "@/components/ui/MiniTag";
 import { Skeleton, SkeletonRows } from "@/components/ui/Skeleton";
 import {
   useModelPortfoliosView,
@@ -62,6 +63,11 @@ import {
   presentFeeChecks,
 } from "@/lib/portfolio/fee-creep-presentation";
 import { computeHealth, rebalanceHint, summarizeHealth } from "@/lib/portfolio/health";
+import {
+  holdingCategoryLabel,
+  holdingGeography,
+  holdingKind,
+} from "@/lib/portfolio/holding-taxonomy";
 import { performanceDisclaimer } from "@/lib/portfolio/performance-disclaimer";
 import { heroReturn } from "@/lib/portfolio/returns-breakdown";
 import { holdingColor } from "@/lib/portfolio/risk-palette";
@@ -2251,7 +2257,7 @@ function PortfolioScreenInner({
           data-active={filter === "equity"}
           onClick={() => setFilter("equity")}
         >
-          Stocks {byClass.equity.toFixed(0)}%
+          Equity {byClass.equity.toFixed(0)}%
         </button>
         <button
           type="button"
@@ -2288,7 +2294,7 @@ function PortfolioScreenInner({
             data-active={filter === "unknown"}
             onClick={() => setFilter("unknown")}
           >
-            Unknown {byClass.unknown.toFixed(0)}%
+            Unclassified {byClass.unknown.toFixed(0)}%
           </button>
         )}
       </div>
@@ -2324,6 +2330,11 @@ function PortfolioScreenInner({
           // Any holding can be viewed; only DB-backed holdings (with an id) can
           // be edited via the holdings API.
           const editable = h.id !== undefined;
+          // Cash earmark (#149): a set-aside account shows a lock marker next to the
+          // Cash chip, plus its purpose on line 2. Resolve it once for the row.
+          const mark = markByTicker.get(h.ticker.toUpperCase());
+          const kind = holdingKind(h);
+          const reservedCash = h.quoteSource === "cash" && mark?.role === "reserved";
           return (
             <div
               key={(h.id ?? h.ticker) + (h.source || "")}
@@ -2373,6 +2384,20 @@ function PortfolioScreenInner({
                           the upper-cased identity used everywhere else (#149). */}
                       {h.quoteSource === "cash" ? h.name || h.ticker : h.ticker}
                     </span>
+                    {/* Type chip (Fund / ETF / Stock / Cash) so a mixed Thai + US + cash
+                        list is scannable at a glance. Shared MiniTag in the SAME muted grey
+                        as the Explore list's asset-class / feeder badges (color --muted, bg
+                        --card-soft) so the two lists' badges are identical. Set-aside cash
+                        gets a lock INSIDE the chip ("locked cash") — a STATUS, not a type. */}
+                    {kind && (
+                      <MiniTag
+                        label={kind}
+                        color="var(--muted)"
+                        bg="var(--card-soft)"
+                        icon={reservedCash ? <Icon name="lock" size={9} /> : undefined}
+                        title={reservedCash ? "Reserved" : undefined}
+                      />
+                    )}
                     {h.syncedBroker && <SyncedIcon broker={h.syncedBroker} />}
                   </div>
                   <div className="sub">
@@ -2384,12 +2409,19 @@ function PortfolioScreenInner({
                       </>
                     )}
                     {(() => {
-                      const mark = markByTicker.get(h.ticker.toUpperCase());
-                      // The label (purpose) leads when set; otherwise "Reserved" flags a
-                      // reserved account, and an investable one just shows its category.
-                      // Always the row's own text color — no special tint (#149).
-                      const tag =
-                        mark?.purpose || (mark?.role === "reserved" ? "Reserved" : h.category);
+                      // Line 2 = asset class · exposure geography (each shown only when
+                      // known; the chip carries the instrument type, never repeated here).
+                      // Cash carries neither — it shows the user's own earmark label
+                      // (`purpose`) verbatim when set; the lock marker already flags
+                      // reserved, so an unlabelled account shows nothing (#149).
+                      const base = [holdingCategoryLabel(h), holdingGeography(h)]
+                        .filter(Boolean)
+                        .join(" · ");
+                      const tag = h.quoteSource === "cash" ? (mark?.purpose ?? "") : base;
+                      // Skip the separator entirely when there's nothing to show (an
+                      // uncategorized custom asset, or plain investable cash) rather than
+                      // dangle a " · ".
+                      if (!tag) return null;
                       return (
                         <>
                           {" · "}

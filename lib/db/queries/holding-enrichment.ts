@@ -165,6 +165,7 @@ export function enrichHoldingsWithCatalog<T extends Holding>(holdings: T[]): T[]
         // Overlay the catalog ETF TER so blended-fee/health count US ETFs — but a
         // user-entered TER wins (broker fee on top, or a stock the user set).
         ter: h.ter ?? us.ter,
+        instrumentType: us.securityType,
         ...tickerOverlay,
       } as T;
     }

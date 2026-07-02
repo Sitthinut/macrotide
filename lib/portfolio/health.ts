@@ -101,11 +101,11 @@ export interface HealthSignals {
 }
 
 const ASSET_CLASS_META: Record<AssetClass, { label: string; color: string }> = {
-  equity: { label: "Stocks", color: "var(--accent)" },
+  equity: { label: "Equity", color: "var(--accent)" },
   bond: { label: "Bonds", color: "#F4A434" },
   alternative: { label: "Alternatives", color: "#7C7CFF" },
   cash: { label: "Cash", color: "#9E9EA8" },
-  unknown: { label: "Unknown", color: "#A38A55" },
+  unknown: { label: "Unclassified", color: "#A38A55" },
 };
 
 // Reserved cash (#149) — set-aside cash shown as its OWN slice, a darker shade of the
