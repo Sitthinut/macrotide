@@ -120,6 +120,13 @@
       "when": 1782948053202,
       "tag": "0016_easy_menace",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1782972664585,
+      "tag": "0017_aberrant_grandmaster",
+      "breakpoints": true
     }
   ]
 }

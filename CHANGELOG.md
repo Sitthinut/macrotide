@@ -15,6 +15,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **US ETFs now show an asset class and exposure region** on their holdings-list
+  row, derived nightly from the fund's SEC N-PORT look-through — its asset
+  category mix names the class (mostly bonds → Fixed Income, mostly equity →
+  Equity), its country mix names the region (US / Intl / EM / Global). Covers
+  ETFs beyond the curated starter map, and widens as holdings coverage grows.
+
 - **The Advisor can now record cash for you from chat.** Tell it "set my SCB
   savings to ฿100,000", "I deposited ฿20,000", or "I withdrew ฿5,000" and it
   drafts the matching Set balance / deposit / withdrawal into the same review

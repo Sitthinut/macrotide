@@ -166,6 +166,7 @@ export function enrichHoldingsWithCatalog<T extends Holding>(holdings: T[]): T[]
         // user-entered TER wins (broker fee on top, or a stock the user set).
         ter: h.ter ?? us.ter,
         instrumentType: us.securityType,
+        exposureRegion: us.exposureRegion,
         ...tickerOverlay,
       } as T;
     }

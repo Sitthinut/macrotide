@@ -54,11 +54,21 @@ describe("refreshEtfHoldings", () => {
         getHoldings: async () => result("Apple Inc.", "Microsoft"),
         getTer: async () => null,
       });
-      expect(res).toEqual({ selected: 1, withHoldings: 1, withTer: 0, errored: 0, tracked: 0 });
+      expect(res).toEqual({
+        selected: 1,
+        withHoldings: 1,
+        withTer: 0,
+        errored: 0,
+        tracked: 0,
+        classified: 1,
+      });
       expect(getEtfHoldings("VOO").holdings.map((h) => h.name)).toEqual([
         "Apple Inc.",
         "Microsoft",
       ]);
+      // Derived from the all-equity, all-US look-through (#268).
+      expect(getUsSecurity("VOO")?.assetClass).toBe("equity");
+      expect(getUsSecurity("VOO")?.exposureRegion).toBe("US");
     });
   });
 
@@ -90,7 +100,14 @@ describe("refreshEtfHoldings", () => {
         }),
         getTer: async () => null,
       });
-      expect(res).toEqual({ selected: 1, withHoldings: 0, withTer: 0, errored: 0, tracked: 0 });
+      expect(res).toEqual({
+        selected: 1,
+        withHoldings: 0,
+        withTer: 0,
+        errored: 0,
+        tracked: 0,
+        classified: 0,
+      });
       expect(getEtfHoldings("SPY").fetchedAt).toBe("2026-06-26T01:00:00Z");
     });
   });
@@ -104,7 +121,14 @@ describe("refreshEtfHoldings", () => {
         getHoldings: async () => ({ asOfDate: null, holdings: [], totalCount: 0, status: "error" }),
         getTer: async () => null,
       });
-      expect(res).toEqual({ selected: 1, withHoldings: 0, withTer: 0, errored: 1, tracked: 0 });
+      expect(res).toEqual({
+        selected: 1,
+        withHoldings: 0,
+        withTer: 0,
+        errored: 1,
+        tracked: 0,
+        classified: 0,
+      });
       // Never stamped → still cold → will retry on the next run / JIT open.
       expect(getEtfHoldings("VOO").fetchedAt).toBeNull();
     });

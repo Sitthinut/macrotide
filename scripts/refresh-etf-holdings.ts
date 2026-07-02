@@ -59,6 +59,7 @@ async function main() {
   console.log("\nDone.");
   console.log(`  Selected:      ${r.selected}`);
   console.log(`  With holdings: ${r.withHoldings}`);
+  console.log(`  Classified:    ${r.classified}`);
   console.log(`  Errored:       ${r.errored}`);
 }
 

@@ -33,6 +33,10 @@ export type Holding = HoldingRow & {
    * us_securities by enrichHoldingsWithCatalog. Absent for Thai funds (identified
    * by quoteSource) and unresolved/custom holdings. Drives the row type chip. */
   instrumentType?: "stock" | "etf" | null;
+  /** Derived exposure region ("US"/"Intl"/"EM"/"Global") for a US ETF, overlaid
+   * from us_securities (N-PORT look-through). Absent otherwise. Drives the row's
+   * line-2 geography for ETFs beyond the curated starter map. */
+  exposureRegion?: string | null;
   /**
    * Broker name when this holding was imported from a connected broker, else
    * null. RELIABLE: derived only from ledger rows carrying a non-null

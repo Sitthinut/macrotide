@@ -41,6 +41,13 @@ export interface Holding {
    */
   instrumentType?: "etf" | "stock" | null;
   /**
+   * Derived exposure region ("US" | "Intl" | "EM" | "Global") for a US ETF,
+   * overlaid from us_securities (N-PORT country look-through). Absent for stocks,
+   * Thai funds, cash, and ETFs not yet fetched. Drives the holdings-list line-2
+   * geography for ETFs beyond the curated starter map.
+   */
+  exposureRegion?: string | null;
+  /**
    * SEC risk-spectrum code (RS1…RS8, RS81), overlaid from the catalog. Drives
    * the holding swatch color via the risk palette; absent for non-catalog
    * holdings (color then falls back to asset class).
