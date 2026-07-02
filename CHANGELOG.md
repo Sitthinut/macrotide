@@ -15,6 +15,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **US ETF holdings and look-through now fetch reliably on the server.** SEC's
+  www.sec.gov enforces a "Fair Access" policy that 403s a plain browser
+  User-Agent from datacenter IPs; the app now sends SEC's declared contact UA, so
+  ETF holdings, the "held via" reverse lookup (which funds hold a stock), and the
+  N-PORT-derived asset class / exposure region actually populate in production.
+
 - **US ETFs now show an asset class and exposure region** on their holdings-list
   row, derived nightly from the fund's SEC N-PORT look-through — its asset
   category mix names the class (mostly bonds → Fixed Income, mostly equity →

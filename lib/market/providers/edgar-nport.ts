@@ -21,7 +21,7 @@
 //   2. Fetch https://www.sec.gov/Archives/edgar/data/{registrantCik}/{acc}/primary_doc.xml
 //   3. Parse <invstOrSec> blocks; sort by weight; keep the top N.
 
-import { BROWSER_USER_AGENT } from "../user-agent";
+import { secEdgarUserAgent } from "../user-agent";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -81,18 +81,17 @@ export interface NportResult {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// SEC's 403 ("Undeclared Automated Tool") targets bare bot UAs, not browsers, so
-// we send the shared browser UA (lib/market/user-agent.ts) — no contact string
-// needed. SEC_EDGAR_USER_AGENT can override it in prod if that ever changes.
+// www.sec.gov (Archives) enforces SEC's "Fair Access" policy and 403s a plain
+// browser UA from a datacenter IP; it serves only a UA declaring a contact. We
+// send the declared SEC EDGAR UA (lib/market/user-agent.ts); SEC_EDGAR_USER_AGENT
+// overrides it with a real project contact.
 const EFTS_SEARCH = "https://efts.sec.gov/LATEST/search-index";
 const ARCHIVES = "https://www.sec.gov/Archives/edgar/data";
 // Look back far enough to always include the latest quarterly filing (filed
 // within ~60 days of a quarter end, quarters 90 days apart).
 const LOOKBACK_DAYS = 200;
 
-function userAgent(): string {
-  return process.env.SEC_EDGAR_USER_AGENT || BROWSER_USER_AGENT;
-}
+const userAgent = secEdgarUserAgent;
 
 // NPORT-P asset-category codes → human labels (raw code as fallback).
 const ASSET_CAT_LABELS: Record<string, string> = {
