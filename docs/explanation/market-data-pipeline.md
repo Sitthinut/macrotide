@@ -183,6 +183,16 @@ touching the portfolio "All" chart:
   fills lazily on first open (one ~1–2s cold fetch, then cached). There is no
   whole-US-catalog prewarm — the free quotas and the append-only `nav_history`
   rule it out.
+- **ETF holdings + "held via" → widen over nights, not instant.** An ETF's SEC
+  N-PORT constituents — and the reverse "which ETFs hold this stock" list plus the
+  derived asset-class / exposure-region it powers — come from a bounded nightly
+  holdings pass (`refresh-etf-holdings`, most-popular ETFs first, advancing through
+  the catalog on successive runs); a cold ETF also JIT-fills its own holdings on
+  first detail open. So a popular stock's held-via lands within a night or two, but
+  a stock held *only* by ETFs not yet ingested shows none until coverage reaches
+  them — there's no per-stock on-demand fetch (the reverse index is a byproduct of
+  ingesting ETFs forward, then resolving each constituent's CUSIP/ISIN→ticker via
+  `resolve-etf-tickers`; see the data model).
 - **FX is not a limiter.** THB↔USD conversion history rides on Frankfurter
   (keyless, ECB-backed, deep to 1999), so the currency leg of a blended "All"
   chart never bottlenecks it.
