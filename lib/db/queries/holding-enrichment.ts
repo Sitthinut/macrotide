@@ -1,6 +1,7 @@
 import "server-only";
 import { eq, inArray, sql } from "drizzle-orm";
 import { cleanUsSecurityName } from "../../market/us-security-name";
+import { translateThaiPolicy } from "../../portfolio/holding-taxonomy";
 import { getMarketDb } from "../context";
 import { fundCatalog, fundShareClasses } from "../schema";
 import { resolveCatalogSymbol } from "./funds";
@@ -177,6 +178,14 @@ export function enrichHoldingsWithCatalog<T extends Holding>(holdings: T[]): T[]
     // the old code); a no-op when the held ticker is already current.
     const tickerOverlay =
       sym && sym.currentTicker !== h.ticker ? { ticker: sym.currentTicker } : {};
-    return { ...h, ...meta, ...tickerOverlay } as T;
+    const enriched = { ...h, ...meta, ...tickerOverlay } as T;
+    // Balanced Thai funds (SEC policy ผสม) carry no catalog asset_class, so they'd
+    // fall into "Unclassified". Classify them "mixed" from the translated policy so
+    // they read as a real (opaque, un-decomposed) sleeve; genuinely unclassifiable
+    // funds keep the empty class (#267).
+    if (!enriched.assetClass && translateThaiPolicy(meta.category) === "Mixed") {
+      enriched.assetClass = "mixed";
+    }
+    return enriched;
   });
 }

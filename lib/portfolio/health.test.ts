@@ -63,6 +63,16 @@ describe("allocationByClass", () => {
     expect(allocationByClass([], 0)).toEqual([]);
   });
 
+  it("surfaces a Mixed sleeve for balanced funds, ordered after Bonds (#267)", () => {
+    const withMixed = [...holdings, holding({ ticker: "K-BALANCED", value: 250, class: "mixed" })];
+    const slices = allocationByClass(withMixed, TOTAL + 250);
+    const mixed = slices.find((s) => s.key === "mixed");
+    expect(mixed?.label).toBe("Mixed");
+    expect(mixed?.pct).toBeCloseTo(20);
+    const keys = slices.map((s) => s.key);
+    expect(keys.indexOf("mixed")).toBeGreaterThan(keys.indexOf("bond"));
+  });
+
   it("pulls a RESERVED cash account into its own slice, out of Cash (#149)", () => {
     const slices = allocationByClass(holdings, TOTAL, new Set(["KFCASH-A"]));
     const map = Object.fromEntries(slices.map((s) => [s.key, s.pct]));

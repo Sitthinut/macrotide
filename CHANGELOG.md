@@ -26,6 +26,11 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   Vanguard, "sp500" finds S&P 500 funds, exact tickers rank first, and searching
   ~13k securities no longer scans the table. Search now feels uniform across both
   catalogs.
+- **Balanced funds now read as a "Mixed" asset class** instead of falling into
+  Unclassified. Thai balanced funds (SEC policy ผสม) carry no catalog asset
+  class, so they get one derived from their policy — surfaced as its own filter
+  tab, allocation sleeve, and donut slice (an opaque bucket, not decomposed into
+  equity/bond). Unclassified is now reserved for genuinely unclassified holdings.
 
 - **The Advisor can now record cash for you from chat.** Tell it "set my SCB
   savings to ฿100,000", "I deposited ฿20,000", or "I withdrew ฿5,000" and it

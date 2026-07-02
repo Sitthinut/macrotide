@@ -752,7 +752,7 @@ export function createAdvisorTools({ userId }: AdvisorToolOptions) {
           .optional()
           .describe("Total expense ratio as a fraction (e.g. 0.003)."),
         assetClass: z
-          .enum(["equity", "bond", "alternative", "cash"])
+          .enum(["equity", "bond", "mixed", "alternative", "cash"])
           .optional()
           .describe("Asset class if you can infer it from the fund name; otherwise omit."),
         region: z

@@ -24,7 +24,7 @@ import type {
 } from "@/lib/static/types";
 
 const DEFAULT_RISK: RiskBand = "balanced";
-const ASSET_CLASSES: AssetClass[] = ["equity", "bond", "alternative", "cash"];
+const ASSET_CLASSES: AssetClass[] = ["equity", "bond", "mixed", "alternative", "cash"];
 
 function quotesByTicker(quotes: FundQuote[]): Map<string, FundQuote> {
   // fund_quotes.ticker is the combined cache key "source:ticker" — see

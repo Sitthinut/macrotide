@@ -51,6 +51,7 @@ export interface HoldingSheetProps {
 const ASSET_CLASSES: { value: AssetClass; label: string }[] = [
   { value: "equity", label: "Equity" },
   { value: "bond", label: "Bond" },
+  { value: "mixed", label: "Mixed" },
   { value: "alternative", label: "Alternative" },
   { value: "cash", label: "Cash" },
   { value: "unknown", label: "Unclassified" },
