@@ -31,6 +31,9 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   class, so they get one derived from their policy — surfaced as its own filter
   tab, allocation sleeve, and donut slice (an opaque bucket, not decomposed into
   equity/bond). Unclassified is now reserved for genuinely unclassified holdings.
+- **Explore's US stock/ETF tabs auto-load the first 100 results** click-free,
+  matching the Thai fund finder (they previously stopped at 50 and required a
+  click); the long tail past 100 stays opt-in via "Load more".
 
 - **The Advisor can now record cash for you from chat.** Tell it "set my SCB
   savings to ฿100,000", "I deposited ฿20,000", or "I withdrew ฿5,000" and it
