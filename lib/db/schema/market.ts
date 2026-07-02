@@ -788,9 +788,16 @@ export const usSecurities = sqliteTable(
     // Listing exchange, mapped from the directory's single-letter code:
     // 'NYSE' | 'NYSE American' | 'NYSE Arca' | 'Cboe BZX' | 'Nasdaq' | NULL.
     exchange: text("exchange"),
-    // Reserved for future enrichment ('equity' | 'bond' | 'commodity' | …);
-    // the directory doesn't carry it, so NULL = not yet classified.
+    // Normalized asset class ('equity' | 'bond' | 'alternative' | 'cash'). The
+    // Nasdaq directory doesn't carry it; for ETFs it's DERIVED nightly from the
+    // N-PORT holdings' asset-category mix (lib/market/etf-classify). NULL = not
+    // yet classified (a stock with no holdings, or an ETF not yet fetched).
     assetClass: text("asset_class"),
+    // Exposure geography ('US' | 'Intl' | 'EM' | 'Global') for an ETF, DERIVED
+    // nightly from the holdings' country mix (lib/market/etf-classify) — the
+    // holdings-list line-2 region for ETFs beyond the curated starter map. NULL
+    // for stocks (a listed company is domestic) and un-fetched ETFs.
+    exposureRegion: text("exposure_region"),
     // Composite FIGI (OpenFIGI) — the rename-PERSISTENT, security-level identifier
     // (the US analogue of a Thai fund's ISIN). Survives a ticker rename (FB→META
     // keep one FIGI), so a held holding anchored by FIGI resolves to the current

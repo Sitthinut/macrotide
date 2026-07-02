@@ -352,6 +352,9 @@ export interface UsHoldingResolution {
   /** Instrument type — drives the "ETF"/"Stock" row chip. Null only if a future
    *  catalog row lacks it (the column is NOT NULL today). */
   securityType: "stock" | "etf" | null;
+  /** Derived exposure region ("US"/"Intl"/"EM"/"Global") for an ETF; drives the
+   *  holdings-list line-2 geography. Null for stocks and un-fetched ETFs. */
+  exposureRegion: string | null;
 }
 
 /**
@@ -374,6 +377,7 @@ export function resolveUsHolding(input: {
     assetClass: row.assetClass,
     ter: row.ter,
     securityType: row.securityType,
+    exposureRegion: row.exposureRegion,
   };
 }
 
@@ -467,6 +471,27 @@ export function setUsSecurityTer(symbol: string, ter: number): number {
   return getMarketDb()
     .update(usSecurities)
     .set({ ter })
+    .where(sql`UPPER(${usSecurities.symbol}) = ${tickerKey(symbol)}`)
+    .run().changes;
+}
+
+/**
+ * Write an ETF's DERIVED asset class + exposure region (from N-PORT look-through;
+ * see lib/market/etf-classify). Only sets a field when its value is non-null, so a
+ * run that can't decide one attribute doesn't clobber a prior good value with null.
+ * Case-insensitive; no-op for an uncatalogued symbol or an empty patch.
+ */
+export function setUsEtfDerived(
+  symbol: string,
+  patch: { assetClass?: string | null; exposureRegion?: string | null },
+): number {
+  const set: Partial<{ assetClass: string; exposureRegion: string }> = {};
+  if (patch.assetClass != null) set.assetClass = patch.assetClass;
+  if (patch.exposureRegion != null) set.exposureRegion = patch.exposureRegion;
+  if (Object.keys(set).length === 0) return 0;
+  return getMarketDb()
+    .update(usSecurities)
+    .set(set)
     .where(sql`UPPER(${usSecurities.symbol}) = ${tickerKey(symbol)}`)
     .run().changes;
 }

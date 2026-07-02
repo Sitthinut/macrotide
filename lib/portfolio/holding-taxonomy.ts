@@ -126,7 +126,8 @@ const ETF_REGION: Record<string, Region> = Object.fromEntries(
  * Confidence-tiered exposure geography — "US" / "Intl" / "EM" / "Global" — or null
  * when we can't stand behind a value (never guessed from listing country):
  *   • US single stock → "US" (a listed company is domestic exposure).
- *   • US ETF → the curated {@link ETF_REGION} map, else null (unknown, omitted).
+ *   • US ETF → the DERIVED N-PORT region (`exposureRegion`, broad coverage) if
+ *     present, else the curated {@link ETF_REGION} starter map, else null.
  *   • Thai fund → its SEC investment region ("Thailand" / "Foreign"); "Mixed" and
  *     unknowns are omitted rather than shown as an ambiguous label.
  *   • Cash / custom → null.
@@ -138,7 +139,8 @@ export function holdingGeography(h: Holding): string | null {
   }
   if (h.quoteSource === "market") {
     if (h.instrumentType === "stock") return "US";
-    if (h.instrumentType === "etf") return ETF_REGION[h.ticker.trim().toUpperCase()] ?? null;
+    if (h.instrumentType === "etf")
+      return h.exposureRegion ?? ETF_REGION[h.ticker.trim().toUpperCase()] ?? null;
   }
   return null;
 }
