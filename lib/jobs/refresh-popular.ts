@@ -79,7 +79,9 @@ async function runPool<T>(
 export interface RefreshPopularOptions {
   /** Most-actives pull size (the candidate pool). Default 100. */
   candidateTop?: number;
-  /** Keep the top-N candidates as the popular set. Default 75. */
+  /** Keep the top-N candidates as the popular set. Default 100 — the whole
+   *  most-actives pool (Alpaca caps `candidateTop` at 100), minus the leveraged/
+   *  inverse + non-priceable rows dropped in ranking. */
   popularKeep?: number;
   /** Also warm the top-M recently-demanded symbols. Default 25. */
   demandKeep?: number;
@@ -120,7 +122,7 @@ export async function refreshPopular(
   opts: RefreshPopularOptions = {},
 ): Promise<RefreshPopularResult> {
   const candidateTop = opts.candidateTop ?? 100;
-  const popularKeep = opts.popularKeep ?? 75;
+  const popularKeep = opts.popularKeep ?? 100;
   const demandKeep = opts.demandKeep ?? 25;
   const demandWindowDays = opts.demandWindowDays ?? 14;
   const range = opts.range ?? "1y";
