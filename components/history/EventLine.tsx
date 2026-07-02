@@ -130,6 +130,9 @@ export function EventLine({
   } else if (txn.units != null && txn.pricePerUnit != null) {
     sub.push(`${units(txn.units)} @ ฿${price(txn.pricePerUnit)}`);
   }
+  // A reconciled Set balance moved no money — say so on the saved row, so a
+  // classification that shapes contributed capital stays auditable after save (#232).
+  if (kind === "cash_balance" && txn.reconcile) sub.push("no money moved");
   if (txn.source) sub.push(txn.source);
 
   const costUnknown = anchor && txn.pricePerUnit == null;

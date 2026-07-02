@@ -11,6 +11,7 @@ import {
   PlanPanel,
   PortfoliosPanel,
 } from "@/components/AppPanels";
+import { CashNudgeCard } from "@/components/CashNudgeCard";
 import { FundSelectScreen } from "@/components/FundSelect";
 import { Icon } from "@/components/Icon";
 import { type PortfolioFormValues, PortfolioSheet } from "@/components/PortfolioSheet";
@@ -35,6 +36,7 @@ import { invalidate, useResource } from "@/lib/fetchers/swr";
 import { clearBackLayers, pushBackLayer } from "@/lib/nav/back-stack";
 import type { AdvisorScreenContext } from "@/lib/portfolio/chat-suggestions";
 import type { ExtractedTxnRow } from "@/lib/portfolio/ocr";
+import type { CashNudge } from "@/lib/portfolio/settlement-cash";
 import { getScrollRoot, saveScreenScroll } from "@/lib/screenScroll";
 import type { Portfolio } from "@/lib/static/types";
 import { type ImportSeedRow, useImportSeed } from "@/lib/stores/import-seed";
@@ -348,6 +350,11 @@ export function App({ isDemo }: { isDemo: boolean }) {
   // into the Add sheet's Activity mode. The all-activity ledger is now its own
   // screen (setScreen("activity")), not a modal.
   const [txnSeed, setTxnSeed] = useState<ExtractedTxnRow[] | null>(null);
+  // Funded-from-cash nudges from the last save (#232) — dismissible cards on the
+  // History screen the save lands on. Session-only; replaced by the next save.
+  const [cashNudges, setCashNudges] = useState<{ bucketId: string; nudges: CashNudge[] } | null>(
+    null,
+  );
   // Ticker for the per-position drill-in screen (One Truth: a holding opens its
   // own record — summary above the history that produced it).
   const [positionTicker, setPositionTicker] = useState<string | null>(null);
@@ -824,6 +831,26 @@ export function App({ isDemo }: { isDemo: boolean }) {
             setAddMode("activity");
             setAddOpen(true);
           }}
+          notice={
+            cashNudges && cashNudges.nudges.length > 0 ? (
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: 8, margin: "4px 0 12px" }}
+              >
+                {cashNudges.nudges.map((n) => (
+                  <CashNudgeCard
+                    key={`${n.buyTicker}-${n.tradeDate}-${n.shortfall}`}
+                    bucketId={cashNudges.bucketId}
+                    nudge={n}
+                    onResolve={() =>
+                      setCashNudges((prev) =>
+                        prev ? { ...prev, nudges: prev.nudges.filter((x) => x !== n) } : prev,
+                      )
+                    }
+                  />
+                ))}
+              </div>
+            ) : null
+          }
         />
       );
     }
@@ -950,6 +977,7 @@ export function App({ isDemo }: { isDemo: boolean }) {
           openConnect();
         }}
         onSaved={() => navigate("activity")}
+        onCashNudges={(bucketId, nudges) => setCashNudges({ bucketId, nudges })}
       />
     </>
   );

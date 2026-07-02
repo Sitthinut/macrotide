@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { LedgerTxn } from "./lots";
-import { cashContributionFlows, foldSettlementCash } from "./settlement-cash";
+import {
+  cashBalancesAsOf,
+  cashContributionFlows,
+  foldSettlementCash,
+  previewBalanceChange,
+} from "./settlement-cash";
 
 // Synthetic data only (EXAMPLE-FUND-*), never real fund codes.
 const A = "EXAMPLE-FUND-A";
@@ -421,5 +426,332 @@ describe("cashContributionFlows (the shared cash-contribution definition)", () =
       new Set(["EMERGENCY"]), // reserved → skipped
     );
     expect(flows).toEqual([{ date: "2024-01-01", amount: 1000 }]); // only the investable account
+  });
+});
+
+describe("buyShortfallById (#232 — the funded-from-cash nudge's trigger)", () => {
+  it("reports only the part in-transit proceeds did not cover, keyed by txn id", () => {
+    const r = foldSettlementCash(
+      [
+        tx({ kind: "sell", units: 100, amount: 1000, tradeDate: "2024-03-01", id: 1 }),
+        // 1000 covered by the sell; 500 came from outside.
+        tx({ ticker: B, kind: "buy", units: 10, amount: -1500, tradeDate: "2024-03-05", id: 2 }),
+      ],
+      TODAY,
+    );
+    expect(r.buyShortfallById.get(2)).toBeCloseTo(500, 6);
+    expect(r.buyShortfallById.has(1)).toBe(false);
+  });
+
+  it("a fully covered rebuy never appears (a reinvested switch cannot double-fire)", () => {
+    const r = foldSettlementCash(
+      [
+        tx({ kind: "sell", units: 100, amount: 1000, tradeDate: "2024-03-01", id: 1 }),
+        tx({ ticker: B, kind: "buy", units: 10, amount: -1000, tradeDate: "2024-03-05", id: 2 }),
+      ],
+      TODAY,
+    );
+    expect(r.buyShortfallById.size).toBe(0);
+  });
+
+  it("a buy with no live lots is fully uncovered", () => {
+    const r = foldSettlementCash(
+      [tx({ kind: "buy", units: 10, amount: -800, tradeDate: "2024-03-01", id: 7 })],
+      TODAY,
+    );
+    expect(r.buyShortfallById.get(7)).toBeCloseTo(800, 6);
+  });
+});
+
+describe("cashBalancesAsOf", () => {
+  it("folds deposit/withdraw/Set-balance into a per-account THB balance at a date", () => {
+    const txns: LedgerTxn[] = [
+      { ticker: "SAVINGS", kind: "deposit", amount: -1000, tradeDate: "2024-01-01" },
+      { ticker: "SAVINGS", kind: "withdraw", amount: 200, tradeDate: "2024-01-05" },
+      {
+        ticker: "USD ACCT",
+        kind: "cash_balance",
+        units: 100,
+        fxToThb: 35,
+        amount: 0,
+        tradeDate: "2024-01-03",
+      },
+      // After the as-of date — must not count.
+      { ticker: "SAVINGS", kind: "deposit", amount: -9000, tradeDate: "2024-02-01" },
+    ];
+    const balances = cashBalancesAsOf(txns, "2024-01-31");
+    expect(balances.get("SAVINGS")).toBeCloseTo(800, 6);
+    expect(balances.get("USD ACCT")).toBeCloseTo(3500, 6);
+  });
+});
+
+describe("Set-balance auto-absorb (#232 — a raise soaks up in-transit proceeds first)", () => {
+  const assertBal = (units: number, tradeDate: string, p: Partial<LedgerTxn> = {}): LedgerTxn => ({
+    ticker: "SAVINGS",
+    kind: "cash_balance",
+    units,
+    fxToThb: 1,
+    amount: 0,
+    tradeDate,
+    ...p,
+  });
+
+  it("a raise fully covered by proceeds produces NO flow and consumes the lot", () => {
+    const r = foldSettlementCash(
+      [
+        tx({ kind: "buy", units: 100, amount: -1000, tradeDate: "2024-01-01" }),
+        tx({ kind: "sell", units: 100, amount: 1500, tradeDate: "2024-03-01", id: 1 }),
+        assertBal(1500, "2024-03-05", { id: 2 }),
+      ],
+      TODAY,
+      undefined,
+      new Map([[1, 1000]]), // sell cost basis 1000 → 500 realized gain rides in the lot
+    );
+    // Contribution: only the original buy. The landing is internal — and crucially
+    // the 500 gain SURVIVES (value 1500 held cash vs 1000 contributed), where the
+    // old raise-is-contribution default erased it (+1500 assert − 1000 expiry).
+    expect(r.externalFlows).toEqual([{ date: "2024-01-01", amount: 1000 }]);
+    expect(r.absorbedByTxnId.get(2)).toBeCloseTo(1500, 6);
+    expect(r.terminalCash).toBe(0);
+    // In-transit cash lives exactly [sell, assert) — then it's the held position's.
+    expect(cashOn(r, "2024-03-03")).toBeCloseTo(1500, 6);
+    expect(cashOn(r, "2024-03-05")).toBe(0);
+  });
+
+  it("a mixed raise (salary + proceeds) flows only the remainder", () => {
+    const r = foldSettlementCash(
+      [
+        tx({ kind: "sell", units: 100, amount: 20000, tradeDate: "2024-03-01" }),
+        assertBal(80000, "2024-02-01", { id: 5 }), // prior balance 80k
+        assertBal(130000, "2024-03-05", { id: 6 }), // +50k = 20k proceeds + 30k salary
+      ],
+      TODAY,
+    );
+    expect(r.absorbedByTxnId.get(6)).toBeCloseTo(20000, 6);
+    expect(r.cashEventFlows).toEqual([
+      { date: "2024-02-01", amount: 80000 }, // first assert = its full amount
+      { date: "2024-03-05", amount: 30000 }, // the salary remainder only
+    ]);
+  });
+
+  it("absorption respects the window — stale proceeds cannot be absorbed", () => {
+    const r = foldSettlementCash(
+      [
+        tx({ kind: "sell", units: 100, amount: 20000, tradeDate: "2024-01-01" }),
+        assertBal(20000, "2024-03-05", { id: 3 }), // > 30 days later
+      ],
+      TODAY,
+    );
+    // Lot expired (capital withdrawn at the sell date); the raise is all new money.
+    expect(r.absorbedByTxnId.size).toBe(0);
+    expect(r.cashEventFlows).toEqual([{ date: "2024-03-05", amount: 20000 }]);
+    expect(r.externalFlows).toEqual([
+      { date: "2024-01-01", amount: -20000 },
+      { date: "2024-03-05", amount: 20000 },
+    ]);
+  });
+
+  it("an absorbing assert beats a same-day buy to the lots; the buy reads bank-funded", () => {
+    const r = foldSettlementCash(
+      [
+        tx({ kind: "sell", units: 100, amount: 20000, tradeDate: "2024-03-01" }),
+        tx({ ticker: B, kind: "buy", units: 10, amount: -20000, tradeDate: "2024-03-05", id: 9 }),
+        assertBal(20000, "2024-03-05", { id: 8 }),
+      ],
+      TODAY,
+    );
+    // The balance holds the proceeds (physically: they landed in the bank), so the
+    // same-day buy was paid some other way — it shows the full shortfall and the
+    // funded-from-cash nudge offers the matching withdraw.
+    expect(r.absorbedByTxnId.get(8)).toBeCloseTo(20000, 6);
+    expect(r.buyShortfallById.get(9)).toBeCloseTo(20000, 6);
+  });
+
+  it("EVENTUAL CORRECTNESS: parked-and-asserted vs walked-away converge on the same lifetime contribution", () => {
+    const trades = [
+      tx({ kind: "buy", units: 100, amount: -1000, tradeDate: "2024-01-01" }),
+      tx({ kind: "sell", units: 100, amount: 1000, tradeDate: "2024-03-01" }),
+    ];
+    const sum = (flows: readonly { amount: number }[]) => flows.reduce((s, f) => s + f.amount, 0);
+    const walked = foldSettlementCash(trades, TODAY);
+    const asserted = foldSettlementCash([...trades, assertBal(1000, "2024-03-05")], TODAY);
+    // Walk away: +1000 buy − 1000 expiry = 0. Assert: +1000 buy, raise absorbed = …
+    // 1000 still inside as held cash — the CONTRIBUTION differs by exactly the money
+    // still in the book, i.e. both agree the user put in 1000 and took nothing out.
+    expect(sum(walked.externalFlows)).toBeCloseTo(0, 6);
+    expect(sum(asserted.externalFlows)).toBeCloseTo(1000, 6);
+    expect(asserted.cashEventFlows).toEqual([]); // the raise itself moved no money
+  });
+
+  it("a reserved account's assert neither flows nor absorbs (lots expire normally)", () => {
+    const txns = [
+      tx({ kind: "sell", units: 100, amount: 20000, tradeDate: "2024-03-01" }),
+      assertBal(20000, "2024-03-05", { ticker: "EMERGENCY", id: 4 }),
+    ];
+    const excluded = foldSettlementCash(txns, TODAY, undefined, undefined, new Set(["EMERGENCY"]));
+    // Parking proceeds into a set-aside account IS a withdrawal from the return's
+    // perspective — the untouched lot expires and records exactly that.
+    expect(excluded.absorbedByTxnId.size).toBe(0);
+    expect(excluded.cashEventFlows).toEqual([]);
+    expect(excluded.externalFlows).toEqual([{ date: "2024-03-01", amount: -20000 }]);
+    // Without the exclusion the same assert absorbs.
+    expect(foldSettlementCash(txns, TODAY).absorbedByTxnId.get(4)).toBeCloseTo(20000, 6);
+  });
+
+  it("legacy reconcile rows still restate with no flow and clear the lots", () => {
+    const r = foldSettlementCash(
+      [
+        tx({ kind: "sell", units: 100, amount: 20000, tradeDate: "2024-03-01" }),
+        assertBal(50000, "2024-03-05", { reconcile: true, id: 7 }),
+      ],
+      TODAY,
+    );
+    expect(r.cashEventFlows).toEqual([]);
+    expect(r.absorbedByTxnId.size).toBe(0);
+    expect(r.terminalCash).toBe(0); // lots cleared, not expired
+    expect(r.externalFlows).toEqual([]);
+  });
+});
+
+describe("previewBalanceChange (#232 — the entry form's consequence line)", () => {
+  const sellThenAssert: LedgerTxn[] = [
+    tx({ kind: "buy", units: 100, amount: -1000, tradeDate: "2024-01-01" }),
+    tx({ kind: "sell", units: 100, amount: 1500, tradeDate: "2024-03-01" }),
+  ];
+
+  it("a covered raise previews as fully absorbed", () => {
+    const p = previewBalanceChange(sellThenAssert, {
+      ticker: "SAVINGS",
+      tradeDate: "2024-03-05",
+      assertedThb: 1500,
+    });
+    expect(p).toEqual({ prior: 0, first: true, delta: 1500, absorbed: 1500 });
+  });
+
+  it("a raise beyond the proceeds previews the split", () => {
+    const p = previewBalanceChange(sellThenAssert, {
+      ticker: "SAVINGS",
+      tradeDate: "2024-03-05",
+      assertedThb: 2000,
+    });
+    expect(p.delta).toBe(2000);
+    expect(p.absorbed).toBeCloseTo(1500, 6);
+  });
+
+  it("measures the raise against the account's PRIOR balance, case-insensitively", () => {
+    const p = previewBalanceChange(
+      [
+        ...sellThenAssert,
+        {
+          ticker: "Savings",
+          kind: "cash_balance",
+          units: 400,
+          fxToThb: 1,
+          amount: 0,
+          tradeDate: "2024-02-01",
+        },
+      ],
+      { ticker: "SAVINGS", tradeDate: "2024-03-05", assertedThb: 1900 },
+    );
+    expect(p.prior).toBe(400);
+    expect(p.first).toBe(false);
+    expect(p.delta).toBe(1500);
+    expect(p.absorbed).toBeCloseTo(1500, 6);
+  });
+
+  it("a same-day buy does not pre-consume the lots (the fold ranks it after the assert)", () => {
+    const p = previewBalanceChange(
+      [
+        ...sellThenAssert,
+        tx({ ticker: B, kind: "buy", units: 10, amount: -1500, tradeDate: "2024-03-05", id: 9 }),
+      ],
+      { ticker: "SAVINGS", tradeDate: "2024-03-05", assertedThb: 1500 },
+    );
+    expect(p.absorbed).toBeCloseTo(1500, 6);
+  });
+
+  it("expired proceeds absorb nothing", () => {
+    const p = previewBalanceChange(sellThenAssert, {
+      ticker: "SAVINGS",
+      tradeDate: "2024-05-15", // > 30 days after the sell
+      assertedThb: 1500,
+    });
+    expect(p.absorbed).toBe(0);
+  });
+
+  it("a drop absorbs nothing", () => {
+    const p = previewBalanceChange(
+      [
+        ...sellThenAssert,
+        {
+          ticker: "SAVINGS",
+          kind: "cash_balance",
+          units: 5000,
+          fxToThb: 1,
+          amount: 0,
+          tradeDate: "2024-02-01",
+        },
+      ],
+      { ticker: "SAVINGS", tradeDate: "2024-03-05", assertedThb: 4000 },
+    );
+    expect(p.delta).toBe(-1000);
+    expect(p.absorbed).toBe(0);
+  });
+});
+
+describe("cashContributionFlows partitions by bucket (#232 — absorption never crosses portfolios)", () => {
+  const crossBucket: LedgerTxn[] = [
+    // A sell in portfolio X…
+    tx({ kind: "sell", units: 100, amount: 20000, tradeDate: "2024-03-01", bucketId: "X" }),
+    // …and a first Set balance in portfolio Y, 4 days later, matching the proceeds.
+    {
+      ticker: "SAVINGS",
+      kind: "cash_balance",
+      units: 20000,
+      fxToThb: 1,
+      amount: 0,
+      tradeDate: "2024-03-05",
+      bucketId: "Y",
+      id: 1,
+    },
+  ];
+
+  it("a raise in one bucket never absorbs another bucket's sale proceeds", () => {
+    // The multi-bucket analytics path must agree with the per-bucket chart path:
+    // bucket Y's raise is all new money; bucket X's lot expires on its own.
+    expect(cashContributionFlows(crossBucket)).toEqual([{ date: "2024-03-05", amount: 20000 }]);
+  });
+
+  it("the same shape WITHIN one bucket absorbs (the control case)", () => {
+    const sameBucket = crossBucket.map((t) => ({ ...t, bucketId: "X" }));
+    expect(cashContributionFlows(sameBucket)).toEqual([]);
+  });
+
+  it("same-named accounts in different buckets keep separate running balances", () => {
+    const flows = cashContributionFlows([
+      {
+        ticker: "SAVINGS",
+        kind: "cash_balance",
+        units: 1000,
+        fxToThb: 1,
+        amount: 0,
+        tradeDate: "2024-01-01",
+        bucketId: "X",
+      },
+      // Same account NAME in bucket Y — its first assert, not a +2000 raise on X's.
+      {
+        ticker: "SAVINGS",
+        kind: "cash_balance",
+        units: 3000,
+        fxToThb: 1,
+        amount: 0,
+        tradeDate: "2024-01-02",
+        bucketId: "Y",
+      },
+    ]);
+    expect(flows).toEqual([
+      { date: "2024-01-01", amount: 1000 },
+      { date: "2024-01-02", amount: 3000 },
+    ]);
   });
 });

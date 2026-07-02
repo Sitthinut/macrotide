@@ -41,6 +41,22 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   matching the Thai fund finder (they previously stopped at 50 and required a
   click); the long tail past 100 stays opt-in via "Load more".
 
+- **"Funded from cash?" one-tap reconciliation.** After you save a buy that a
+  tracked cash account could have covered, a dismissible card on History offers
+  to record the matching withdrawal — one tap and the buy stops double-counting
+  as new money (the buy and the withdrawal net to an internal transfer). Only
+  the part of the buy that recent sale proceeds didn't already cover is offered,
+  and Reserved accounts are never suggested.
+- **Set balance sorts out sale proceeds by itself.** A balance raise now
+  automatically recognises the part covered by a recent fund sale — the sale
+  landing in your bank is the same money moving rooms, not new savings — and
+  counts only the remainder as money you added, so a mixed update (salary plus
+  proceeds) splits itself correctly with nothing to configure. The entry form
+  narrates the split before you save ("฿20,000 of this is your recent fund sale
+  landing; ฿30,000 is counted as money you added"), and a profitable sale you
+  park in the bank now keeps its gain on the books instead of quietly inflating
+  "money invested". Older balances saved with the "no money moved" override keep
+  their meaning and show a tag in History.
 - **The Advisor can now record cash for you from chat.** Tell it "set my SCB
   savings to ฿100,000", "I deposited ฿20,000", or "I withdrew ฿5,000" and it
   drafts the matching Set balance / deposit / withdrawal into the same review

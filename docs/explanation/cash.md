@@ -1,6 +1,6 @@
 # Cash
 
-*Last updated: 2026-06-18*
+*Last updated: 2026-07-01*
 
 How Macrotide tracks real cash — bank balances, parked sale proceeds, dry
 powder — as a first-class part of the portfolio, and how it keeps cash from
@@ -53,11 +53,12 @@ ordinary ledger events ([ADR 0004](./decisions/0004-unified-ledger-positions-der
 facts-only model — store the fact, derive at the fold):
 
 - **Deposit / Withdraw** — explicit dated external flows (+/−), the precise path.
-- **Set balance** — the hero. "As of date D this account holds ฿X." The **change
-  vs the prior balance is treated as money in or out by default** (up =
-  contribution, down = withdrawal). The first balance is just this with a prior of
-  zero. ("Set balance", not "Cash balance" — the noun didn't signal *set, not
-  add*.)
+- **Set balance** — the hero. "As of date D this account holds ฿X." The change vs
+  the prior balance is classified **automatically**: a raise first absorbs any
+  sale proceeds still in transit (the seam below) and only the remainder counts
+  as money in; a drop counts as money out. The first balance is just this with a
+  prior of zero. ("Set balance", not "Cash balance" — the noun didn't signal
+  *set, not add*.)
 
 A cash account is **not a first-class entity** — it's emergent from the ledger, a
 ticker whose `quote_source` is `cash`. The **ticker is the account's identity**;
@@ -85,11 +86,23 @@ cash in transit so the switch doesn't read as a drawdown
 is the **untracked-cash path** and is essentially unchanged. Explicit cash meets
 it at exactly one seam, kept clean so proceeds never live in two places:
 
-- A **Set balance** that *reconciles* (a raise the heuristic recognizes as recent
-  sale proceeds rather than new money) **clears that account's in-transit lots** —
-  the asserted balance now holds that cash. This is the parked-proceeds fix:
-  deliberately-parked proceeds are never read as withdrawn, so lifetime
-  contribution stops double-counting money you reinvested later.
+- A **Set-balance raise absorbs live in-transit proceeds first** — a redemption
+  pays out to your bank, so a recent sale routinely lands inside a routine
+  balance update, and that part is the same money changing rooms, not a
+  contribution. The absorbed lot's cash migrates into the held-cash position at
+  the assert date (never read as withdrawn), and **only the remainder counts as
+  money you added** — so a mixed raise (salary + proceeds) splits itself
+  correctly with nothing to configure. This is arithmetic over the ledger, not a
+  setting: there is no classification control, so there is nothing to set wrong.
+  The entry form **narrates** the split before you save ("฿20,000 of this is
+  your recent fund sale landing; ฿30,000 is counted as money you added"); a
+  first balance narrates nothing (its full amount counting as capital is correct
+  and needs no alarm). Two edges stay deliberately simple: **interest** counts
+  as a small contribution (conservative — it understates the return, never
+  flatters it), and a **typo** is fixed by editing the wrong row in History, not
+  by a corrective assert. Rows saved with the retired "no money moved" override
+  (`reconcile`) keep their meaning — a pure restatement, no flow, clears the
+  lots — and History tags them "no money moved".
 
 The two streams **compose** rather than collide: with no cash accounts the
 heuristic runs alone (today's behavior), and where they meet, the reconcile clears
@@ -111,14 +124,17 @@ Cash accounts move *only* on explicit cash events. Two reasons:
    value and contribution moving together at every explicit event, so there's
    **zero fake gain**, whether or not you reconcile.
 
-The intended affordance is a gentle, dismissible **"funded from cash?"** nudge
-after a buy a tracked account could have funded — one tap records the matching
-withdrawal, and the buy(+) and withdraw(−) net to zero, turning it into an
-internal transfer. Ignore it and nothing breaks: both contribution and net worth
-are inflated by the same buy amount, so the **gain stays correct**, and the next
-Set balance (which defaults to "money out" when it drops) cancels the buy's
-contribution exactly. Lazy reconciliation lands at the same right answer as the
-one-tap nudge.
+The affordance is a gentle, dismissible **"funded from cash?"** card, shown on
+History after saving a buy a tracked account could have funded — one tap records
+the matching withdrawal, and the buy(+) and withdraw(−) net to zero, turning it
+into an internal transfer. The check runs server-side on the **post-heuristic
+shortfall** — only the part of the buy that in-transit sale proceeds did *not*
+cover — so a buy that reinvested a recent sale never fires it; and it never
+offers a Reserved account (that money is set aside by definition). Ignore it and
+nothing breaks: both contribution and net worth are inflated by the same buy
+amount, so the **gain stays correct**, and the next Set balance (which defaults
+to "money out" when it drops) cancels the buy's contribution exactly. Lazy
+reconciliation lands at the same right answer as the one-tap card.
 
 ## Purpose: Role + Label
 
@@ -197,8 +213,10 @@ the same machinery in both: reserved cash (always) **+** all remaining uninveste
 investable cash (Funds only). That single `cashContributionFlows` definition feeds
 all three places a contribution is counted — the headline XIRR, the chart's
 net-invested line, and `contributions.ts` — so they **cannot silently diverge**.
-That shared-definition discipline is the whole reason the headline return and the
-chart agree.
+Since proceeds absorption made an assert's flow depend on the live lot state, the
+definition is literally one pass: `cashContributionFlows` is a view over the same
+settlement-cash fold that drives the chart, so the discipline holds by
+construction, not by convention.
 
 ## What's deferred
 
