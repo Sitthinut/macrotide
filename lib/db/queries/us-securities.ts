@@ -6,8 +6,9 @@
 // autofill, and the Advisor's US-instrument search tool.
 
 import "server-only";
-import { and, asc, eq, inArray, like, ne, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, type SQL, sql } from "drizzle-orm";
 import { quoteCacheKey, tickerKey } from "../../market/sources";
+import { searchUsSymbolsScored } from "../../search/us-security-index";
 import { getMarketDb } from "../context";
 import { fundQuotes, navHistory, usSecurities } from "../schema";
 
@@ -82,24 +83,12 @@ export interface FindUsSecuritiesFilter {
 const FIND_DEFAULT_LIMIT = 50;
 const FIND_MAX_LIMIT = 600;
 
-/** Build the shared WHERE for find/count so the two never drift. */
-function buildWhere(filter: FindUsSecuritiesFilter): SQL | undefined {
+/** Structured (non-text) filters shared by the browse fetch + its count. */
+function structuredClauses(filter: FindUsSecuritiesFilter): SQL[] {
   const clauses: SQL[] = [];
   if (!filter.includeDelisted) clauses.push(eq(usSecurities.status, "active"));
   if (filter.securityType) clauses.push(eq(usSecurities.securityType, filter.securityType));
-  const q = filter.query?.trim();
-  if (q) {
-    const upper = tickerKey(q);
-    const contains = `%${q}%`;
-    const symbolMatch = or(
-      // Anchored symbol match (case-insensitive — symbols are upper anyway).
-      like(usSecurities.symbol, `${upper}%`),
-      sql`${usSecurities.name} LIKE ${contains} COLLATE NOCASE`,
-    );
-    if (symbolMatch) clauses.push(symbolMatch);
-  }
-  if (clauses.length === 0) return undefined;
-  return clauses.length === 1 ? clauses[0] : and(...clauses);
+  return clauses;
 }
 
 export interface UsSecuritiesPage {
@@ -109,29 +98,55 @@ export interface UsSecuritiesPage {
 
 export function findUsSecurities(filter: FindUsSecuritiesFilter = {}): UsSecuritiesPage {
   const db = getMarketDb();
-  const where = buildWhere(filter);
   const limit = Math.min(filter.limit ?? FIND_DEFAULT_LIMIT, FIND_MAX_LIMIT);
   const offset = Math.max(filter.offset ?? 0, 0);
+  const clauses = structuredClauses(filter);
+  const queryStr = filter.query?.trim();
 
-  // Exact-symbol hits first, then by chosen sort — so typing "AAPL" surfaces
-  // Apple above names that merely contain the letters.
-  const q = filter.query ? tickerKey(filter.query) : undefined;
-  const order: SQL[] = [];
-  if (q) order.push(sql`CASE WHEN ${usSecurities.symbol} = ${q} THEN 0 ELSE 1 END`);
-  if (filter.sort === "popularity") {
-    // The default browse order ("alphabet isn't useful"): most-traded (daily
-    // most-actives score) → biggest (market cap, the proxy that's populated for
-    // the enriched mega-caps even when the most-actives score is sparse) → in-app
-    // demand → symbol as the stable tiebreak. SQLite sorts NULLs last on DESC.
-    order.push(
-      sql`${usSecurities.popularityScore} DESC`,
-      sql`${usSecurities.marketCap} DESC`,
-      sql`${usSecurities.viewCount} DESC`,
-      asc(usSecurities.symbol),
-    );
-  } else {
-    order.push(asc(filter.sort === "name" ? usSecurities.name : usSecurities.symbol));
+  // ── Text query → relevance search via the in-memory MiniSearch index ──
+  // (typo/prefix/alias tolerant, no leading-wildcard table scan). Candidates are
+  // capped to a bounded pool; the structured type/status filters still apply.
+  if (queryStr) {
+    const scored = searchUsSymbolsScored(queryStr).slice(0, FIND_MAX_LIMIT);
+    if (scored.length === 0) return { items: [], total: 0 };
+    const rank = new Map(scored.map((s, i) => [s.symbol.toUpperCase(), i]));
+    clauses.push(inArray(sql`upper(${usSecurities.symbol})`, [...rank.keys()]));
+    const rows = db
+      .select()
+      .from(usSecurities)
+      .where(and(...clauses))
+      .all();
+    // Exact-symbol first (typing "AAPL" surfaces Apple), then MiniSearch relevance
+    // rank — the IN clause can't preserve the ranked order, so sort in memory over
+    // the bounded candidate set.
+    const exact = tickerKey(queryStr);
+    const keyOf = (s: string) => s.toUpperCase();
+    rows.sort((a, b) => {
+      const ea = keyOf(a.symbol) === exact ? 0 : 1;
+      const eb = keyOf(b.symbol) === exact ? 0 : 1;
+      if (ea !== eb) return ea - eb;
+      const ra = rank.get(keyOf(a.symbol)) ?? Number.MAX_SAFE_INTEGER;
+      const rb = rank.get(keyOf(b.symbol)) ?? Number.MAX_SAFE_INTEGER;
+      return ra - rb;
+    });
+    return { items: rows.slice(offset, offset + limit), total: rows.length };
   }
+
+  // ── No query → browse order ──
+  const where = clauses.length ? and(...clauses) : undefined;
+  const order: SQL[] =
+    filter.sort === "popularity"
+      ? // Default browse order ("alphabet isn't useful"): most-traded (daily
+        // most-actives score) → biggest (market cap, populated for enriched
+        // mega-caps even when the most-actives score is sparse) → in-app demand →
+        // symbol as the stable tiebreak. SQLite sorts NULLs last on DESC.
+        [
+          sql`${usSecurities.popularityScore} DESC`,
+          sql`${usSecurities.marketCap} DESC`,
+          sql`${usSecurities.viewCount} DESC`,
+          asc(usSecurities.symbol),
+        ]
+      : [asc(filter.sort === "name" ? usSecurities.name : usSecurities.symbol)];
 
   const items = db
     .select()

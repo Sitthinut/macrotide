@@ -93,6 +93,23 @@ describe("searchAssets", () => {
     expect(findUs).toHaveBeenCalledWith(expect.objectContaining({ securityType: "etf" }));
   });
 
+  it("keeps a source's relevance order over raw popularity when searching", () => {
+    // The finder returns relevance order (a real match first, a popular-but-weak
+    // alias match second). The merge must preserve that, not float the high-pop
+    // junk to the top — the "sp500 surfaces unrelated funds" fix.
+    const r = searchAssets(
+      { query: "sp500", assetType: "us" },
+      deps(
+        [],
+        [
+          usRow("VOO", "Vanguard S&P 500 ETF", "etf", 0.2), // relevant, modest pop
+          usRow("BWMX", "Betterware de Mexico", "stock", 0.9), // weak alias hit, high pop
+        ],
+      ),
+    );
+    expect(r.items[0].ticker).toBe("VOO");
+  });
+
   it("idle (no query) ranks by popularity across sources", () => {
     const r = searchAssets(
       { assetType: "all" },
