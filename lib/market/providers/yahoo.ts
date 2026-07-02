@@ -12,6 +12,7 @@
 //   THB=X    — USD/THB
 //   AAPL, PTT.BK, etc.
 
+import { BROWSER_USER_AGENT } from "../user-agent";
 import {
   type Provider,
   ProviderError,
@@ -49,9 +50,6 @@ const BASE_URLS = [
   "https://query2.finance.yahoo.com/v8/finance/chart",
   "https://query1.finance.yahoo.com/v8/finance/chart",
 ];
-const USER_AGENT =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
-
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 async function fetchOnce(
@@ -66,7 +64,7 @@ async function fetchOnce(
   url.searchParams.set("includePrePost", "false");
   return fetch(url, {
     headers: {
-      "User-Agent": USER_AGENT,
+      "User-Agent": BROWSER_USER_AGENT,
       Accept: "application/json",
       "Accept-Language": "en-US,en;q=0.9",
     },

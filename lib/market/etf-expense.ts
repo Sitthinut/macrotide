@@ -12,12 +12,13 @@
 // iXBRL). TER then stays null and the UI falls back to the broker-fee / manual
 // field — never blocks the page.
 
+import { BROWSER_USER_AGENT } from "./user-agent";
+
 const ARCHIVES = "https://www.sec.gov/Archives/edgar/data";
 const BROWSE_EDGAR = "https://www.sec.gov/cgi-bin/browse-edgar";
-const DEFAULT_USER_AGENT = "Macrotide/1.0 admin@macrotide.app";
 
 function userAgent(): string {
-  return process.env.SEC_EDGAR_USER_AGENT || DEFAULT_USER_AGENT;
+  return process.env.SEC_EDGAR_USER_AGENT || BROWSER_USER_AGENT;
 }
 
 /**
