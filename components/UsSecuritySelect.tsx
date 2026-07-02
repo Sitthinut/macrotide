@@ -20,8 +20,13 @@ import { useExploreQuery } from "@/lib/stores/explore-ui";
 type TypeFilter = "" | "stock" | "etf";
 type SortKey = "symbol" | "name" | "popularity";
 
-const PAGE = 50;
-const LOAD_MORE = 100;
+// Pagination mirrors the Thai fund screener (FundSelect): the first AUTO_LOAD_MAX
+// rows stream in click-free in AUTO_STEP chunks (the common browse stays in the
+// cheap top), then the long tail is opt-in via "Load more" (CLICK_STEP each) to
+// cap DOM growth and keep keyboard/screen-reader control.
+const AUTO_STEP = 50;
+const AUTO_LOAD_MAX = 100;
+const CLICK_STEP = 100;
 // How many visible rows to warm on render so the first click paints instantly.
 const PREFETCH_ROWS = 8;
 
@@ -89,7 +94,7 @@ export function UsSecuritySelect({
       : initialType === "stock"
         ? "Search US stocks by name or symbol… (e.g. AAPL, Apple)"
         : "Search US stocks & ETFs by symbol or name… (e.g. AAPL, Vanguard)";
-  const [limit, setLimit] = useState(PAGE);
+  const [limit, setLimit] = useState(AUTO_STEP);
   const [detail, setDetail] = useState<UsSecurity | null>(null);
   // Inside Explore, route detail opens through the shared stack (modal-as-page);
   // standalone, use the local sheet.
@@ -104,9 +109,9 @@ export function UsSecuritySelect({
   }, [queryInput]);
 
   // A new filter/search is a new result set — start back at page one.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: PAGE is a module constant; we reset only when the query shape changes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: AUTO_STEP is a module constant; we reset only when the query shape changes.
   useEffect(() => {
-    setLimit(PAGE);
+    setLimit(AUTO_STEP);
   }, [query, type, sort]);
 
   const url = useMemo(() => {
@@ -123,6 +128,16 @@ export function UsSecuritySelect({
   const total = data?.total ?? 0;
   const hasResults = items.length > 0;
   const canLoadMore = items.length < total;
+  // Auto-stream up to AUTO_LOAD_MAX rows click-free: once the current page has
+  // arrived (items caught up to the requested limit), bump the limit another
+  // AUTO_STEP until the cap. keepPreviousData keeps the list stable between bumps;
+  // past the cap the tail is opt-in via "Load more".
+  const autoLoading = canLoadMore && limit < AUTO_LOAD_MAX;
+  useEffect(() => {
+    if (autoLoading && items.length >= limit) {
+      setLimit((l) => Math.min(AUTO_LOAD_MAX, l + AUTO_STEP));
+    }
+  }, [autoLoading, items.length, limit]);
 
   // Warm row charts so opening the detail sheet paints from cache: the top
   // PREFETCH_ROWS on render, plus any row on hover/focus. Dedup so each symbol is
@@ -192,7 +207,8 @@ export function UsSecuritySelect({
                   onIntent={() => prefetchSeries(s.symbol)}
                 />
               ))}
-              {canLoadMore && (
+              {autoLoading && <SkeletonRows rows={3} />}
+              {canLoadMore && !autoLoading && (
                 <div style={{ padding: "12px 14px 18px", textAlign: "center" }}>
                   <div
                     style={{
@@ -207,7 +223,7 @@ export function UsSecuritySelect({
                   </div>
                   <button
                     type="button"
-                    onClick={() => setLimit((l) => l + LOAD_MORE)}
+                    onClick={() => setLimit((l) => l + CLICK_STEP)}
                     style={{
                       width: "100%",
                       padding: "10px 16px",
@@ -221,7 +237,7 @@ export function UsSecuritySelect({
                       cursor: "pointer",
                     }}
                   >
-                    Load {Math.min(LOAD_MORE, total - items.length)} more
+                    Load {Math.min(CLICK_STEP, total - items.length)} more
                   </button>
                 </div>
               )}
