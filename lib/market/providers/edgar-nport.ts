@@ -8,7 +8,7 @@
 // Why this and not the issuer's own CSV: iShares/VanEck holdings CSVs are
 // Akamai bot-gated (a datacenter fetch gets an HTML challenge page, not CSV).
 // EDGAR is official, free, and returns real data to a plain server-side GET —
-// it only requires a User-Agent that declares a contact email (see below).
+// it only requires a non-bot User-Agent (we send the shared browser UA; see below).
 //
 // Trade-off: NPORT-P is filed within ~60 days of each fiscal quarter end, so
 // holdings are "as of" the last quarter — fine for an informational look-through
@@ -20,6 +20,8 @@
 //      the last ~200 days, forms=NPORT-P → newest filing's accession number.
 //   2. Fetch https://www.sec.gov/Archives/edgar/data/{registrantCik}/{acc}/primary_doc.xml
 //   3. Parse <invstOrSec> blocks; sort by weight; keep the top N.
+
+import { BROWSER_USER_AGENT } from "../user-agent";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -79,11 +81,9 @@ export interface NportResult {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// SEC rejects requests whose User-Agent doesn't declare a contact (HTTP 403,
-// "Your Request Originates from an Undeclared Automated Tool"). The format is
-// "App/version contact-email". Override with SEC_EDGAR_USER_AGENT in prod to
-// set a real contact address.
-const DEFAULT_USER_AGENT = "Macrotide/1.0 admin@macrotide.app";
+// SEC's 403 ("Undeclared Automated Tool") targets bare bot UAs, not browsers, so
+// we send the shared browser UA (lib/market/user-agent.ts) — no contact string
+// needed. SEC_EDGAR_USER_AGENT can override it in prod if that ever changes.
 const EFTS_SEARCH = "https://efts.sec.gov/LATEST/search-index";
 const ARCHIVES = "https://www.sec.gov/Archives/edgar/data";
 // Look back far enough to always include the latest quarterly filing (filed
@@ -91,7 +91,7 @@ const ARCHIVES = "https://www.sec.gov/Archives/edgar/data";
 const LOOKBACK_DAYS = 200;
 
 function userAgent(): string {
-  return process.env.SEC_EDGAR_USER_AGENT || DEFAULT_USER_AGENT;
+  return process.env.SEC_EDGAR_USER_AGENT || BROWSER_USER_AGENT;
 }
 
 // NPORT-P asset-category codes → human labels (raw code as fallback).

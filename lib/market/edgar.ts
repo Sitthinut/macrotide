@@ -1,7 +1,7 @@
 // SEC EDGAR company data client — profile + fundamentals for US securities.
 //
-// Public-domain US-government open data: the only requirement is a contact
-// User-Agent (SEC returns 403 to a UA that doesn't declare one). Covers the
+// Public-domain US-government open data: the only requirement is a non-bot
+// User-Agent (SEC 403s bare automated-tool UAs; we send the shared browser UA). Covers the
 // detail-page fields a vendor would otherwise charge for, sourced entirely from
 // SEC:
 //   • profile (name, listing exchange, SIC industry, fiscal year) — submissions
@@ -10,7 +10,7 @@
 //
 // Sibling to edgar-nport.ts (ETF holdings); kept separate because that one parses
 // NPORT-P XML for funds while this hits the JSON company APIs for operating
-// companies. Both share the contact-UA requirement (SEC_EDGAR_USER_AGENT).
+// companies. Both send the shared browser UA (SEC_EDGAR_USER_AGENT overrides).
 //
 // Endpoints (all need the UA header):
 //   ticker→CIK   https://www.sec.gov/files/company_tickers_exchange.json
@@ -18,14 +18,14 @@
 //   facts        https://data.sec.gov/api/xbrl/companyfacts/CIK{10pad}.json
 
 import "server-only";
+import { BROWSER_USER_AGENT } from "./user-agent";
 
-const UA_DEFAULT = "Macrotide/1.0 admin@macrotide.app";
 const TICKERS_URL = "https://www.sec.gov/files/company_tickers_exchange.json";
 const submissionsUrl = (cik: string) => `https://data.sec.gov/submissions/CIK${cik}.json`;
 const factsUrl = (cik: string) => `https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`;
 
 function userAgent(): string {
-  return process.env.SEC_EDGAR_USER_AGENT || UA_DEFAULT;
+  return process.env.SEC_EDGAR_USER_AGENT || BROWSER_USER_AGENT;
 }
 
 /** Zero-pad a CIK to the 10-digit form every data.sec.gov path expects. */
