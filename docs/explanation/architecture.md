@@ -179,16 +179,26 @@ retail-first, then-accumulating heuristic. Both tables are populated by the same
 SEC enumeration in one crawl — no extra API calls. Column-level detail:
 [data-model.md § Parent fund vs. share classes](../reference/data-model.md#parent-fund-vs-share-classes).
 
-## Fund search
+## Asset search
 
-The **Explore** tab's fund-finder typeahead is served by an **in-memory MiniSearch index**
-([lib/search/fund-index.ts](../../lib/search/fund-index.ts)) over the bounded,
-read-only fund catalog — not a `LIKE` scan or a search server. It gives fuzzy +
-prefix matching with field boosting and curated index-nickname synonyms, and
-**folds each feeder fund's master fund name into the document** so "S&P500"
-surfaces feeder funds like KKP US500-UH. The index builds lazily per market.db
-handle and rebuilds transparently when a cheap staleness signal (active-fund
-count + `MAX(updated_at)`) changes after the nightly refresh.
+The **Explore** tab's typeahead is served by **in-memory MiniSearch indexes**
+over the bounded, read-only catalogs — not a `LIKE` scan or a search server.
+Both catalogs use the same pattern and share the query pre-processing (the same
+curated index-nickname synonyms and fuzzy/prefix rules), so results feel uniform
+across them:
+
+- **Thai funds** ([lib/search/fund-index.ts](../../lib/search/fund-index.ts)) —
+  fuzzy + prefix matching with field boosting, and **folds each feeder fund's
+  master fund name into the document** so "S&P500" surfaces feeder funds like
+  KKP US500-UH.
+- **US securities** ([lib/search/us-security-index.ts](../../lib/search/us-security-index.ts)) —
+  over symbol + cleaned name; `findUsSecurities` orders exact-symbol-first, then
+  by relevance. Replaced the old `symbol LIKE 'q%' OR name LIKE '%q%'` path,
+  whose leading-wildcard name scan used no index and had no typo tolerance.
+
+Each index builds lazily per market.db handle and rebuilds transparently when a
+cheap staleness signal (active-row count + `MAX(updated_at)`) changes after the
+nightly refresh.
 
 ## Client UI state: typed external stores
 
@@ -271,7 +281,7 @@ lib/auth/                  better-auth singleton + session helpers
 lib/ai/                    OpenRouter provider, summarization
 lib/advisor/, lib/memory/  Advisor tools + long-term memory
 lib/market/                Provider registry, cache, index/FX chain + Thai SEC
-lib/search/                In-memory MiniSearch fund index
+lib/search/                In-memory MiniSearch indexes (fund + US security)
 lib/stores/                Typed useSyncExternalStore UI stores
 lib/portfolio/             Analytics, plan parsing, plan-edit, OCR, health/score
 lib/static/                Editorial content + placeholder analytics

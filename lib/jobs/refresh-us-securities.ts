@@ -21,6 +21,7 @@ import {
   upsertUsSecurities,
 } from "../db/queries/us-securities";
 import { mapTickersToFigi } from "../market/figi";
+import { invalidateUsSecurityIndex } from "../search/us-security-index";
 
 const DIRECTORY_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqtraded.txt";
 
@@ -158,6 +159,10 @@ export async function refreshUsSecurities(
       renamed++;
     }
   }
+
+  // Rebuild the in-memory search index next time it's queried (belt-and-braces —
+  // the index's own staleness signature already covers a catalog change).
+  invalidateUsSecurityIndex();
 
   return { parsed: rows.length, upserted, delisted, active: upserted, figiEnriched, renamed };
 }

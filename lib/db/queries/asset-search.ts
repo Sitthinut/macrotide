@@ -41,7 +41,14 @@ export interface AssetSearchPage {
 }
 
 interface Ranked extends AssetSearchItem {
-  score: number;
+  /** Position in this item's SOURCE relevance list (0 = best). Each finder already
+   *  ranks by relevance (MiniSearch BM25 for both catalogs), so we interleave the
+   *  two lists by position rather than recomputing a coarse text score — that
+   *  preserved fuzzy/alias relevance instead of collapsing alias hits to "no match"
+   *  and letting popularity float unrelated rows to the top. */
+  rank: number;
+  /** Exact-ticker hit — hoisted above everything else when searching. */
+  exact: boolean;
   pop: number;
 }
 
@@ -91,8 +98,8 @@ export function matchScore(query: string, ticker: string, name: string): number 
   return 9;
 }
 
-/** Merge + rank + page already-mapped items. Pure. Query → match then popularity;
- *  idle → popularity. */
+/** Merge + rank + page already-mapped items. Pure. Query → exact ticker, then each
+ *  source's relevance rank (interleaved), then popularity; idle → popularity. */
 export function rankAssets(
   items: Ranked[],
   hasQuery: boolean,
@@ -100,11 +107,16 @@ export function rankAssets(
   limit: number,
 ): AssetSearchItem[] {
   items.sort((a, b) => {
-    if (hasQuery && a.score !== b.score) return a.score - b.score;
+    if (hasQuery) {
+      if (a.exact !== b.exact) return a.exact ? -1 : 1;
+      if (a.rank !== b.rank) return a.rank - b.rank;
+    }
     if (a.pop !== b.pop) return b.pop - a.pop;
     return a.name.localeCompare(b.name);
   });
-  return items.slice(offset, offset + limit).map(({ score: _s, pop: _p, ...rest }) => rest);
+  return items
+    .slice(offset, offset + limit)
+    .map(({ rank: _r, exact: _e, pop: _p, ...rest }) => rest);
 }
 
 export interface AssetSearchDeps {
@@ -143,14 +155,15 @@ export function searchAssets(
     const page = findThai({ query: query || undefined, limit: cap });
     total += page.total;
     const maxAum = Math.max(1, ...page.items.map((t) => t.aum ?? 0));
-    for (const t of page.items) {
+    page.items.forEach((t, i) => {
       const item = thaiToItem(t);
       ranked.push({
         ...item,
-        score: matchScore(query, item.ticker, item.name),
+        rank: i,
+        exact: matchScore(query, item.ticker, item.name) === 0,
         pop: (t.aum ?? 0) / maxAum,
       });
-    }
+    });
   }
 
   if (wantUs) {
@@ -163,15 +176,16 @@ export function searchAssets(
       sort: hasQuery ? undefined : "popularity",
     });
     total += page.total;
-    for (const u of page.items) {
+    page.items.forEach((u, i) => {
       const item = usToItem(u);
       ranked.push({
         ...item,
+        rank: i,
+        exact: matchScore(query, item.ticker, item.name) === 0,
         // popularityScore is already 0–1; a small view-count nudge, capped.
-        score: matchScore(query, item.ticker, item.name),
         pop: Math.min(1, u.popularityScore + Math.min(u.viewCount, 100) / 500),
       });
-    }
+    });
   }
 
   return { items: rankAssets(ranked, hasQuery, offset, limit), total };

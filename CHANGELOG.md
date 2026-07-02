@@ -20,6 +20,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   category mix names the class (mostly bonds → Fixed Income, mostly equity →
   Equity), its country mix names the region (US / Intl / EM / Global). Covers
   ETFs beyond the curated starter map, and widens as holdings coverage grows.
+- **US securities search is now typo-tolerant and relevance-ranked.** Explore's
+  US stock/ETF search moved off the old `LIKE` substring scan onto the same
+  in-memory MiniSearch index the Thai fund finder uses — so "vangard" finds
+  Vanguard, "sp500" finds S&P 500 funds, exact tickers rank first, and searching
+  ~13k securities no longer scans the table. Search now feels uniform across both
+  catalogs.
 
 - **The Advisor can now record cash for you from chat.** Tell it "set my SCB
   savings to ฿100,000", "I deposited ฿20,000", or "I withdrew ฿5,000" and it
