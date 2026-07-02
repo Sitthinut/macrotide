@@ -2,24 +2,33 @@
 // in the Thai screener and the asset-type badge in the unified Explore list. One
 // shared component so the badges look identical across tabs.
 
-/** Compact colored label chip. Defaults to the accent ramp; pass color/bg to retint. */
+import type { ReactNode } from "react";
+
+/** Compact colored label chip. Defaults to the accent ramp; pass color/bg to retint.
+ *  An optional leading `icon` renders inside the chip (e.g. a lock for reserved cash),
+ *  inheriting the chip's text color. */
 export function MiniTag({
   label,
   title,
   color = "var(--accent)",
   bg = "var(--accent-soft)",
   clamp = false,
+  icon,
 }: {
   label: string;
   title?: string;
   color?: string;
   bg?: string;
   clamp?: boolean;
+  icon?: ReactNode;
 }) {
   return (
     <span
       title={title}
       style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: icon ? 3 : 0,
         fontSize: 9.5,
         fontFamily: "var(--font-mono)",
         fontWeight: 600,
@@ -36,6 +45,7 @@ export function MiniTag({
         ...(clamp ? { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" } : null),
       }}
     >
+      {icon}
       {label}
     </span>
   );

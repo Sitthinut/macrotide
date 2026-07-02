@@ -80,6 +80,7 @@ function holdingFromDb(h: DbHolding, quotes: Map<string, FundQuote>): Holding {
     ter: h.ter ?? null,
     source: h.source ?? "",
     quoteSource: h.quoteSource,
+    instrumentType: h.instrumentType ?? null,
     riskSpectrum: h.riskSpectrum ?? null,
     syncedBroker: h.syncedBroker ?? null,
   };

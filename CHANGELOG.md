@@ -52,6 +52,19 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   current symbol, name, and price history through a stable FIGI identifier, and a
   custom holding starts pricing automatically once its symbol lists.
 
+- **Your holdings list labels each position's type and exposure.** Every row in the
+  Portfolio holdings list carries a small chip — Fund, ETF, Stock, or Cash (set-aside
+  cash gets a lock marker) — so a mixed Thai-fund, US-security and cash portfolio is
+  scannable at a glance. The line beneath reads its asset class and, where we're
+  confident, its exposure region — a Thai fund's SEC policy translated to English
+  ("Equity", "Fixed Income", "Mixed") with its home/foreign region, and a US
+  position by asset class plus geography for single stocks and the well-known index
+  ETFs ("Equity · US", "Equity · Intl", "Fixed Income · US"). Geography is never
+  guessed from the listing country, so an unrecognised ETF simply omits it. Cash
+  shows its earmark purpose ("Emergency"); only custom self-priced assets stay
+  unlabelled. One asset-class vocabulary throughout — the holdings filter, the
+  allocation breakdown, and the Advisor all read Equity / Bonds / Cash / Unclassified.
+
 - **See what's inside an index fund, and how to own a stock through one.** A US
   ETF's detail lists its holdings with tickers you can tap to open each one. A
   leveraged or inverse ETF reads honestly too: its swap holdings show the

@@ -29,6 +29,10 @@ export type Holding = HoldingRow & {
   /** SEC risk-spectrum code, overlaid from the catalog (market.db) by
    * enrichHoldingsWithCatalog — absent for non-catalog holdings. */
   riskSpectrum?: string | null;
+  /** Instrument type for a US (`market`) holding — "etf" | "stock", overlaid from
+   * us_securities by enrichHoldingsWithCatalog. Absent for Thai funds (identified
+   * by quoteSource) and unresolved/custom holdings. Drives the row type chip. */
+  instrumentType?: "stock" | "etf" | null;
   /**
    * Broker name when this holding was imported from a connected broker, else
    * null. RELIABLE: derived only from ledger rows carrying a non-null

@@ -9,6 +9,7 @@ import { getUsSecurityDetail, mergeRelatedEtfs } from "./us-detail";
 import { setDividends } from "./us-dividends";
 import { type HeldViaEtf, setEtfHoldings } from "./us-etf-holdings";
 import type { RelatedEtf } from "./us-related";
+import { resolveUsHolding } from "./us-securities";
 
 const stockLine = (s: string, n: string) => `Y|${s}|${n}|Q| |N|100|N||${s}|${s}|N`;
 const etfLine = (s: string, n: string) => `Y|${s}|${n}|P| |Y|100|N||${s}|${s}|N`;
@@ -178,5 +179,23 @@ describe("mergeRelatedEtfs (pure)", () => {
     const xlk = merged.find((e) => e.symbol === "XLK");
     // The sector ETF keeps its group + index flag and gains the held-via weight.
     expect(xlk).toMatchObject({ group: "sector", isIndex: true, weightPct: 22.5 });
+  });
+});
+
+describe("resolveUsHolding — surfaces securityType for the row type chip", () => {
+  it("returns 'etf' for an ETF and 'stock' for a single name", async () => {
+    await run(async () => {
+      await refreshUsSecurities({
+        fetchText: async () =>
+          directory(etfLine("QQQM", "Invesco NASDAQ 100 ETF"), stockLine("AAPL", "Apple Inc.")),
+        seenAt: "2026-06-26T00:00:00Z",
+      });
+      expect(resolveUsHolding({ ticker: "QQQM" })?.securityType).toBe("etf");
+      expect(resolveUsHolding({ ticker: "AAPL" })?.securityType).toBe("stock");
+      // Case-insensitive lookup, same as the rest of the resolver.
+      expect(resolveUsHolding({ ticker: "aapl" })?.securityType).toBe("stock");
+      // An uncatalogued ticker still resolves to null (no chip, not a guess).
+      expect(resolveUsHolding({ ticker: "NOPE" })).toBeNull();
+    });
   });
 });

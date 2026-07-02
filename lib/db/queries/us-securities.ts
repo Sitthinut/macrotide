@@ -349,6 +349,9 @@ export interface UsHoldingResolution {
   assetClass: string | null;
   /** Catalog expense ratio (ETF TER, decimal) — overlaid when the user set none. */
   ter: number | null;
+  /** Instrument type — drives the "ETF"/"Stock" row chip. Null only if a future
+   *  catalog row lacks it (the column is NOT NULL today). */
+  securityType: "stock" | "etf" | null;
 }
 
 /**
@@ -365,7 +368,13 @@ export function resolveUsHolding(input: {
     (input.catalogFigi ? resolveUsSecurityByFigi(input.catalogFigi) : undefined) ??
     getUsSecurity(input.ticker);
   if (!row) return null;
-  return { currentSymbol: row.symbol, name: row.name, assetClass: row.assetClass, ter: row.ter };
+  return {
+    currentSymbol: row.symbol,
+    name: row.name,
+    assetClass: row.assetClass,
+    ter: row.ter,
+    securityType: row.securityType,
+  };
 }
 
 // ─── detail enrichment (profile + fundamentals + ratios; see lib/market/edgar.ts) ───

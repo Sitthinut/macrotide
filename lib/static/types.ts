@@ -34,6 +34,13 @@ export interface Holding {
   /** Data-routing key. Present on adapted holdings from /api/holdings. */
   quoteSource?: string;
   /**
+   * Instrument type for a US (`market`) holding — "etf" | "stock", overlaid from
+   * the us_securities catalog. Absent for Thai funds (identified by quoteSource ===
+   * "thai_mutual_fund"), cash, and unresolved/custom holdings. With quoteSource,
+   * drives the "Fund"/"ETF"/"Stock" chip on the holdings-list row.
+   */
+  instrumentType?: "etf" | "stock" | null;
+  /**
    * SEC risk-spectrum code (RS1…RS8, RS81), overlaid from the catalog. Drives
    * the holding swatch color via the risk palette; absent for non-catalog
    * holdings (color then falls back to asset class).
