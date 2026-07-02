@@ -77,6 +77,8 @@ export interface HeldViaEtf {
   weightPct: number | null;
   /** The ETF's expense ratio (fraction), or null — so the detail can show fee + weight together. */
   ter: number | null;
+  /** Popularity score (0–1) — tiebreak among equal-fee holders. */
+  popularityScore: number;
 }
 
 /**
@@ -94,6 +96,7 @@ export function getEtfsHoldingSymbol(symbol: string, limit = 8): HeldViaEtf[] {
       name: usSecurities.name,
       weightPct: usEtfHoldings.weightPct,
       ter: usSecurities.ter,
+      popularityScore: usSecurities.popularityScore,
     })
     .from(usEtfHoldings)
     .innerJoin(usSecurities, sql`UPPER(${usSecurities.symbol}) = UPPER(${usEtfHoldings.symbol})`)

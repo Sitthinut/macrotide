@@ -129,18 +129,26 @@ describe("mergeRelatedEtfs (pure)", () => {
     symbol: string,
     ter: number | null,
     group: RelatedEtf["group"] = "broad",
+    popularityScore = 0,
   ): RelatedEtf => ({
     symbol,
     name: `${symbol} ETF`,
     ter,
     securityType: "etf",
+    popularityScore,
     group,
   });
-  const heldVia = (symbol: string, weightPct: number, ter: number | null): HeldViaEtf => ({
+  const heldVia = (
+    symbol: string,
+    weightPct: number,
+    ter: number | null,
+    popularityScore = 0,
+  ): HeldViaEtf => ({
     symbol,
     name: `${symbol} ETF`,
     weightPct,
     ter,
+    popularityScore,
   });
 
   it("dedups an ETF that both tracks and holds, keeping its fee + weight, cheapest first", () => {
@@ -179,6 +187,16 @@ describe("mergeRelatedEtfs (pure)", () => {
     const xlk = merged.find((e) => e.symbol === "XLK");
     // The sector ETF keeps its group + index flag and gains the held-via weight.
     expect(xlk).toMatchObject({ group: "sector", isIndex: true, weightPct: 22.5 });
+  });
+
+  it("breaks an equal-fee, equal-weight tie by popularity, then ticker", () => {
+    // Same TER, no held-via weight → the more-popular tracker leads even though
+    // its ticker sorts later (matches the Explore starter-shelf tiebreak).
+    const merged = mergeRelatedEtfs(
+      [etf("AAA", 0.0003, "broad", 0.1), etf("ZED", 0.0003, "broad", 0.9)],
+      [],
+    );
+    expect(merged.map((e) => e.symbol)).toEqual(["ZED", "AAA"]);
   });
 });
 

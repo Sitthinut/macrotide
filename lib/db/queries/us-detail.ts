@@ -62,9 +62,14 @@ export interface RelatedEtfRow {
    *  "sector" = tracks the security's GICS sector, "holder" = holds it but we can't
    *  confirm it's an index fund. Keeps sector ETFs in their own group. */
   group: "broad" | "sector" | "holder";
+  /** Popularity score (0–1) — tiebreak among equal-fee, equal-weight ETFs so the
+   *  bigger/more-traded one leads (matches the Explore starter-shelf ordering). */
+  popularityScore: number;
 }
 
-/** Cheapest effective TER first (null/≤0 last), then heavier weight, then ticker. */
+/** Cheapest effective TER first (null/≤0 last), then heavier weight, then the
+ *  more-popular ETF, then ticker — matching the Explore starter-shelf tiebreak
+ *  (popularity is populated for the big trackers; market_cap often isn't). */
 function compareRelatedEtf(a: RelatedEtfRow, b: RelatedEtfRow): number {
   const ea = a.ter != null && a.ter > 0 ? a.ter : Number.POSITIVE_INFINITY;
   const eb = b.ter != null && b.ter > 0 ? b.ter : Number.POSITIVE_INFINITY;
@@ -72,6 +77,7 @@ function compareRelatedEtf(a: RelatedEtfRow, b: RelatedEtfRow): number {
   const wa = a.weightPct ?? -1;
   const wb = b.weightPct ?? -1;
   if (wa !== wb) return wb - wa;
+  if (a.popularityScore !== b.popularityScore) return b.popularityScore - a.popularityScore;
   return a.symbol.localeCompare(b.symbol);
 }
 
@@ -104,6 +110,7 @@ export function mergeRelatedEtfs(usEtfs: RelatedEtf[], heldVia: HeldViaEtf[]): R
       securityType: e.securityType,
       isIndex: true,
       group: e.group,
+      popularityScore: e.popularityScore,
     });
   }
   // Held-via ETFs: attach the weight to a tracker already listed (keeping its
@@ -121,6 +128,7 @@ export function mergeRelatedEtfs(usEtfs: RelatedEtf[], heldVia: HeldViaEtf[]): R
         securityType: "etf",
         isIndex: false,
         group: "holder",
+        popularityScore: h.popularityScore,
       });
   }
   // Cap each group independently, then emit broad → sector → holder.

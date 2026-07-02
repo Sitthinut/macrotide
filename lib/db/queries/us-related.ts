@@ -59,6 +59,9 @@ export interface RelatedEtf {
   name: string;
   ter: number | null;
   securityType: "stock" | "etf";
+  /** Popularity score (0–1, from the most-actives prewarm) — the tiebreak among
+   *  equal-fee ETFs so the bigger/more-traded tracker leads. */
+  popularityScore: number;
   /** Which kind of index this ETF tracks relative to the subject: a "broad"
    *  market index it belongs to (S&P 500 / Nasdaq-100 / Dow) or the subject's
    *  GICS "sector". Groups the "own the index" list so a higher-fee sector ETF
@@ -228,6 +231,7 @@ export function getRelatedByIndex(
       name: etf.name,
       ter: etf.ter,
       securityType: etf.securityType,
+      popularityScore: etf.popularityScore,
       group,
     }));
 
