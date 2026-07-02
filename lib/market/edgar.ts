@@ -10,7 +10,7 @@
 //
 // Sibling to edgar-nport.ts (ETF holdings); kept separate because that one parses
 // NPORT-P XML for funds while this hits the JSON company APIs for operating
-// companies. Both send the shared browser UA (SEC_EDGAR_USER_AGENT overrides).
+// companies. Both send the declared SEC EDGAR UA (SEC_EDGAR_USER_AGENT overrides).
 //
 // Endpoints (all need the UA header):
 //   ticker→CIK   https://www.sec.gov/files/company_tickers_exchange.json
@@ -18,15 +18,13 @@
 //   facts        https://data.sec.gov/api/xbrl/companyfacts/CIK{10pad}.json
 
 import "server-only";
-import { BROWSER_USER_AGENT } from "./user-agent";
+import { secEdgarUserAgent } from "./user-agent";
 
 const TICKERS_URL = "https://www.sec.gov/files/company_tickers_exchange.json";
 const submissionsUrl = (cik: string) => `https://data.sec.gov/submissions/CIK${cik}.json`;
 const factsUrl = (cik: string) => `https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`;
 
-function userAgent(): string {
-  return process.env.SEC_EDGAR_USER_AGENT || BROWSER_USER_AGENT;
-}
+const userAgent = secEdgarUserAgent;
 
 /** Zero-pad a CIK to the 10-digit form every data.sec.gov path expects. */
 export function padCik(cik: string | number): string {

@@ -12,14 +12,12 @@
 // iXBRL). TER then stays null and the UI falls back to the broker-fee / manual
 // field — never blocks the page.
 
-import { BROWSER_USER_AGENT } from "./user-agent";
+import { secEdgarUserAgent } from "./user-agent";
 
 const ARCHIVES = "https://www.sec.gov/Archives/edgar/data";
 const BROWSE_EDGAR = "https://www.sec.gov/cgi-bin/browse-edgar";
 
-function userAgent(): string {
-  return process.env.SEC_EDGAR_USER_AGENT || BROWSER_USER_AGENT;
-}
+const userAgent = secEdgarUserAgent;
 
 /**
  * Parse a 485BPOS XBRL instance for a class's expense ratio. Pure. Picks the
