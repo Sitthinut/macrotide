@@ -22,6 +22,7 @@ import { eq } from "drizzle-orm";
 import { POST } from "@/app/api/transactions/route";
 import { runWithDbContext } from "@/lib/db/context";
 import { createBucket } from "@/lib/db/queries/buckets";
+import { setAccountEarmark } from "@/lib/db/queries/earmarks";
 import { listHoldings } from "@/lib/db/queries/holdings";
 import { navHistory } from "@/lib/db/schema";
 import { quoteCacheKey } from "@/lib/market/sources";
@@ -500,5 +501,93 @@ describe("POST /api/transactions — facts-only ledger (ADR 0004)", () => {
       },
     ]);
     expect(heldUnits("EXAMPLE-FUND-C")).toBeCloseTo(200); // 100 × 2
+  });
+});
+
+describe("POST /api/transactions — funded-from-cash nudge (#232)", () => {
+  const savings = (amount: number, tradeDate = "2026-02-01") => ({
+    tradeDate,
+    kind: "deposit",
+    ticker: "Savings",
+    quoteSource: "cash",
+    units: amount,
+    amount,
+    tradeCurrency: "THB",
+    fxToThb: 1,
+  });
+  const buy = (amount: number, tradeDate = "2026-03-05") => ({
+    tradeDate,
+    kind: "buy",
+    ticker: "EXAMPLE-FUND-A",
+    quoteSource: "thai_mutual_fund",
+    units: 100,
+    amount,
+  });
+
+  it("nudges a buy a tracked cash account could cover, with the uncovered shortfall", async () => {
+    await post([savings(50000)]);
+    const { status, body } = await post([buy(30000)]);
+    expect(status).toBe(201);
+    expect(body.cashNudges).toEqual([
+      {
+        buyTicker: "EXAMPLE-FUND-A",
+        tradeDate: "2026-03-05",
+        shortfall: 30000,
+        accounts: [{ ticker: "Savings", balance: 50000 }],
+      },
+    ]);
+  });
+
+  it("does not fire for a buy the in-transit heuristic already covered (a reinvested switch)", async () => {
+    await post([savings(50000)]);
+    await post([
+      {
+        tradeDate: "2026-03-01",
+        kind: "sell",
+        ticker: "EXAMPLE-FUND-B",
+        quoteSource: "thai_mutual_fund",
+        units: 100,
+        amount: 30000,
+      },
+    ]);
+    const { body } = await post([buy(30000)]);
+    expect(body.cashNudges).toBeUndefined();
+  });
+
+  it("fires only for the shortfall the heuristic did NOT cover", async () => {
+    await post([savings(50000)]);
+    await post([
+      {
+        tradeDate: "2026-03-01",
+        kind: "sell",
+        ticker: "EXAMPLE-FUND-B",
+        quoteSource: "thai_mutual_fund",
+        units: 100,
+        amount: 10000,
+      },
+    ]);
+    const { body } = await post([buy(30000)]);
+    expect(body.cashNudges).toHaveLength(1);
+    expect(body.cashNudges[0].shortfall).toBeCloseTo(20000); // 30000 − the 10000 proceeds
+  });
+
+  it("never offers a RESERVED account (#149) or one that cannot cover the buy", async () => {
+    await post([savings(50000)]);
+    await runWithDbContext(ctx(), () =>
+      setAccountEarmark({ bucketId: "b1", ticker: "Savings", role: "reserved", amount: null }),
+    );
+    const { body } = await post([buy(30000)]);
+    expect(body.cashNudges).toBeUndefined();
+  });
+
+  it("stays silent when the balance at the buy date is short", async () => {
+    await post([savings(10000)]);
+    const { body } = await post([buy(30000)]);
+    expect(body.cashNudges).toBeUndefined();
+  });
+
+  it("a cash-only batch never nudges", async () => {
+    const { body } = await post([savings(50000)]);
+    expect(body.cashNudges).toBeUndefined();
   });
 });

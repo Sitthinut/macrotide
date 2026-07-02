@@ -264,6 +264,7 @@ export function toLedgerTxn(r: Transaction): LedgerTxn {
   const kind: TxnKind = isTxnKind(r.kind) ? r.kind : "buy";
   return {
     id: r.id,
+    bucketId: r.bucketId,
     ticker: r.ticker,
     kind,
     tradeDate: r.tradeDate,

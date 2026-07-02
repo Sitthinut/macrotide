@@ -12,9 +12,11 @@ import { Icon } from "@/components/Icon";
 export interface HistoryScreenProps {
   onBack: () => void;
   onAdd: () => void;
+  /** Optional callout above the statement — e.g. the funded-from-cash nudge (#232). */
+  notice?: React.ReactNode;
 }
 
-export function HistoryScreen({ onBack, onAdd }: HistoryScreenProps) {
+export function HistoryScreen({ onBack, onAdd, notice }: HistoryScreenProps) {
   return (
     <div className="screen">
       {/* Topbar content shares the same column width as the body so the back
@@ -62,6 +64,7 @@ export function HistoryScreen({ onBack, onAdd }: HistoryScreenProps) {
       </div>
 
       <div style={{ padding: "4px 16px 40px", maxWidth: 880, margin: "0 auto" }}>
+        {notice}
         <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.5, margin: "4px 8px 14px" }}>
           Everything you’ve recorded, most recent first. Tap any line to edit it in place.
         </p>

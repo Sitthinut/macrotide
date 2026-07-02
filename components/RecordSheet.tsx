@@ -36,11 +36,13 @@ import { readExifCapture } from "@/lib/image-exif";
 import { normalizeImage } from "@/lib/image-normalize";
 import type { QuoteSource } from "@/lib/market/sources";
 import { looksLikeBrokerExport, parseBrokerExport } from "@/lib/portfolio/broker-import";
-import type { TxnKind } from "@/lib/portfolio/lots";
+import type { LedgerTxn, TxnKind } from "@/lib/portfolio/lots";
 import type { ExtractedTxnRow, ImportDocType } from "@/lib/portfolio/ocr";
+import { type CashNudge, previewBalanceChange } from "@/lib/portfolio/settlement-cash";
 import { TXN_KIND_HELP, TXN_KIND_LABEL, typeSelectOptions } from "@/lib/portfolio/txn-display";
 import {
   isCashKind,
+  isTxnKind,
   normalizeDate,
   normalizeTxnDraft,
   parseTxnPaste,
@@ -145,9 +147,6 @@ interface Row {
   /** Native→THB rate for a non-THB cash account; "" / "1" for THB. The entered
    * figure is in the account currency; the ledger ฿ amount is figure × this rate. */
   fxToThb?: string;
-  /** "No money moved" override on a Set balance (cash_balance) — interest, a
-   * correction, or asserting parked sale proceeds. Sent as `reconcile`. */
-  reconcile?: boolean;
   /** Cash account Purpose (#149) — its RETURN role + an optional objective label;
    * saved as an earmark on submit. Only meaningful for cash rows. */
   cashRole?: "investable" | "reserved";
@@ -292,6 +291,9 @@ export interface RecordSheetProps {
   open: boolean;
   onClose: () => void;
   onSaved?: (count: number) => void;
+  /** Funded-from-cash nudges the save produced (#232) — the parent surfaces them
+   * (the sheet has already closed by then). */
+  onCashNudges?: (bucketId: string, nudges: CashNudge[]) => void;
   defaultBucketId?: string | null;
   /** "opening" when entered from Holdings "Add"; "buy" from a Record action. */
   defaultKind?: RowKind;
@@ -310,6 +312,7 @@ export function RecordSheet({
   open,
   onClose,
   onSaved,
+  onCashNudges,
   defaultBucketId,
   defaultKind = "opening",
   defaultMode = "investment",
@@ -451,6 +454,38 @@ export function RecordSheet({
   const purposeLabels = useMemo(
     () => mergeCashPurposes((earmarks ?? []).map((e) => e.purpose)),
     [earmarks],
+  );
+  // The bucket's ledger, fetched only while a Set-balance row is being entered —
+  // feeds the "raise ≈ recent sale proceeds → no money moved" default (#232). The
+  // suggestion helper is pure, so the fold runs client-side on the fetched rows.
+  const wantLedger = open && !!bucketId && rows.some((r) => r.kind === "cash_balance");
+  const { data: ledgerRows } = useResource<
+    Array<{
+      id: number;
+      ticker: string;
+      kind: string;
+      tradeDate: string;
+      units: number | null;
+      amount: number;
+      fxToThb: number | null;
+      reconcile: boolean | null;
+      createdAt: string | null;
+    }>
+  >(wantLedger ? `/api/transactions?bucket=${encodeURIComponent(bucketId)}` : null);
+  const bucketLedger = useMemo<LedgerTxn[] | undefined>(
+    () =>
+      ledgerRows?.map((r) => ({
+        id: r.id,
+        ticker: r.ticker,
+        kind: isTxnKind(r.kind) ? r.kind : "buy",
+        tradeDate: r.tradeDate,
+        units: r.units,
+        amount: r.amount,
+        fxToThb: r.fxToThb,
+        reconcile: r.reconcile,
+        createdAt: r.createdAt ?? undefined,
+      })),
+    [ledgerRows],
   );
 
   const reset = () => {
@@ -740,8 +775,6 @@ export function RecordSheet({
             units: figure > 0 ? figure : undefined,
             value: r.kind === "cash_balance" && thb > 0 ? thb : undefined,
             amount: r.kind === "cash_balance" ? 0 : thb,
-            // "No money moved" override — only meaningful on a Set balance.
-            reconcile: r.kind === "cash_balance" ? !!r.reconcile : undefined,
             quoteSource: "cash",
             tradeCurrency: currency,
             fxToThb: rate,
@@ -814,7 +847,7 @@ export function RecordSheet({
       // NAV on its date yet — storing the ฿ value as the fact; its units derive at the
       // fold when that date's NAV lands. So there's no "couldn't price it" reject here.
       if (!res.ok) throw new Error(String(res.status));
-      const body = (await res.json()) as { count: number };
+      const body = (await res.json()) as { count: number; cashNudges?: CashNudge[] };
       // Save the cash Purpose for any Set-balance row that set one — only when Reserved
       // or a label is given, so a plain Set balance never clobbers an existing designation.
       for (const r of readyRows) {
@@ -837,6 +870,9 @@ export function RecordSheet({
       invalidate(/^\/api\/holdings/);
       invalidate(/^\/api\/portfolios/);
       invalidate("/api/earmarks");
+      // Funded-from-cash nudges (#232) outlive the sheet — the parent shows them
+      // where the user lands after saving.
+      if (body.cashNudges?.length) onCashNudges?.(bucketId, body.cashNudges);
       onSaved?.(body.count);
       reset();
       onClose();
@@ -1048,6 +1084,7 @@ export function RecordSheet({
                   tickers={tickerOptions}
                   cashAccounts={cashAccounts}
                   purposeOptions={purposeLabels}
+                  bucketLedger={bucketLedger}
                   onChange={(p) => patch(r.id, p)}
                   onDone={() => setEditing(null)}
                   onRemove={() => removeRow(r.id)}
@@ -1214,6 +1251,7 @@ function RowEditor({
   tickers,
   cashAccounts,
   purposeOptions,
+  bucketLedger,
   onChange,
   onDone,
   onRemove,
@@ -1222,6 +1260,9 @@ function RowEditor({
   tickers: TickerSuggestion[];
   cashAccounts: string[];
   purposeOptions: string[];
+  /** The bucket's ledger (fetched while a Set balance is edited) — feeds the
+   * sale-proceeds "no money moved" default (#232). */
+  bucketLedger?: LedgerTxn[];
   onChange: (p: Partial<Row>) => void;
   onDone: () => void;
   onRemove: () => void;
@@ -1233,6 +1274,42 @@ function RowEditor({
   const cashBalance = row.kind === "cash_balance";
   // Dividend / fee are pure ฿ flows — no units or price, just an amount.
   const amountOnly = row.kind === "dividend" || row.kind === "fee";
+  // The consequence line (#232) — the SAME arithmetic the fold runs at save: a raise
+  // absorbs live in-transit sale proceeds first (an internal transfer), only the
+  // remainder is new money; a drop is money out. Pure narration, no control — there
+  // is nothing to set, so nothing to set wrong. A FIRST balance narrates nothing: its
+  // full amount counting as capital is correct and needs no alarm-shaped "+฿500,000".
+  const assertedThb = (() => {
+    const currency = (row.currency || "THB").trim().toUpperCase() || "THB";
+    const rate = currency === "THB" ? 1 : Number(row.fxToThb) > 0 ? Number(row.fxToThb) : 1;
+    const native = Number(row.value || row.amount);
+    return native > 0 ? native * rate : 0;
+  })();
+  const preview = useMemo(() => {
+    if (!cashBalance || !bucketLedger || !row.ticker.trim() || !row.tradeDate || !(assertedThb > 0))
+      return null;
+    return previewBalanceChange(bucketLedger, {
+      ticker: row.ticker,
+      tradeDate: row.tradeDate,
+      assertedThb,
+    });
+  }, [cashBalance, bucketLedger, row.ticker, row.tradeDate, assertedThb]);
+  const classifyHint = (() => {
+    if (!preview || preview.first) return null;
+    const { delta, absorbed } = preview;
+    if (Math.abs(delta) < 0.005) return null;
+    if (delta < 0) {
+      return `Records ${fmtTHBClean(-delta)} out on ${fmtDate(row.tradeDate)} — counted as money you took out.`;
+    }
+    const added = delta - absorbed;
+    if (absorbed > 0.005 && added > 0.005) {
+      return `${fmtTHBClean(absorbed)} of this is your recent fund sale landing; ${fmtTHBClean(added)} is counted as money you added.`;
+    }
+    if (absorbed > 0.005) {
+      return "This is your recent fund sale landing in the account — not counted as new money.";
+    }
+    return `Records ${fmtTHBClean(delta)} in on ${fmtDate(row.tradeDate)} — counted as money you added.`;
+  })();
   // A Balance recorded by its ฿ value (not a unit count): avg cost is optional here
   // — units (and any cost) are derived from the value, so the cost field steps back.
   const anchorValueDriven = anchor && Number(row.value) > 0;
@@ -1506,6 +1583,11 @@ function RowEditor({
       </div>
       {/* Purpose (Role + Label) now lives in the main `.rec-edit` grid above — single row
           on desktop, wraps on narrow — instead of a separate block here. */}
+      {classifyHint ? (
+        <p className="rec-hint" aria-live="polite">
+          {classifyHint}
+        </p>
+      ) : null}
       <div className="ledger-edit-actions">
         <span className="rec-type-help">
           <Icon name="info" size={12} />

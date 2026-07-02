@@ -3,14 +3,23 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { withDb } from "@/lib/api/with-db";
 import { listBuckets } from "@/lib/db/queries/buckets";
+import { listEarmarks } from "@/lib/db/queries/earmarks";
 import { canonicalTickerMap, catalogQuoteSource } from "@/lib/db/queries/funds";
+import { foldableEvents } from "@/lib/db/queries/resolve-derived-units";
 import {
   insertTransactions,
   listTransactionsByBucket,
   listTransactionsForBuckets,
+  type Transaction,
   type TransactionInsert,
 } from "@/lib/db/queries/transactions";
 import { tickerKey } from "@/lib/market/sources";
+import {
+  type CashNudge,
+  cashBalancesAsOf,
+  foldSettlementCash,
+} from "@/lib/portfolio/settlement-cash";
+import { toLedgerTxn } from "@/lib/portfolio/transaction-analytics";
 import {
   isAnchorKind,
   isCashAnchorKind,
@@ -170,6 +179,79 @@ export async function POST(req: Request) {
     });
 
     const inserted = insertTransactions(rows);
-    return NextResponse.json({ inserted, importBatchId, count: inserted.length }, { status: 201 });
+    const cashNudges = fundedFromCashNudges(bucketId, inserted);
+    return NextResponse.json(
+      {
+        inserted,
+        importBatchId,
+        count: inserted.length,
+        ...(cashNudges.length > 0 ? { cashNudges } : {}),
+      },
+      { status: 201 },
+    );
   });
+}
+
+// Below this the money is in satang noise, not a real shortfall.
+const NUDGE_EPSILON = 0.005;
+const NUDGE_CAP = 3;
+
+/**
+ * The funded-from-cash nudge (#232). For each just-inserted buy, the part of its cost
+ * the in-transit settlement heuristic did NOT already net (a reinvested switch never
+ * fires) — paired with the tracked cash accounts that could have covered it at the buy
+ * date. Convenience, not correctness: the client offers a one-tap matching withdraw;
+ * ignoring it still reconciles at the next Set balance. Reserved accounts are set
+ * aside (#149) and non-THB accounts need FX-aware entry (#233), so neither is offered.
+ */
+function fundedFromCashNudges(bucketId: string, inserted: Transaction[]): CashNudge[] {
+  const buys = inserted.filter((t) => t.kind === "buy");
+  if (buys.length === 0) return [];
+
+  // The bucket ledger including this batch, folded the same way analytics folds it
+  // (derived units resolved), so the shortfall matches what the chart will show.
+  const all = listTransactionsByBucket(bucketId);
+  const ledger = foldableEvents(all).map(toLedgerTxn);
+  const today = new Date().toISOString().slice(0, 10);
+  const { buyShortfallById } = foldSettlementCash(ledger, today);
+
+  const reserved = new Set(
+    listEarmarks()
+      .filter((e) => e.bucketId === bucketId && e.role === "reserved" && e.ticker)
+      .map((e) => tickerKey(e.ticker as string)),
+  );
+  const nonThb = new Set(
+    all
+      .filter((r) => r.quoteSource === "cash" && (r.tradeCurrency ?? "THB").toUpperCase() !== "THB")
+      .map((r) => tickerKey(r.ticker)),
+  );
+  const candidates = new Map<string, string>(); // tickerKey → display ticker
+  for (const r of all) {
+    if (r.quoteSource !== "cash") continue;
+    const key = tickerKey(r.ticker);
+    if (reserved.has(key) || nonThb.has(key) || candidates.has(key)) continue;
+    candidates.set(key, r.ticker);
+  }
+  if (candidates.size === 0) return [];
+
+  const nudges: CashNudge[] = [];
+  for (const buy of buys) {
+    const shortfall = buyShortfallById.get(buy.id) ?? 0;
+    if (shortfall <= NUDGE_EPSILON) continue;
+    // Case-fold the per-account balances at the buy date onto the candidate keys.
+    const balanceByKey = new Map<string, number>();
+    for (const [ticker, balance] of cashBalancesAsOf(ledger, buy.tradeDate)) {
+      const key = tickerKey(ticker);
+      balanceByKey.set(key, (balanceByKey.get(key) ?? 0) + balance);
+    }
+    const accounts = [...candidates]
+      .map(([key, ticker]) => ({ ticker, balance: balanceByKey.get(key) ?? 0 }))
+      .filter((a) => a.balance >= shortfall - NUDGE_EPSILON)
+      .sort((a, b) => b.balance - a.balance)
+      .slice(0, NUDGE_CAP);
+    if (accounts.length === 0) continue;
+    nudges.push({ buyTicker: buy.ticker, tradeDate: buy.tradeDate, shortfall, accounts });
+    if (nudges.length >= NUDGE_CAP) break;
+  }
+  return nudges;
 }

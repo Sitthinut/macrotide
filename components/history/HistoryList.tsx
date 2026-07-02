@@ -639,8 +639,6 @@ function TxnEditor({
           />
         )}
         {isCash ? (
-          // The "no money moved" override was replaced by the per-account Purpose
-          // (Investable | Reserved) — the role decides the return treatment (#149 D10).
           <input
             value={cashBalance ? (draft.value ?? "") : draft.amount}
             onChange={(e) =>

@@ -68,6 +68,10 @@ export type CostBasisMethod = "average" | "fifo";
 export interface LedgerTxn {
   /** Stable tie-breaker for same-date ordering (the DB row id). */
   id?: number;
+  /** Owning portfolio — read ONLY by the settlement-cash fold to scope in-transit
+   * lots and absorption per bucket when a caller folds several buckets' rows
+   * together (the analytics path). Position math never crosses buckets anyway. */
+  bucketId?: string;
   ticker: string;
   kind: TxnKind;
   /** ISO-8601 economic event date — the ordering + discounting key. */
