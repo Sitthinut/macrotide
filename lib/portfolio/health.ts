@@ -100,9 +100,13 @@ export interface HealthSignals {
   cashPct: number;
 }
 
+// Distinct, high-contrast donut/legend colors (the same readable palette family as
+// the region chart) — one clearly separable hue per class. Mixed uses the region
+// palette's rose so it stands apart from equity-green and bond-orange.
 const ASSET_CLASS_META: Record<AssetClass, { label: string; color: string }> = {
   equity: { label: "Equity", color: "var(--accent)" },
   bond: { label: "Bonds", color: "#F4A434" },
+  mixed: { label: "Mixed", color: "#C76A8F" },
   alternative: { label: "Alternatives", color: "#7C7CFF" },
   cash: { label: "Cash", color: "#9E9EA8" },
   unknown: { label: "Unclassified", color: "#A38A55" },
@@ -144,7 +148,7 @@ export function allocationByClass(
         : h.class;
     groups.set(key, (groups.get(key) ?? 0) + h.value);
   }
-  const order = ["equity", "bond", "alternative", "cash", "reserved", "unknown"] as const;
+  const order = ["equity", "bond", "mixed", "alternative", "cash", "reserved", "unknown"] as const;
   return order
     .map((key) => {
       const value = groups.get(key) ?? 0;

@@ -8,6 +8,7 @@ import type { AssetClass, Holding } from "@/lib/static/types";
 const ASSET_CLASS_LABELS: Record<AssetClass, string> = {
   equity: "Equity",
   bond: "Bond",
+  mixed: "Mixed",
   alternative: "Alternative",
   cash: "Cash",
   unknown: "Unclassified",

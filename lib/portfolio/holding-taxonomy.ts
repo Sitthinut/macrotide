@@ -60,6 +60,7 @@ export function translateThaiPolicy(category: string | null | undefined): string
 const CLASS_LABEL: Record<string, string> = {
   equity: "Equity",
   bond: "Fixed Income",
+  mixed: "Mixed",
   alternative: "Alternative",
   cash: "Cash",
 };

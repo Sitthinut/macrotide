@@ -51,6 +51,7 @@ const HUE_COOLEST = RISK_RAMP[0][2]; // 250°
 const CLASS_RAMP_INDEX: Record<AssetClass, number | null> = {
   cash: 1,
   bond: 3,
+  mixed: 4,
   equity: 5,
   alternative: 7,
   unknown: null,

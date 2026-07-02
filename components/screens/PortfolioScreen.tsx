@@ -992,7 +992,7 @@ function PortfolioScreenInner({
 
   const byClass = useMemo(() => {
     if (!view || view.totalValue <= 0) {
-      return { equity: 0, bond: 0, alternative: 0, cash: 0, unknown: 0 };
+      return { equity: 0, bond: 0, mixed: 0, alternative: 0, cash: 0, unknown: 0 };
     }
     const groups: Record<string, number> = {};
     view.holdings.forEach((h) => {
@@ -1002,6 +1002,7 @@ function PortfolioScreenInner({
     return {
       equity: ((groups.equity || 0) / total) * 100,
       bond: ((groups.bond || 0) / total) * 100,
+      mixed: ((groups.mixed || 0) / total) * 100,
       alternative: ((groups.alternative || 0) / total) * 100,
       cash: ((groups.cash || 0) / total) * 100,
       unknown: ((groups.unknown || 0) / total) * 100,
@@ -2267,6 +2268,16 @@ function PortfolioScreenInner({
         >
           Bonds {byClass.bond.toFixed(0)}%
         </button>
+        {byClass.mixed > 0.5 && (
+          <button
+            type="button"
+            className="chip"
+            data-active={filter === "mixed"}
+            onClick={() => setFilter("mixed")}
+          >
+            Mixed {byClass.mixed.toFixed(0)}%
+          </button>
+        )}
         {byClass.alternative > 0.5 && (
           <button
             type="button"

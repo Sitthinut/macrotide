@@ -73,6 +73,12 @@ describe("adaptPortfolios", () => {
     expect(portfolios[0].holdings[0].nav).toBe(100);
   });
 
+  it("preserves the 'mixed' asset class instead of collapsing it to unknown (#267)", () => {
+    const balanced = { ...sampleHolding, assetClass: "mixed" };
+    const portfolios = adaptPortfolios([sampleBucket], [balanced], [sampleQuote]);
+    expect(portfolios[0].holdings[0].class).toBe("mixed");
+  });
+
   it("preserves the DB id and bucketId on adapted holdings", () => {
     const portfolios = adaptPortfolios([sampleBucket], [sampleHolding], [sampleQuote]);
     expect(portfolios[0].holdings[0].id).toBe(1);
