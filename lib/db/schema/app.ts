@@ -9,6 +9,7 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import type { NativeInputs } from "@/lib/portfolio/native-inputs";
 
 // ───────────────────────────────────────────────────────────────────────────
 // app.db — the system of record (env DB_PATH, default data/app.db). Holds every
@@ -242,6 +243,12 @@ export const transactions = sqliteTable(
      * THB-denominated funds: tradeCurrency "THB", fxToThb 1 (a no-op).
      */
     fxToThb: real("fx_to_thb").notNull().default(1),
+    /**
+     * The native figures the user typed for a non-THB row, stored verbatim (see
+     * `NativeInputs`). Null on THB rows and legacy rows — those reconstruct
+     * native from `THB ÷ fxToThb` at read. Never folded; provenance only.
+     */
+    nativeInputs: text("native_inputs", { mode: "json" }).$type<NativeInputs>(),
     note: text("note"),
     // Free-text broker / import provenance label, like holdings.source.
     source: text("source"),

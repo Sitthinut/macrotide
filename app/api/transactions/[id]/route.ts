@@ -5,6 +5,7 @@ import { listBuckets } from "@/lib/db/queries/buckets";
 import { canonicalTicker, catalogQuoteSource } from "@/lib/db/queries/funds";
 import { deleteTransaction, updateTransaction } from "@/lib/db/queries/transactions";
 import { tickerKey } from "@/lib/market/sources";
+import { nativeInputsSchema } from "@/lib/portfolio/native-inputs";
 import {
   isAnchorKind,
   isCashAnchorKind,
@@ -45,6 +46,9 @@ const patchBody = z
     // omitted pair (a THB edit) leaves the row THB-denominated.
     tradeCurrency: z.string().trim().min(1).max(8).default("THB"),
     fxToThb: z.number().finite().positive().default(1),
+    // Verbatim native figures the user typed (non-THB rows) — provenance only,
+    // never folded. See POST /api/transactions.
+    nativeInputs: nativeInputsSchema.nullish(),
   })
   // A trade needs the money fact: a positive ฿ amount OR a unit count (units-only
   // trades derive their amount from NAV). Anchors and splits may carry amount 0.
@@ -107,6 +111,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       // this rate at entry); the pair records the currency + trade-date rate.
       tradeCurrency: t.tradeCurrency,
       fxToThb: t.fxToThb,
+      // Verbatim native figures — kept only for a non-THB row (a THB edit clears them).
+      nativeInputs: t.tradeCurrency === "THB" ? null : (t.nativeInputs ?? null),
     });
     if (!updated) return NextResponse.json({ error: "not_found" }, { status: 404 });
     return NextResponse.json(updated);

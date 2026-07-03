@@ -206,4 +206,42 @@ describe("PATCH /api/transactions/[id] — facts-only edit parity", () => {
     expect(stored().tradeCurrency).toBe("THB");
     expect(stored().fxToThb).toBe(1);
   });
+
+  it("keeps the verbatim native figures on a non-THB edit; THB stays authoritative", async () => {
+    const id = seedBuy("USSTK");
+    const { status } = await patch(id, {
+      tradeDate: "2026-03-01",
+      kind: "buy",
+      ticker: "USSTK",
+      quoteSource: "market",
+      units: 10,
+      pricePerUnit: 400 * 35,
+      amount: 400 * 35 * 10,
+      tradeCurrency: "USD",
+      fxToThb: 35,
+      nativeInputs: { amount: 4000, price: 400 },
+    });
+    expect(status).toBe(200);
+    // The exact figures the user typed round-trip, not a ฿ ÷ rate reconstruction.
+    expect(stored().nativeInputs).toEqual({ amount: 4000, price: 400 });
+    // THB money is unchanged and still drives the fold.
+    expect(Math.abs(stored().amount)).toBe(400 * 35 * 10);
+    expect(stored().pricePerUnit).toBe(14000);
+  });
+
+  it("clears native figures on a THB edit even if the client sends them", async () => {
+    const id = seedBuy("EXAMPLE-FUND-A");
+    const { status } = await patch(id, {
+      tradeDate: "2026-03-01",
+      kind: "buy",
+      ticker: "EXAMPLE-FUND-A",
+      quoteSource: "thai_mutual_fund",
+      units: 10,
+      pricePerUnit: 5,
+      amount: 50,
+      nativeInputs: { amount: 999 }, // a THB row has no native side — dropped
+    });
+    expect(status).toBe(200);
+    expect(stored().nativeInputs).toBeNull();
+  });
 });
