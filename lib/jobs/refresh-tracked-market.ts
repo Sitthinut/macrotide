@@ -2,6 +2,7 @@ import "server-only";
 import { appDb } from "@/lib/db/client";
 import { holdings } from "@/lib/db/schema";
 import { refreshSymbols } from "@/lib/market/cache";
+import { BASE_CURRENCY, inferHoldingCurrency } from "@/lib/market/currency";
 import { INDICATOR_CATALOG } from "@/lib/market/indicators";
 import type { SeriesRange } from "@/lib/market/providers/types";
 import { quoteCacheKey } from "@/lib/market/sources";
@@ -9,6 +10,38 @@ import { quoteCacheKey } from "@/lib/market/sources";
 interface SymbolRef {
   source: string;
   ticker: string;
+}
+
+/** The distinct native currencies of the held positions: a security infers
+ * from its symbol, cash carries its own `currency`. Drives which FX series to warm. */
+function listHeldCurrencies(): string[] {
+  const set = new Set<string>();
+  for (const r of appDb
+    .selectDistinct({
+      source: holdings.quoteSource,
+      ticker: holdings.ticker,
+      currency: holdings.currency,
+    })
+    .from(holdings)
+    .all()) {
+    set.add(inferHoldingCurrency(r.source, r.ticker, r.currency));
+  }
+  return [...set];
+}
+
+/**
+ * The FX series a foreign holding's value fold needs. Every conversion runs
+ * through USD→THB (`THB=X`); a non-USD foreign currency C also needs its USD cross
+ * series (`C=X`) for `C→THB = (USD→THB)/(USD→C)`. Warmed at `max` alongside the held
+ * NAV so a foreign holding's baht chart is as deep and fresh as its native NAV —
+ * covering both the daily refresh and the historical backfill in one pass.
+ */
+function fxRefsForCurrencies(currencies: string[]): SymbolRef[] {
+  const foreign = currencies.filter((c) => c && c !== BASE_CURRENCY);
+  if (foreign.length === 0) return [];
+  const tickers = new Set<string>(["THB=X"]);
+  for (const c of foreign) if (c !== "USD") tickers.add(`${c}=X`);
+  return [...tickers].map((ticker) => ({ source: "market", ticker }));
 }
 
 export interface RefreshTrackedMarketResult {
@@ -35,6 +68,8 @@ export interface RefreshTrackedMarketOptions {
   range?: SeriesRange;
   /** Test seam — enumerate held refs. */
   _listHeld?: () => SymbolRef[];
+  /** Test seam — enumerate held currencies. */
+  _listHeldCurrencies?: () => string[];
   /** Test seam — refresh a batch of refs. */
   _refreshSymbols?: typeof refreshSymbols;
 }
@@ -77,6 +112,7 @@ export async function refreshTrackedMarket(
   const shallowRange = opts.range ?? "6mo";
   const refresh = opts._refreshSymbols ?? refreshSymbols;
   const listHeld = opts._listHeld ?? listHeldRefs;
+  const listCurrencies = opts._listHeldCurrencies ?? listHeldCurrencies;
 
   const indexRefs: SymbolRef[] = INDICATOR_CATALOG.map((i) => ({
     source: "market",
@@ -93,9 +129,13 @@ export async function refreshTrackedMarket(
       return true;
     });
 
-  // Deep first (held market positions → max), then the shallow rest (indicators
-  // + held funds/manual). De-dup is shared across both, so the deep claim wins.
-  const deepRefs = dedupe(heldRefs.filter((r) => r.source === "market"));
+  // Deep first (held market positions + the FX series their baht chart needs → max),
+  // then the shallow rest (indicators + held funds/manual). De-dup is shared across
+  // both, so the deep claim wins.
+  const deepRefs = dedupe([
+    ...heldRefs.filter((r) => r.source === "market"),
+    ...fxRefsForCurrencies(listCurrencies()),
+  ]);
   const shallowRefs = dedupe([...indexRefs, ...heldRefs.filter((r) => r.source !== "market")]);
 
   const deepResults = deepRefs.length > 0 ? await refresh(deepRefs, "max") : [];

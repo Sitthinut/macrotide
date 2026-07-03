@@ -21,6 +21,7 @@ describe("refreshTrackedMarket — depth split", () => {
     await refreshTrackedMarket({
       range: "6mo",
       _listHeld: () => held,
+      _listHeldCurrencies: () => [],
       _refreshSymbols: refresh,
     });
 
@@ -38,7 +39,11 @@ describe("refreshTrackedMarket — depth split", () => {
     const indicator = INDICATOR_CATALOG[0].symbol; // also held as a market position
     const held: Ref[] = [{ source: "market", ticker: indicator }];
 
-    await refreshTrackedMarket({ _listHeld: () => held, _refreshSymbols: refresh });
+    await refreshTrackedMarket({
+      _listHeld: () => held,
+      _listHeldCurrencies: () => [],
+      _refreshSymbols: refresh,
+    });
 
     const [deepRefs] = refresh.mock.calls[0];
     const [shallowRefs] = refresh.mock.calls[1];
@@ -54,7 +59,12 @@ describe("refreshTrackedMarket — depth split", () => {
       { source: "manual", ticker: "GOLD-BAR" },
     ];
 
-    await refreshTrackedMarket({ range: "1y", _listHeld: () => held, _refreshSymbols: refresh });
+    await refreshTrackedMarket({
+      range: "1y",
+      _listHeld: () => held,
+      _listHeldCurrencies: () => [],
+      _refreshSymbols: refresh,
+    });
 
     // No held market refs → no deep batch; everything in one shallow call.
     expect(refresh).toHaveBeenCalledTimes(1);
@@ -77,10 +87,48 @@ describe("refreshTrackedMarket — depth split", () => {
       { source: "market", ticker: "BAD" },
     ];
 
-    const res = await refreshTrackedMarket({ _listHeld: () => held, _refreshSymbols: refresh });
+    const res = await refreshTrackedMarket({
+      _listHeld: () => held,
+      _listHeldCurrencies: () => [],
+      _refreshSymbols: refresh,
+    });
 
     expect(res.requested).toBe(res.ok + res.failed);
     expect(res.failed).toBe(1);
     expect(res.errors).toContainEqual({ source: "market", ticker: "BAD", error: "no data" });
+  });
+
+  it("warms the FX series a held foreign currency needs, deep, alongside the NAV", async () => {
+    const refresh = vi.fn(async (refs: Ref[], _range?: string) => okResults(refs));
+    const held: Ref[] = [{ source: "market", ticker: "VOO" }];
+
+    await refreshTrackedMarket({
+      _listHeld: () => held,
+      // A held USD position needs USD→THB (`THB=X`); USD converts directly, no `USD=X`.
+      _listHeldCurrencies: () => ["USD", "THB"],
+      _refreshSymbols: refresh,
+    });
+
+    const [deepRefs, deepRange] = refresh.mock.calls[0];
+    expect(deepRange).toBe("max");
+    expect(deepRefs).toContainEqual({ source: "market", ticker: "THB=X" });
+    expect(deepRefs).not.toContainEqual({ source: "market", ticker: "USD=X" });
+  });
+
+  it("adds no FX ref to the deep batch when every holding is THB", async () => {
+    const refresh = vi.fn(async (refs: Ref[], _range?: string) => okResults(refs));
+    // A held market position gives us a deep batch to inspect; all-THB currencies.
+    const held: Ref[] = [{ source: "market", ticker: "SET.BK" }];
+
+    await refreshTrackedMarket({
+      _listHeld: () => held,
+      _listHeldCurrencies: () => ["THB"],
+      _refreshSymbols: refresh,
+    });
+
+    // Only the deep batch is ours to gate; the shallow indicators may legitimately
+    // include an FX indicator (a Markets currency row). No FX ref was added here.
+    const [deepRefs] = refresh.mock.calls[0];
+    expect((deepRefs as Ref[]).some((r) => r.ticker.endsWith("=X"))).toBe(false);
   });
 });
