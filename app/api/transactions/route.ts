@@ -202,7 +202,8 @@ const NUDGE_CAP = 3;
  * fires) — paired with the tracked cash accounts that could have covered it at the buy
  * date. Convenience, not correctness: the client offers a one-tap matching withdraw;
  * ignoring it still reconciles at the next Set balance. Reserved accounts are set
- * aside (#149) and non-THB accounts need FX-aware entry (#233), so neither is offered.
+ * aside (#149) and not offered; a non-THB account IS offered — the withdraw records in
+ * native units at the buy-date FX rate. Each candidate carries its currency.
  */
 function fundedFromCashNudges(bucketId: string, inserted: Transaction[]): CashNudge[] {
   const buys = inserted.filter((t) => t.kind === "buy");
@@ -220,16 +221,16 @@ function fundedFromCashNudges(bucketId: string, inserted: Transaction[]): CashNu
       .filter((e) => e.bucketId === bucketId && e.role === "reserved" && e.ticker)
       .map((e) => tickerKey(e.ticker as string)),
   );
-  const nonThb = new Set(
-    all
-      .filter((r) => r.quoteSource === "cash" && (r.tradeCurrency ?? "THB").toUpperCase() !== "THB")
-      .map((r) => tickerKey(r.ticker)),
-  );
+  // A cash account's native currency (its rows all share one tradeCurrency); a non-THB
+  // account is offered now that the withdraw records in native units at the buy-date
+  // FX rate, not by storing THB as its units.
+  const currencyByKey = new Map<string, string>();
   const candidates = new Map<string, string>(); // tickerKey → display ticker
   for (const r of all) {
     if (r.quoteSource !== "cash") continue;
     const key = tickerKey(r.ticker);
-    if (reserved.has(key) || nonThb.has(key) || candidates.has(key)) continue;
+    currencyByKey.set(key, (r.tradeCurrency ?? "THB").toUpperCase() || "THB");
+    if (reserved.has(key) || candidates.has(key)) continue;
     candidates.set(key, r.ticker);
   }
   if (candidates.size === 0) return [];
@@ -245,7 +246,11 @@ function fundedFromCashNudges(bucketId: string, inserted: Transaction[]): CashNu
       balanceByKey.set(key, (balanceByKey.get(key) ?? 0) + balance);
     }
     const accounts = [...candidates]
-      .map(([key, ticker]) => ({ ticker, balance: balanceByKey.get(key) ?? 0 }))
+      .map(([key, ticker]) => ({
+        ticker,
+        balance: balanceByKey.get(key) ?? 0,
+        currency: currencyByKey.get(key) ?? "THB",
+      }))
       .filter((a) => a.balance >= shortfall - NUDGE_EPSILON)
       .sort((a, b) => b.balance - a.balance)
       .slice(0, NUDGE_CAP);

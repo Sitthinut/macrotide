@@ -490,8 +490,13 @@ export interface CashNudge {
   tradeDate: string;
   /** THB the in-transit heuristic did NOT cover — the offered withdraw amount. */
   shortfall: number;
-  /** Candidate accounts (balance ≥ shortfall at the buy date), largest first. */
-  accounts: Array<{ ticker: string; balance: number }>;
+  /**
+   * Candidate accounts (balance ≥ shortfall at the buy date), largest first.
+   * `balance` is THB (the sufficiency check is THB-vs-THB); `currency` is the
+   * account's native currency, so a non-THB account records its withdraw in native
+   * units at the buy-date FX rate rather than storing THB as its units.
+   */
+  accounts: Array<{ ticker: string; balance: number; currency: string }>;
 }
 
 /** `previewBalanceChange`'s verdict — what saving a draft Set balance will conclude. */

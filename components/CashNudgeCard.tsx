@@ -29,6 +29,24 @@ export function CashNudgeCard({ bucketId, nudge, onResolve }: CashNudgeCardProps
     setBusy(true);
     setError(false);
     try {
+      // A cash row carries the NATIVE figure as `units` and the ฿ figure as `amount`.
+      // The shortfall is THB; for a THB account the two are the same number. For a
+      // non-THB account fetch the buy-date FX rate and record native units =
+      // shortfall ÷ rate — never store the THB figure as a non-THB account's units.
+      const currency = (
+        nudge.accounts.find((a) => a.ticker === account)?.currency ?? "THB"
+      ).toUpperCase();
+      let units = nudge.shortfall;
+      let fxToThb = 1;
+      if (currency !== "THB") {
+        const fxRes = await fetch(
+          `/api/fx?from=${encodeURIComponent(currency)}&on=${nudge.tradeDate}`,
+        );
+        const body = fxRes.ok ? ((await fxRes.json()) as { rate: number | null }) : null;
+        if (!body || !(body.rate && body.rate > 0)) throw new Error("fx_unavailable");
+        fxToThb = body.rate;
+        units = nudge.shortfall / fxToThb;
+      }
       const res = await fetch("/api/transactions", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -40,13 +58,12 @@ export function CashNudgeCard({ bucketId, nudge, onResolve }: CashNudgeCardProps
               kind: "withdraw",
               ticker: account,
               englishName: account,
-              // Cash rows carry the native figure as units and the ฿ amount; the
-              // candidates are THB-only, so the two are the same number here.
-              units: nudge.shortfall,
+              units,
+              // ฿ amount the buy/withdraw net to zero on — always the THB shortfall.
               amount: nudge.shortfall,
               quoteSource: "cash",
-              tradeCurrency: "THB",
-              fxToThb: 1,
+              tradeCurrency: currency,
+              fxToThb,
               note: `Funded the ${nudge.buyTicker} buy`,
             },
           ],
