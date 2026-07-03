@@ -176,6 +176,13 @@
       "when": 1782443995884,
       "tag": "0024_superb_magus",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1783112262638,
+      "tag": "0025_lucky_felicia_hardy",
+      "breakpoints": true
     }
   ]
 }

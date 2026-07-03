@@ -99,6 +99,44 @@ describe("POST /api/transactions — facts-only ledger (ADR 0004)", () => {
     expect(heldUnits("EXAMPLE-FUND-A")).toBeCloseTo(16000);
   });
 
+  it("persists the verbatim native figures for a non-THB buy; THB stays the fold fact", async () => {
+    const { status, body } = await post([
+      {
+        tradeDate: "2026-03-01",
+        kind: "buy",
+        ticker: "USSTK",
+        quoteSource: "market",
+        units: 10,
+        pricePerUnit: 500 * 35,
+        amount: 500 * 35 * 10,
+        tradeCurrency: "USD",
+        fxToThb: 35,
+        nativeInputs: { amount: 5000, price: 500 },
+      },
+    ]);
+    expect(status).toBe(201);
+    // The exact numbers the user typed are stored verbatim...
+    expect(body.inserted[0].nativeInputs).toEqual({ amount: 5000, price: 500 });
+    // ...while the THB money stays authoritative for the fold.
+    expect(Math.abs(body.inserted[0].amount)).toBe(500 * 35 * 10);
+  });
+
+  it("drops native figures on a THB buy even if the client sends them", async () => {
+    const { body } = await post([
+      {
+        tradeDate: "2026-03-01",
+        kind: "buy",
+        ticker: "EXAMPLE-FUND-A",
+        quoteSource: "thai_mutual_fund",
+        units: 10,
+        pricePerUnit: 5,
+        amount: 50,
+        nativeInputs: { amount: 999 }, // a THB row has no native side
+      },
+    ]);
+    expect(body.inserted[0].nativeInputs).toBeNull();
+  });
+
   it("derives units for a LOWERCASE-cataloged fund's value-only Balance (cache-key case, #134)", async () => {
     // The ttb SSF/RMF family is cataloged in lowercase. The NAV cache is keyed by
     // the canonical quoteCacheKey (source:UPPER(ticker)) on write, and the fold

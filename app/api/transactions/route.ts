@@ -14,6 +14,7 @@ import {
   type TransactionInsert,
 } from "@/lib/db/queries/transactions";
 import { tickerKey } from "@/lib/market/sources";
+import { nativeInputsSchema } from "@/lib/portfolio/native-inputs";
 import {
   type CashNudge,
   cashBalancesAsOf,
@@ -62,6 +63,10 @@ const txnInput = z
     quoteSource: z.string().trim().min(1).max(40).default("market"),
     tradeCurrency: z.string().trim().min(1).max(8).default("THB"),
     fxToThb: z.number().finite().positive().default(1),
+    // Raw native figures the user typed (non-THB rows), kept verbatim as
+    // provenance. The THB money columns above stay authoritative; these are
+    // never derived from or folded — display/audit only.
+    nativeInputs: nativeInputsSchema.nullish(),
     note: z.string().trim().max(500).optional(),
     source: z.string().trim().max(120).optional(),
   })
@@ -172,6 +177,9 @@ export async function POST(req: Request) {
         fee: t.fee ?? null,
         tradeCurrency: t.tradeCurrency,
         fxToThb: t.fxToThb,
+        // The verbatim native figures — kept only for a non-THB row (a THB row's
+        // stored columns already ARE the native fact).
+        nativeInputs: t.tradeCurrency === "THB" ? null : (t.nativeInputs ?? null),
         note: t.note ?? null,
         source: t.source ?? null,
         importBatchId,

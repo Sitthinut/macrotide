@@ -400,6 +400,9 @@ export function seedDemoData(db: Db): void {
         holdingSource === "market" ? inferHoldingCurrency("market", h.ticker) : "THB";
       const legFx = legCurrency === "THB" ? 1 : DEMO_MARKET_FX;
       for (const leg of storyLegs(portfolioIndex, holdingIndex, h, p.holdings)) {
+        // Store the native (USD) figures the persona "typed" so the demo round-trips
+        // exactly — the editor shows $500, not the ฿ ÷ rate reconstruction.
+        const legNativeAmount = legCurrency === "THB" ? null : Math.abs(leg.amount) / legFx;
         db.insert(transactions)
           .values({
             bucketId: p.id,
@@ -414,6 +417,13 @@ export function seedDemoData(db: Db): void {
             fee: null,
             tradeCurrency: legCurrency,
             fxToThb: legFx,
+            nativeInputs:
+              legNativeAmount == null
+                ? null
+                : {
+                    amount: round4(legNativeAmount),
+                    ...(leg.units > 0 ? { price: round4(legNativeAmount / leg.units) } : {}),
+                  },
             source: h.source,
             importBatchId: "seed-history",
             createdAt: now,
