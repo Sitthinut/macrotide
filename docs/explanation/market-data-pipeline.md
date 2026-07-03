@@ -193,9 +193,13 @@ touching the portfolio "All" chart:
   them — there's no per-stock on-demand fetch (the reverse index is a byproduct of
   ingesting ETFs forward, then resolving each constituent's CUSIP/ISIN→ticker via
   `resolve-etf-tickers`; see the data model).
-- **FX is not a limiter.** THB↔USD conversion history rides on Frankfurter
-  (keyless, ECB-backed, deep to 1999), so the currency leg of a blended "All"
-  chart never bottlenecks it.
+- **FX rides the held-NAV warm.** THB↔USD conversion history comes from Frankfurter
+  (keyless, ECB-backed, deep to 1999), so it never bottlenecks a blended "All" chart.
+  The `refresh-market` freshness job warms each held foreign currency's `=X` series to
+  `max` alongside the held NAV — so a foreign holding's baht chart and its trade-date
+  cost-basis conversion are a cache hit on first open (not a cold FX fetch), and a
+  Frankfurter blip serves the last-good rate instead of dropping the holding. A USD
+  position needs only USD→THB (`THB=X`); a non-USD currency adds its USD cross series.
 - **Benchmark comparison → deep, total-return.** Comparing the portfolio against
   an index needs a purpose-built **total-return** series, not the display-only
   price indices above: a price index would understate the benchmark and flatter
