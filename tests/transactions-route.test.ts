@@ -533,7 +533,35 @@ describe("POST /api/transactions — funded-from-cash nudge (#232)", () => {
         buyTicker: "EXAMPLE-FUND-A",
         tradeDate: "2026-03-05",
         shortfall: 30000,
-        accounts: [{ ticker: "Savings", balance: 50000 }],
+        accounts: [{ ticker: "Savings", balance: 50000, currency: "THB" }],
+      },
+    ]);
+  });
+
+  it("offers a NON-THB account with its currency so the withdraw can record native units (#233)", async () => {
+    // A USD savings account: native $1,000 balance, THB value 35,000 at fxToThb 35.
+    // Sufficiency is THB-vs-THB (35,000 ≥ the 30,000 shortfall), and the nudge carries
+    // the account currency so CashNudgeCard records the withdraw as native units at the
+    // buy-date FX rate — not the THB figure stored as the account's units.
+    await post([
+      {
+        tradeDate: "2026-02-01",
+        kind: "deposit",
+        ticker: "USD-Savings",
+        quoteSource: "cash",
+        units: 1000,
+        amount: 35000,
+        tradeCurrency: "USD",
+        fxToThb: 35,
+      },
+    ]);
+    const { body } = await post([buy(30000)]);
+    expect(body.cashNudges).toEqual([
+      {
+        buyTicker: "EXAMPLE-FUND-A",
+        tradeDate: "2026-03-05",
+        shortfall: 30000,
+        accounts: [{ ticker: "USD-Savings", balance: 35000, currency: "USD" }],
       },
     ]);
   });
