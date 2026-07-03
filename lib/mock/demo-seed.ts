@@ -23,14 +23,19 @@ import {
   transactions,
 } from "../db/schema";
 import type * as appSchema from "../db/schema/app";
+import { inferHoldingCurrency } from "../market/currency";
 import { MODEL_PORTFOLIOS, PORTFOLIOS, USER_GOALS, USER_JOURNAL, USER_PLAN } from "./data";
 import { demoHoldingSeries } from "./demo-history-read";
 
 type Db = ReturnType<typeof drizzle<typeof appSchema>>;
 const REFERENCE_TODAY = new Date("2026-05-21T00:00:00Z");
 
-// All demo seed holdings are Thai mutual funds, per the existing seed.
+// Most demo seed holdings are Thai mutual funds; a few are direct US positions.
 const DEMO_QUOTE_SOURCE = "thai_mutual_fund" as const;
+// The US positions were bought around 2022 — a representative USD→THB rate so their
+// cost basis reads in native USD. The THB figures on the legs are unchanged; this
+// only tags them as foreign so the entry editors show $ and the trade-date rate.
+const DEMO_MARKET_FX = 35;
 
 /** One ledger row of the persona's trade history. */
 interface StoryLeg {
@@ -388,6 +393,12 @@ export function seedDemoData(db: Db): void {
       // Dated trade history — the ledger is the source of truth and the holding
       // above is its projection (ADR 0004). Real dates matter: the value chart
       // replays the ledger, so these legs ARE the persona's 5-year story.
+      // A US (`market`) position's cost basis is native (USD); tag its legs so the entry
+      // editors show $ + the trade-date rate. The stored THB figures are unchanged — the
+      // ledger stays uniformly THB, this only records the native currency + rate.
+      const legCurrency =
+        holdingSource === "market" ? inferHoldingCurrency("market", h.ticker) : "THB";
+      const legFx = legCurrency === "THB" ? 1 : DEMO_MARKET_FX;
       for (const leg of storyLegs(portfolioIndex, holdingIndex, h, p.holdings)) {
         db.insert(transactions)
           .values({
@@ -401,8 +412,8 @@ export function seedDemoData(db: Db): void {
             pricePerUnit: leg.units > 0 ? round4(Math.abs(leg.amount) / leg.units) : null,
             amount: leg.amount,
             fee: null,
-            tradeCurrency: "THB",
-            fxToThb: 1,
+            tradeCurrency: legCurrency,
+            fxToThb: legFx,
             source: h.source,
             importBatchId: "seed-history",
             createdAt: now,
