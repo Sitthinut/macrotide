@@ -14,9 +14,11 @@ import { EventLine } from "@/components/history/EventLine";
 import { Icon } from "@/components/Icon";
 import { PrivateAmount } from "@/components/PrivateAmount";
 import { SymbolCombobox } from "@/components/portfolio/SymbolCombobox";
+import { MoneyInput } from "@/components/ui/MoneyInput";
 import { QtyInput, qtyDefaultMode } from "@/components/ui/QtyInput";
 import { Skeleton, SkeletonRows } from "@/components/ui/Skeleton";
 import { Stat } from "@/components/ui/Stat";
+import { fxCurrency, useFxEntry } from "@/components/ui/useFxEntry";
 import { mergeWithHoldings, type TickerSuggestion } from "@/lib/data/known-holdings";
 import type { Transaction } from "@/lib/db/queries/transactions";
 import { useHoldings } from "@/lib/fetchers/portfolio";
@@ -86,8 +88,11 @@ interface Draft {
   quoteSource: string;
   /** A cash account's currency (deposit/withdraw/cash_balance). Defaults THB. */
   currency?: string;
-  /** Native→THB rate for a non-THB cash account; "" / "1" for THB. */
+  /** Native→THB rate for a non-THB holding (cash or foreign security); "" / "1" for THB. */
   fxToThb?: string;
+  /** True once the user edits the rate by hand — also set on load for a stored non-THB
+   * row so its historical rate is preserved rather than silently re-fetched. */
+  fxManual?: boolean;
   /** "No money moved" override on a Set balance (cash_balance) — sent as `reconcile`. */
   reconcile?: boolean;
   /** True once the source was set explicitly (saved value or a badge flip) — keeps
@@ -110,6 +115,20 @@ function blankDraft(): Draft {
   };
 }
 function draftFromTxn(t: Transaction): Draft {
+  // A non-THB SECURITY stores its money fields in THB (native × the trade-date rate);
+  // the editor shows/edits NATIVE and re-multiplies on save, so seed native = THB ÷ rate
+  // (else editing would double-convert). Cash already stores native in `units`, so it
+  // needs no un-conversion. THB rows carry fx 1 → a no-op.
+  const secFx =
+    !isCashKind(t.kind) && (t.tradeCurrency ?? "THB") !== "THB" && (t.fxToThb ?? 1) !== 1
+      ? (t.fxToThb as number)
+      : 1;
+  // Un-convert THB → native for editing. Round the non-THB result to 4 dp: a raw
+  // THB ÷ rate is usually a long float (฿18,000 ÷ 35 = 514.28571…) that would show as
+  // garbage; 4 dp is plenty for a price and re-multiplies back to within a rounding
+  // whisker of the stored THB. A THB row (secFx 1) is left byte-for-byte unchanged.
+  const nat = (v: number): string =>
+    secFx === 1 ? String(v) : String(Math.round((v / secFx) * 1e4) / 1e4);
   return {
     tradeDate: t.tradeDate.slice(0, 10),
     kind: t.kind as TxnKind,
@@ -124,21 +143,23 @@ function draftFromTxn(t: Transaction): Draft {
       t.kind === "cash_balance" && t.units != null
         ? String(t.units)
         : t.value != null
-          ? String(t.value)
+          ? nat(t.value)
           : "",
-    pricePerUnit: t.pricePerUnit != null ? String(t.pricePerUnit) : "",
-    marketPrice: t.marketPrice != null ? String(t.marketPrice) : "",
-    fee: t.fee != null ? String(t.fee) : "",
+    pricePerUnit: t.pricePerUnit != null ? nat(t.pricePerUnit) : "",
+    marketPrice: t.marketPrice != null ? nat(t.marketPrice) : "",
+    fee: t.fee != null ? nat(t.fee) : "",
     // The Amount field is NATIVE. A cash deposit/withdraw stores native in `units` and
-    // ฿ in `amount`; seed from `units` so a non-THB amount doesn't re-apply the rate on save.
+    // ฿ in `amount`; seed from `units`. A non-cash amount un-converts THB → native.
     amount:
       isCashKind(t.kind) && t.kind !== "cash_balance" && t.units != null
         ? String(t.units)
-        : String(Math.abs(t.amount)),
+        : nat(Math.abs(t.amount)),
     quoteSource: t.quoteSource,
     currency: t.tradeCurrency ?? "THB",
-    // Only surface a rate for a non-THB account (THB is the implicit 1).
+    // Only surface a rate for a non-THB holding (THB is the implicit 1); mark it manual
+    // so opening the row keeps its stored historical rate instead of re-fetching.
     fxToThb: t.fxToThb != null && t.fxToThb !== 1 ? String(t.fxToThb) : "",
+    fxManual: t.fxToThb != null && t.fxToThb !== 1,
     reconcile: !!t.reconcile,
     quoteSourceLocked: true,
   };
@@ -246,6 +267,19 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
       setBusy(false);
       return;
     }
+    // Non-THB cost basis: convert the entered native figures to the THB the
+    // ledger folds, via the trade-date rate. A non-THB row (non-split) needs a rate —
+    // block rather than silently store the native figure as baht.
+    const secCurrency = fxCurrency(draft);
+    const secRate =
+      secCurrency === "THB" ? 1 : Number(draft.fxToThb) > 0 ? Number(draft.fxToThb) : 1;
+    const toThb = (v: number | null | undefined): number | undefined =>
+      v == null ? undefined : v * secRate;
+    if (draft.kind !== "split" && secCurrency !== "THB" && !(Number(draft.fxToThb) > 0)) {
+      setRowError(`Add the ${secCurrency}→฿ FX rate so the cost basis stores in baht.`);
+      setBusy(false);
+      return;
+    }
     try {
       let payload: Record<string, unknown>;
       if (isCashKind(draft.kind)) {
@@ -282,13 +316,16 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
           tradeDate: draft.tradeDate,
           kind: draft.kind,
           ticker: draft.ticker.trim(),
+          // `units` are a native share count; money fields convert to THB.
           units: hasUnits ? Number(draft.units) : undefined,
-          value: !hasUnits && hasValue ? Number(draft.value) : undefined,
-          pricePerUnit: avg,
-          marketPrice: draft.marketPrice.trim() === "" ? null : Number(draft.marketPrice),
+          value: !hasUnits && hasValue ? toThb(Number(draft.value)) : undefined,
+          pricePerUnit: toThb(avg),
+          marketPrice: draft.marketPrice.trim() === "" ? null : toThb(Number(draft.marketPrice)),
           // Cost magnitude (units × avg cost) — the PATCH route signs it (cash out).
-          amount: hasUnits && avg != null ? Number(draft.units) * avg : 0,
+          amount: hasUnits && avg != null ? toThb(Number(draft.units) * avg) : 0,
           quoteSource: draft.quoteSource || "manual",
+          tradeCurrency: secCurrency,
+          fxToThb: secRate,
         };
       } else {
         const d = normalizeTxnDraft({
@@ -305,11 +342,14 @@ export function HistoryList({ ticker = null, showRecap = true, onAddEntry }: His
           tradeDate: d.tradeDate,
           kind: d.kind,
           ticker: d.ticker,
+          // `units` (and a split ratio) are counts; money fields convert to THB.
           units: d.units,
-          pricePerUnit: d.pricePerUnit,
-          amount: d.kind === "split" ? 0 : (d.amount ?? 0),
-          fee: d.fee,
+          pricePerUnit: d.kind === "split" ? d.pricePerUnit : toThb(d.pricePerUnit),
+          amount: d.kind === "split" ? 0 : (toThb(d.amount) ?? 0),
+          fee: d.kind === "split" ? d.fee : toThb(d.fee),
           quoteSource: draft.quoteSource || d.quoteSource,
+          tradeCurrency: secCurrency,
+          fxToThb: secRate,
         };
       }
 
@@ -578,6 +618,24 @@ function TxnEditor({
   // Dividend / fee are pure ฿ flows — no units or price, just an amount.
   const amountOnly = draft.kind === "dividend" || draft.kind === "fee";
 
+  // Best-effort native money on the row, for the "≈ ฿X" FX preview.
+  const nativeMoney = cashBalance
+    ? Number(draft.value)
+    : isCash || amountOnly
+      ? Number(draft.amount)
+      : Number(draft.value) > 0
+        ? Number(draft.value)
+        : Number(draft.units) > 0 && Number(draft.pricePerUnit) > 0
+          ? Number(draft.units) * Number(draft.pricePerUnit)
+          : Number(draft.amount);
+  // Currency + trade-date FX, the SAME machinery the Add/Record modal uses.
+  const { currency, prefix, fxHint } = useFxEntry(draft, set, nativeMoney);
+  const cycleCurrency = () =>
+    set({ currency: currency === "THB" ? "USD" : "THB", fxManual: false });
+  // A CUSTOM (manual-priced) asset picks its currency (interactive pill, default ฿); a
+  // Thai fund / US Stock/ETF derives it read-only from the source.
+  const primaryCycle = draft.quoteSource === "manual" ? cycleCurrency : undefined;
+
   return (
     <div className="ledger-edit-card">
       <div className={`rec-edit${anchor ? " is-anchor" : amountOnly || isCash ? " is-flow" : ""}`}>
@@ -606,7 +664,6 @@ function TxnEditor({
           aria-label={anchor ? "As-of date" : "Trade date"}
         />
         {isCash ? (
-          // THB only for now — non-THB cash waits on auto-fetched FX (no manual rate).
           <input
             value={draft.ticker}
             onChange={(e) => set({ ticker: e.target.value })}
@@ -639,37 +696,55 @@ function TxnEditor({
           />
         )}
         {isCash ? (
-          <input
-            value={cashBalance ? (draft.value ?? "") : draft.amount}
-            onChange={(e) =>
-              set(cashBalance ? { value: e.target.value } : { amount: e.target.value })
-            }
-            placeholder={cashBalance ? "Balance (฿)" : "฿ amount"}
-            inputMode="decimal"
-            aria-label={cashBalance ? "Cash balance" : "Cash amount"}
-          />
+          <div className="rec-money">
+            {/* Cash picks its currency — the ฿⇄$ pill is interactive. */}
+            <MoneyInput
+              echo={prefix(cycleCurrency)}
+              value={cashBalance ? (draft.value ?? "") : draft.amount}
+              onChange={(e) =>
+                set(cashBalance ? { value: e.target.value } : { amount: e.target.value })
+              }
+              placeholder={cashBalance ? "Balance" : "Amount"}
+              inputMode="decimal"
+              aria-label={cashBalance ? "Cash balance" : "Cash amount"}
+            />
+            {fxHint}
+          </div>
         ) : amountOnly ? (
-          <input
-            value={draft.amount}
-            onChange={(e) => set({ amount: e.target.value })}
-            placeholder="฿ amount"
-            inputMode="decimal"
-            aria-label="Amount in baht"
-          />
+          <div className="rec-money">
+            <MoneyInput
+              echo={prefix(primaryCycle)}
+              value={draft.amount}
+              onChange={(e) => set({ amount: e.target.value })}
+              placeholder="Amount"
+              inputMode="decimal"
+              aria-label={`Amount in ${currency}`}
+            />
+            {fxHint}
+          </div>
         ) : (
           <>
-            <QtyInput
-              units={draft.units}
-              // `value` is the real ฿ total (a trade's amount, a Balance's value) so the
-              // toggle has data to re-type. A saved row stores only the typed fact, so
-              // open in the mode that fact implies — Units when a count is present, else
-              // ฿ — via the shared `qtyDefaultMode` (the SAME rule the Add modal uses).
-              value={anchor ? draft.value : draft.amount}
-              defaultMode={qtyDefaultMode(draft.units)}
-              onUnits={(v) => set({ units: v })}
-              onValue={(v) => set(anchor ? { value: v } : { amount: v })}
-            />
-            <input
+            <div className="rec-money">
+              <QtyInput
+                units={draft.units}
+                // `value` is the real ฿ total (a trade's amount, a Balance's value) so the
+                // toggle has data to re-type. A saved row stores only the typed fact, so
+                // open in the mode that fact implies — Units when a count is present, else
+                // ฿ — via the shared `qtyDefaultMode` (the SAME rule the Add modal uses).
+                value={anchor ? draft.value : draft.amount}
+                defaultMode={qtyDefaultMode(draft.units)}
+                // The $/฿ currency prefix on the ฿ total — read-only when the source
+                // decides it, an interactive pill for a custom asset.
+                leading={prefix(primaryCycle)}
+                onUnits={(v) => set({ units: v })}
+                onValue={(v) => set(anchor ? { value: v } : { amount: v })}
+              />
+              {fxHint}
+            </div>
+            {/* Every money field echoes the currency ($/฿) read-only; currency is set on
+                the total field. */}
+            <MoneyInput
+              echo={prefix()}
               value={draft.pricePerUnit}
               onChange={(e) => set({ pricePerUnit: e.target.value })}
               placeholder={anchor ? "Avg cost" : "Price"}
@@ -682,7 +757,8 @@ function TxnEditor({
               }
             />
             {anchor ? (
-              <input
+              <MoneyInput
+                echo={prefix()}
                 value={draft.marketPrice}
                 onChange={(e) => set({ marketPrice: e.target.value })}
                 placeholder="Current price"
@@ -691,7 +767,8 @@ function TxnEditor({
                 title="Today's price per unit. Only needed for a custom asset we can't price live — known funds use the live NAV."
               />
             ) : (
-              <input
+              <MoneyInput
+                echo={prefix()}
                 value={draft.fee}
                 onChange={(e) => set({ fee: e.target.value })}
                 placeholder="Fee"

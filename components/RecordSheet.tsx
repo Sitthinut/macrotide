@@ -18,7 +18,9 @@ import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import { SymbolCombobox } from "@/components/portfolio/SymbolCombobox";
 import { Combobox } from "@/components/ui/Combobox";
+import { MoneyInput } from "@/components/ui/MoneyInput";
 import { QtyInput, qtyDefaultMode } from "@/components/ui/QtyInput";
+import { fxCurrency, useFxEntry } from "@/components/ui/useFxEntry";
 import { mergeCashPurposes } from "@/lib/data/cash-purposes";
 import { mergeWithHoldings, type TickerSuggestion } from "@/lib/data/known-holdings";
 import { mergeSourceSuggestions } from "@/lib/data/sources";
@@ -144,9 +146,13 @@ interface Row {
   amount: string;
   /** A cash account's currency (deposit/withdraw/cash_balance). Defaults THB. */
   currency?: string;
-  /** Native→THB rate for a non-THB cash account; "" / "1" for THB. The entered
-   * figure is in the account currency; the ledger ฿ amount is figure × this rate. */
+  /** Native→THB rate for a non-THB holding (cash account OR a foreign-listed
+   * security); "" / "1" for THB. The entered figures are in the native
+   * currency; the ledger ฿ amount is figure × this rate. */
   fxToThb?: string;
+  /** True once the user edits the FX rate by hand — stops the trade-date auto-fetch
+   * from overwriting their figure when the ticker / currency / date changes. */
+  fxManual?: boolean;
   /** Cash account Purpose (#149) — its RETURN role + an optional objective label;
    * saved as an earmark on submit. Only meaningful for cash rows. */
   cashRole?: "investable" | "reserved";
@@ -748,11 +754,33 @@ export function RecordSheet({
       setError("Nothing ready to save yet — fill in at least one row.");
       return;
     }
+    // A non-THB holding needs its trade-date FX rate to store a THB cost basis;
+    // without it we'd silently record the native figure as baht. Block with a clear
+    // ask rather than mis-store — the rate auto-fills on open, so this is the rare
+    // cold-cache / offline case the user resolves by typing it.
+    const missingFx = readyRows.find((r) => {
+      if (r.kind === "split") return false; // a split moves no cash — no FX needed
+      const c = fxCurrency(r);
+      return c !== "THB" && !(Number(r.fxToThb) > 0);
+    });
+    if (missingFx) {
+      setError(
+        `Add the ${fxCurrency(missingFx)}→฿ FX rate for ${missingFx.ticker.trim() || "the non-THB row"} so its cost basis stores in baht.`,
+      );
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
       const transactions = readyRows.map((r) => {
         const quoteSource = r.quoteSource || "manual";
+        // Native→THB for a foreign-listed security's cost basis: the entered
+        // figures are in the holding's currency; the ledger folds THB. THB → rate 1
+        // (no-op). Cash has its own native-units convention below.
+        const secCurrency = fxCurrency(r);
+        const secRate = secCurrency === "THB" ? 1 : Number(r.fxToThb) > 0 ? Number(r.fxToThb) : 1;
+        const toThb = (v: number | null | undefined): number | undefined =>
+          v == null ? undefined : v * secRate;
         if (isCashKind(r.kind)) {
           // Cash: the entered figure is in the account currency = NATIVE units (THB by
           // default). `units` stays native (its position is valued at live FX); the
@@ -803,15 +831,18 @@ export function RecordSheet({
             // Send the typed case; the server stores the official catalog case (#235).
             ticker: r.ticker.trim(),
             englishName: r.englishName,
-            // Send units when read; otherwise omit and send the ฿ value so the
-            // server derives units from NAV(tradeDate) (#130).
+            // Send units when read; otherwise omit and send the (THB) value so the
+            // server derives units from NAV(tradeDate) (#130). Money facts convert to
+            // THB via the trade-date rate; `units` stay a native share count.
             units: hasUnits ? Number(r.units) : undefined,
-            value: !hasUnits && Number(r.value) > 0 ? Number(r.value) : undefined,
-            pricePerUnit: realAvg,
-            // The Balance's current price → the asset's market-price point.
-            marketPrice: r.currentPrice?.trim() ? Number(r.currentPrice) : undefined,
-            amount: costMagnitude,
+            value: !hasUnits && Number(r.value) > 0 ? toThb(Number(r.value)) : undefined,
+            pricePerUnit: toThb(realAvg),
+            // The Balance's current price → the asset's market-price point (THB).
+            marketPrice: r.currentPrice?.trim() ? toThb(Number(r.currentPrice)) : undefined,
+            amount: toThb(costMagnitude) ?? 0,
             quoteSource,
+            tradeCurrency: secCurrency,
+            fxToThb: secRate,
             source: source.trim() || undefined,
           };
         }
@@ -830,11 +861,15 @@ export function RecordSheet({
           kind: d.kind,
           ticker: d.ticker,
           englishName: r.englishName,
+          // `units` (and a split ratio) are currency-free counts; the money fields
+          // convert to THB via the trade-date rate. A split carries no cash.
           units: d.units,
-          pricePerUnit: d.pricePerUnit,
-          fee: d.fee,
-          amount: d.kind === "split" ? 0 : (d.amount ?? 0),
+          pricePerUnit: d.kind === "split" ? d.pricePerUnit : toThb(d.pricePerUnit),
+          fee: d.kind === "split" ? d.fee : toThb(d.fee),
+          amount: d.kind === "split" ? 0 : (toThb(d.amount) ?? 0),
           quoteSource: d.quoteSource || quoteSource,
+          tradeCurrency: secCurrency,
+          fxToThb: secRate,
           source: source.trim() || undefined,
         };
       });
@@ -1324,6 +1359,34 @@ function RowEditor({
   // its units and its cash — never optional there (without it, an amount becomes 0 units).
   const tradePriceOptional =
     !anchor && pricedByFeed && (Number(row.amount) > 0 || Number(row.units) > 0);
+
+  // Best-effort native money on the row, for the "≈ ฿X" rate preview: a Balance's
+  // value, a units×price cost, a cash/flow amount, else the invested total.
+  const nativeMoney = cashBalance
+    ? Number(row.value)
+    : isCash || amountOnly
+      ? Number(row.amount)
+      : Number(row.value) > 0
+        ? Number(row.value)
+        : Number(row.units) > 0 && Number(row.price) > 0
+          ? Number(row.units) * Number(row.price)
+          : Number(row.amount) > 0
+            ? Number(row.amount)
+            : Number(row.costTotal);
+
+  // Currency + trade-date FX, shared via useFxEntry. Currency shows as a $/฿
+  // prefix on the money box: a security's is DERIVED from its price source (read-only —
+  // change it by flipping the source), cash's is an interactive ฿⇄$ pill. A non-THB row
+  // gets one FX line under its first money field.
+  const { currency, prefix, fxHint } = useFxEntry(row, onChange, nativeMoney);
+  const cycleCurrency = () =>
+    onChange({ currency: currency === "THB" ? "USD" : "THB", fxManual: false });
+  // Currency is read-only when the source decides it (a Thai fund is ฿, a US Stock/ETF is
+  // $); a CUSTOM (manual-priced) asset has nothing to derive from, so the user picks it —
+  // an interactive ฿⇄$ pill on the primary money field, default ฿.
+  const secCurrencyEditable = row.quoteSource === "manual";
+  const primaryCycle = secCurrencyEditable ? cycleCurrency : undefined;
+
   // A Set balance carries 6 fields (Type·Date·Account·Total·Purpose·Label) → reuse the
   // 6-column investment grid (one line on desktop). Deposit/withdraw + dividend/fee have
   // 4, so they keep the wider `is-flow` grid.
@@ -1390,7 +1453,6 @@ function RowEditor({
           />
         </label>
         {isCash ? (
-          // THB only for now — non-THB cash waits on auto-fetched FX (no manual rate field).
           <label className="rec-field">
             <span className="rec-label">Account</span>
             <Combobox<string>
@@ -1445,8 +1507,11 @@ function RowEditor({
         {isCash ? (
           <>
             <label className="rec-field">
-              <span className="rec-label">{cashBalance ? "Total (฿)" : "Amount (฿)"}</span>
-              <input
+              <span className="rec-label">{cashBalance ? "Total" : "Amount"}</span>
+              {/* Cash picks its currency — the ฿⇄$ pill is interactive; resetting the
+                  manual flag re-fetches the new currency's trade-date rate. */}
+              <MoneyInput
+                echo={prefix(cycleCurrency)}
                 value={cashBalance ? (row.value ?? "") : row.amount}
                 onChange={(e) =>
                   onChange(cashBalance ? { value: e.target.value } : { amount: e.target.value })
@@ -1455,6 +1520,7 @@ function RowEditor({
                 inputMode="decimal"
                 aria-label={cashBalance ? "Cash balance" : "Cash amount"}
               />
+              {fxHint}
             </label>
             {cashBalance ? (
               <>
@@ -1489,19 +1555,21 @@ function RowEditor({
           </>
         ) : amountOnly ? (
           <label className="rec-field">
-            <span className="rec-label">฿ Amount</span>
-            <input
+            <span className="rec-label">Amount</span>
+            <MoneyInput
+              echo={prefix(primaryCycle)}
               value={row.amount}
               onChange={(e) => onChange({ amount: e.target.value })}
               placeholder="Amount"
               inputMode="decimal"
-              aria-label="Amount in baht"
+              aria-label={`Amount in ${currency}`}
             />
+            {fxHint}
           </label>
         ) : (
           <>
             <div className="rec-field">
-              <span className="rec-label">{anchor ? "Units or ฿ total" : "Units or ฿ amount"}</span>
+              <span className="rec-label">{anchor ? "Units or total" : "Units or amount"}</span>
               <QtyInput
                 units={row.units}
                 // A Balance persists its ฿ figure in `value`; a trade in its `amount`
@@ -1510,9 +1578,13 @@ function RowEditor({
                 // in the mode the stored fact implies, via the SAME helper History uses.
                 value={anchor ? row.value : row.amount}
                 defaultMode={qtyDefaultMode(row.units)}
+                // The currency rides as a left-edge $/฿ prefix on the ฿ total —
+                // read-only when the source decides it, an interactive pill for a custom asset.
+                leading={prefix(primaryCycle)}
                 onUnits={(v) => onChange({ units: v })}
                 onValue={(v) => onChange(anchor ? { value: v } : { amount: v })}
               />
+              {fxHint}
             </div>
             <label className="rec-field">
               <span className="rec-label">
@@ -1521,7 +1593,11 @@ function RowEditor({
                     Avg cost on a Balance is never "optional" — encouraged via the nudge. */}
                 {tradePriceOptional && <span className="rec-opt"> · optional</span>}
               </span>
-              <input
+              {/* Every money field echoes the currency ($/฿); the estimate/optional border
+                  cues move to the `.amt-field` wrapper (see globals.css), so the prefix
+                  doesn't fight them. */}
+              <MoneyInput
+                echo={prefix()}
                 value={row.price}
                 onChange={(e) => onChange({ price: e.target.value, estimated: false })}
                 placeholder={tradePriceOptional ? "Optional" : anchor ? "What you paid" : "Price"}
@@ -1546,7 +1622,8 @@ function RowEditor({
                   Current price
                   {pricedByFeed && <span className="rec-opt"> · optional</span>}
                 </span>
-                <input
+                <MoneyInput
+                  echo={prefix()}
                   value={row.currentPrice ?? ""}
                   onChange={(e) => onChange({ currentPrice: e.target.value })}
                   // Optional ONLY for a feed-priced symbol (live NAV); for a custom asset
@@ -1568,7 +1645,8 @@ function RowEditor({
                 <span className="rec-label">
                   Fee<span className="rec-opt"> · optional</span>
                 </span>
-                <input
+                <MoneyInput
+                  echo={prefix()}
                   value={row.fee}
                   onChange={(e) => onChange({ fee: e.target.value })}
                   placeholder="Optional"

@@ -170,4 +170,40 @@ describe("PATCH /api/transactions/[id] — facts-only edit parity", () => {
     // a split alone rebases nothing — it holds no units.
     expect(heldUnits("EXAMPLE-FUND-B")).toBeUndefined();
   });
+
+  it("stores tradeCurrency + fxToThb on a non-THB edit (#233 History currency editing)", async () => {
+    const id = seedBuy("USSTK"); // quoteSource thai_mutual_fund in the seed; PATCH sets market
+    // The editor sends THB money (native × rate) + the currency/rate pair.
+    const { status } = await patch(id, {
+      tradeDate: "2026-03-01",
+      kind: "buy",
+      ticker: "USSTK",
+      quoteSource: "market",
+      units: 10,
+      pricePerUnit: 400 * 35, // $400 × 35
+      amount: 400 * 35 * 10,
+      tradeCurrency: "USD",
+      fxToThb: 35,
+    });
+    expect(status).toBe(200);
+    expect(stored().tradeCurrency).toBe("USD");
+    expect(stored().fxToThb).toBe(35);
+    expect(stored().pricePerUnit).toBe(14000); // THB avg cost
+  });
+
+  it("an omitted currency pair leaves the row THB (default 1)", async () => {
+    const id = seedBuy("EXAMPLE-FUND-A");
+    const { status } = await patch(id, {
+      tradeDate: "2026-03-01",
+      kind: "buy",
+      ticker: "EXAMPLE-FUND-A",
+      quoteSource: "thai_mutual_fund",
+      units: 10,
+      pricePerUnit: 5,
+      amount: 50,
+    });
+    expect(status).toBe(200);
+    expect(stored().tradeCurrency).toBe("THB");
+    expect(stored().fxToThb).toBe(1);
+  });
 });

@@ -41,6 +41,10 @@ const patchBody = z
     amount: z.number().finite().nonnegative().default(0),
     fee: z.number().finite().nonnegative().nullish(),
     quoteSource: z.string().trim().min(1).max(40),
+    // Currency + trade-date FX for a non-THB cost basis; default THB / 1 so an
+    // omitted pair (a THB edit) leaves the row THB-denominated.
+    tradeCurrency: z.string().trim().min(1).max(8).default("THB"),
+    fxToThb: z.number().finite().positive().default(1),
   })
   // A trade needs the money fact: a positive ฿ amount OR a unit count (units-only
   // trades derive their amount from NAV). Anchors and splits may carry amount 0.
@@ -99,6 +103,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       amount: signedAmount(t.kind, t.amount),
       fee: t.fee ?? null,
       quoteSource,
+      // Non-THB cost basis: the money fields above are already THB (native ×
+      // this rate at entry); the pair records the currency + trade-date rate.
+      tradeCurrency: t.tradeCurrency,
+      fxToThb: t.fxToThb,
     });
     if (!updated) return NextResponse.json({ error: "not_found" }, { status: 404 });
     return NextResponse.json(updated);

@@ -803,17 +803,31 @@ body[data-topbar-hidden="true"] .portfolio-switch {
     background 0.15s;
 }
 .sheet-input::placeholder {
-  color: var(--muted);
-  opacity: 0.7;
+  /* A placeholder is the FAINTEST text in the field — lighter than a disabled field's
+     muted value and far lighter than a real ink value, so an empty field reads clearly
+     as "type here", not as a value. */
+  color: var(--muted-2);
+  opacity: 1;
 }
 .sheet-input:focus,
 .sheet-input:focus-visible {
   border-color: var(--accent);
   background: var(--paper);
 }
+/* Three distinct field states. This form's EDITABLE fields are card-soft filled, so we
+   can't lean on the usual "grey = disabled" read (grey is already editable). A disabled
+   field therefore stays a filled field (NOT hollow — hollow reads as empty/placeholder)
+   with its value muted and a not-allowed cursor; the LOCK ICON by the label carries the
+   "can't edit this" meaning explicitly. Text hierarchy keeps the states apart: ink value
+   (editable) → muted value (disabled) → faintest placeholder (empty). */
 .sheet-input:disabled {
-  opacity: 0.55;
+  color: var(--muted);
   cursor: not-allowed;
+  opacity: 1;
+}
+.sheet-input:disabled::placeholder {
+  /* A locked field shouldn't invite input with a "type here" hint. */
+  color: transparent;
 }
 textarea.sheet-input {
   font-family: var(--font-mono);
@@ -4166,7 +4180,8 @@ button.chip {
   line-height: 1.3;
 }
 .combobox__option:hover,
-.combobox__option:focus-visible {
+.combobox__option:focus-visible,
+.combobox__option[data-active] {
   background: var(--card-soft);
 }
 /* Facet dropdown menus (Explore): taller than the symbol combobox, and the
@@ -4686,10 +4701,35 @@ button.chip {
   color: var(--ink);
 }
 
-/* Quantity field with a units ↔ ฿ switcher (components/ui/QtyInput). */
+/* Quantity field with a units ↔ ฿ switcher (components/ui/QtyInput). The box chrome
+   lives on the wrapper so a currency prefix sits INSIDE it as a flex item with
+   a consistent gap to the number; the input itself is borderless. */
 .qty-input {
   position: relative;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--paper);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 0 9px;
+}
+.qty-input:focus-within {
+  border-color: var(--accent);
+}
+.rec-edit .qty-input__input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  padding: 7px 0;
+  padding-right: 42px; /* clear the absolute units/total toggle on the right */
+}
+.rec-edit .qty-input__input:focus {
+  border: 0;
 }
 .qty-input__toggle {
   position: absolute;
@@ -4862,6 +4902,131 @@ button.chip {
   color: var(--muted-2);
   font-weight: 400;
 }
+/* Currency as an in-input text PREFIX at the left edge — like "$" before a
+   figure, NOT a bordered badge. The wrapper carries the box chrome and lays the prefix
+   + borderless input out in a flex row, so the number starts a CONSISTENT gap after
+   the prefix whatever its width (plain "USD" or "USD ⌄"). */
+.amt-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--paper);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 0 9px;
+}
+.amt-field:focus-within {
+  border-color: var(--accent);
+}
+.rec-edit .amt-field__input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  padding: 7px 0;
+}
+.rec-edit .amt-field__input:focus {
+  border: 0;
+}
+.cur-prefix {
+  flex: none;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  /* Same weight for ฿ and $: a step below the black value, but clearly darker
+     than the faded placeholder so the prefix never reads as one. */
+  color: var(--ink-soft);
+}
+button.cur-prefix {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  /* Match the plain-text (span) prefix exactly — NOT `font: inherit`, which would
+     reset to the larger row font and make the cash toggle bigger than the inferred
+     investment prefix. */
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+}
+.cur-prefix--toggle:hover {
+  color: var(--ink);
+}
+/* Trade-date FX conversion as ONE muted line just under the amount box — the ฿
+   equivalent + an "adjust" link that reveals the reference rate inline. Reads as a
+   helper on the amount, not a field of its own. */
+.rec-fx {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  /* The expanded editor (฿ [rate] · Reset · Done) is wider than a narrow money column
+     (e.g. History's Units cell), so keep it on ONE line and let it spill into the free
+     space to the right (the row's other cells are empty below their boxes) rather than
+     wrapping "Done" onto a second line. The card has no overflow clip, so it just shows.
+     Narrow / stacked layouts wrap it back (see the ≤660px container query). */
+  white-space: nowrap;
+}
+/* Minimal inline rate editor — a borderless underlined number, not a full field.
+   Wide enough for a full rate (e.g. 33.2203) without clipping. */
+.rec-edit .rec-fx__rate {
+  width: 62px;
+  margin: 0 1px;
+  padding: 0 1px;
+  border: 0;
+  border-bottom: 1px solid var(--accent);
+  border-radius: 0;
+  background: none;
+  font-size: 11.5px;
+  text-align: center;
+}
+/* "adjust" / "done" / "reset" are the app's standard inline action — plain `.link-btn`
+   (bold, inherits the muted line color, no underline, no hover color change) with a
+   chevron, exactly like the "Exclude cash" link. Only spacing is added here. */
+.rec-fx__adjust {
+  margin-left: 6px;
+}
+/* "Done" confirms the rate — the primary action of the inline editor, so it reads in the
+   accent (green), while "Adjust" / "Reset" stay muted. */
+.rec-fx .rec-fx__done {
+  color: var(--accent);
+}
+/* In the History editor's flat grid, wrap a money box + its FX line so the line sits
+   directly under the field it belongs to (the first money field), not adrift below the
+   whole row. */
+.rec-money {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.rec-money .rec-fx {
+  /* Spacing comes from the column gap — don't double it. */
+  margin-top: 0;
+}
+/* A money field's estimate/optional cue lives on its border. With a currency prefix the
+   box border sits on the `.amt-field` wrapper and the input goes borderless — so carry
+   the dashed/amber cue on the wrapper (via :has) and the prefix never fights it. */
+.rec-edit .amt-field input[data-optional],
+.rec-edit .amt-field input[data-estimated] {
+  border: 0;
+}
+.rec-edit .amt-field:has(input[data-optional]) {
+  border-style: dashed;
+  border-color: var(--line);
+}
+.rec-edit .amt-field:has(input[data-estimated]) {
+  border-style: dashed;
+  border-color: var(--amber);
+}
+.rec-edit .amt-field:has(input[data-optional]):focus-within,
+.rec-edit .amt-field:has(input[data-estimated]):focus-within {
+  border-color: var(--accent);
+}
 /* Amount-only kinds (dividend / fee): Type · Date · Symbol · ฿ amount. */
 .rec-edit.is-flow {
   grid-template-columns: 98px 124px minmax(120px, 1.3fr) minmax(120px, 1.2fr);
@@ -4929,6 +5094,10 @@ button.chip {
   .rec-edit.is-anchor,
   .rec-edit.is-flow {
     grid-template-columns: 1fr 1fr;
+  }
+  /* Stacked / narrow: no free space to spill into, so let the FX line wrap again. */
+  .rec-fx {
+    white-space: normal;
   }
 }
 

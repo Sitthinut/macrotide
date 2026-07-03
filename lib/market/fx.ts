@@ -3,6 +3,8 @@ import { getCachedSeries } from "./cache";
 import { BASE_CURRENCY } from "./currency";
 import type { SeriesRange } from "./providers/types";
 
+const MS_PER_DAY = 86_400_000;
+
 // Per-date FX conversion into the portfolio base currency (THB), reusing the
 // existing keyless Frankfurter chain (ECB reference rates) — no new provider.
 //
@@ -110,6 +112,37 @@ export async function buildFxConverter(
   };
 
   return { rateOn, missing };
+}
+
+/**
+ * The smallest cache range that comfortably spans back to `date`, so the FX series
+ * actually contains that date's rate (forward-fill can't invent data before the
+ * range start — it back-fills the earliest known rate, which for a far-past date is
+ * the wrong rate). A little headroom past the exact boundary absorbs ECB weekend/
+ * holiday gaps.
+ */
+function rangeForDate(date: string): SeriesRange {
+  const days = (Date.now() - Date.parse(`${date}T00:00:00Z`)) / MS_PER_DAY;
+  if (days <= 25) return "1mo";
+  if (days <= 80) return "3mo";
+  if (days <= 170) return "6mo";
+  if (days <= 350) return "1y";
+  if (days <= 1800) return "5y";
+  return "max";
+}
+
+/**
+ * One rate: "1 unit of `currency`, in THB" on `date` (the trade-date FX used to
+ * capture a non-THB cost basis). THB → 1. Returns null when the rate can't be
+ * resolved (cold cache / unknown currency) so the caller can fall back to a manual
+ * entry rather than guess. Reuses the same keyless Frankfurter cross-rate path as
+ * the value fold, so an entered basis and its later valuation share one FX source.
+ */
+export async function fxRateOn(currency: string, date: string): Promise<number | null> {
+  const c = (currency || "").trim().toUpperCase();
+  if (!c || c === BASE_CURRENCY) return 1;
+  const fx = await buildFxConverter([c], rangeForDate(date), [date]);
+  return fx.rateOn(c, date);
 }
 
 /** Fetch the USD→`currency` daily series via Frankfurter and forward-fill it. */
