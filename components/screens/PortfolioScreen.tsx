@@ -852,6 +852,9 @@ function PortfolioScreenInner({
   async function saveHolding(values: HoldingFormValues) {
     const id = holdingSheet?.id;
     if (id === undefined) return;
+    // Position (units/avgCost) is derived from the ledger and edited in History, not
+    // here (ADR 0004) — the edit form is metadata-only, so we don't send it and never
+    // write a snapshot that would override the transaction history.
     const payload = {
       bucketId: values.bucketId,
       ticker: values.ticker,
@@ -860,8 +863,6 @@ function PortfolioScreenInner({
       category: values.category || null,
       assetClass: values.assetClass,
       region: values.region || null,
-      units: values.units,
-      avgCost: values.avgCost,
       ter: values.ter,
       source: values.source || null,
       quoteSource: values.quoteSource,
