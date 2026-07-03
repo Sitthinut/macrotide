@@ -11,6 +11,7 @@ import type { ShareClassListItem } from "@/lib/db/queries/funds";
 import type { UsSecurity } from "@/lib/db/queries/us-securities";
 import { saveEarmark, useEarmarks, useHoldings } from "@/lib/fetchers/portfolio";
 import { useResource } from "@/lib/fetchers/swr";
+import { fmtNum, fmtTHBClean } from "@/lib/format";
 import { QUOTE_SOURCE_LABELS, QUOTE_SOURCES, type QuoteSource } from "@/lib/market/sources";
 import { cleanUsSecurityName } from "@/lib/market/us-security-name";
 import type { AssetClass } from "@/lib/static/types";
@@ -258,12 +259,16 @@ export function HoldingSheet({
         />
         <Modal.Body gap={14}>
           {isCash ? (
-            <FormRow label="Type">
-              {/* A cash account is just cash — locked, no price source / asset class. */}
+            <FormRow label="Type" locked>
+              {/* A cash account is just cash, locked, no price source / asset class. */}
               <input className="sheet-input" value="Cash" disabled />
             </FormRow>
           ) : (
-            <FormRow label="Type" hint="Determines where we fetch this holding's price">
+            <FormRow
+              label="Type"
+              locked={lockTicker || known}
+              hint="Determines where we fetch this holding's price"
+            >
               <select
                 className="sheet-input"
                 value={values.quoteSource}
@@ -281,7 +286,7 @@ export function HoldingSheet({
             </FormRow>
           )}
 
-          <FormRow label={isCash ? "Account" : "Symbol"}>
+          <FormRow label={isCash ? "Account" : "Symbol"} locked={!isCash && (lockTicker || known)}>
             {isCash ? (
               // Always renameable (the rename cascades the ledger + earmark); Combobox
               // suggests the cash accounts you already track, matching the Add modal.
@@ -358,7 +363,7 @@ export function HoldingSheet({
 
           {!isCash && (
             <>
-              <FormRow label="Name (English)">
+              <FormRow label="Name (English)" locked={known}>
                 <input
                   className="sheet-input"
                   value={values.englishName}
@@ -368,7 +373,7 @@ export function HoldingSheet({
                 />
               </FormRow>
 
-              <FormRow label="Name (Thai)" hint="Optional">
+              <FormRow label="Name (Thai)" locked={known} hint="Optional">
                 <input
                   className="sheet-input"
                   value={values.thaiName}
@@ -396,32 +401,61 @@ export function HoldingSheet({
             </FormRow>
           )}
 
-          {!isCash && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <FormRow label="Quantity">
-                <input
-                  className="sheet-input"
-                  type="number"
-                  step="0.0001"
-                  value={Number.isFinite(values.units) ? values.units : ""}
-                  onChange={(e) => update({ units: Number.parseFloat(e.target.value) || 0 })}
-                  placeholder="0"
-                  disabled={known}
-                />
-              </FormRow>
-              <FormRow label="Avg cost" hint="THB per unit/share">
-                <input
-                  className="sheet-input"
-                  type="number"
-                  step="0.01"
-                  value={Number.isFinite(values.avgCost) ? values.avgCost : ""}
-                  onChange={(e) => update({ avgCost: Number.parseFloat(e.target.value) || 0 })}
-                  placeholder="0"
-                  disabled={known}
-                />
-              </FormRow>
-            </div>
-          )}
+          {!isCash &&
+            (isEdit ? (
+              // Quantity + cost are DERIVED from the ledger (ADR 0004) — they aren't facts
+              // this form owns. Editing the aggregate here would mean writing a synthetic
+              // snapshot and, for a foreign holding, un-blending an averaged THB basis with
+              // no single native rate. So show them read-only and send people to History,
+              // where the underlying trades (and their native currency) are edited exactly.
+              <div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <FormRow label="Quantity" locked hint="Edit in History">
+                    <input
+                      className="sheet-input"
+                      value={Number.isFinite(values.units) ? fmtNum(values.units, 4) : ""}
+                      disabled
+                    />
+                  </FormRow>
+                  <FormRow label="Avg cost" locked hint="THB per unit/share">
+                    <input
+                      className="sheet-input"
+                      value={
+                        Number.isFinite(values.avgCost) && values.avgCost > 0
+                          ? fmtTHBClean(values.avgCost, 2)
+                          : ""
+                      }
+                      disabled
+                    />
+                  </FormRow>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <FormRow label="Quantity" locked={known}>
+                  <input
+                    className="sheet-input"
+                    type="number"
+                    step="0.0001"
+                    value={Number.isFinite(values.units) ? values.units : ""}
+                    onChange={(e) => update({ units: Number.parseFloat(e.target.value) || 0 })}
+                    placeholder="0"
+                    disabled={known}
+                  />
+                </FormRow>
+                <FormRow label="Avg cost" locked={known} hint="THB per unit/share">
+                  <input
+                    className="sheet-input"
+                    type="number"
+                    step="0.01"
+                    value={Number.isFinite(values.avgCost) ? values.avgCost : ""}
+                    onChange={(e) => update({ avgCost: Number.parseFloat(e.target.value) || 0 })}
+                    placeholder="0"
+                    disabled={known}
+                  />
+                </FormRow>
+              </div>
+            ))}
 
           {isCash ? (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -456,7 +490,7 @@ export function HoldingSheet({
 
           {!isCash && (
             <>
-              <FormRow label="Asset class">
+              <FormRow label="Asset class" locked={known}>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   {ASSET_CLASSES.map((a) => (
                     <button
@@ -484,7 +518,7 @@ export function HoldingSheet({
               </FormRow>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <FormRow label="Category" hint="e.g. US Equity">
+                <FormRow label="Category" locked={known} hint="e.g. US Equity">
                   <input
                     className="sheet-input"
                     value={values.category}
@@ -493,7 +527,7 @@ export function HoldingSheet({
                     disabled={known}
                   />
                 </FormRow>
-                <FormRow label="Region" hint="US / TH / Global / EM">
+                <FormRow label="Region" locked={known} hint="US / TH / Global / EM">
                   <input
                     className="sheet-input"
                     value={values.region}
@@ -505,7 +539,7 @@ export function HoldingSheet({
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <FormRow label="TER (%)" hint="Annual expense ratio">
+                <FormRow label="TER (%)" locked={known} hint="Annual expense ratio">
                   <input
                     className="sheet-input"
                     type="number"
@@ -518,6 +552,7 @@ export function HoldingSheet({
                 </FormRow>
                 <FormRow
                   label="Source"
+                  locked={synced}
                   hint={synced ? `Synced from ${syncedBroker}` : "Where this came from"}
                 >
                   <input
@@ -607,10 +642,15 @@ export function HoldingSheet({
 function FormRow({
   label,
   hint,
+  locked,
   children,
 }: {
   label: string;
   hint?: string;
+  /** Show a lock icon by the label — the explicit "you can't edit this here" cue that a
+   * disabled field needs, since this form's editable fields are grey-filled (so a dimmed
+   * field can't lean on the usual "grey = disabled" read). */
+  locked?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -622,9 +662,13 @@ function FormRow({
           color: "var(--muted)",
           letterSpacing: "0.04em",
           marginBottom: 6,
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
         }}
       >
         {label.toUpperCase()}
+        {locked && <Icon name="lock" size={10} />}
       </div>
       {children}
       {hint && <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4 }}>{hint}</div>}
