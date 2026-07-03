@@ -30,7 +30,7 @@ plan, and journal — including plan edits it proposes as accept/reject cards.
 - **Performance** — headline total return on contributed capital, with a full breakdown: realized and unrealized gains, time-weighted period returns, money-weighted return (XIRR) per-fund and whole-portfolio, cost-basis timeline, contributions and income
 - **Wealth-over-time chart** — value, return, or funds-vs-cash composition over time, replayed from your ledger so it shows what you actually held (exited funds included)
 - **Plain-language health checks** — allocation drift, blended fees, cash drag, and look-through diversification (underlying single-name concentration, feeder-aware); fee-creep alerts you can dismiss or snooze
-- **Flexible import** — paste, a screenshot, CSV, or typed rows, all reviewed in one editable list before saving; symbol autocomplete; enter by units or baht value
+- **Flexible import** — paste, a screenshot, CSV, or typed rows, all reviewed in one editable list before saving; symbol autocomplete; enter by units or value, in baht or a foreign currency
 - **Broker auto-sync** — connect a broker once and it imports your full order history and keeps it in sync, each account as its own portfolio
 - **Plan & journal** — a markdown investment plan the Advisor proposes edits to, plus notes, decisions, questions, and a reading list
 

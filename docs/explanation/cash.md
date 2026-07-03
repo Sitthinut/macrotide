@@ -73,9 +73,12 @@ A cash account values at **1.0 in its own currency**, folded by `reduceLots` fro
 **native** units (the account-currency amount, avg cost 1) like any other
 position, then converted to baht through the **same single `fx.rateOn` source**
 the rest of the app uses — never a second FX path, so cash and funds can't
-disagree on a rate. Cash is **THB-only today**: the `currency` / `fxToThb`
-plumbing and the fold math are in place, but the rate fetch and currency picker
-are deferred (tracked on the board).
+disagree on a rate. A **non-THB account** is fully supported: the Add/Record
+entry form carries a **currency picker** and auto-fills the **trade-date FX rate**
+(from the keyless Frankfurter cache via `/api/fx`, editable), stored as `fxToThb`
+on the row. The native balance rides in `units`; the trade-date rate values the
+*contribution* while the *current* value floats at today's `fx.rateOn` — so an FX
+move on foreign cash shows up honestly in the return.
 
 ### The seam with the in-transit heuristic
 
@@ -226,8 +229,7 @@ richer version belongs to the goals / wealth-path planner
 read-only overlay referencing accounts — never a money container (that's the
 double-counting trap when one balance feeds several goals). Deferred there or on
 the board: named goals with a target amount and date, multiple earmark slices in
-one account, reserving *funds* (not just cash), FX for non-baht cash, and Advisor
-cash import.
+one account, and reserving *funds* (not just cash).
 
 ## Where this lives
 

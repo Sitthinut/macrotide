@@ -63,10 +63,19 @@ export function resolveDerivedUnits(rows: readonly Transaction[]): Transaction[]
     if (!isDerivable(r)) return r;
     const key = cacheKey(r);
     // Cash has no market NAV — it is priced at 1.0 in its own currency, so a
-    // value-only cash_balance derives units = value ÷ 1 = the asserted balance.
-    const nav = isCashKind(r.kind)
-      ? 1
-      : (navByDate.get(r.tradeDate)?.get(key) ?? latest.get(key) ?? null);
+    // value-only cash_balance derives units = value ÷ 1 = the asserted balance
+    // (its money fact stays NATIVE; the FX to THB happens at valuation, not here).
+    //
+    // A non-cash NAV comes from the provider in the holding's NATIVE currency (USD
+    // for a US ETF), but the money total we divide it into (`value`/`amount`) was
+    // stored in THB — native × the trade-date `fxToThb` at entry. So convert
+    // the divisor to THB with that SAME trade-date rate: units = value_THB ÷
+    // (NAV_native × fxToThb) then comes out as a native share count. THB holdings
+    // carry fxToThb 1, so this is a no-op for them (and for the `pricePerUnit`
+    // divisor below, which is already stored in THB — no conversion needed there).
+    const fx = r.fxToThb && r.fxToThb > 0 ? r.fxToThb : 1;
+    const navNative = navByDate.get(r.tradeDate)?.get(key) ?? latest.get(key) ?? null;
+    const nav = isCashKind(r.kind) ? 1 : navNative == null ? null : navNative * fx;
 
     // Units-only delta trade → derive the cash: units × (execution price ?? NAV), with
     // the fee folded in like a normal trade, then signed by kind (buy = cash out). No

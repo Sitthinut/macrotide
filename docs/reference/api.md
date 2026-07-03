@@ -48,6 +48,7 @@ or rename a route.
 | Route | Methods | Purpose |
 |---|---|---|
 | `/api/quotes` | GET | Latest NAV / price quotes for tickers; `refresh=1` re-fetches through the provider chain, `refresh=1&mine=1` derives the refs from the caller's holdings server-side |
+| `/api/fx` | GET | Trade-date FX rate for a currency into THB (`?from=USD&on=YYYY-MM-DD`) — "1 `from` unit, in baht" on that date, via the keyless Frankfurter cross-rate cache. Powers the Add/Record currency picker's auto-filled rate for a non-THB cost basis; `rate` is null on a cold cache so the client falls back to a manual figure |
 | `/api/market/indices` | GET | SET + global index levels and deltas |
 | `/api/market/news` | GET | Market news (RSS) |
 | `/api/market/benchmark` | GET | Total-return index series for a named benchmark (`?key=`, `?range=`); used by the Portfolio "VS" overlay to draw the benchmark line; returns an empty series when the market cache is cold (client treats that as unavailable, never as zero) |

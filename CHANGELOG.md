@@ -15,6 +15,27 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Enter a cost basis in a foreign currency.** The Add/Record form now takes a
+  non-THB cost basis for a cash account (currency picker) or a foreign-listed
+  stock / ETF (currency inferred from the symbol — USD for a US ETF), auto-filling
+  the **trade-date FX rate** (keyless Frankfurter cache, editable, with a "≈ ฿"
+  preview). The rate is captured on the row, so contributed capital, P/L, and the
+  money-weighted return for a foreign holding are computed on its real baht cost
+  instead of assuming the entered figure was already baht. The same currency +
+  FX-rate entry is available in the **History inline editor**, so an existing row's
+  currency and rate can be edited (it shows and edits figures in the holding's own
+  currency). The funded-from-cash nudge now offers **non-THB cash accounts** too,
+  recording the matching withdraw in native units at the buy-date rate. A foreign
+  holding's baht chart and cost-basis conversion are warmed nightly alongside its
+  NAV, so they open instantly instead of paying a cold FX fetch.
+- **The holding editor's quantity and cost are now read-only, edited in History.**
+  A position is derived from its transactions (the ledger), so the "Edit holding"
+  sheet shows quantity and average cost as read-only and points to History to change
+  them — where each trade keeps its own trade-date FX rate. The sheet's locked fields
+  now carry a lock icon so they read clearly as locked rather than empty.
+- **Keyboard navigation for the autocomplete dropdowns** (symbol, cash account,
+  purpose): ↑/↓ move a highlighted option, Enter picks it, Escape closes — with a
+  typed custom value left intact when nothing is highlighted.
 - **US ETF holdings and look-through now fetch reliably on the server.** SEC's
   www.sec.gov enforces a "Fair Access" policy that 403s a plain browser
   User-Agent from datacenter IPs; the app now sends SEC's declared contact UA, so

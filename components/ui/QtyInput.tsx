@@ -15,7 +15,7 @@
 // was entered — which `units`-presence alone encodes (see `qtyDefaultMode`). Both
 // inline editors (the Add modal + History) wire it the same way, so they match.
 
-import { useRef, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { useClipEnd } from "@/lib/useClipEnd";
 
 export interface QtyInputProps {
@@ -30,6 +30,9 @@ export interface QtyInputProps {
    *  `qtyDefaultMode(units)` recovers the entry mode: units present → Units, else ฿. */
   defaultMode?: "units" | "total";
   ariaLabel?: string;
+  /** A left-edge adornment inside the box — the currency prefix, rendered as
+   *  the first flex child so the number starts a consistent gap after it. */
+  leading?: ReactNode;
 }
 
 /**
@@ -49,6 +52,7 @@ export function QtyInput({
   onValue,
   defaultMode,
   ariaLabel = "Units",
+  leading,
 }: QtyInputProps) {
   // ONE number in ONE box; the Units ↔ ฿ Total toggle just RE-TYPES it — like a type
   // badge on what you entered. Flipping the toggle keeps your figure (no convert, no
@@ -95,16 +99,19 @@ export function QtyInput({
 
   return (
     <div className="qty-input" data-clip-end={clipEnd || undefined}>
+      {/* The currency prefix belongs to a MONEY total, not a share count — hide it in
+          Units mode. */}
+      {inBaht ? leading : null}
       <input
         ref={inputRef}
+        className="qty-input__input"
         value={text}
         onChange={(e) => apply(e.target.value, mode)}
         onScroll={recompute}
         onFocus={recompute}
-        placeholder={inBaht ? "฿ total" : "Units"}
+        placeholder={inBaht ? "total" : "Units"}
         inputMode="decimal"
-        aria-label={inBaht ? "Total in baht" : ariaLabel}
-        style={{ paddingRight: 52 }}
+        aria-label={inBaht ? "Total" : ariaLabel}
       />
       <span className="field-fade" aria-hidden="true" />
       <button
