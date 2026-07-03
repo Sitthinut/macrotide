@@ -161,7 +161,9 @@ export const PORTFOLIOS: Portfolio[] = [
         class: "equity",
         region: "US",
         value: 80000,
-        cost: 72000,
+        // ฿70,000 for 4 shares = ฿17,500/share = $500 at the ฿35 seed rate — a clean
+        // native cost basis so the demo's US position reads as $500 (not a float).
+        cost: 70000,
         units: 4,
         nav: 560,
         d1: 0.3,
