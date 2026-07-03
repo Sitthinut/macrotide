@@ -39,6 +39,7 @@ import { normalizeImage } from "@/lib/image-normalize";
 import type { QuoteSource } from "@/lib/market/sources";
 import { looksLikeBrokerExport, parseBrokerExport } from "@/lib/portfolio/broker-import";
 import type { LedgerTxn, TxnKind } from "@/lib/portfolio/lots";
+import type { NativeInputs } from "@/lib/portfolio/native-inputs";
 import type { ExtractedTxnRow, ImportDocType } from "@/lib/portfolio/ocr";
 import { type CashNudge, previewBalanceChange } from "@/lib/portfolio/settlement-cash";
 import { TXN_KIND_HELP, TXN_KIND_LABEL, typeSelectOptions } from "@/lib/portfolio/txn-display";
@@ -772,6 +773,20 @@ export function RecordSheet({
     setSubmitting(true);
     setError(null);
     try {
+      // The verbatim native figures the user typed, kept for a non-THB row so a
+      // reopen shows the exact number ($500), not a `THB ÷ rate` reconstruction.
+      // Provenance only — the THB columns stay authoritative. Drops empties and
+      // returns undefined for THB (nothing to keep) or an all-empty bundle.
+      const nativeBundle = (currency: string, fields: NativeInputs): NativeInputs | undefined => {
+        if (currency === "THB") return undefined;
+        const out: NativeInputs = {};
+        for (const [k, v] of Object.entries(fields)) {
+          if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+            out[k as keyof NativeInputs] = v;
+          }
+        }
+        return Object.keys(out).length > 0 ? out : undefined;
+      };
       const transactions = readyRows.map((r) => {
         const quoteSource = r.quoteSource || "manual";
         // Native→THB for a foreign-listed security's cost basis: the entered
@@ -806,6 +821,8 @@ export function RecordSheet({
             quoteSource: "cash",
             tradeCurrency: currency,
             fxToThb: rate,
+            // Cash needs no nativeInputs: its native figure already lives losslessly
+            // in `units` (the editor reads cash amounts from there, never via ÷rate).
             source: source.trim() || undefined,
           };
         }
@@ -843,6 +860,12 @@ export function RecordSheet({
             quoteSource,
             tradeCurrency: secCurrency,
             fxToThb: secRate,
+            nativeInputs: nativeBundle(secCurrency, {
+              value: !hasUnits && Number(r.value) > 0 ? Number(r.value) : undefined,
+              price: realAvg ?? undefined,
+              marketPrice: r.currentPrice?.trim() ? Number(r.currentPrice) : undefined,
+              amount: costMagnitude,
+            }),
             source: source.trim() || undefined,
           };
         }
@@ -870,6 +893,14 @@ export function RecordSheet({
           quoteSource: d.quoteSource || quoteSource,
           tradeCurrency: secCurrency,
           fxToThb: secRate,
+          nativeInputs:
+            d.kind === "split"
+              ? undefined
+              : nativeBundle(secCurrency, {
+                  price: d.pricePerUnit ?? undefined,
+                  fee: d.fee ?? undefined,
+                  amount: d.amount ?? undefined,
+                }),
           source: source.trim() || undefined,
         };
       });

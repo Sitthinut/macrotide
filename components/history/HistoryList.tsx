@@ -129,6 +129,12 @@ function draftFromTxn(t: Transaction): Draft {
   // whisker of the stored THB. A THB row (secFx 1) is left byte-for-byte unchanged.
   const nat = (v: number): string =>
     secFx === 1 ? String(v) : String(Math.round((v / secFx) * 1e4) / 1e4);
+  // Prefer the verbatim native figure the user typed when it was stored (rows saved
+  // since native-input capture landed); fall back to the `÷ rate` reconstruction for
+  // legacy rows. This is what shows $500 exactly instead of 514.2857 on a reopen.
+  const ni = t.nativeInputs ?? undefined;
+  const pick = (native: number | undefined, thb: number): string =>
+    native != null ? String(native) : nat(thb);
   return {
     tradeDate: t.tradeDate.slice(0, 10),
     kind: t.kind as TxnKind,
@@ -143,17 +149,17 @@ function draftFromTxn(t: Transaction): Draft {
       t.kind === "cash_balance" && t.units != null
         ? String(t.units)
         : t.value != null
-          ? nat(t.value)
+          ? pick(ni?.value, t.value)
           : "",
-    pricePerUnit: t.pricePerUnit != null ? nat(t.pricePerUnit) : "",
-    marketPrice: t.marketPrice != null ? nat(t.marketPrice) : "",
-    fee: t.fee != null ? nat(t.fee) : "",
+    pricePerUnit: t.pricePerUnit != null ? pick(ni?.price, t.pricePerUnit) : "",
+    marketPrice: t.marketPrice != null ? pick(ni?.marketPrice, t.marketPrice) : "",
+    fee: t.fee != null ? pick(ni?.fee, t.fee) : "",
     // The Amount field is NATIVE. A cash deposit/withdraw stores native in `units` and
     // ฿ in `amount`; seed from `units`. A non-cash amount un-converts THB → native.
     amount:
       isCashKind(t.kind) && t.kind !== "cash_balance" && t.units != null
         ? String(t.units)
-        : nat(Math.abs(t.amount)),
+        : pick(ni?.amount, Math.abs(t.amount)),
     quoteSource: t.quoteSource,
     currency: t.tradeCurrency ?? "THB",
     // Only surface a rate for a non-THB holding (THB is the implicit 1); mark it manual

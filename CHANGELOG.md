@@ -27,7 +27,10 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   currency). The funded-from-cash nudge now offers **non-THB cash accounts** too,
   recording the matching withdraw in native units at the buy-date rate. A foreign
   holding's baht chart and cost-basis conversion are warmed nightly alongside its
-  NAV, so they open instantly instead of paying a cold FX fetch.
+  NAV, so they open instantly instead of paying a cold FX fetch. The **exact
+  figures you typed** in a foreign currency are stored verbatim alongside the baht
+  the ledger folds on, so reopening a foreign transaction shows your original
+  numbers instead of a rounded back-conversion.
 - **The holding editor's quantity and cost are now read-only, edited in History.**
   A position is derived from its transactions (the ledger), so the "Edit holding"
   sheet shows quantity and average cost as read-only and points to History to change
