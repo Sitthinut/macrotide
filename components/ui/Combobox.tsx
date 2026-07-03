@@ -7,7 +7,7 @@
 // original AddHoldingsSheet symbol field so every custom dropdown — symbol,
 // source, anything future — shares this behavior and styling.
 
-import { type CSSProperties, type ReactNode, useId, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { useClipEnd } from "@/lib/useClipEnd";
 import { useFlipUp } from "@/lib/useFlipUp";
 
@@ -66,10 +66,53 @@ export function Combobox<T>({
   // forces it; otherwise we measure on focus.
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const show = open && items.length > 0;
   const { up: flipUp, measure: measureFlip } = useFlipUp(inputRef);
   const up = openUp || flipUp;
+
+  // Keyboard nav: the highlighted option (−1 = none, so plain Enter keeps a typed
+  // custom value instead of pulling in the top suggestion). Arrow keys move it, Enter
+  // picks it, Escape closes.
+  const [active, setActive] = useState(-1);
+  // Keep the highlight in range as the filtered list changes; scroll it into view.
+  useEffect(() => {
+    if (active >= items.length) setActive(items.length - 1);
+  }, [items.length, active]);
+  useEffect(() => {
+    if (!show || active < 0) return;
+    const el = listRef.current?.children[active] as HTMLElement | undefined;
+    el?.scrollIntoView({ block: "nearest" });
+  }, [active, show]);
+
+  const move = (delta: number) => {
+    if (!show) {
+      setOpen(true);
+      return;
+    }
+    const n = items.length;
+    setActive((i) => (i < 0 ? (delta > 0 ? 0 : n - 1) : (i + delta + n) % n));
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      move(1);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      move(-1);
+    } else if (e.key === "Enter" && show && active >= 0 && active < items.length) {
+      e.preventDefault();
+      onPick(items[active]);
+      setOpen(false);
+      setActive(-1);
+    } else if (e.key === "Escape" && show) {
+      e.preventDefault();
+      setOpen(false);
+      setActive(-1);
+    }
+  };
 
   // A trailing fade (the symbol field's `.field-fade`) cues "there's more to the
   // right", so it shows only while the value is clipped and not scrolled to its
@@ -84,8 +127,10 @@ export function Combobox<T>({
         value={value}
         onChange={(e) => {
           setOpen(true);
+          setActive(-1); // a fresh filter starts unhighlighted
           onChange(e.target.value);
         }}
+        onKeyDown={onKeyDown}
         onScroll={updateClipEnd}
         onFocus={() => {
           measureFlip();
@@ -112,20 +157,30 @@ export function Combobox<T>({
       />
       {trailing}
       {show && (
-        <div id={listId} role="listbox" className="combobox__list" data-up={up || undefined}>
-          {items.map((item) => (
+        <div
+          id={listId}
+          ref={listRef}
+          role="listbox"
+          className="combobox__list"
+          data-up={up || undefined}
+        >
+          {items.map((item, i) => (
             <button
               key={getKey(item)}
               type="button"
               role="option"
-              aria-selected={false}
+              aria-selected={i === active}
+              data-active={i === active || undefined}
               className="combobox__option"
+              // Sync the keyboard highlight to the pointer so the two don't fight.
+              onMouseEnter={() => setActive(i)}
               // mousedown fires before blur — keeps the input focused so the
               // list doesn't unmount before the pick runs.
               onMouseDown={(e) => {
                 e.preventDefault();
                 onPick(item);
                 setOpen(false);
+                setActive(-1);
               }}
             >
               {renderItem(item)}
