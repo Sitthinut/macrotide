@@ -74,6 +74,9 @@ const CLOSES: Record<string, number> = {
 };
 
 describe("refreshPopular", () => {
+  // The demand-recency window is measured from `seenAt` (the run clock), so these
+  // fixtures are deterministic regardless of when the suite runs — the 2026-06-25
+  // demand seed sits inside the 14-day window ending at the 2026-06-26 `seenAt`.
   it("scores the popular set, warms demand extras, and decays the rest", async () => {
     const warmed: string[] = [];
     await withFreshContext(async () => {

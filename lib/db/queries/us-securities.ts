@@ -258,8 +258,10 @@ export function listTopPopularSymbols(limit: number): string[] {
 }
 
 /** Active symbols viewed within `windowDays`, most-viewed first (the demand half). */
-export function listTopDemandSymbols(limit: number, windowDays: number): string[] {
-  const cutoff = new Date(Date.now() - windowDays * 86_400_000).toISOString();
+/** Top recently-demanded symbols whose last view is at or after `cutoff` (ISO). The
+ *  caller owns the clock (derives `cutoff` from the run timestamp) so the window
+ *  isn't tied to `Date.now()` — keeps the job deterministic under test. */
+export function listTopDemandSymbols(limit: number, cutoff: string): string[] {
   return getMarketDb()
     .select({ symbol: usSecurities.symbol })
     .from(usSecurities)

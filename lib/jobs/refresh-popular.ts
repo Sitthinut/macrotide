@@ -156,8 +156,13 @@ export async function refreshPopular(
   const decayed = decayPopularityExcept(seenAt, { step: opts.decayStep, floor: opts.decayFloor });
 
   // 3. Warm the demand half (recently-viewed) that the candidate pool didn't cover.
+  // Measure the recency window from `seenAt` (the run's single clock), not Date.now(),
+  // so the whole pass shares one timestamp and stays deterministic under test.
+  const demandCutoff = new Date(
+    new Date(seenAt).getTime() - demandWindowDays * 86_400_000,
+  ).toISOString();
   const warmedSet = new Set(warmedCandidates.map((c) => c.symbol.toUpperCase()));
-  const demandSyms = listTopDemandSymbols(demandKeep, demandWindowDays).filter(
+  const demandSyms = listTopDemandSymbols(demandKeep, demandCutoff).filter(
     (s) => !warmedSet.has(s.toUpperCase()),
   );
   let demandWarmed = 0;
