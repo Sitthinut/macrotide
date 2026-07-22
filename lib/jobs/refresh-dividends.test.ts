@@ -80,6 +80,27 @@ describe("refreshDividends", () => {
       expect(getDividends("AAPL").fetchedAt).toBeNull();
     });
   });
+
+  it("isolates a throwing symbol — the rest of the run still lands", async () => {
+    // `mapPool` propagates a throw, so an unexpected error on ONE symbol used to
+    // abort the whole nightly job and leave every symbol behind it unrefreshed.
+    await run(async () => {
+      await seed("AAPL");
+      await seed("NVDA");
+      const res = await refreshDividends({
+        symbols: ["AAPL", "NVDA"],
+        concurrency: 1,
+        fetchedAt: "2026-06-26T01:00:00Z",
+        getDividendsFor: async (symbol) => {
+          if (symbol === "AAPL") throw new Error("boom");
+          return ok("2025-05-12");
+        },
+      });
+      expect(res).toEqual({ selected: 2, withDividends: 1, errored: 1 });
+      expect(getDividends("NVDA").fetchedAt).toBe("2026-06-26T01:00:00Z");
+      expect(getDividends("AAPL").fetchedAt).toBeNull();
+    });
+  });
 });
 
 describe("ensureDividends (JIT)", () => {
