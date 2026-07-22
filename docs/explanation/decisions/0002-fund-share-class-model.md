@@ -113,3 +113,14 @@ written. (New decisions live in the [Picks table](./README.md#picks), not here.)
   ranks by name relevance with the exact-ticker match floated first. Recorded in
   Picks → "Explore screener ordering"; the fund-level `current_ter` it reads
   follows the representative retail class, not a fee-waived sibling.
+- **2026-07 — `ticker` is a current claim, so the column is nullable.** The
+  UNIQUE-and-required `ticker` above assumed a code belongs to one class forever.
+  Thai fund codes are reused: a fixed-term fund matures and its code is recycled
+  for the next term, a fund re-registers under a new `proj_id`, or a single-class
+  fund goes multi-class and the code moves off its own `"main"` row. Since the
+  table never deletes, the previous holder kept claiming the code and the UNIQUE
+  index aborted the nightly refresh outright. The claim now moves: the superseded
+  row is **retired** (`ticker` NULL) rather than deleted, so it stays a valid
+  holdings anchor while the live class owns the code. `ticker` is still globally
+  UNIQUE among the classes that hold one, and still the `holdings.ticker` / NAV
+  cache-key id — the rest of C is unchanged.

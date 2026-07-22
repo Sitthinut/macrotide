@@ -5,15 +5,28 @@
 // validates a typed ticker against them.
 
 import "server-only";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { quoteCacheKey, tickerKey } from "@/lib/market/sources";
 import { getDb, getMarketDb } from "../context";
 import { fundCatalog, fundQuotes, fundShareClasses, holdings, navHistory } from "../schema";
 
 export type ShareClass = typeof fundShareClasses.$inferSelect;
 export type ShareClassInsert = typeof fundShareClasses.$inferInsert;
+/** A share class that still claims a ticker — see the `ticker` column note. */
+export type LiveShareClass = ShareClass & { ticker: string };
 
 const THAI_SOURCE = "thai_mutual_fund";
+
+/**
+ * A class with a NULL `ticker` has been superseded — another class took its code
+ * (see `upsertShareClasses`). The row survives as an anchor for holdings recorded
+ * against it, but it is no longer priceable, listable, or searchable, so every
+ * read filters it out. Pair the SQL predicate with `liveTickers` to narrow the type.
+ */
+const HAS_TICKER = isNotNull(fundShareClasses.ticker);
+
+const liveTickers = <T extends { ticker: string | null }>(rows: T[]) =>
+  rows.filter((r): r is T & { ticker: string } => r.ticker !== null);
 
 /**
  * Re-point a renamed share class's cached NAV to its NEW symbol (#235). When a
@@ -28,6 +41,18 @@ function repointNavCache(db: ReturnType<typeof getMarketDb>, oldTicker: string, 
   if (oldKey === newKey) return; // case-only change → same cache key
   db.run(sql`UPDATE OR REPLACE ${fundQuotes} SET ticker = ${newKey} WHERE ticker = ${oldKey}`);
   db.run(sql`UPDATE OR REPLACE ${navHistory} SET ticker = ${newKey} WHERE ticker = ${oldKey}`);
+}
+
+/**
+ * Drop the cached NAV/quote rows for a ticker that has changed hands between
+ * funds. market.db is regenerable and the next prewarm refills it, so losing a
+ * cache entry is cheap; serving the previous fund's prices under the new fund's
+ * code is not.
+ */
+function purgeNavCache(db: ReturnType<typeof getMarketDb>, ticker: string) {
+  const key = quoteCacheKey(THAI_SOURCE, ticker);
+  db.run(sql`DELETE FROM ${fundQuotes} WHERE ticker = ${key}`);
+  db.run(sql`DELETE FROM ${navHistory} WHERE ticker = ${key}`);
 }
 
 /** Batch-upsert share classes, keyed on (projId, className). A ticker CHANGE for an
@@ -55,6 +80,44 @@ export function upsertShareClasses(rows: ShareClassInsert[]): void {
           ),
         )
         .get();
+
+      // Retire whoever else currently holds this ticker. Thai fund codes get
+      // reused, and because this table never deletes, the superseded row was still
+      // claiming the code — so the UNIQUE index on `ticker` aborted the whole
+      // refresh. Three live cases on 2026-07-22: a fund re-registering under a new
+      // proj_id (K-GSF(USD)), a matured fixed-term fund's code recycled for the next
+      // term (KTFFE132), and a single-class fund going multi-class so the code moved
+      // off its own "main" row (KKP WIN-UH-R).
+      //
+      // SEC no longer reports the code for that class, so the claim is dead — but
+      // the ROW is still an anchor for holdings recorded against it, so it survives
+      // with a NULL ticker instead of being deleted. Deletes keyed on an external id
+      // are how the catalog got wiped once; the safe number here stays ZERO.
+      if (row.ticker) {
+        const heldBy = tx
+          .select({ projId: fundShareClasses.projId, className: fundShareClasses.className })
+          .from(fundShareClasses)
+          .where(eq(fundShareClasses.ticker, row.ticker))
+          .get();
+        if (heldBy && (heldBy.projId !== row.projId || heldBy.className !== row.className)) {
+          tx.update(fundShareClasses)
+            .set({ ticker: null, updatedAt: sql`(CURRENT_TIMESTAMP)` })
+            .where(
+              and(
+                eq(fundShareClasses.projId, heldBy.projId),
+                eq(fundShareClasses.className, heldBy.className),
+              ),
+            )
+            .run();
+          // A DIFFERENT fund taking the code means the cached NAV under it is the
+          // previous fund's price series. Inheriting it would draw a stranger's
+          // history on the new fund's chart, so drop it and let the fetch refill.
+          // (Same fund, code moved between its own classes → the series still
+          // belongs to it; keep it.)
+          if (heldBy.projId !== row.projId) purgeNavCache(db, row.ticker);
+        }
+      }
+
       tx.insert(fundShareClasses)
         .values(row)
         .onConflictDoUpdate({
@@ -72,7 +135,7 @@ export function upsertShareClasses(rows: ShareClassInsert[]): void {
         })
         .run();
       const oldTicker = prior?.ticker;
-      if (oldTicker && tickerKey(oldTicker) !== tickerKey(row.ticker))
+      if (oldTicker && row.ticker && tickerKey(oldTicker) !== tickerKey(row.ticker))
         renames.push({ oldTicker, newTicker: row.ticker });
     }
     // Re-point inside the SAME transaction (#235): a crash between the share-class
@@ -82,13 +145,20 @@ export function upsertShareClasses(rows: ShareClassInsert[]): void {
   });
 }
 
-/** All share classes of a fund (for the detail class selector), by proj_id. */
-export function listShareClassesByProj(projId: string): ShareClass[] {
-  return getMarketDb()
-    .select()
-    .from(fundShareClasses)
-    .where(eq(fundShareClasses.projId, projId))
-    .all();
+/**
+ * The LIVE share classes of a fund (for the detail class selector), by proj_id.
+ * Superseded classes — those whose code was taken by another class, leaving a NULL
+ * ticker — are excluded: they aren't priceable, so they can't be selected, charted,
+ * or resolved.
+ */
+export function listShareClassesByProj(projId: string): LiveShareClass[] {
+  return liveTickers(
+    getMarketDb()
+      .select()
+      .from(fundShareClasses)
+      .where(and(eq(fundShareClasses.projId, projId), HAS_TICKER))
+      .all(),
+  );
 }
 
 /** Resolve a priceable ticker to its share class (+ parent proj_id), or undefined. */
@@ -126,13 +196,13 @@ export function listActiveShareClassTickers(
   opts: { retailOnly?: boolean } = {},
 ): ShareClassTicker[] {
   const db = getMarketDb();
-  const where = [eq(fundCatalog.status, "active")];
+  const where = [eq(fundCatalog.status, "active"), HAS_TICKER];
   if (opts.retailOnly) {
     where.push(
       sql`(${fundShareClasses.investorType} IS NULL OR ${fundShareClasses.investorType} NOT IN ('institutional', 'insurance'))`,
     );
   }
-  return db
+  const rows = db
     .select({
       projId: fundShareClasses.projId,
       ticker: fundShareClasses.ticker,
@@ -144,6 +214,7 @@ export function listActiveShareClassTickers(
     .innerJoin(fundCatalog, eq(fundShareClasses.projId, fundCatalog.projId))
     .where(and(...where))
     .all();
+  return liveTickers(rows);
 }
 
 /**
@@ -180,12 +251,12 @@ export function listHeldShareClassTickers(): ShareClassTicker[] {
   };
   // Partition once: anchored rows resolve by (proj_id, class_name); the rest by an
   // upper-cased ticker match. Then ONE batched query per partition.
-  const anchorPairs = new Set<string>();
+  const anchorPairs = new Map<string, string>();
   const projIds = new Set<string>();
   const tickerKeys = new Set<string>();
   for (const h of held) {
     if (h.projId && h.className) {
-      anchorPairs.add(`${h.projId} ${h.className}`);
+      anchorPairs.set(`${h.projId} ${h.className}`, h.ticker);
       projIds.add(h.projId);
     } else if (h.ticker.trim()) {
       tickerKeys.add(tickerKey(h.ticker));
@@ -198,16 +269,29 @@ export function listHeldShareClassTickers(): ShareClassTicker[] {
       .from(fundShareClasses)
       .innerJoin(fundCatalog, eq(fundShareClasses.projId, fundCatalog.projId))
       .where(inArray(fundShareClasses.projId, [...projIds]))
-      .all())
-      if (anchorPairs.has(`${r.projId} ${r.className}`)) out.set(r.ticker, r);
+      .all()) {
+      const heldTicker = anchorPairs.get(`${r.projId} ${r.className}`);
+      if (heldTicker === undefined) continue;
+      // The anchored class gave up its code to a successor (NULL ticker). Don't
+      // drop the holding from the pre-warm — fall through to the ticker pass on
+      // the code the user actually holds, which the successor now owns, so its
+      // NAV keeps updating across the handover.
+      if (r.ticker === null) {
+        if (heldTicker.trim()) tickerKeys.add(tickerKey(heldTicker));
+        continue;
+      }
+      out.set(r.ticker, { ...r, ticker: r.ticker });
+    }
   }
   if (tickerKeys.size > 0) {
-    for (const r of db
-      .select(cols)
-      .from(fundShareClasses)
-      .innerJoin(fundCatalog, eq(fundShareClasses.projId, fundCatalog.projId))
-      .where(inArray(sql`upper(${fundShareClasses.ticker})`, [...tickerKeys]))
-      .all())
+    for (const r of liveTickers(
+      db
+        .select(cols)
+        .from(fundShareClasses)
+        .innerJoin(fundCatalog, eq(fundShareClasses.projId, fundCatalog.projId))
+        .where(inArray(sql`upper(${fundShareClasses.ticker})`, [...tickerKeys]))
+        .all(),
+    ))
       out.set(r.ticker, r);
   }
   return [...out.values()];

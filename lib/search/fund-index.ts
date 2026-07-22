@@ -152,6 +152,9 @@ function buildDocs(db: MarketDb): FundDoc[] {
     .all();
   const classTickersByProj = new Map<string, string[]>();
   for (const c of classRows) {
+    // A superseded class (NULL ticker) has no code to match on — skip it, so a
+    // search for a recycled code finds only the fund that currently owns it.
+    if (!c.ticker) continue;
     const list = classTickersByProj.get(c.projId);
     if (list) list.push(c.ticker);
     else classTickersByProj.set(c.projId, [c.ticker]);

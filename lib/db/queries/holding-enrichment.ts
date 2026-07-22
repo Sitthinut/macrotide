@@ -75,6 +75,7 @@ export function catalogMetadataForHoldings(tickers: string[]): Map<string, Catal
     .innerJoin(fundCatalog, eq(fundShareClasses.projId, fundCatalog.projId))
     .where(inArray(sql`upper(${fundShareClasses.ticker})`, cleaned))
     .all()) {
+    if (!r.ticker) continue;
     out.set(r.ticker.toUpperCase(), {
       thaiName: r.thaiName,
       englishName: r.englishName,
