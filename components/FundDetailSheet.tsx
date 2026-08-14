@@ -26,7 +26,7 @@ import type {
   FundTopHoldingRow,
 } from "@/lib/db/queries/fund-enrichment";
 import type { FundWithTer } from "@/lib/db/queries/funds";
-import type { ShareClass } from "@/lib/db/queries/share-classes";
+import type { LiveShareClass } from "@/lib/db/queries/share-classes";
 import { type SeriesRange, useFundSeries } from "@/lib/fetchers/portfolio";
 import { useResource } from "@/lib/fetchers/swr";
 import {
@@ -61,7 +61,7 @@ export type FundDetailResponse = FundWithTer & {
   /** Master fund's underlying holdings (feeder look-through). Empty when not available. */
   lookThroughHoldings: FeederLookThroughHoldingRow[];
   /** Priceable share classes of this fund (one per SEC share class). */
-  shareClasses: ShareClass[];
+  shareClasses: LiveShareClass[];
   /** Ticker of the class to show first (the opened class, else a heuristic default). */
   selectedClassTicker: string | null;
   /** The feeder's master fund resolved to a US ETF ticker (by name), or null. */
@@ -1073,7 +1073,7 @@ function ClassPicker({
   headlineFont,
   onSelect,
 }: {
-  classes: ShareClass[];
+  classes: LiveShareClass[];
   selectedTicker: string | null;
   headlineTicker: string;
   headlineFont: React.CSSProperties;
@@ -1212,7 +1212,7 @@ function FundHeader({
   onSelectClass,
 }: {
   fund: FundDetailResponse;
-  shareClasses: ShareClass[];
+  shareClasses: LiveShareClass[];
   selectedTicker: string | null;
   onSelectClass: (ticker: string) => void;
 }) {
@@ -1409,7 +1409,7 @@ const CHART_MODES: { key: ChartMode; lbl: string }[] = [
 
 // Short label for a share-class option: ticker + distribution + investor type.
 // Used by the class selector in the fund header.
-function classOptionLabel(c: ShareClass): string {
+function classOptionLabel(c: LiveShareClass): string {
   const bits: string[] = [c.ticker];
   if (c.distributionPolicy === "accumulating") bits.push("Acc");
   else if (c.distributionPolicy === "dividend") bits.push("Div");

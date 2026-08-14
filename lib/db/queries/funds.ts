@@ -887,7 +887,7 @@ export function catalogQuoteSource(tickers: string[]): Map<string, QuoteSource> 
     .from(fundShareClasses)
     .where(inArray(sql`upper(${fundShareClasses.ticker})`, cleaned))
     .all())
-    hits.add(r.ticker.toUpperCase());
+    if (r.ticker) hits.add(r.ticker.toUpperCase());
   for (const r of db
     .select({ abbr: fundCatalog.abbrName })
     .from(fundCatalog)
@@ -940,7 +940,7 @@ export function canonicalTickerMap(tickers: string[]): Map<string, string> {
     .from(fundShareClasses)
     .where(inArray(sql`upper(${fundShareClasses.ticker})`, cleaned))
     .all())
-    out.set(tickerKey(r.ticker), r.ticker);
+    if (r.ticker) out.set(tickerKey(r.ticker), r.ticker);
   return out;
 }
 
@@ -979,15 +979,19 @@ const SHARE_CLASS_COLS = {
 type ShareClassRow = {
   projId: string;
   className: string;
-  ticker: string;
+  ticker: string | null;
   isin: string | null;
 };
-const toSymbol = (r: ShareClassRow): CatalogSymbol => ({
-  projId: r.projId,
-  className: r.className,
-  currentTicker: r.ticker,
-  isin: r.isin,
-});
+/**
+ * NULL when the class no longer claims a ticker — another class took its code
+ * (see `upsertShareClasses`). The row is still a valid anchor, but it can't name a
+ * priceable symbol, so every caller falls through to its next resolution strategy
+ * rather than returning a symbol nothing can be priced under.
+ */
+const toSymbol = (r: ShareClassRow | undefined): CatalogSymbol | null =>
+  r?.ticker == null
+    ? null
+    : { projId: r.projId, className: r.className, currentTicker: r.ticker, isin: r.isin };
 
 /** Resolve a stored anchor `(projId, className)` to the current share class. */
 export function resolveShareClassByAnchor(projId: string, className: string): CatalogSymbol | null {
@@ -997,7 +1001,8 @@ export function resolveShareClassByAnchor(projId: string, className: string): Ca
     .from(fundShareClasses)
     .where(and(eq(fundShareClasses.projId, projId), eq(fundShareClasses.className, className)))
     .get();
-  if (sc) return toSymbol(sc);
+  const sym = toSymbol(sc);
+  if (sym) return sym;
   // A single-class fund exposes the parent abbr as the holdable ticker.
   if (className === "main") {
     const cat = db
@@ -1021,7 +1026,8 @@ export function resolveShareClassByTicker(ticker: string): CatalogSymbol | null 
     .from(fundShareClasses)
     .where(sql`upper(${fundShareClasses.ticker}) = ${key}`)
     .get();
-  if (sc) return toSymbol(sc);
+  const sym = toSymbol(sc);
+  if (sym) return sym;
   const cat = db
     .select({ projId: fundCatalog.projId, abbr: fundCatalog.abbrName })
     .from(fundCatalog)
@@ -1065,7 +1071,8 @@ export function resolveCatalogSymbol(input: {
         )
         .orderBy(desc(fundShareClasses.updatedAt), sql`rowid desc`)
         .get();
-      if (exact) return toSymbol(exact);
+      const bySameFund = toSymbol(exact);
+      if (bySameFund) return bySameFund;
     }
     // Otherwise pick the most-recently-updated row sharing the ISIN (the nightly
     // refresh keeps the LIVE class fresh; rowid breaks an exact-timestamp tie toward
@@ -1076,7 +1083,8 @@ export function resolveCatalogSymbol(input: {
       .where(eq(fundShareClasses.isinCode, input.catalogIsin))
       .orderBy(desc(fundShareClasses.updatedAt), sql`rowid desc`)
       .get();
-    if (r) return toSymbol(r);
+    const byIsin = toSymbol(r);
+    if (byIsin) return byIsin;
   }
   if (input.catalogProjId && input.catalogClassName) {
     const byAnchor = resolveShareClassByAnchor(input.catalogProjId, input.catalogClassName);

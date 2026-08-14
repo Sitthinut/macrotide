@@ -284,7 +284,16 @@ export const fundShareClasses = sqliteTable(
     className: text("class_name").notNull(),
     // Priceable ticker = holdings.ticker = NAV cache-key tail. Derived: abbr when
     // className is "main", else className.
-    ticker: text("ticker").notNull(),
+    //
+    // NULLABLE because a ticker is a CURRENT claim, not a permanent property. Thai
+    // fund codes get reused — a fixed-term fund matures and the code is recycled
+    // for the next term, a fund re-registers under a new proj_id, or a single-class
+    // fund becomes multi-class and the code moves from the "main" row to a named
+    // class. This table never deletes (see upsertShareClasses), so the superseded
+    // row survives; NULL is how it gives up the code. The UNIQUE index below still
+    // holds — SQLite permits many NULLs — and every read filters on the ticker, so
+    // a retired row simply stops matching.
+    ticker: text("ticker"),
     // Raw Thai class detail, e.g. "ชนิดสะสมมูลค่า สำหรับผู้ลงทุนทั่วไป".
     classDetailTh: text("class_detail_th"),
     // Parsed from classDetailTh: 'accumulating' | 'dividend' | NULL.
@@ -954,7 +963,11 @@ export const usDividends = sqliteTable(
   "us_dividends",
   {
     symbol: text("symbol").notNull(),
-    // Ex-dividend date (YYYY-MM-DD) — the natural per-symbol key.
+    // Ex-dividend date (YYYY-MM-DD). NOT a key: one ex-date can carry more than one
+    // real payment — a regular plus a supplemental (F, Feb 2025: $0.15 + $0.15
+    // special) or a base plus a variable component (HL, UTZ pay both quarterly).
+    // Keying on it dropped half of those, understating trailing yield, and the
+    // Alpaca feed's second row aborted the whole nightly job on the PK.
     exDate: text("ex_date").notNull(),
     payableDate: text("payable_date"),
     recordDate: text("record_date"),
@@ -962,8 +975,8 @@ export const usDividends = sqliteTable(
     cashAmount: real("cash_amount"),
     special: integer("special", { mode: "boolean" }).notNull().default(false),
   },
-  (t) => [
-    primaryKey({ columns: [t.symbol, t.exDate] }),
-    index("idx_us_dividends_symbol").on(t.symbol),
-  ],
+  // No uniqueness: `setDividends` replaces a symbol's rows wholesale inside one
+  // transaction, so the table can't accumulate duplicates through the write path,
+  // and the feed's own restatements are collapsed there on the payment identity.
+  (t) => [index("idx_us_dividends_symbol_ex").on(t.symbol, t.exDate)],
 );

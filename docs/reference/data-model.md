@@ -55,7 +55,7 @@ the current mappers ignore.
 | `fund_quotes` | Latest NAV + performance per ticker | `ticker` PK, `nav`, `d1_pct`, `ytd_pct`, `y1_pct`, `deepest_range` (widest series range fetched — lets a wider request deepen a fresh-but-shallow cache) |
 | `nav_history` | Daily NAV (+ fund AUM) history — **append/update only, never time-pruned** | Composite PK (`ticker`, `date`); `nav`, `net_asset` (fund total net assets / AUM, when the source reports it) |
 | `fund_catalog` | SEC-sourced fund universe (parent-level: one row per `proj_id`) — **derived by the transform from `sec_raw`**, not hand-edited | keyed by `proj_id`; `current_ter` is a **derived cache** of the latest TER (maintained by `upsertFundFees`; source of truth stays `fund_fees`) — picked from the **representative retail class**, not a fee-waived sibling, so the parent fee reflects what a retail buyer pays; a `0` rate is read as "not actualized" (a new fund's unrealized rate falls through to its ceiling; an all-zero row — including the SEC `main` placeholder — resolves to NULL "no published fee"), never a fake free fund; `proj_retail_type` is the SEC's audience code; `retailTier()` (lib/market/retail-tier.ts) maps it to an eligibility tier — `retail` (R/G/null), `accredited` (A/B/H = AI/HNW), `ultra` (X = UI), `provident` (V), `institutional` (N/F) — driving the screener's buy-list gate (browse filters to one audience via the "Access" facet — default retail, or exclusively accredited/ultra/both) and the search demotion of non-buyable funds; `asset_class` is derived **risk-spectrum-first**: the SEC factsheet risk code (RS1/RS2 → `cash`, RS3/RS4 → `bond`, RS6/RS7 → `equity`, RS8 → `alternative`) is the primary signal, falling back to the `policy_desc` label + money-market name match for funds without a code or with an ambiguous one (RS5, RS8x) |
-| `fund_share_classes` | The **priceable units** of each fund (one row per SEC share class) | composite PK (`proj_id`, `class_name`); `ticker` is `UNIQUE` and is the holdable/cache-key id — see below |
+| `fund_share_classes` | The **priceable units** of each fund (one row per SEC share class) | composite PK (`proj_id`, `class_name`); `ticker` is `UNIQUE` **and nullable** — it is the holdable/cache-key id while the class still claims it, NULL once another class takes the code — see below |
 | `fund_fees` | Fee history per fund class — derived by the transform from `sec_raw` | source of truth for TER among the derived tables (raw fee payloads live in `sec_raw`) |
 | `fund_benchmarks` | Declared benchmark index per fund (factsheet §8.1) — derived by the transform from the nightly bulk sweep | composite PK (`proj_id`, `group_seq`) — a blended benchmark keeps its several weighted rows; the benchmark string names the index, geography, and hedging variant. Drives the derived `fund_catalog` facets `region_focus` / `sector_focus` / `index_family` (benchmark first — fresh signals outrank frozen ones), with the AIMC peer-group snapshot (`aimc_category`; one-shot from the legacy v1 API via `scripts/backfill-aimc-v1.ts`) as a gap-filler and the name gazetteer last; `index_family` additionally falls back to the MASTER fund's name (SEC profile field + `feeder_master_map`) — a feeder invests ≥80% in its single master, so a master named "…S&P 500 ETF" is fact, not inference, while a fund's own marketing name still never claims a family; `region_focus_source` records provenance; unknown stays NULL — see `lib/market/fund-facets.ts` |
 | `fund_statistics` | Factsheet risk/return statistics per share class (Sharpe, max drawdown, FX-hedging ratio, tracking error, turnover) — derived by the transform from the nightly bulk sweep | composite PK (`proj_id`, `fund_class_name`); figures parsed from the SEC's string values, verbatim payload stays in `sec_raw` |
@@ -95,6 +95,18 @@ the parent's `abbr_name` when the SEC class is `"main"` (single-class funds), el
 the class code itself (e.g. `MDIVA-A`). Because `ticker` is the cache-key tail of
 `${source}:${ticker}`, each share class resolves to its own NAV/quote rows in
 `fund_quotes`/`nav_history`.
+
+A ticker is a **current claim, not a permanent property** — Thai fund codes get
+reused. A fixed-term fund matures and its code is recycled for the next term, a
+fund re-registers under a new `proj_id`, or a single-class fund goes multi-class
+and the code moves off its own `"main"` row. This table **never deletes**, so the
+previous holder is still there; when a new class claims its code, that row is
+**retired** — `ticker` set to NULL — instead of being removed, keeping it valid as
+a holdings anchor. NULL is why the column is nullable and why the `UNIQUE` index
+still holds (SQLite permits many NULLs). Every read filters retired rows out, so
+they are not listable, searchable, or priceable. A **cross-fund** handover also
+drops the cached NAV under that code, so the new fund never inherits the previous
+fund's price history; a handover between two classes of the *same* fund keeps it.
 
 Rows are populated by the same SEC general-info/profiles enumeration that builds
 the catalog, de-duped per class — **no extra API calls**. Queries live in

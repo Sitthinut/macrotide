@@ -41,16 +41,24 @@ export async function refreshDividends(
   let withDividends = 0;
   let errored = 0;
   await mapPool(symbols, opts.concurrency ?? 4, async (symbol) => {
-    const res = await get(symbol);
-    if (!res.fetched) {
-      // No creds / transient failure — don't cache (an empty would wrongly read as
-      // "no dividends"); leave it stale so the next run / JIT open retries.
+    // Per-symbol isolation: `mapPool` propagates a throw, so before this an
+    // unexpected error on ONE symbol aborted the entire nightly run and left every
+    // symbol behind it unrefreshed. One bad symbol should cost one symbol.
+    try {
+      const res = await get(symbol);
+      if (!res.fetched) {
+        // No creds / transient failure — don't cache (an empty would wrongly read as
+        // "no dividends"); leave it stale so the next run / JIT open retries.
+        errored++;
+        return;
+      }
+      // A 2xx, even if empty (a genuine non-payer) → cache + stamp.
+      setDividends(symbol, res.dividends, fetchedAt);
+      if (res.dividends.length > 0) withDividends++;
+    } catch (err) {
       errored++;
-      return;
+      console.error(`refresh-dividends: ${symbol} failed —`, err);
     }
-    // A 2xx, even if empty (a genuine non-payer) → cache + stamp.
-    setDividends(symbol, res.dividends, fetchedAt);
-    if (res.dividends.length > 0) withDividends++;
   });
   return { selected: symbols.length, withDividends, errored };
 }

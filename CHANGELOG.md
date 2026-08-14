@@ -15,6 +15,24 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Fund codes that change hands no longer break the nightly refresh.** Thai fund
+  codes are reused — a fixed-term fund matures and its code is recycled for the
+  next term, a fund re-registers, or a single-class fund goes multi-class and the
+  code moves off its own `main` row. The share-class table never deletes, so the
+  previous holder kept claiming the code and a UNIQUE constraint aborted the whole
+  refresh, freezing the catalog. The claim now transfers: the superseded class is
+  retired rather than removed (so it stays a valid anchor for anything recorded
+  against it) and disappears from listings, search, and pricing. When a *different*
+  fund takes a code, the cached NAV under it is dropped too, so the new fund never
+  charts the previous fund's price history.
+- **Dividends paid twice on one day are both counted.** A stock that pays a regular
+  plus a supplemental dividend on the same ex-date, or a base plus a variable
+  component, now stores both — previously the second one aborted the dividend
+  refresh, which also stopped every symbol queued behind it. The provider's own
+  restatement of a single payment (same amount and record date, corrected payable
+  date) is still collapsed to one, so trailing yield counts each payment once. A
+  symbol that fails now costs one symbol instead of the entire run.
+
 - **Enter a cost basis in a foreign currency.** The Add/Record form now takes a
   non-THB cost basis for a cash account (currency picker) or a foreign-listed
   stock / ETF (currency inferred from the symbol — USD for a US ETF), auto-filling
