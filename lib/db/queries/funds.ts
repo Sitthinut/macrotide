@@ -104,7 +104,7 @@ export interface FundFacetsUpdate {
   regionFocusSource: string | null;
   sectorFocus: string | null;
   indexFamily: string | null;
-  /** Raw AIMC peer-group code, verbatim (null = unclassified / v1 key absent). */
+  /** Raw AIMC peer-group code from the frozen snapshot (null = unclassified). */
   aimcCategory: string | null;
 }
 
