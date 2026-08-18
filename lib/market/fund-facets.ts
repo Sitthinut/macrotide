@@ -123,13 +123,23 @@ const BENCHMARK_PATTERNS: ReadonlyArray<{
 
 // Official AIMC peer-group codes (legacy v1 FundFactsheet `fund_compare`) →
 // facet signals. The AIMC category is the official Thai fund classification
-// (43 peer groups, 2021 amendment) but reaches us as a one-shot SNAPSHOT (the
-// v1 API retires mid-2026), so it ranks BELOW the living signals (benchmark,
-// invest flag) and only fills the gaps they leave. Codes were enumerated from
-// the live catalog; anything unknown simply claims nothing (the raw code is
-// still stored verbatim in fund_catalog.aimc_category). Allocation /
-// miscellaneous codes (AA/MA/CA/FIA/MIS/FF) intentionally claim no region or
-// sector.
+// (43 peer groups, 2021 amendment), and it ranks BELOW the living signals
+// (benchmark, invest flag) — it only fills the gaps they leave. Codes were
+// enumerated from the live catalog; anything unknown simply claims nothing
+// (the raw code is still stored verbatim in fund_catalog.aimc_category).
+// Allocation / miscellaneous codes (AA/MA/CA/FIA/MIS/FF) intentionally claim
+// no region or sector.
+//
+// PROVENANCE — this data is FROZEN and cannot be regenerated. The codes were
+// snapshotted into sec_raw in June 2026, just before SEC retired the only API
+// that served them (v1 FundFactsheet, 2026-06-30 — it now answers 503). There
+// is no v2 equivalent, and we deliberately do not redistribute the dataset:
+// market.db is regenerable-by-design, and shipping a scraped classification
+// mapping raises licensing questions for what is only a gap-filler. So a fresh
+// clone has an empty aimc_category column. Nothing breaks — derivation just
+// degrades to the sources below it: measured over the active catalog, region
+// coverage falls from 83.9% to 79.3%, because the name gazetteer recovers most
+// of what the snapshot was covering.
 const AIMC_FACETS: Readonly<Record<string, BenchmarkSignal>> = {
   // Thai equity
   EG: { region: "thailand" }, // Equity General
@@ -239,7 +249,7 @@ function firstNameMatch(
 export interface FundFacetInput {
   /** Verbatim benchmark strings (blend rows in order); empty when none declared. */
   benchmarks: string[];
-  /** Official AIMC peer-group code ("USEQ", "EQLC"…), when the v1 key is configured. */
+  /** Official AIMC peer-group code ("USEQ", "EQLC"…) from the frozen snapshot. */
   aimcCategory?: string | null;
   englishName?: string | null;
   thaiName?: string | null;
@@ -258,9 +268,9 @@ export interface FundFacetInput {
  *   2. invest_country_flag — 'domestic' (no foreign investment) ⇒ 'thailand',
  *      authoritative and current.
  *   3. AIMC peer-group code — the official classification, but a one-shot
- *      SNAPSHOT (the v1 API retires mid-2026 and never updates again), so it
- *      only fills gaps the living signals leave; it must never override a
- *      fresh benchmark after a fund changes mandate.
+ *      SNAPSHOT: SEC retired the only API that served it, so it never updates
+ *      again. It only fills gaps the living signals leave, and must never
+ *      override a fresh benchmark after a fund changes mandate.
  *   4. Name gazetteer over names + master-fund name — first specific match
  *      wins; used only when everything above said nothing.
  * Sector: benchmark first, then AIMC, then names. An index family is claimed

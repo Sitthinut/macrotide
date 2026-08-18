@@ -186,9 +186,10 @@ export const fundCatalog = sqliteTable(
     // Normalized benchmark index family ("SET50", "S&P 500", "MSCI ACWI"…) —
     // only ever claimed from a declared benchmark, never inferred from a name.
     indexFamily: text("index_family"),
-    // Official AIMC peer-group code ("USEQ", "EQLC", "CPM"…), verbatim from the
-    // legacy v1 FundFactsheet API (optional SEC_V1_API_KEY subscription).
-    // NULL = unclassified by AIMC or the v1 key isn't configured.
+    // Official AIMC peer-group code ("USEQ", "EQLC", "CPM"…), verbatim from a
+    // June-2026 snapshot of the legacy v1 FundFactsheet API, which SEC has
+    // since retired. NULL = the fund carried no AIMC code at snapshot time, or
+    // it registered after it; nothing can populate this column any more.
     aimcCategory: text("aimc_category"),
     // Feeder funds (the main vehicle for Thai access to global indices).
     isFeederFund: integer("is_feeder_fund", { mode: "boolean" }).notNull().default(false),

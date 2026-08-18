@@ -480,9 +480,10 @@ export function transformFundCatalog(): TransformFundCatalogResult {
   // 4. Derived facets (region/sector focus + index family) — computed from the
   // fund's benchmark strings (tapped in step 3) with name fallback, per
   // lib/market/fund-facets.ts. Runs last and writes via one batched update.
-  // AIMC peer-group codes from the one-shot v1 snapshot (see
-  // scripts/backfill-aimc-v1.ts — the v1 portal retires mid-2026, so this is
-  // snapshot data, not a recurring crawl; absent rows simply claim nothing).
+  // AIMC peer-group codes read from the frozen snapshot landed in sec_raw
+  // before SEC retired the v1 FundFactsheet API (2026-06-30). Snapshot data,
+  // never a crawl — nothing repopulates it now, and absent rows simply claim
+  // nothing. See lib/market/fund-facets.ts (AIMC_FACETS) for the provenance.
   const aimcByProj = new Map<string, string>();
   for (const row of readSecRaw(SEC_ENDPOINTS.aimcCategory)) {
     try {

@@ -33,7 +33,10 @@ export const SEC_ENDPOINTS = {
   minimums: "factsheet/subscription-redemption-minimums",
   dividendPolicy: "factsheet/dividend-policy",
   dividendHistory: "daily-info/dividend-history",
-  // v1 FundFactsheet (separate optional subscription) — AIMC peer-group code.
+  // AIMC peer-group code, landed once from the legacy v1 FundFactsheet API
+  // before SEC retired it (2026-06-30). NOT a live endpoint any more: this
+  // string is now purely the storage discriminator for the frozen snapshot
+  // rows, so renaming it orphans every one of them.
   aimcCategory: "v1/fund-compare",
 } as const;
 
