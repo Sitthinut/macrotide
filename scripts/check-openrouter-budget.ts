@@ -17,6 +17,27 @@
 //   - per-KEY account guard (THIS probe) — bounds total account spend before the
 //     403 that would break ALL chat.
 //
+// THIS PROBE WATCHES TWO FAILURE MODES, and the worse verdict wins (2026-09-04).
+// They are measured DIFFERENTLY on purpose:
+//
+//   1. the KEY's monthly cap — `/api/v1/key` limit / limit_remaining, as a
+//      PERCENTAGE. Usage only climbs until the calendar-month reset, so a
+//      threshold crossing is meaningful and one-way.
+//
+//   2. the ACCOUNT's prepaid credits — `/api/v1/credits`, as an ABSOLUTE FLOOR
+//      (`classifyCredits`), never a percentage. The account has auto-topup armed
+//      at $2, so the balance is meant to sit low and get refilled. A percentage
+//      test would park around 90% forever and climb as purchased credits
+//      accumulate — a permanently-firing alarm. What matters is binary: did the
+//      refill happen? Only a balance sustained BELOW the floor means it did not.
+//
+// Only (1) was checked until 2026-09-04, so the probe could report a healthy key
+// cap hourly while the account balance ran toward exhaustion. When both ceilings
+// are configured to the same figure the old line read like an account balance when
+// it was only ever the key's cap; each dimension is now named explicitly.
+// An unreadable balance classifies `indeterminate` and, per `worstStatus`, can
+// never mask a real verdict from the key dimension.
+//
 // Usage:
 //   npm run jobs:check-budget [-- [--warn-pct=N] [--crit-pct=N]]
 //
@@ -44,6 +65,7 @@
 import { fileURLToPath } from "node:url";
 
 const KEY_ENDPOINT = "https://openrouter.ai/api/v1/key";
+const CREDITS_ENDPOINT = "https://openrouter.ai/api/v1/credits";
 
 // Generic best-practice defaults — NOT account-specific. The dollar cap is read
 // from OpenRouter, never hard-coded here; only these percentages have defaults,
@@ -157,6 +179,28 @@ interface KeyReading {
   label: string | null;
 }
 
+/** Shape of the bits of `GET /api/v1/credits` we read.
+ *
+ *  THIS IS A DIFFERENT NUMBER FROM THE KEY LIMIT and the distinction is the whole
+ *  reason this endpoint is read (2026-09-04). `/key`'s `limit` is the per-key
+ *  monthly spending cap set in the dashboard; `/credits` is the account's prepaid
+ *  balance. A key sitting at 0% of its own cap still stops working the instant
+ *  ACCOUNT credits reach zero — and every other key on the account stops with it.
+ *
+ *  That is not hypothetical: this probe reported a healthy key cap hourly while
+ *  the account's own balance ran down toward exhaustion. When both ceilings are
+ *  configured to the same figure the old summary line was actively misleading — a
+ *  bare `limit=`/`remaining=` pair reads like an account balance when it is only
+ *  ever the key's cap. The header's stated purpose — "bounds total account spend
+ *  before the 403 that would break ALL chat" — was not actually being served.
+ */
+interface CreditsResponse {
+  data?: {
+    total_credits?: number | null;
+    total_usage?: number | null;
+  };
+}
+
 /** Attempts for the `/key` read. A transient hiccup (network / timeout / 5xx) is
  *  retried so it doesn't masquerade as a sustained outage; a 4xx is not. */
 const MAX_FETCH_ATTEMPTS = 3;
@@ -215,6 +259,79 @@ async function fetchKeyReading(apiKey: string): Promise<KeyReading> {
   throw lastErr;
 }
 
+/** Read the account's prepaid credit balance, expressed in the SAME shape as a
+ *  key limit so `pctUsed` / `classify` apply unchanged: the account's total
+ *  credits are the "limit" and what is left of them the "remaining".
+ *
+ *  Retries transient failures like the `/key` read. Returns an all-null reading
+ *  rather than throwing when the balance can't be read — that dimension then
+ *  classifies `indeterminate` and, per `worstStatus`, cannot mask a real verdict
+ *  from the key dimension. A credits outage must never page on its own. */
+async function fetchAccountCredits(apiKey: string): Promise<KeyUsage> {
+  const unreadable: KeyUsage = { limit: null, limitRemaining: null };
+  for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(CREDITS_ENDPOINT, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "HTTP-Referer": process.env.PUBLIC_APP_URL ?? "https://macrotide.local",
+          "X-Title": "Macrotide",
+        },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (res.status >= 400 && res.status < 500) return unreadable; // won't recover
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = ((await res.json()) as CreditsResponse).data ?? {};
+      const total = typeof d.total_credits === "number" ? d.total_credits : null;
+      const used = typeof d.total_usage === "number" ? d.total_usage : null;
+      if (total === null || used === null) return unreadable;
+      return { limit: total, limitRemaining: total - used };
+    } catch {
+      if (attempt < MAX_FETCH_ATTEMPTS) await sleep(RETRY_BACKOFF_MS[attempt - 1] ?? 1500);
+    }
+  }
+  return unreadable;
+}
+
+/** Dollars of account credit below which auto-topup has evidently NOT fired.
+ *
+ *  With OpenRouter auto-topup enabled the balance is SUPPOSED to sit low — it gets
+ *  refilled, not drained. A percentage test is therefore the wrong shape: topup
+ *  pins `remaining` just above its trigger, so `(total - remaining) / total` parks
+ *  at a high percentage permanently and only climbs as purchased credits
+ *  accumulate. That would page forever and teach everyone to ignore it.
+ *
+ *  What actually matters is binary: did topup fire? Above the trigger, or freshly
+ *  refilled, is healthy at any percentage. Sustained BELOW the trigger means the
+ *  refill did not happen (card declined, auto-topup disabled) and every model call
+ *  is about to 403. Keep this floor BELOW the configured topup trigger so a normal
+ *  pre-refill dip is not mistaken for a failure. */
+export const ACCOUNT_FLOOR_USD = 1.0;
+
+/** Classify the account's prepaid balance for an auto-topup account: an absolute
+ *  floor, not a percentage. `indeterminate` when the balance can't be read. */
+export function classifyCredits(
+  credits: KeyUsage,
+  floorUsd: number = ACCOUNT_FLOOR_USD,
+): BudgetStatus {
+  const remaining = credits.limitRemaining;
+  if (remaining === null || !Number.isFinite(remaining)) return "indeterminate";
+  return remaining < floorUsd ? "critical" : "healthy";
+}
+
+/** The more severe of two verdicts. `indeterminate` is the weakest: an unreadable
+ *  dimension must never downgrade a real warn/critical from the other one. */
+export function worstStatus(a: BudgetStatus, b: BudgetStatus): BudgetStatus {
+  const rank: Record<BudgetStatus, number> = {
+    indeterminate: 0,
+    healthy: 1,
+    warn: 2,
+    critical: 3,
+  };
+  return rank[a] >= rank[b] ? a : b;
+}
+
 /** POST a one-line failure message to the heartbeat's `/fail` sub-path (the
  *  standard dead-man convention — same one scripts/heartbeat.sh uses). */
 async function postFail(url: string, message: string): Promise<void> {
@@ -263,15 +380,30 @@ async function main(): Promise<void> {
     return;
   }
 
-  const status = classify(reading.usage, warnPct, critPct);
+  // Two INDEPENDENT ways to lose service, so both are classified and the worse
+  // one wins: the key's own monthly cap, and the account's prepaid credits.
+  // Either reaching its ceiling 403s the app; watching only the first is how an
+  // 85%-consumed account read "healthy" hourly. A credits read failure yields an
+  // all-null reading → `indeterminate` → cannot mask the key verdict.
+  const credits = await fetchAccountCredits(apiKey);
+
+  const keyStatus = classify(reading.usage, warnPct, critPct);
+  const creditStatus = classifyCredits(credits);
+  const status = worstStatus(keyStatus, creditStatus);
+
   const pct = pctUsed(reading.usage);
   const pctStr = pct === null ? "n/a" : `${pct.toFixed(1)}%`;
+  const creditRemainingStr = money(credits.limitRemaining);
   const labelStr = reading.label ? ` key=${reading.label}` : "";
 
-  // One greppable summary line, logged regardless of verdict.
+  // One greppable summary line, logged regardless of verdict. Both dimensions are
+  // named explicitly — the old line showed a bare `limit=`/`remaining=` pair that
+  // read like an account balance when it was only ever the key's cap.
   const line =
-    `budget: ${status}${labelStr} used=${pctStr} limit=${money(reading.usage.limit)} ` +
-    `remaining=${money(reading.usage.limitRemaining)} usage_monthly=${money(reading.usageMonthly)} ` +
+    `budget: ${status}${labelStr} key_cap_used=${pctStr} ` +
+    `key_limit=${money(reading.usage.limit)} key_remaining=${money(reading.usage.limitRemaining)} ` +
+    `usage_monthly=${money(reading.usageMonthly)} | account_remaining=${creditRemainingStr} ` +
+    `(auto-topup floor=${money(ACCOUNT_FLOOR_USD)}) ` +
     `(warn=${warnPct}% crit=${critPct}%)`;
 
   if (status === "critical") {
@@ -284,6 +416,12 @@ async function main(): Promise<void> {
       console.log(
         "budget: no monthly limit set on this key — set one in the OpenRouter " +
           "dashboard for this probe to track spend.",
+      );
+    }
+    if (credits.limit === null) {
+      console.log(
+        "budget: account credit balance unreadable — the account-exhaustion " +
+          "dimension is NOT being checked this run.",
       );
     }
   }
@@ -302,7 +440,16 @@ async function main(): Promise<void> {
   //     or more in a row fire.
   if (heartbeatUrl && (status === "warn" || status === "critical")) {
     try {
-      await postFail(heartbeatUrl, alertMessage(status, reading.usage));
+      // Alert on the dimension that actually tripped. The two are worded
+      // differently because they mean different things: the key cap is a
+      // percentage of a monthly allowance; the account balance is a dollar floor
+      // that only trips when auto-topup failed to refill.
+      const body =
+        creditStatus === "critical"
+          ? `critical: OpenRouter account balance ${money(credits.limitRemaining)} — ` +
+            `below the ${money(ACCOUNT_FLOOR_USD)} floor, auto-topup has not refilled it`
+          : alertMessage(status, reading.usage);
+      await postFail(heartbeatUrl, body);
     } catch {
       // A failed alert POST must not change the budget verdict.
     }

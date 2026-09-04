@@ -7,14 +7,17 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  ACCOUNT_FLOOR_USD,
   alertMessage,
   CRITICAL_EXIT_CODE,
   classify,
+  classifyCredits,
   DEFAULT_CRIT_PCT,
   DEFAULT_WARN_PCT,
   exitCodeFor,
   parseArgs,
   pctUsed,
+  worstStatus,
 } from "../scripts/check-openrouter-budget";
 
 describe("parseArgs", () => {
@@ -119,6 +122,57 @@ describe("alertMessage", () => {
   it("renders n/a when the limit can't be read", () => {
     expect(alertMessage("warn", { limit: null, limitRemaining: null })).toBe(
       "warn: OpenRouter spend n/a — n/a/n/a",
+    );
+  });
+});
+
+describe("worstStatus", () => {
+  it("prefers the more severe verdict in either argument order", () => {
+    expect(worstStatus("healthy", "critical")).toBe("critical");
+    expect(worstStatus("critical", "healthy")).toBe("critical");
+    expect(worstStatus("healthy", "warn")).toBe("warn");
+    expect(worstStatus("warn", "critical")).toBe("critical");
+  });
+
+  it("never lets an unreadable dimension mask a real verdict", () => {
+    // The whole point: a credits read that fails must not downgrade a real key
+    // warn/critical to indeterminate (which the caller treats as exit 0).
+    expect(worstStatus("indeterminate", "critical")).toBe("critical");
+    expect(worstStatus("indeterminate", "warn")).toBe("warn");
+    expect(worstStatus("indeterminate", "healthy")).toBe("healthy");
+  });
+
+  it("is indeterminate only when BOTH dimensions are", () => {
+    expect(worstStatus("indeterminate", "indeterminate")).toBe("indeterminate");
+  });
+});
+
+describe("classifyCredits (auto-topup account: absolute floor, not a percentage)", () => {
+  // With auto-topup enabled a LOW balance is normal — the account gets refilled,
+  // not drained — so a percentage test would fire forever. Only a balance below the
+  // floor means the refill did not happen. Figures are synthetic.
+  it("is healthy at a low balance that a percentage test would have called warn", () => {
+    expect(classifyCredits({ limit: 50, limitRemaining: 7.5 })).toBe("healthy");
+  });
+
+  it("stays healthy just above the floor, however low the percentage looks", () => {
+    expect(classifyCredits({ limit: 50, limitRemaining: ACCOUNT_FLOOR_USD })).toBe("healthy");
+    expect(classifyCredits({ limit: 500, limitRemaining: 2.0 })).toBe("healthy");
+  });
+
+  it("is critical below the floor — auto-topup did not refill", () => {
+    expect(classifyCredits({ limit: 50, limitRemaining: 0.4 })).toBe("critical");
+    expect(classifyCredits({ limit: 50, limitRemaining: 0 })).toBe("critical");
+  });
+
+  it("is indeterminate when the balance cannot be read (never a false page)", () => {
+    expect(classifyCredits({ limit: null, limitRemaining: null })).toBe("indeterminate");
+  });
+
+  it("a healthy balance never downgrades a real key-cap verdict", () => {
+    const keyCritical = classify({ limit: 50, limitRemaining: 0.5 }, 80, 95);
+    expect(worstStatus(keyCritical, classifyCredits({ limit: 50, limitRemaining: 7.5 }))).toBe(
+      "critical",
     );
   });
 });

@@ -1193,6 +1193,17 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Fixed
 
+- **The OpenRouter spend probe now watches the account balance, not just the key
+  cap.** It read only the key's own monthly limit, so it could report a healthy key
+  cap hourly while the account's prepaid balance ran toward exhaustion — and when
+  both ceilings are configured to the same figure, the summary line read like an
+  account balance when it was only ever the key's cap. Either ceiling 403s every
+  model call, so both are now checked and the worse verdict wins. The balance is
+  judged against an absolute dollar floor rather than a percentage: with auto-topup
+  enabled a low balance is normal, so a percentage test would alarm permanently —
+  only a balance that stays below the floor means the refill failed. An unreadable
+  balance is `indeterminate` and can never mask a real key verdict.
+
 - **The demo's history always looks current.** The committed demo NAV/benchmark
   fixture is now re-dated on read so its latest point always lands on today —
   the demo stays recent and daily-dense at any date with no periodic refresh,
