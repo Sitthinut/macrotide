@@ -94,6 +94,9 @@ restate the issue list, colors, or IDs here; they'd go stale. The conventions:
   Todo items. Move to In Progress on start. Move to Done when merged to `origin/main`, then
   close the issue and do the ship-docs pass above. A Status nobody moves is worse
   than none.
+- **One branch per testable flow.** Scope work by what gets tested together; don't
+  split one flow into many issues or branches. An unrelated bug found on the way
+  still gets its own issue.
 
 A doc reference to a function, env var, or file path is a contract: when you
 rename/move/delete it, `grep -rn "thing" *.md docs/` and fix the references.
@@ -255,6 +258,13 @@ GitHub Actions CI runs typecheck + lint + build. The build step needs
 - Adding a column to an app table? Most app tables already carry a nullable
   `user_id` (app baseline + `0004`) for per-user scoping; design new ones the same way.
   (`0007` is the holdings→ledger backfill — see ADR 0004.)
+
+## UI components
+
+Build new UI from the existing design system: `.holding` rows, `.stats-strip`,
+`.hero-block`, `.section-header`, the `.ledger-edit` editor, and
+`components/ui/Combobox.tsx` for custom dropdowns. Propose a new pattern only when
+nothing fits, and say so; a bespoke redesign was rejected and rebuilt on these.
 
 ## Product copy & vocabulary
 
