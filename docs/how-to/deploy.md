@@ -792,6 +792,7 @@ For a zero-downtime swap behind Caddy: blue/green with two systemd instances on 
 | Demo dashboard renders but data is wrong | Cookie collision across browsers. Clear `macrotide_demo` cookie, hit `/login` again. |
 | `/api/chat` returns 429 immediately | IP rate limit. The default is 20 RPM; see `lib/api/rate-limit.ts`. |
 | Build fails with "out of memory" | ARM64 VMs with <2 GB RAM need a swapfile. `sudo fallocate -l 2G /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile`. |
+| Build fails fetching fonts | `next/font` downloads Google Fonts at **build** time, so the build host needs outbound internet. A no-egress build sandbox fails; the running app doesn't need it. |
 
 ## Hardening checklist
 

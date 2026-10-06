@@ -705,9 +705,9 @@ export const fundPortfolioAssetType = sqliteTable(
 
 // ───────────────────────────────────────────────────────────────────────────
 // Feeder fund look-through — maps a Thai feeder fund (proj_id) to a foreign
-// master fund identified by ISIN, and stores the master fund's published
-// holdings fetched from the provider's public daily CSV.
-// Controlled by EXTERNAL_INGEST_FEEDER_HOLDINGS env flag (default OFF).
+// master fund, and stores the master's holdings from its latest SEC EDGAR
+// Form NPORT-P filing (lib/market/providers/edgar-nport.ts). Controlled by the
+// EXTERNAL_INGEST_FEEDER_HOLDINGS env flag (default OFF).
 // ───────────────────────────────────────────────────────────────────────────
 
 // Maps a Thai feeder fund to its master fund ISIN for look-through.
@@ -720,11 +720,16 @@ export const feederMasterMap = sqliteTable(
     projId: text("proj_id")
       .primaryKey()
       .references(() => fundCatalog.projId, { onDelete: "cascade" }),
-    // ISIN of the foreign master fund (e.g. "IE00B5BMR087" for CSPX).
+    // ISIN of the foreign master fund: the EDGAR_FUNDS registry key for
+    // crawl-derived rows. Don't resolve a master from this column: the source
+    // data shares placeholder ISINs across unrelated masters, so match by
+    // master_name instead (resolveMasterSymbol).
     masterIsin: text("master_isin").notNull(),
     // Human-readable master fund name for display (e.g. "iShares Core S&P 500 UCITS ETF").
     masterName: text("master_name"),
-    // Source of the master fund data: 'ishares' | 'vanguard' | 'manual'.
+    // Source of the mapping: 'sec-nport' when the catalog crawl derived it, or
+    // an operator-curated value. The 'ishares' default is left over from a
+    // retired issuer-CSV source.
     provider: text("provider").notNull().default("ishares"),
     createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
     updatedAt: text("updated_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
@@ -732,8 +737,8 @@ export const feederMasterMap = sqliteTable(
   (table) => [index("idx_feeder_master_map_isin").on(table.masterIsin)],
 );
 
-// Look-through holdings — latest snapshot of the master fund's published
-// holdings, fetched from the provider's public CSV. Replaces on each crawl
+// Look-through holdings — latest snapshot of the master fund's holdings from
+// its newest NPORT-P filing (as of the report period). Replaces on each crawl
 // (delete-then-insert). Only the LATEST snapshot is kept.
 export const feederLookThroughHoldings = sqliteTable(
   "feeder_look_through_holdings",
@@ -744,11 +749,11 @@ export const feederLookThroughHoldings = sqliteTable(
       .references(() => fundCatalog.projId, { onDelete: "cascade" }),
     // Rank within the master fund (1 = largest holding by weight).
     rank: integer("rank").notNull(),
-    // Security name as published by the master fund provider.
+    // Security name as reported in the NPORT-P filing.
     name: text("name").notNull(),
     // Ticker symbol (may be empty for bonds/cash).
     ticker: text("ticker"),
-    // Asset class label from the provider (Equity, Fixed Income, Cash, Other).
+    // Asset class label mapped from the NPORT-P assetCat code.
     assetClass: text("asset_class"),
     // ISIN of the underlying security (may be empty).
     isin: text("isin"),

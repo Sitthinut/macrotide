@@ -65,6 +65,12 @@ env-overridable — see the `*_REASONING_*` rows in configuration.md.
 > **Every chain is capped at 3.** OpenRouter's `models[]` fallback array rejects more
 > than 3 entries (a longer chain 400s and dead-fails every request), so `openrouter()`
 > trims to the first 3 (best-by-order). Keep suggested chains ≤ 3.
+>
+> **Probe the whole chain when you edit one.** A fallback fires only when the
+> primary fails, so a dead alternate stays invisible until the day it's needed.
+> When changing any `*_TIER_MODELS` (or other `*_MODELS`) chain, test every
+> model in it with tools, `tool_choice` and structured output, not just the
+> primary.
 
 Two cross-cutting mechanisms make the `none` pins robust: **retry-on-400** —
 `openrouter()` retries once without the reasoning field when a model 400s "reasoning
@@ -110,7 +116,15 @@ exactly why the recover-on-empty net is load-bearing, not optional.
 The public tier's model is now its own operator knob (`PUBLIC_TIER_MODELS`, default the
 zero-cost `openrouter/free`), so a cheap paid model (the A/B picked
 `google/gemini-2.5-flash-lite` / `-flash`) can remove most dead-ends *at the
-source*. The cost guard the AGENTS.md invariant mandates is preserved **by
+source*. In that A/B of cheap tools-capable models on the Advisor tool loop,
+reliability did **not** separate them (nearly all hit zero dead-ends, and the
+recover/retry net covers the rest), so cost and latency decided it:
+`gemini-2.5-flash-lite` ran ~2 s and ~$0.0003 per turn, with `-flash` as the
+quality step-up. **For the common chat turn, pick a fast non-reasoning model.**
+The popular cheap reasoning/agentic models rank well on leaderboards but took
+8–29 s per chat turn, burned tokens, and a few were unreliable on the tool loop;
+reasoning is a per-turn choice for rare analytical asks (§ 3), not a default.
+Re-measure before changing the chain, since prices and models move. The cost guard the AGENTS.md invariant mandates is preserved **by
 construction**: the public tier chain derives ONLY from `PUBLIC_TIER_MODELS`, never from
 `TRUSTED_TIER_MODELS`, so a paid floor is a deliberate, separately-capped choice — not a
 widening of the pinned chain. Spend is bounded by the daily token cap plus the
@@ -146,7 +160,7 @@ no-prose rate; latency = wall-clock/turn; $/1k = complex-tier, list price:
 35–78s) and reliability (3% dead-ends) — at quality within judge-noise of glm-5.1.
 This ties back to routing-by-reliability above: the model live at sweep time
 (`glm-4.6`, itself only a brief interim pick) **dead-ended ~28% of complex turns**
-— the intermittent-silence failure mode (#21) that makes any model *feel* broken,
+— the intermittent-silence failure mode that makes any model *feel* broken,
 which is exactly what reliability-first routing exists to avoid. glm-5.1 is the
 fallback (top quality, different provider → no shared-outage risk). Input tokens
 dominate and grok supports prompt caching (cached read ~16% of input), so real
@@ -159,8 +173,7 @@ change) — never swap blind.
 
 The holdings-image OCR + in-chat vision surfaces are their own operator knobs
 (`OCR_MODELS`, `VISION_CHAT_MODELS`), migrating off the
-deprecating `gemini-2.5` family (`-flash` EOL 2026-10-16; implementation tracked
-in [#182](https://github.com/Sitthinut/macrotide/issues/182)). **Suggested
+deprecating `gemini-2.5` family (`-flash` EOL 2026-10-16). **Suggested
 default: `google/gemini-2.5-flash-lite` primary + `google/gemini-3.1-flash-lite`
 fallback** (operators can override) — measured by
 [`scripts/eval/ocr.ts`](../../scripts/eval/ocr.ts) against **real broker
@@ -184,6 +197,16 @@ latency / 4× input cost — vision stays on a dedicated cheap model, never unif
 onto the chat model. **Caveat:** synthetic vector fixtures can't reproduce the
 photographic degradation that separates models — the real-screenshot run is the
 load-bearing evidence; the committed synthetic set is a regression net.
+
+**Rejected or optional candidates.** OCR specialists lost to general Gemini Flash
+vision: a China-hosted OCR model is a privacy no-go for financial screenshots
+(and had no live endpoint on OpenRouter), and Mistral OCR hallucinated financial
+digits head-to-head. Typhoon OCR (Thai-native, tuned for Thai financial
+documents) remains an optional cross-check or a zero-egress self-hosted option.
+**The free chain can't do vision:** `openrouter/free` errors on image input, and
+`:free` vision models require the provider's train-on-your-data opt-in, which
+financial data rules out. That's why vision and OCR run on their own cheap paid
+chain for every tier (bounded by the caps), not on the text tier chains.
 
 **This model serves a TOOL, not a whole-turn swap.** The chat driver stays on
 every turn and reads an attachment by calling `examine_image` (which runs the

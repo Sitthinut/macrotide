@@ -50,7 +50,12 @@ delivered it (a closed-issue number is dead weight — strip a ref when its work
 ships). Link an issue only for **not-yet-built behavior a doc must mention** — its
 open tracking issue, so the live link is the reminder to revisit when the work
 lands. Status lives in the board and CHANGELOG, not in prose; the README Features
-list names shipped capabilities only (no status column).
+list names shipped capabilities only (no status column). The same holds for
+**code comments**: no issue or PR numbers, ROADMAP phase numbers, or status tags
+(`[shipped]`, `[next]`); describe behavior in present tense and frame future work
+as a design direction. Stable artifacts (a migration file, a function, an env
+var) are fine to cite. Issue numbers belong in commit subjects, PR bodies and the
+CHANGELOG.
 
 **Exception — numbered ADRs (`decisions/NNNN-*.md`) are immutable:** a record of a
 decision *when it was made*. **Never rewrite one to match new behavior** (it's
@@ -114,6 +119,12 @@ committed code, fixtures, tests, or docs:
   could imply endorsement or violate TOS (e.g., commercial fund supermarkets).
   Reference only public, official data sources (Thai SEC, Yahoo Finance,
   exchange-published indices).
+- Real ledger rows, balances, holdings, account numbers or key suffixes — and
+  not in issues, PR bodies, commit messages or comments either (production
+  holds real users' data; code and tests use demo data only).
+- Names of private tooling or infrastructure: the deployment's hosts, paths,
+  hooks or private repos. Public text describes the app, written generically
+  ("deployments should keep the origin unreachable").
 
 Tests use synthetic data only. If you need a real fund code to test against,
 ask the user — never invent one and commit it as if it were real.

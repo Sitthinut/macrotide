@@ -233,6 +233,10 @@ do.
 - **No tax filing / advice** — it can explain how SSF/RMF/Thai ESG work; it is
   not a tax service.
 - **No real-time trading-desk data** — long-horizon cadence, not tick data.
+- **No automatic migration across Thai fund mergers** — no source publishes the
+  old-to-new fund link or conversion ratio, so a merged holding stays visible at
+  its last-known NAV for the user to update
+  ([why](./market-data-pipeline.md#fund-mergers-degrade-gracefully-dont-auto-migrate)).
 - **No named goals or targets on cash — and no rich earmarking — in the cash
   feature itself.** Cash carries a single per-account Purpose (one Role + an
   optional label) and reserves either a fixed amount or the whole balance. The

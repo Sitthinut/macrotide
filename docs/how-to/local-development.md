@@ -57,12 +57,43 @@ and the code that reads each one — is the env-var table in
 > multi-user matures — design with that in mind (see
 > [AGENTS.md § Migrations](../../AGENTS.md#migrations-drizzle)).
 
+## Working in a git worktree
+
+A worktree shares the repo but not its untracked files, so it starts without
+`node_modules`, `.env.local` or `data/`.
+
+- **Give it a real `node_modules`.** Next 16 runs Turbopack for both `next dev`
+  and `next build`, and Turbopack rejects a symlinked `node_modules` ("Symlink
+  [project]/node_modules is invalid, it points out of the filesystem root"). A
+  symlink is enough for `tsc --noEmit` and Biome; to run dev or build, hard-link
+  a copy from the main checkout instead (fast, and it shares disk):
+
+  ```bash
+  rm -f node_modules
+  cp -al ../macrotide/node_modules node_modules
+  npm run dev   # picks the next free port if :3000 is taken
+  ```
+
+- **Sign in with a passkey.** With no `.env.local` there are no OAuth
+  credentials, so the worktree is passkey-only; passkeys work on
+  `http://localhost`. It also gets its own fresh `data/app.db`.
+- **Never point unmerged code at a shared, real `market.db`.** A migration,
+  crawl or backfill from an unmerged branch writes into the file every other
+  checkout reads. Run such jobs against a copy (`MARKET_DB_PATH`), taken from a
+  consistent snapshot rather than the live WAL-mode file.
+
 ## Tests
 
 [Vitest](https://vitest.dev/). Tests live next to the code they cover
 (`*.test.ts`) plus a few integration tests under `tests/`. Run `npm test` (or
 `npm run test:watch` while iterating). CI runs typecheck + lint + build on
 every push.
+
+**Never trust network-stubbed tests alone for an external source.** A bot-gated
+endpoint can answer `200` with the expected `Content-Type` and an HTML challenge
+page for a body, and synthetic fixtures hide that. Verify a new or changed
+provider against the live endpoint (a smoke script or a one-off fetch) before
+calling it done.
 
 ## Pre-commit hook
 

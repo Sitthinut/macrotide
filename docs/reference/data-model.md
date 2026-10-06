@@ -161,9 +161,12 @@ These timestamps are stored as integer epoch-ms (app tables use ISO-8601 text).
 
 ## Ownership & multi-user
 
-Most app tables carry a nullable `user_id` referencing `user.id`. Today, in
-single-owner mode, it is `NULL` and rows are visible to the owner; multi-user
-mode scopes every query by `user_id`. The evolution is described in
+The persistent `app.db` is multi-user: most app tables carry a nullable
+`user_id` referencing `user.id`, and every signed-in user's rows are stamped with
+their id. Request queries scope by `user_id` (`ownedBy`); demo and built-in rows
+stay `NULL`, as does everything under `AUTH_DISABLED=1` local dev. Batch jobs
+with no request (nightly prewarm, reconcile) read every user's rows. The
+evolution is described in
 [design principles § single-owner → multi-user](../explanation/design-principles.md#from-single-owner-to-multi-user).
 
 ## Relationships (sketch)

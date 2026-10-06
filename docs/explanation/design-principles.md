@@ -59,15 +59,15 @@ instinct behind the codebase's `see docs/...` comments and these docs'
 
 ## From single-owner to multi-user
 
-The app was built single-owner first and grows into multi-user without a
-rewrite. The mechanism: most app tables carry a nullable `user_id`. In
-single-owner mode it's `NULL` and the owner sees everything; multi-user mode
-scopes every query by `user_id` (`requireUser()`, an `ownedBy()` filter that
-collapses to "no user" when there's no session). Identity (passkey + optional
-Google), quotas, and tier gating are all **env-gated** — set nothing and
-the app runs exactly as the single-owner version did.
+The app was built single-owner first and grew into multi-user without a
+rewrite; it runs multi-user in production. The mechanism: most app tables carry
+a nullable `user_id`. A signed-in user's rows carry their id, and request
+queries scope by it (`requireUser()`, an `ownedBy()` filter that collapses to
+`user_id IS NULL` when there's no user, the row set demo, built-in data and
+`AUTH_DISABLED=1` local dev use). "Owner" names the admin account
+(`OWNER_EMAIL`), not the only user. Quotas and tier gating are **env-gated**.
 
-This lets each capability ship and be tested behind a default-off switch rather
+This let each capability ship and be tested behind a default-off switch rather
 than in a risky big-bang cutover. The data shape is in
 [data-model.md](../reference/data-model.md).
 

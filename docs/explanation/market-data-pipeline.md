@@ -1,6 +1,6 @@
 # Market data pipeline
 
-*Last updated: 2026-06-26*
+*Last updated: 2026-10-06*
 
 How market data gets into `market.db` and stays fresh — the **Thai fund catalog
 crawl** (SEC reference data), the **US securities catalog** (Nasdaq directory +
@@ -76,6 +76,37 @@ we don't read yet are still captured in `sec_raw` for later. Asset class /
 money-market detection is driven by the SEC `risk-spectrum` RS-code, not
 fund-name matching. The catalog of landable endpoints/fields lives in the
 [SEC spec repo](https://github.com/Sitthinut/sec-open-data-api-spec).
+
+**Fee coverage is the endpoint's ceiling, not a bug.** The SEC fee endpoint
+returns usable fee rows for only a minority of active funds; the rest show as
+"no published fee". Wider coverage needs another source, not a crawl fix.
+
+### What the SEC API doesn't have
+
+Holdings and portfolios come from the SEC v2 endpoints named in the schema
+comments (`lib/db/schema/market.ts`). Each of these needs a third-party source:
+tracking error against an external index series, bond duration / yield / credit
+rating (the ISIN is there, the analytics aren't), and FX-hedge ratios or
+derivative positions over time (profiles carry only static hedging-policy text).
+
+### Fund mergers: degrade gracefully, don't auto-migrate
+
+A Thai fund merger liquidates the old fund (a new `proj_id` takes over) and
+converts units at a ratio. **Auto-migrating holdings across a merger isn't
+feasible**: no machine-readable old-to-new mapping or conversion ratio exists in
+the SEC Open API, AIMC, or FundConnext (the exchange's fund platform, whose
+feed excludes corporate actions). The SEC profile exposes only `fund_status`
+(`Registered`, `IPO`, `Expired`, `Canceled`, `Liquidated`) and `cancel_date`:
+no successor field, reason code or ratio. Ratios live only in per-merger PDF
+disclosures each fund house publishes. (The SEC spec's "Fund API Mapping (Old vs
+New)" is the v1-to-v2 *API* migration, not fund-to-fund.) Only funds of the same
+fund house can merge, which narrows candidates but still gives no successor link.
+
+The current behavior is the right automatic one: a merged holding's
+ISIN / `(proj_id, class_name)` anchor resolves to the now-inactive fund, keeps
+its name (marked closed) and last-known NAV (the quote cache is never pruned),
+and never vanishes. The only worthwhile follow-up is a detect-and-flag nudge
+when a held fund flips to `Canceled` or `Liquidated`.
 
 `jobs:refresh-share-classes` runs after the catalog (FK dependency) to populate
 the priceable share-class tickers the series cache keys on.
@@ -225,6 +256,6 @@ synthetic data as its own returns.
 | A new SEC field not yet landed | the crawl's `sec_raw` landing (`refresh-fund-catalog.ts`) |
 | Price-series freshness, depth, or fallback | [lib/market/cache.ts](../../lib/market/cache.ts) |
 | Provider chain / a new market provider | [lib/market/providers/](../../lib/market/providers), then [auth-and-providers.md](../reference/auth-and-providers.md#market-data-providers-indices--fx--stocks) |
-| Coverage backfill (NAV history depth) | `jobs:prewarm-nav` (`prewarm-nav.ts`); held non-fund positions self-heal on demand — [#141](https://github.com/Sitthinut/macrotide/issues/141) |
-| Benchmark comparison series (total-return) | not built — [#81](https://github.com/Sitthinut/macrotide/issues/81) |
+| Coverage backfill (NAV history depth) | `jobs:prewarm-nav` (`prewarm-nav.ts`); held non-fund positions warm via `jobs:refresh-market` |
+| Benchmark comparison series (total-return) | `jobs:prewarm-benchmark` (`prewarm-benchmark.ts`), the `benchmark_tr` source |
 | Job schedules / one-shot containers | [deploy.md § Scheduled jobs](../how-to/deploy.md#scheduled-jobs-systemd-timers) |

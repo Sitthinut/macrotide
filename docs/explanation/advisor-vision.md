@@ -71,7 +71,9 @@ importer also proves out, primary + an EOL-proof fallback) via
 `resolveVisionProvider` ([lib/ai/provider.ts](../../lib/ai/provider.ts)). This is
 the same shape as the `PUBLIC_TIER_MODELS` invariant, and for the same reason:
 **public-tier vision derives from its own var, never from `TRUSTED_TIER_MODELS`** —
-so enabling vision can't widen the text model chains.
+so enabling vision can't widen the text model chains. Why it can't ride the free
+chain, and the candidate models:
+[inference-strategy.md § Suggested vision & OCR models](./inference-strategy.md#suggested-vision--ocr-models-2026-06-16-sweep).
 
 A chart/factsheet the user is reasoning *about* can escalate to a stronger
 `VISION_CHAT_ESCALATE_MODELS` chain (`resolveVisionEscalateProvider`), chosen

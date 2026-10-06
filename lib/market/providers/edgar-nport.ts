@@ -8,7 +8,7 @@
 // Why this and not the issuer's own CSV: iShares/VanEck holdings CSVs are
 // Akamai bot-gated (a datacenter fetch gets an HTML challenge page, not CSV).
 // EDGAR is official, free, and returns real data to a plain server-side GET —
-// it only requires a non-bot User-Agent (we send the shared browser UA; see below).
+// it only requires a User-Agent that declares a contact (secEdgarUserAgent).
 //
 // Trade-off: NPORT-P is filed within ~60 days of each fiscal quarter end, so
 // holdings are "as of" the last quarter — fine for an informational look-through
@@ -117,6 +117,9 @@ const ASSET_CAT_LABELS: Record<string, string> = {
 // Master funds used by Thai feeder funds that are US-registered (file NPORT-P).
 // CIK + seriesId verified live against SEC's company_tickers_mf.json and EFTS.
 // Add entries (with a verified ISIN) as more feeders are mapped.
+// Masters with no NPORT-P filing have no free programmatic holdings source and
+// stay uncovered: gold grantor trusts (GLD), HK- and Japan-listed ETFs, and
+// UCITS funds (e.g. Irish-domiciled ETFs and mutual funds).
 export const EDGAR_FUNDS: Record<string, EdgarFundRef> = {
   US4642872265: {
     cik: "1100663",
