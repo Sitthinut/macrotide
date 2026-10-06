@@ -22,6 +22,7 @@
 //       usable fallback for a deep TR backfill.
 
 import { BENCHMARK_TR_SOURCE } from "../sources";
+import { providerFetch } from "./http";
 import {
   type Provider,
   ProviderError,
@@ -136,7 +137,10 @@ async function fetchTwelveDataSeries(
   if (opts.adjusted) url.searchParams.set("adjust", "all");
   url.searchParams.set("apikey", key);
 
-  const res = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" });
+  const res = await providerFetch(url, {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
   if (!res.ok) {
     throw new ProviderError(
       `Twelve Data returned ${res.status} for ${symbol}`,

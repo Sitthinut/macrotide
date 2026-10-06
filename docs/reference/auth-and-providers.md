@@ -196,6 +196,10 @@ FMP (keyed, REAL US indices)
         → Yahoo (keyless)
 ```
 
+Every upstream fetch is bounded by a 10-second timeout
+(`lib/market/providers/http.ts`), so a hung provider throws and the chain moves on
+rather than stalling the request or the Advisor tool waiting on it.
+
 | Provider | Env var | Free tier | Serves |
 | --- | --- | --- | --- |
 | FMP (Financial Modeling Prep) | `FMP_API_KEY` | ≈ 250 req/day | REAL US index levels — `^GSPC` (S&P 500), `^NDX` (Nasdaq-100), `^DJI` (Dow) |

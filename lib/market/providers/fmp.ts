@@ -18,6 +18,7 @@
 // Response: a flat array [{ symbol, date: "2026-05-27", close: 7520.4, … }, …]
 // arriving newest-first, so we sort to oldest-first.
 
+import { providerFetch } from "./http";
 import {
   type Provider,
   ProviderError,
@@ -96,7 +97,10 @@ export const fmpProvider: Provider = {
     url.searchParams.set("to", end);
     url.searchParams.set("apikey", key);
 
-    const res = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" });
+    const res = await providerFetch(url, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
     if (!res.ok) {
       throw new ProviderError(`FMP returned ${res.status} for ${symbol}`, "fmp", res.status);
     }

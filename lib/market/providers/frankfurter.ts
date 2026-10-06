@@ -5,11 +5,12 @@
 // foreign-exchange pairs, so it `matches` Yahoo-style FX tickers ("THB=X") and
 // nothing else, sitting in the chain as the keyless FX layer ahead of Yahoo.
 //
-// Endpoint: https://api.frankfurter.app/{start}..{end}?from=USD&to=THB
+// Endpoint: https://api.frankfurter.dev/v1/{start}..{end}?from=USD&to=THB
 // Response: { base, start_date, end_date, rates: { "2026-04-01": { THB: 32.5 }, … } }
 // Rates cover ECB working days only (no weekends/holidays) — fine for a daily
 // series. History reaches back to 1999.
 
+import { providerFetch } from "./http";
 import {
   type Provider,
   ProviderError,
@@ -19,7 +20,7 @@ import {
   type SeriesRange,
 } from "./types";
 
-const BASE_URL = "https://api.frankfurter.app";
+const BASE_URL = "https://api.frankfurter.dev/v1";
 
 // Yahoo FX tickers are "XXX=X", meaning USD per 1 XXX. We quote USD→XXX.
 const FX_RE = /^([A-Z]{3})=X$/;
@@ -67,7 +68,10 @@ export const frankfurterProvider: Provider = {
     url.searchParams.set("from", "USD");
     url.searchParams.set("to", quoteCcy);
 
-    const res = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" });
+    const res = await providerFetch(url, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
     if (!res.ok) {
       throw new ProviderError(
         `Frankfurter returned ${res.status} for ${ticker}`,

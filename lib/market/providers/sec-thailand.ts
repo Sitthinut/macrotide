@@ -34,6 +34,7 @@
 // Default/max page_size = 100; empty next_cursor signals last page.
 
 import type { SecFundFeeItem } from "../fund-fees";
+import { providerFetch } from "./http";
 import {
   type Provider,
   ProviderError,
@@ -144,7 +145,7 @@ async function secFetch<T>(path: string, key: string): Promise<T | null> {
   const url = `${BASE_URL}${path}`;
   for (let attempt = 0; ; attempt++) {
     await rateGate();
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       headers: {
         "Ocp-Apim-Subscription-Key": key,
         Accept: "application/json",

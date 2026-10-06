@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { frankfurterProvider } from "./frankfurter";
 import { ProviderError } from "./types";
 
-// Synthetic shapes only — no live API is hit (except the explicit smoke test).
+// Synthetic shapes only — no live API is hit (tests/setup-network.ts blocks it).
 
 describe("frankfurterProvider.matches", () => {
   it("owns Yahoo-style FX pairs and nothing else", () => {
@@ -65,5 +65,30 @@ describe("frankfurterProvider.fetchSeries", () => {
     await expect(frankfurterProvider.fetchSeries("THB=X", "1mo", "1d")).rejects.toBeInstanceOf(
       ProviderError,
     );
+  });
+});
+
+describe("frankfurterProvider request", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("calls the current domain with a bounded timeout", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ base: "USD", rates: { "2026-05-01": { THB: 32 } } }), {
+        status: 200,
+      }),
+    );
+
+    await frankfurterProvider.fetchSeries("THB=X", "1mo", "1d");
+
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(String(url)).toMatch(/^https:\/\/api\.frankfurter\.dev\/v1\//);
+    expect((init as RequestInit).signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("fails over when the upstream hangs past the timeout", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(
+      new DOMException("The operation was aborted due to timeout", "TimeoutError"),
+    );
+    await expect(frankfurterProvider.fetchSeries("THB=X", "1mo", "1d")).rejects.toThrow(/timeout/i);
   });
 });

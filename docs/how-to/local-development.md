@@ -89,6 +89,10 @@ A worktree shares the repo but not its untracked files, so it starts without
 `npm run test:watch` while iterating). CI runs typecheck + lint + build on
 every push.
 
+Unit tests can't reach the network: `tests/setup-network.ts` replaces `fetch` with
+one that throws the URL, so a test that needs a response stubs `fetch` itself
+(`vi.stubGlobal` / `vi.spyOn`).
+
 **Never trust network-stubbed tests alone for an external source.** A bot-gated
 endpoint can answer `200` with the expected `Content-Type` and an HTML challenge
 page for a body, and synthetic fixtures hide that. Verify a new or changed

@@ -1193,6 +1193,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Fixed
 
+- **A hung market-data provider no longer stalls quotes or the Advisor.** Every
+  upstream fetch (the FX, index, stock and Thai fund providers) now gives up after
+  10 seconds and the chain moves on to the next provider; Yahoo no longer retries a
+  timed-out request. Frankfurter is called on its current domain, and unit tests
+  can no longer reach the network, so a slow third party can't fail CI.
+
 - **The OpenRouter spend probe now watches the account balance, not just the key
   cap.** It read only the key's own monthly limit, so it could report a healthy key
   cap hourly while the account's prepaid balance ran toward exhaustion — and when

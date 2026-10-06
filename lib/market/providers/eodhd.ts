@@ -13,6 +13,7 @@
 // Endpoint: https://eodhd.com/api/eod/{SYMBOL}?api_token=&fmt=json&order=a
 // Response: [{ date: "2026-05-01", close: 5200.1 }, …] (oldest-first w/ order=a)
 
+import { providerFetch } from "./http";
 import {
   type Provider,
   ProviderError,
@@ -99,7 +100,10 @@ export const eodhdProvider: Provider = {
     url.searchParams.set("from", startDate(range));
     url.searchParams.set("to", end);
 
-    const res = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" });
+    const res = await providerFetch(url, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
     if (!res.ok) {
       throw new ProviderError(`EODHD returned ${res.status} for ${symbol}`, "eodhd", res.status);
     }

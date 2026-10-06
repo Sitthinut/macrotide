@@ -19,6 +19,7 @@
 // Endpoint: https://data.alpaca.markets/v2/stocks/{symbol}/bars?timeframe=1Day
 // Response: { bars: [{ t: "2026-05-01T04:00:00Z", c: 211.5, … }], symbol, next_page_token }
 
+import { providerFetch } from "./http";
 import {
   type Provider,
   ProviderError,
@@ -116,7 +117,7 @@ export const alpacaProvider: Provider = {
     // the 10000 cap, so a single request suffices (no next_page_token paging).
     url.searchParams.set("limit", "10000");
 
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       headers: {
         Accept: "application/json",
         "APCA-API-KEY-ID": c.keyId,

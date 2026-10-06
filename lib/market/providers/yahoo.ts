@@ -13,6 +13,7 @@
 //   AAPL, PTT.BK, etc.
 
 import { BROWSER_USER_AGENT } from "../user-agent";
+import { isTimeout, PROVIDER_TIMEOUT_MS, providerFetch } from "./http";
 import {
   type Provider,
   ProviderError,
@@ -62,7 +63,7 @@ async function fetchOnce(
   url.searchParams.set("range", range);
   url.searchParams.set("interval", interval);
   url.searchParams.set("includePrePost", "false");
-  return fetch(url, {
+  return providerFetch(url, {
     headers: {
       "User-Agent": BROWSER_USER_AGENT,
       Accept: "application/json",
@@ -100,6 +101,12 @@ async function fetchChart(symbol: string, range: SeriesRange, interval: SeriesIn
         if (!result) throw new ProviderError(`No chart result for ${symbol}`, "yahoo");
         return result;
       } catch (err) {
+        if (isTimeout(err)) {
+          throw new ProviderError(
+            `Yahoo timed out after ${PROVIDER_TIMEOUT_MS} ms for ${symbol}`,
+            "yahoo",
+          );
+        }
         lastError = err instanceof ProviderError ? err : new ProviderError(String(err), "yahoo");
         if (lastError.status && lastError.status !== 429) throw lastError;
       }
