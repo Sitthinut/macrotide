@@ -70,7 +70,7 @@ A worktree shares the repo but not its untracked files, so it starts without
 
   ```bash
   rm -f node_modules
-  cp -al ../macrotide/node_modules node_modules
+  cp -al "$(git rev-parse --git-common-dir)/../node_modules" node_modules   # the main checkout's
   npm run dev   # picks the next free port if :3000 is taken
   ```
 
