@@ -52,8 +52,8 @@ path ever lets someone claim an address they haven't proven. Full rationale:
 - **Unlink / revoke:** providers and passkeys can be removed, but at least one
   *usable* sign-in method is always kept (you can't revoke your last passkey or
   unlink your last provider if it would lock you out — enforced in the UI *and*
-  server-side). Unlinking your **last** provider clears the account email back to
-  emailless. A removed passkey can't sign in again — its server credential is gone.
+  server-side; a refused unlink says why). Unlinking your **last** provider clears
+  the account email back to emailless, and Account shows the change right away. A removed passkey can't sign in again — its server credential is gone.
 - **Ended up with two accounts** (signed up separately with each method)? They
   don't auto-merge; add a passkey to the OAuth account and abandon the spare.
   (Deleting the spare account is [planned](https://github.com/Sitthinut/macrotide/issues/105).)

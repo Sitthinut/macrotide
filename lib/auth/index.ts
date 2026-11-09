@@ -2,6 +2,7 @@ import "server-only";
 import { passkey } from "@better-auth/passkey";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { APIError } from "better-auth/api";
 import { and, eq, inArray } from "drizzle-orm";
 import { appDb, appSqlite, marketDb, marketSqlite } from "@/lib/db/client";
 import { runWithDbContext } from "@/lib/db/context";
@@ -10,7 +11,13 @@ import {
   passkey as passkeyTable,
   user as userTable,
 } from "@/lib/db/schema";
-import { shouldAdoptOnLink, shouldBlockUnlink, shouldResetEmailOnUnlink } from "./account-rules";
+import {
+  shouldAdoptOnLink,
+  shouldBlockUnlink,
+  shouldResetEmailOnUnlink,
+  UNLINK_LOCKOUT_CODE,
+  unlinkLockoutMessage,
+} from "./account-rules";
 import { idTokenEmail } from "./id-token";
 import { isPlaceholderEmail, placeholderEmail } from "./placeholder-email";
 import { socialProvidersConfig } from "./providers";
@@ -91,8 +98,8 @@ function adoptProviderEmail(account: {
 }
 
 /**
- * Lockout backstop for unlinking an OAuth provider (`account.delete.before`;
- * returning false blocks the deletion). Refuses to remove a social provider
+ * Lockout backstop for unlinking an OAuth provider (`account.delete.before`,
+ * which throws to block the deletion). Refuses to remove a social provider
  * when it would leave the user with NO usable sign-in method — no passkey and no
  * other OAuth provider. The `credential` bootstrap row (random password, no UI)
  * is not usable, so it's never counted. This makes both signup origins behave
@@ -289,8 +296,15 @@ export const auth = betterAuth({
       },
       delete: {
         // Backstop: refuse an unlink that would leave no usable sign-in method.
+        // Throw rather than return false: better-auth answers a skipped delete
+        // with `{status: true}`, so the caller would be told it worked.
         before: async (acct: { userId: string; providerId: string }) => {
-          if (blocksUnlinkLockout(acct)) return false;
+          if (blocksUnlinkLockout(acct)) {
+            throw new APIError("BAD_REQUEST", {
+              code: UNLINK_LOCKOUT_CODE,
+              message: unlinkLockoutMessage(),
+            });
+          }
         },
         // When the last provider goes, the email is no longer provider-backed —
         // reset it to an emailless placeholder.

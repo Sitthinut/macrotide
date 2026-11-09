@@ -47,3 +47,15 @@ export function shouldResetEmailOnUnlink(opts: {
   if (!opts.isSocial) return false;
   return opts.remainingSocialCount === 0 && !opts.currentIsPlaceholder;
 }
+
+/**
+ * Error code the unlink lockout guard returns, so the Account screen can tell a
+ * refused unlink apart from other failures.
+ */
+export const UNLINK_LOCKOUT_CODE = "UNLINK_WOULD_LOCK_OUT";
+
+/** Why an unlink was refused. Shared by the server guard and the Account screen. */
+export function unlinkLockoutMessage(providerLabel?: string): string {
+  const subject = providerLabel ?? "This provider";
+  return `${subject} is your only way to sign in. Register a passkey before unlinking it.`;
+}
