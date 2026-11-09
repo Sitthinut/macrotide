@@ -15,6 +15,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **A failed or cancelled provider link returns to Account with the reason.**
+  Linking Google from Account used to leave you on a bare error page when it
+  didn't complete (for example, when that Google account already belongs to
+  another Macrotide account); you now land back on Account with a plain
+  explanation.
+
 - **A refused provider unlink now says why.** Unlinking a provider that is your
   only way to sign in used to report success while leaving it linked; Account now
   shows the reason and refreshes its sign-in list. After an unlink, the Account
