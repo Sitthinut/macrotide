@@ -19,6 +19,9 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // `next dev` otherwise writes a managed docs block into AGENTS.md on every
+  // start. AGENTS.md is hand-maintained here, so keep the dev server out of it.
+  agentRules: false,
   // Keep the dev-tools indicator in the bottom-right corner (out of the way of
   // the app's top-left nav and bottom-left content).
   devIndicators: {
