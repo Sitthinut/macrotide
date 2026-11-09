@@ -15,6 +15,11 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **A refused provider unlink now says why.** Unlinking a provider that is your
+  only way to sign in used to report success while leaving it linked; Account now
+  shows the reason and refreshes its sign-in list. After an unlink, the Account
+  screen also shows the updated email straight away instead of after a reload.
+
 - **Fund codes that change hands no longer break the nightly refresh.** Thai fund
   codes are reused — a fixed-term fund matures and its code is recycled for the
   next term, a fund re-registers, or a single-class fund goes multi-class and the

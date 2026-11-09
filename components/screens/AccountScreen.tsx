@@ -4,8 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { PasskeyIcon, ProviderIcon } from "@/components/ProviderIcon";
 import { aaguidName } from "@/lib/auth/aaguid";
+import { UNLINK_LOCKOUT_CODE, unlinkLockoutMessage } from "@/lib/auth/account-rules";
 import { clearDemoSession } from "@/lib/auth/clear-demo";
 import { authClient } from "@/lib/auth/client";
+import { type LinkedAccount, unlinkTargetId } from "@/lib/auth/linked-accounts";
 import { isPlaceholderEmail } from "@/lib/auth/placeholder-email";
 import { useResource } from "@/lib/fetchers/swr";
 import { fmtTokens } from "@/lib/format";
@@ -15,13 +17,6 @@ import { fmtTokens } from "@/lib/format";
 interface UsageData {
   inputTokens: number;
   outputTokens: number;
-}
-
-// Shape returned by better-auth's /list-accounts endpoint.
-interface LinkedAccount {
-  id: string;
-  providerId: string;
-  accountId: string;
 }
 
 // Subset of /api/auth-config we need: which OAuth providers are configured.
@@ -212,9 +207,7 @@ export function AccountScreen({ isDemo, onBack }: AccountScreenProps) {
 
   function handleUnlinkProvider(provider: string, label: string) {
     if (cannotUnlinkLastOAuth) {
-      setActionError(
-        `${label} is your only way to sign in. Register a passkey before unlinking it.`,
-      );
+      setActionError(unlinkLockoutMessage(label));
       return;
     }
     setConfirm({
@@ -225,19 +218,24 @@ export function AccountScreen({ isDemo, onBack }: AccountScreenProps) {
         setBusy(true);
         setActionError(null);
         try {
-          // unlinkAccount selects by the local account row id, not the provider.
-          const row = linkedAccounts?.find((a) => a.providerId === provider);
-          if (!row) throw new Error(`${label} is not linked`);
-          const res = await authClient.unlinkAccount({ accountId: row.id });
-          if ((res as { error?: { message?: string } })?.error) {
+          const accountId = unlinkTargetId(linkedAccounts, provider);
+          if (!accountId) throw new Error(`${label} is not linked`);
+          const res = await authClient.unlinkAccount({ accountId });
+          if (res?.error) {
             throw new Error(
-              (res as { error?: { message?: string } }).error?.message ?? "Unlink failed",
+              res.error.code === UNLINK_LOCKOUT_CODE
+                ? unlinkLockoutMessage(label)
+                : (res.error.message ?? "Unlink failed"),
             );
           }
-          await refreshLinkedAccounts();
+          // Unlinking the last provider resets the account email server-side.
+          await session.refetch();
         } catch (e) {
           setActionError(e instanceof Error ? e.message : "Unlink failed");
         } finally {
+          // Refresh on failure too: a refused unlink usually means this screen's
+          // view of linked providers or passkeys was stale.
+          await Promise.all([refreshLinkedAccounts(), passkeyState.refetch()]);
           setBusy(false);
         }
       },

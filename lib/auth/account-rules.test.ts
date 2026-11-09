@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { shouldAdoptOnLink, shouldBlockUnlink, shouldResetEmailOnUnlink } from "./account-rules";
+import {
+  shouldAdoptOnLink,
+  shouldBlockUnlink,
+  shouldResetEmailOnUnlink,
+  unlinkLockoutMessage,
+} from "./account-rules";
 
 describe("shouldBlockUnlink", () => {
   it("blocks only when no other provider AND no passkey remain", () => {
@@ -93,5 +98,17 @@ describe("shouldResetEmailOnUnlink", () => {
         currentIsPlaceholder: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("unlinkLockoutMessage", () => {
+  it("names the provider when the caller knows it", () => {
+    expect(unlinkLockoutMessage("Google")).toBe(
+      "Google is your only way to sign in. Register a passkey before unlinking it.",
+    );
+  });
+
+  it("falls back to a generic subject", () => {
+    expect(unlinkLockoutMessage()).toMatch(/^This provider is your only way to sign in\./);
   });
 });
