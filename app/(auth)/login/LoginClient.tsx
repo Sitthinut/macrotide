@@ -71,7 +71,7 @@ function oauthErrorMessage(code: string | null): string | null {
   switch (code) {
     case "account_not_linked":
     case "unable_to_link_account":
-    case "email_doesn't_match":
+    case "email_does_not_match":
       return "We couldn't sign you in with that provider. If you already have an account, sign in with your original method, then link this provider from Account settings.";
     default:
       return "Sign-in didn't complete. Please try again.";

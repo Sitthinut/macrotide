@@ -225,7 +225,10 @@ export function AccountScreen({ isDemo, onBack }: AccountScreenProps) {
         setBusy(true);
         setActionError(null);
         try {
-          const res = await authClient.unlinkAccount({ providerId: provider });
+          // unlinkAccount selects by the local account row id, not the provider.
+          const row = linkedAccounts?.find((a) => a.providerId === provider);
+          if (!row) throw new Error(`${label} is not linked`);
+          const res = await authClient.unlinkAccount({ accountId: row.id });
           if ((res as { error?: { message?: string } })?.error) {
             throw new Error(
               (res as { error?: { message?: string } }).error?.message ?? "Unlink failed",
