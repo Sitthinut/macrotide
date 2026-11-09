@@ -32,6 +32,12 @@
       "groupName": "dev-tooling"
     },
     {
+      "description": "better-auth pins its @better-auth/* packages to its exact version (peer deps), so they only resolve when bumped together. Auth changes can pass typecheck/build and still break sign-in, so a human merges them",
+      "matchPackageNames": ["better-auth", "@better-auth/**"],
+      "groupName": "better-auth",
+      "automerge": false
+    },
+    {
       "description": "Majors get their own PR for manual review (no automerge)",
       "matchUpdateTypes": ["major"],
       "automerge": false
