@@ -297,7 +297,9 @@ export const auth = betterAuth({
       delete: {
         // Backstop: refuse an unlink that would leave no usable sign-in method.
         // Throw rather than return false: better-auth answers a skipped delete
-        // with `{status: true}`, so the caller would be told it worked.
+        // with `{status: true}`, so the caller would be told it worked. It also
+        // aborts better-auth's other account deletes (deleteUser, magic-link /
+        // email-OTP account cleanup); re-check this before enabling either.
         before: async (acct: { userId: string; providerId: string }) => {
           if (blocksUnlinkLockout(acct)) {
             throw new APIError("BAD_REQUEST", {
