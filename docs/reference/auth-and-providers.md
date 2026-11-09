@@ -46,14 +46,16 @@ path ever lets someone claim an address they haven't proven. Full rationale:
 
 - **Edit your name** inline from the Profile card.
 - **passkey → add OAuth:** Account → **Link** a provider. The account email then
-  mirrors that provider's verified address.
+  mirrors that provider's verified address. If linking fails or is cancelled, you
+  return to Account with the reason.
 - **OAuth → add passkey:** the post-sign-in prompt (shown once, only if you have
   no passkey yet), or Account → register a passkey.
 - **Unlink / revoke:** providers and passkeys can be removed, but at least one
   *usable* sign-in method is always kept (you can't revoke your last passkey or
   unlink your last provider if it would lock you out — enforced in the UI *and*
   server-side; a refused unlink says why). Unlinking your **last** provider clears
-  the account email back to emailless, and Account shows the change right away. A removed passkey can't sign in again — its server credential is gone.
+  the account email back to emailless, and Account shows the change right away.
+  A removed passkey can't sign in again — its server credential is gone.
 - **Ended up with two accounts** (signed up separately with each method)? They
   don't auto-merge; add a passkey to the OAuth account and abandon the spare.
   (Deleting the spare account is [planned](https://github.com/Sitthinut/macrotide/issues/105).)

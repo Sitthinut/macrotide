@@ -8,6 +8,7 @@ import { UNLINK_LOCKOUT_CODE, unlinkLockoutMessage } from "@/lib/auth/account-ru
 import { clearDemoSession } from "@/lib/auth/clear-demo";
 import { authClient } from "@/lib/auth/client";
 import { type LinkedAccount, unlinkTargetId } from "@/lib/auth/linked-accounts";
+import { LINK_ERROR_CALLBACK_URL } from "@/lib/auth/oauth-errors";
 import { isPlaceholderEmail } from "@/lib/auth/placeholder-email";
 import { useResource } from "@/lib/fetchers/swr";
 import { fmtTokens } from "@/lib/format";
@@ -27,6 +28,10 @@ interface AuthConfigData {
 export interface AccountScreenProps {
   isDemo: boolean;
   onBack: () => void;
+  /** Shown on open, e.g. why a provider link just failed. */
+  initialError?: string | null;
+  /** Called once the screen has taken `initialError`, so it isn't shown again. */
+  onInitialErrorShown?: () => void;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -48,7 +53,12 @@ function fmtDate(d: Date | null | undefined): string {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function AccountScreen({ isDemo, onBack }: AccountScreenProps) {
+export function AccountScreen({
+  isDemo,
+  onBack,
+  initialError = null,
+  onInitialErrorShown,
+}: AccountScreenProps) {
   // Session (name + email)
   const session = authClient.useSession();
   // Passkeys (reactive — refetches after add/delete)
@@ -65,7 +75,7 @@ export function AccountScreen({ isDemo, onBack }: AccountScreenProps) {
 
   // Action state
   const [busy, setBusy] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(initialError);
   // Pending destructive action awaiting confirmation.
   const [confirm, setConfirm] = useState<{
     title: string;
@@ -93,6 +103,10 @@ export function AccountScreen({ isDemo, onBack }: AccountScreenProps) {
   useEffect(() => {
     refreshLinkedAccounts();
   }, [refreshLinkedAccounts]);
+
+  useEffect(() => {
+    if (initialError) onInitialErrorShown?.();
+  }, [initialError, onInitialErrorShown]);
 
   // ── Derived ─────────────────────────────────────────────────────────────────
 
@@ -191,12 +205,17 @@ export function AccountScreen({ isDemo, onBack }: AccountScreenProps) {
   // Link an OAuth provider to THIS account. Redirects to the provider and back;
   // on return the account row exists (and, for a placeholder-email account, the
   // verified provider email is adopted server-side). callbackURL returns to the
-  // app — the user reopens Account to see the new "linked" state.
+  // app — the user reopens Account to see the new "linked" state. A failed link
+  // returns to errorCallbackURL, and the app reopens Account with the reason.
   async function handleLinkProvider(provider: string) {
     setBusy(true);
     setActionError(null);
     try {
-      const res = await authClient.linkSocial({ provider, callbackURL: "/" });
+      const res = await authClient.linkSocial({
+        provider,
+        callbackURL: "/",
+        errorCallbackURL: LINK_ERROR_CALLBACK_URL,
+      });
       if (res?.error) throw new Error(res.error.message ?? "Couldn't start linking");
       // Success triggers a full-page redirect to the provider; nothing else to do.
     } catch (e) {

@@ -30,6 +30,7 @@ import { PositionScreen } from "@/components/screens/PositionScreen";
 import { SettingsScreen, type Theme } from "@/components/screens/SettingsScreen";
 import { clearDemoSession } from "@/lib/auth/clear-demo";
 import { authClient } from "@/lib/auth/client";
+import { linkErrorCode, linkErrorMessage } from "@/lib/auth/oauth-errors";
 import { usePortfolioView, useSelectedModelId } from "@/lib/fetchers/legacy";
 import { usePlan } from "@/lib/fetchers/portfolio";
 import { invalidate, useResource } from "@/lib/fetchers/swr";
@@ -321,6 +322,20 @@ export function App({ isDemo }: { isDemo: boolean }) {
     else pushBackLayer(() => setScreen(from));
     setScreen(target);
   }, []);
+  // A failed provider link from Account returns to `/?link=failed&error=<code>`.
+  // Reopen Account with the reason once, and drop the query so a reload or a
+  // shared URL doesn't repeat it.
+  const [linkError, setLinkError] = useState<string | null>(null);
+  useEffect(() => {
+    const code = linkErrorCode(window.location.search);
+    if (!code) return;
+    const url = new URL(window.location.href);
+    for (const key of ["link", "error", "error_description"]) url.searchParams.delete(key);
+    window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+    setLinkError(linkErrorMessage(code));
+    navigate("account");
+  }, [navigate]);
+  const clearLinkError = useCallback(() => setLinkError(null), []);
   // The on-screen Back affordances route through Back so a tapped back-arrow and
   // a hardware Back share one path and history depth stays aligned.
   const goBack = () => {
@@ -909,7 +924,14 @@ export function App({ isDemo }: { isDemo: boolean }) {
       );
     }
     if (screen === "account") {
-      return <AccountScreen isDemo={isDemo} onBack={goBack} />;
+      return (
+        <AccountScreen
+          isDemo={isDemo}
+          onBack={goBack}
+          initialError={linkError}
+          onInitialErrorShown={clearLinkError}
+        />
+      );
     }
     if (screen === "admin") {
       // Defense in depth: even if a non-owner reaches this branch, the API
