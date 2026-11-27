@@ -4,13 +4,13 @@ import { z } from "zod";
 import { withDb } from "@/lib/api/with-db";
 import {
   deleteBrokerConnection,
+  getBrokerAccountOrder,
   listBrokerConnections,
   setBrokerConnectionBucket,
 } from "@/lib/db/queries/broker-connections";
 import { rotateBrokerImportToken } from "@/lib/db/queries/broker-token";
 import { createBucket, listBuckets } from "@/lib/db/queries/buckets";
 import { countHeldByExternalAccount } from "@/lib/db/queries/project-holdings";
-import { getSetting } from "@/lib/db/queries/settings";
 import {
   deleteTransactionsByExternalAccount,
   remapExternalAccountToBucket,
@@ -35,7 +35,7 @@ export function GET() {
     const orderIndex = (source: string, accountCode: string): number => {
       let order = orderCache.get(source);
       if (!order) {
-        order = getSetting<string[]>(`broker_account_order:${source}`) ?? [];
+        order = getBrokerAccountOrder(source);
         orderCache.set(source, order);
       }
       const i = order.indexOf(accountCode);

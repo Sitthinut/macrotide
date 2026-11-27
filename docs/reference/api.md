@@ -41,7 +41,6 @@ or rename a route.
 | `/api/portfolios/reorder` | PATCH | Persist a manual display ordering for the caller's portfolios — accepts `{ orderedIds: string[] }` and writes a `position` index for each; ids the caller does not own are silently skipped |
 | `/api/holdings/propose` | POST | Accept side of the Advisor holding-proposal flow — commits a `propose_holding` tool-call result to the ledger once the user clicks Accept in the chat card; the proposal can only attach a holding to a bucket the caller owns; a ticker a broker connection already syncs into that bucket is refused (`409 synced_duplicate`) to prevent a double-count; rejecting a proposal is client-only and never reaches this route |
 | `/api/holdings/source` | GET, POST | GET lists the caller's distinct source labels with holding counts and a `managed` flag (label belongs to a live broker connection). POST renames a label across all of the caller's holdings — `{ from, to }` body; empty `to` clears the label; scoped to the user's own buckets so it cannot touch another user's rows; a managed label is refused (`409 managed_source`) since renaming it would desync the connection, and renaming a manual label *into* a managed one is refused (`409 managed_target`) since it would trap the holdings under a read-only managed source |
-| `/api/settings` | GET, PUT | Read / write key-value settings |
 
 ## Market data
 
