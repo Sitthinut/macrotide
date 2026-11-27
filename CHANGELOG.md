@@ -15,6 +15,9 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Broker sync accepts only configured brokers.** A sync whose export names a
+  broker this server has no connector for is refused with a clear error and
+  saves nothing.
 - **Journal, portfolio and model edits change only their editable fields.** An
   update keeps the entry's owner, id and creation time whatever the request
   carries, and saving a journal entry with an unknown kind or a malformed body

@@ -231,16 +231,21 @@ export async function POST(req: Request) {
 
   // The export names its broker via `source` (the connector's sourceTag) — match
   // it to the right connector so the correct response-shape drives parsing (with
-  // several connectors configured). Falls back to the first, then SDK defaults.
+  // several connectors configured). An export without one falls back to the
+  // first connector, then SDK defaults.
   const exportSource =
     exportData &&
     typeof exportData === "object" &&
     typeof (exportData as { source?: unknown }).source === "string"
-      ? (exportData as { source: string }).source
+      ? (exportData as { source: string }).source.trim() || undefined
       : undefined;
   const connectors = await getConnectors();
-  const connector =
-    (exportSource && connectors.find((c) => c.sourceTag === exportSource)) || connectors[0] || null;
+  const matched = exportSource ? connectors.find((c) => c.sourceTag === exportSource) : undefined;
+  // The source keys per-user settings rows, so only a configured connector's
+  // tag is accepted. Checked after authentication so an anonymous caller can't
+  // probe which brokers are configured.
+  const unknownSource = exportSource !== undefined && !matched;
+  const connector = matched ?? connectors[0] ?? null;
   const { rows } = parseBrokerExport(exportData, connector?.shape);
   if (rows.length === 0) {
     return NextResponse.json(
@@ -260,15 +265,30 @@ export async function POST(req: Request) {
       ? (exportData as { accountLabel: string }).accountLabel
       : "";
 
+  const run = () => {
+    if (!unknownSource) {
+      return commit(rows, sourceTag, sourceLabel, names, fallbackBucketId, accountLabel);
+    }
+    // No connector at all usually means the manifest couldn't be loaded right
+    // now, so the sync is worth retrying; a list without this tag is final.
+    return connectors.length === 0
+      ? NextResponse.json(
+          { error: "broker_unavailable", message: "Broker sync isn't available right now." },
+          { status: 503 },
+        )
+      : NextResponse.json(
+          { error: "unknown_source", message: "That broker isn't configured on this server." },
+          { status: 400 },
+        );
+  };
+
   // Token path (the userscript): no cookies; the token authenticates + resolves
   // the owner. Falls through to session auth when no token is supplied.
   if (token) {
-    const res = await withImportToken(token, () =>
-      commit(rows, sourceTag, sourceLabel, names, fallbackBucketId, accountLabel),
-    );
+    const res = await withImportToken(token, run);
     if (!res.ok) return NextResponse.json({ error: "invalid_token" }, { status: 401 });
     return res.value;
   }
 
-  return withDb(() => commit(rows, sourceTag, sourceLabel, names, fallbackBucketId, accountLabel));
+  return withDb(run);
 }
