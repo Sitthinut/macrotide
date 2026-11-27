@@ -15,6 +15,11 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Journal, portfolio and model edits change only their editable fields.** An
+  update keeps the entry's owner, id and creation time whatever the request
+  carries, and saving a journal entry with an unknown kind or a malformed body
+  returns a clear validation error instead of a server error.
+
 - **A failed or cancelled provider link returns to Account with the reason.**
   Linking Google from Account used to leave you on a bare error page when it
   didn't complete (for example, when that Google account already belongs to

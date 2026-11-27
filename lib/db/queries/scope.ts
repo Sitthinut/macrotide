@@ -60,3 +60,24 @@ export function ownedBy(userIdColumn: SQLiteColumn, opts: OwnedByOptions = {}): 
 export function ownerId(): string | null {
   return getUserId();
 }
+
+/**
+ * Copy only the listed fields from an update patch, dropping everything else.
+ *
+ * Route handlers hand request bodies to the `update*` queries, and a body can
+ * carry any key at runtime whatever its static type says. Owner-scoped updates
+ * pass their patch through this so a client can never write `user_id`, the
+ * primary key, or another server-managed column. `undefined` values are
+ * dropped too, so an absent field leaves the column as it is.
+ */
+export function pickEditable<T extends object, K extends keyof T>(
+  patch: T,
+  fields: readonly K[],
+): Partial<Pick<T, K>> {
+  const out: Partial<Pick<T, K>> = {};
+  if (patch === null || typeof patch !== "object") return out;
+  for (const field of fields) {
+    if (Object.hasOwn(patch, field) && patch[field] !== undefined) out[field] = patch[field];
+  }
+  return out;
+}

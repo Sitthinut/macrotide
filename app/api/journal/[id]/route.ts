@@ -4,6 +4,7 @@ import {
   archiveJournalEntry,
   deleteJournalEntry,
   getJournalEntry,
+  journalUpdateBody,
   updateJournalEntry,
 } from "@/lib/db/queries/journal";
 
@@ -18,9 +19,22 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const body = await req.json();
+  let json: unknown;
+  try {
+    json = await req.json();
+  } catch {
+    return NextResponse.json({ error: "bad_request" }, { status: 400 });
+  }
+  const parsed = journalUpdateBody.safeParse(json);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "validation_failed", issues: parsed.error.issues },
+      { status: 400 },
+    );
+  }
+  const patch = parsed.data;
   return withDb(() => {
-    const row = updateJournalEntry(Number(id), body);
+    const row = updateJournalEntry(Number(id), patch);
     if (!row) return NextResponse.json({ error: "not_found" }, { status: 404 });
     return NextResponse.json(row);
   });
