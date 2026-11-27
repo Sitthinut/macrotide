@@ -37,7 +37,7 @@ app.db but share the real market.db read-write (same warm cache as real users).
 | `journal_entries` | Notes, decisions, questions and reading (`kind` is one of `note`, `decision`, `question`, `reading`) | `kind`, `tags` (JSON), `pinned`, `archived_at`, `user_id` |
 | `model_portfolios` | Built-in + custom model allocations | `built_in`, `allocation` (JSON slices), risk/return metadata, `user_id` |
 | `action_item_states` | Archive / "Not for me" suppression for generated Portfolio action items (fee-creep flags today) | one row per (`user_id`, `item_key`); `state` ∈ archived / not_for_me, optional `reason` (chip key or free text), `snapshot_savings_pp` (magnitude baseline for the resurface check), `item_type`. Keyed by a deterministic `item_key` (`lib/portfolio/action-item-key.ts`) since the items carry no row of their own. (`snooze_until` is a dormant legacy column — Snooze is dropped.) |
-| `settings` | Generic key-value app settings | `key` → `value` (JSON) |
+| `settings` | Key-value store with no `user_id` column. Per-user values live under keys that carry the user id (`<name>:<userId>[:<sub>]`, `owner` when signed out; see `userSettingKey`), such as each user's broker import token and broker sync details. No API route lists it. | `key` → `value` (JSON) |
 | `user_market_indicators` | Per-user Markets-screen indicator list — which symbols a user pins and in what order | `user_id` (nullable), `symbol` (canonical ticker from the indicator catalog), `position` (display order, ascending); unique on (`user_id`, `symbol`). No rows → app falls back to the curated default set. Despite the `market_` name this is a user preference (lives in app.db, not market.db) |
 
 ### Market data (market.db — written by the market layer + the SEC crawl)

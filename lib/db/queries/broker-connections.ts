@@ -5,6 +5,7 @@ import { getDb } from "../context";
 import { brokerConnections } from "../schema";
 import { createBucket, getBucket } from "./buckets";
 import { ownedBy, ownerId } from "./scope";
+import { getSetting, setSetting, userSettingKey } from "./settings";
 
 // Broker-import connections: the account_code → portfolio (bucket) mapping plus
 // last-sync status. Owner-scoped like buckets (scope.ts). Uniqueness per
@@ -129,4 +130,24 @@ export function resolveAccountBucket(
   const bucket = createBucket({ id: randomUUID(), name, brokerage: accountCode });
   upsertBrokerConnection({ source, accountCode, displayName: planName, bucketId: bucket.id });
   return { bucketId: bucket.id, created: true };
+}
+
+// Per-source sync details kept in the settings store, private to each user: the
+// broker-login identifier shown in the Settings header, and the broker's own
+// account order (so Connections sorts like the source, not by account code).
+
+export function getBrokerLoginLabel(source: string): string | null {
+  return getSetting<string>(userSettingKey("broker_login_label", source)) ?? null;
+}
+
+export function setBrokerLoginLabel(source: string, label: string): void {
+  setSetting(userSettingKey("broker_login_label", source), label);
+}
+
+export function getBrokerAccountOrder(source: string): string[] {
+  return getSetting<string[]>(userSettingKey("broker_account_order", source)) ?? [];
+}
+
+export function setBrokerAccountOrder(source: string, accountCodes: string[]): void {
+  setSetting(userSettingKey("broker_account_order", source), accountCodes);
 }

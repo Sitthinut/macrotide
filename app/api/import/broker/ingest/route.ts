@@ -2,10 +2,14 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { withImportToken } from "@/lib/api/broker-token-auth";
 import { withDb } from "@/lib/api/with-db";
-import { resolveAccountBucket, upsertBrokerConnection } from "@/lib/db/queries/broker-connections";
+import {
+  resolveAccountBucket,
+  setBrokerAccountOrder,
+  setBrokerLoginLabel,
+  upsertBrokerConnection,
+} from "@/lib/db/queries/broker-connections";
 import { listBuckets } from "@/lib/db/queries/buckets";
 import { canonicalTickerMap, catalogQuoteSource } from "@/lib/db/queries/funds";
-import { setSetting } from "@/lib/db/queries/settings";
 import {
   insertTransactionsDeduped,
   remapExternalAccountToBucket,
@@ -111,10 +115,10 @@ function commit(
   accountLabel: string,
 ): NextResponse {
   // Remember the broker-login identifier (name/email) for the Settings header.
-  if (accountLabel) setSetting(`broker_login_label:${sourceTag}`, accountLabel);
+  if (accountLabel) setBrokerLoginLabel(sourceTag, accountLabel);
   // Remember the broker's account order (as the export listed them) so the
   // Connections list sorts the same way as the source, not by account code.
-  if (names.size) setSetting(`broker_account_order:${sourceTag}`, Array.from(names.keys()));
+  if (names.size) setBrokerAccountOrder(sourceTag, Array.from(names.keys()));
 
   // Keep only rows with a recognized ledger kind + a DATE-ONLY ISO day (parser
   // already dropped cancel/pending/unknown and trims datetimes to their date

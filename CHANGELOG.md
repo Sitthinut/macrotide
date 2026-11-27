@@ -19,6 +19,11 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   update keeps the entry's owner, id and creation time whatever the request
   carries, and saving a journal entry with an unknown kind or a malformed body
   returns a clear validation error instead of a server error.
+- **Removed an unused settings endpoint, and broker sync details are kept per
+  account.** The generic key-value settings API is gone (nothing in the app used
+  it). The broker login name shown in Settings and the broker's account order in
+  Connections are now stored for each account separately; both refill on the
+  next sync.
 
 - **A failed or cancelled provider link returns to Account with the reason.**
   Linking Google from Account used to leave you on a bare error page when it

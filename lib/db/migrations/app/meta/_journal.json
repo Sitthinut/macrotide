@@ -183,6 +183,13 @@
       "when": 1783112262638,
       "tag": "0025_lucky_felicia_hardy",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1795782218265,
+      "tag": "0026_user_scoped_broker_settings",
+      "breakpoints": true
     }
   ]
 }

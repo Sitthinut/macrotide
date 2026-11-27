@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
 import { isDemoRequest } from "@/lib/db/context";
+import { getBrokerLoginLabel } from "@/lib/db/queries/broker-connections";
 import {
   getOrCreateBrokerImportToken,
   rotateBrokerImportToken,
 } from "@/lib/db/queries/broker-token";
-import { getSetting } from "@/lib/db/queries/settings";
 import { brokerInstallUrl } from "@/lib/portfolio/broker-install";
 import { getConnector } from "@/lib/portfolio/connector";
 
@@ -32,7 +32,7 @@ export async function GET(req: Request) {
       id: connector.id,
       token,
       displayName: connector.displayName,
-      accountLabel: getSetting<string>(`broker_login_label:${connector.sourceTag}`) ?? null,
+      accountLabel: getBrokerLoginLabel(connector.sourceTag),
       installUrl: brokerInstallUrl(req, token),
       openUrl: connector.openUrl ?? null,
       loginUrl: connector.loginUrl ?? connector.openUrl ?? null,
