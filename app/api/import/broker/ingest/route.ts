@@ -180,13 +180,26 @@ function commit(
   fallbackBucketId: string | undefined,
   accountLabel: string,
 ): NextResponse {
+  const owned = listBuckets();
+  // Rows with no account context (bare array) → a chosen/first portfolio.
+  const fallback =
+    (fallbackBucketId && owned.find((b) => b.id === fallbackBucketId)?.id) || owned[0]?.id;
+  // Nothing to route → refuse before saving anything. A real account always
+  // routes (its portfolio is created if missing).
+  const routable = [...groups.keys()].some((account) => account !== "" || !!fallback);
+  if (!routable) {
+    return NextResponse.json(
+      { error: "no_bucket", message: "No importable orders, or no portfolio to route to." },
+      { status: 409 },
+    );
+  }
+
   // Remember the broker-login identifier (name/email) for the Settings header.
   if (accountLabel) setBrokerLoginLabel(sourceTag, accountLabel);
   // Remember the broker's account order (as the export listed them) so the
   // Connections list sorts the same way as the source, not by account code.
   if (names.size) setBrokerAccountOrder(sourceTag, Array.from(names.keys()));
 
-  const owned = listBuckets();
   let ownedIds = owned.map((b) => b.id);
   const catalogSources = catalogQuoteSource(valid.map((r) => r.ticker));
   const canon = canonicalTickerMap(valid.map((r) => r.ticker));
@@ -204,11 +217,8 @@ function commit(
       bucketId = resolveAccountBucket(sourceTag, account, names.get(account) ?? "").bucketId;
       if (!ownedIds.includes(bucketId)) ownedIds = [...ownedIds, bucketId];
       // Pull any earlier rows of this account into the mapped portfolio.
-      remapExternalAccountToBucket(account, bucketId, ownedIds);
+      remapExternalAccountToBucket(sourceTag, account, bucketId, ownedIds);
     } else {
-      // No account context (bare array) → a chosen/first portfolio.
-      const fallback =
-        (fallbackBucketId && owned.find((b) => b.id === fallbackBucketId)?.id) || owned[0]?.id;
       if (!fallback) continue; // no portfolio at all → nothing to route to
       bucketId = fallback;
     }
@@ -237,13 +247,6 @@ function commit(
         lastSkipped: skipped,
       });
     }
-  }
-
-  if (results.length === 0) {
-    return NextResponse.json(
-      { error: "no_bucket", message: "No importable orders, or no portfolio to route to." },
-      { status: 409 },
-    );
   }
 
   return NextResponse.json(

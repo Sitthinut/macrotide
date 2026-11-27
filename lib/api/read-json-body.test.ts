@@ -52,6 +52,13 @@ describe("readJsonBody", () => {
     });
   });
 
+  it("accepts a leading byte-order mark, as req.json() does", async () => {
+    expect(await readJsonBody(req(chunked(`﻿${body}`)), size + 3)).toEqual({
+      ok: true,
+      value: JSON.parse(body),
+    });
+  });
+
   it("refuses a declared length over the limit without reading", async () => {
     const r = req(chunked(body), { "content-length": String(size + 100) });
     expect(await readJsonBody(r, size)).toEqual({ ok: false, reason: "too_large" });

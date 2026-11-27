@@ -67,12 +67,27 @@ export function projectBucketPositions(bucketId: string): ProjectedPosition[] {
 }
 
 /**
+ * Ledger rows imported from ONE broker account. The account code alone isn't
+ * unique across brokers, so this also matches the broker through the dedup key
+ * every imported row carries (`<source>:<accountCode>:…`, built by the connector
+ * SDK's parser).
+ */
+export function brokerAccountRows(source: string, accountCode: string) {
+  const prefix = `${source}:${accountCode}:`;
+  return and(
+    eq(transactions.externalAccount, accountCode),
+    sql`substr(${transactions.externalId}, 1, ${prefix.length}) = ${prefix}`,
+  );
+}
+
+/**
  * How many tickers ONE broker account currently holds — fold only that account's
  * ledger rows (by `external_account`), across the caller-owned buckets, and count
  * the surviving positions. Per-account (not per-bucket) so the count is stable
  * when the account is remapped/merged into a different portfolio.
  */
 export function countHeldByExternalAccount(
+  source: string,
   externalAccount: string,
   ownedBucketIds: string[],
 ): number {
@@ -82,7 +97,7 @@ export function countHeldByExternalAccount(
     .from(transactions)
     .where(
       and(
-        eq(transactions.externalAccount, externalAccount),
+        brokerAccountRows(source, externalAccount),
         inArray(transactions.bucketId, ownedBucketIds),
       ),
     )

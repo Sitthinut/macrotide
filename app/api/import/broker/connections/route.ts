@@ -2,9 +2,11 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { withDb } from "@/lib/api/with-db";
+import { getDb } from "@/lib/db/context";
 import {
   deleteBrokerConnection,
   getBrokerAccountOrder,
+  getBrokerConnection,
   listBrokerConnections,
   setBrokerConnectionBucket,
 } from "@/lib/db/queries/broker-connections";
@@ -15,6 +17,7 @@ import {
   deleteTransactionsByExternalAccount,
   remapExternalAccountToBucket,
 } from "@/lib/db/queries/transactions";
+import { MAX_PORTFOLIO_NAME_LENGTH } from "@/lib/portfolio/broker-sync-limits";
 
 // Manage broker-import connections (Settings → Connections). Session-scoped via
 // withDb. GET lists each account's mapped portfolio + last-sync status; PATCH
@@ -58,7 +61,7 @@ export function GET() {
       lastSkipped: c.lastSkipped,
       // Per-ACCOUNT held count (folds this account's own ledger) — stable across
       // remap/merge, unlike a per-bucket count.
-      holdings: countHeldByExternalAccount(c.accountCode, ownedIds),
+      holdings: countHeldByExternalAccount(c.source, c.accountCode, ownedIds),
     }));
     return NextResponse.json(rows);
   });
@@ -71,7 +74,7 @@ const patchBody = z
     // Remap to an existing portfolio …
     bucketId: z.string().trim().min(1).optional(),
     // … or create a new one with this name.
-    newName: z.string().trim().min(1).max(120).optional(),
+    newName: z.string().trim().min(1).max(MAX_PORTFOLIO_NAME_LENGTH).optional(),
   })
   .refine((b) => b.bucketId || b.newName, {
     message: "provide bucketId or newName",
@@ -94,23 +97,28 @@ export async function PATCH(req: Request) {
   }
   const { source, accountCode, bucketId, newName } = parsed.data;
 
-  return withDb(() => {
-    const owned = listBuckets();
-    let targetId: string;
-    if (newName) {
-      targetId = createBucket({ id: randomUUID(), name: newName, brokerage: accountCode }).id;
-    } else {
-      const found = owned.find((b) => b.id === bucketId);
-      if (!found) return NextResponse.json({ error: "bucket_not_found" }, { status: 404 });
-      targetId = found.id;
-    }
-    const conn = setBrokerConnectionBucket(source, accountCode, targetId);
-    if (!conn) return NextResponse.json({ error: "connection_not_found" }, { status: 404 });
-    // Move this account's existing rows into the chosen portfolio.
-    const ownedIds = [...listBuckets().map((b) => b.id)];
-    const { moved } = remapExternalAccountToBucket(accountCode, targetId, ownedIds);
-    return NextResponse.json({ ok: true, bucketId: targetId, moved });
-  });
+  return withDb(() =>
+    // One transaction, and the connection is checked before anything is
+    // created, so a refused remap leaves no stray portfolio behind.
+    getDb().transaction(() => {
+      if (!getBrokerConnection(source, accountCode)) {
+        return NextResponse.json({ error: "connection_not_found" }, { status: 404 });
+      }
+      let targetId: string;
+      if (newName) {
+        targetId = createBucket({ id: randomUUID(), name: newName, brokerage: accountCode }).id;
+      } else {
+        const found = listBuckets().find((b) => b.id === bucketId);
+        if (!found) return NextResponse.json({ error: "bucket_not_found" }, { status: 404 });
+        targetId = found.id;
+      }
+      setBrokerConnectionBucket(source, accountCode, targetId);
+      // Move this account's existing rows into the chosen portfolio.
+      const ownedIds = listBuckets().map((b) => b.id);
+      const { moved } = remapExternalAccountToBucket(source, accountCode, targetId, ownedIds);
+      return NextResponse.json({ ok: true, bucketId: targetId, moved });
+    }),
+  );
 }
 
 const deleteBody = z
@@ -156,7 +164,7 @@ export async function DELETE(req: Request) {
       const targets = source ? connections.filter((c) => c.source === source) : connections;
       for (const c of targets) {
         if (mode === "purge")
-          removed += deleteTransactionsByExternalAccount(c.accountCode, ownedIds);
+          removed += deleteTransactionsByExternalAccount(c.source, c.accountCode, ownedIds);
         deleteBrokerConnection(c.source, c.accountCode);
       }
       // The import token is shared across brokers, so only rotate it (killing
@@ -168,8 +176,10 @@ export async function DELETE(req: Request) {
 
     // Single account (internal / fallback).
     if (accountCode) {
-      if (mode === "purge") removed = deleteTransactionsByExternalAccount(accountCode, ownedIds);
-      deleteBrokerConnection(source ?? "broker", accountCode);
+      const src = source ?? "broker";
+      if (mode === "purge")
+        removed = deleteTransactionsByExternalAccount(src, accountCode, ownedIds);
+      deleteBrokerConnection(src, accountCode);
     }
     return NextResponse.json({ ok: true, removed });
   });

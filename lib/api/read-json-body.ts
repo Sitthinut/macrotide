@@ -25,7 +25,8 @@ export async function readJsonBody(req: Request, maxBytes: number): Promise<Json
     chunks.push(value);
   }
   try {
-    return { ok: true, value: JSON.parse(Buffer.concat(chunks).toString("utf8")) };
+    // TextDecoder drops a leading byte-order mark, as req.json() does.
+    return { ok: true, value: JSON.parse(new TextDecoder().decode(Buffer.concat(chunks))) };
   } catch {
     return { ok: false, reason: "bad_json" };
   }

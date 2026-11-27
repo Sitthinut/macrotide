@@ -2,7 +2,11 @@ import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "../context";
 import { transactions } from "../schema";
-import { rebuildHoldingsForBucket, rebuildHoldingsForBuckets } from "./project-holdings";
+import {
+  brokerAccountRows,
+  rebuildHoldingsForBucket,
+  rebuildHoldingsForBuckets,
+} from "./project-holdings";
 
 // Transaction ledger queries.
 //
@@ -157,12 +161,13 @@ export function deleteTransaction(id: number, ownedBucketIds: string[]): number 
 }
 
 /**
- * Move every transaction from one broker account (external_account) into a
+ * Move every transaction from one broker account (source + external_account) into a
  * target bucket — the account→portfolio remap / merge / consolidation primitive.
  * Gated by the caller-owned bucket set. Rebuilds holdings for the source AND
  * target buckets. `external_id` is untouched, so a re-sync stays idempotent.
  */
 export function remapExternalAccountToBucket(
+  source: string,
   externalAccount: string,
   newBucketId: string,
   ownedBucketIds: string[],
@@ -174,7 +179,7 @@ export function remapExternalAccountToBucket(
     .from(transactions)
     .where(
       and(
-        eq(transactions.externalAccount, externalAccount),
+        brokerAccountRows(source, externalAccount),
         inArray(transactions.bucketId, ownedBucketIds),
       ),
     )
@@ -184,7 +189,7 @@ export function remapExternalAccountToBucket(
     .set({ bucketId: newBucketId, updatedAt: new Date().toISOString() })
     .where(
       and(
-        eq(transactions.externalAccount, externalAccount),
+        brokerAccountRows(source, externalAccount),
         inArray(transactions.bucketId, ownedBucketIds),
       ),
     )
@@ -196,6 +201,7 @@ export function remapExternalAccountToBucket(
 
 /** Delete every transaction from one broker account (unlink → remove all history). */
 export function deleteTransactionsByExternalAccount(
+  source: string,
   externalAccount: string,
   ownedBucketIds: string[],
 ): number {
@@ -206,7 +212,7 @@ export function deleteTransactionsByExternalAccount(
     .from(transactions)
     .where(
       and(
-        eq(transactions.externalAccount, externalAccount),
+        brokerAccountRows(source, externalAccount),
         inArray(transactions.bucketId, ownedBucketIds),
       ),
     )
@@ -215,7 +221,7 @@ export function deleteTransactionsByExternalAccount(
     .delete(transactions)
     .where(
       and(
-        eq(transactions.externalAccount, externalAccount),
+        brokerAccountRows(source, externalAccount),
         inArray(transactions.bucketId, ownedBucketIds),
       ),
     )

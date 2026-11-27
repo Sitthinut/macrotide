@@ -13,8 +13,11 @@ export const MAX_SYNC_ACCOUNTS = 50;
 export const MAX_USER_BROKER_CONNECTIONS = 100;
 /** Broker account code length (stored on the connection and the portfolio). */
 export const MAX_ACCOUNT_CODE_LENGTH = 64;
+/** Portfolio name length for portfolios a broker connection creates (from sync
+ *  or from Settings → Connections). */
+export const MAX_PORTFOLIO_NAME_LENGTH = 200;
 /** Account (plan) name length; it becomes the new portfolio's name. */
-export const MAX_ACCOUNT_NAME_LENGTH = 200;
+export const MAX_ACCOUNT_NAME_LENGTH = MAX_PORTFOLIO_NAME_LENGTH;
 /** Broker login label length (a name or an email address; emails cap at 254). */
 export const MAX_LOGIN_LABEL_LENGTH = 254;
 /** Fund ticker length, matching the manual transaction form's limit. */
