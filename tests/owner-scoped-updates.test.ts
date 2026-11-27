@@ -349,7 +349,7 @@ describe("edge cases", () => {
     expect(pickEditable("title" as unknown as object, [])).toEqual({});
   });
 
-  it("PATCH /api/buckets/[id] with a null body is a no-op, not a server error", async () => {
+  it("PATCH /api/buckets/[id] with a null body is refused, not a server error", async () => {
     await withFreshContext(async () => {
       seedUsers("alice");
       await runWithUserScope("alice", async () => {
@@ -357,8 +357,9 @@ describe("edge cases", () => {
         const res = await patchBucketRoute(jsonRequest("PATCH", "null"), {
           params: Promise.resolve({ id: "b-alice" }),
         });
-        expect(res.status).toBe(200);
-        expect((await res.json()).name).toBe("Mine");
+        expect(res.status).toBe(400);
+        expect((await res.json()).error).toBe("validation_failed");
+        expect(listBuckets()[0].name).toBe("Mine");
       });
     });
   });

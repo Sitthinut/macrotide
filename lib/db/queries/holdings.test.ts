@@ -466,6 +466,28 @@ describe("managed sources (Sources × Connections)", () => {
     });
   });
 
+  it("tells brokers apart when they share an account code", () => {
+    runWithDbContext(ctx(), () => {
+      createBucket({ ...BUCKET, id: "b1" });
+      seedSyncedWithConnection("b1", "EXAMPLE-FUND-A", {
+        source: "Broker One",
+        sourceTag: "broker-one",
+        account: "AC-001",
+      });
+      seedSyncedWithConnection("b1", "EXAMPLE-FUND-B", {
+        source: "Broker Two",
+        sourceTag: "broker-two",
+        account: "AC-001",
+      });
+      expect(managedSourceLabels(["b1"])).toEqual(new Set(["Broker One", "Broker Two"]));
+
+      // Broker Two's same-coded account stays linked, but Broker One's label is
+      // free to rename once its own connection is gone.
+      deleteBrokerConnection("broker-one", "AC-001");
+      expect(managedSourceLabels(["b1"])).toEqual(new Set(["Broker Two"]));
+    });
+  });
+
   it("reports the broker for a synced ticker, null for a manual one", () => {
     runWithDbContext(ctx(), () => {
       createBucket({ ...BUCKET, id: "b1" });

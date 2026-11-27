@@ -15,6 +15,19 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Broker sync has size limits and saves all or nothing.** One sync can
+  include up to 50 broker accounts, and each user can link up to 100 (accounts
+  already linked keep syncing). The login label, account and fund names, order
+  count and request size are capped too. A sync over any limit is refused with
+  a clear error before anything is saved, and a sync that fails partway leaves
+  no partial import behind.
+- **Broker accounts are told apart by broker as well as account code.** Two
+  brokers that use the same account code no longer pull each other's orders
+  when syncing, moving an account to another portfolio or removing its history,
+  and moving an account that isn't linked no longer leaves an empty portfolio.
+- **Creating or editing a portfolio checks its fields.** Only the editable
+  fields are saved, names are capped at 200 characters and other text fields
+  have limits too, and the server assigns each new portfolio's id.
 - **Broker sync accepts only configured brokers.** A sync whose export names a
   broker this server has no connector for is refused with a clear error and
   saves nothing.

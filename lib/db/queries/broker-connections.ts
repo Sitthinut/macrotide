@@ -23,6 +23,21 @@ export function listBrokerConnections(): BrokerConnection[] {
     .all();
 }
 
+/** Keys ({@link brokerConnectionKey}) of the caller's connections, for limit checks. */
+export function brokerConnectionKeys(): Set<string> {
+  const rows = getDb()
+    .select({ source: brokerConnections.source, accountCode: brokerConnections.accountCode })
+    .from(brokerConnections)
+    .where(ownedBy(brokerConnections.userId))
+    .all();
+  return new Set(rows.map((r) => brokerConnectionKey(r.source, r.accountCode)));
+}
+
+/** One string per (source, account code) pair; JSON keeps the two parts apart. */
+export function brokerConnectionKey(source: string, accountCode: string): string {
+  return JSON.stringify([source, accountCode]);
+}
+
 export function getBrokerConnection(
   source: string,
   accountCode: string,
