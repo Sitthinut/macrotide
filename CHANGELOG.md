@@ -15,6 +15,12 @@ cut: this section is sliced into a dated/versioned heading and a fresh
 
 ### Added
 
+- **Broker sync has size limits and saves all or nothing.** One sync can
+  include up to 50 broker accounts, and each user can link up to 100 (accounts
+  already linked keep syncing). The login label, account and fund names, order
+  count and request size are capped too. A sync over any limit is refused with
+  a clear error before anything is saved, and a sync that fails partway leaves
+  no partial import behind.
 - **Broker sync accepts only configured brokers.** A sync whose export names a
   broker this server has no connector for is refused with a clear error and
   saves nothing.

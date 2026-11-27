@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { withImportToken } from "@/lib/api/broker-token-auth";
+import { readJsonBody } from "@/lib/api/read-json-body";
 import { withDb } from "@/lib/api/with-db";
+import { getDb } from "@/lib/db/context";
 import {
+  brokerConnectionKey,
+  brokerConnectionKeys,
   resolveAccountBucket,
   setBrokerAccountOrder,
   setBrokerLoginLabel,
@@ -17,6 +21,11 @@ import {
 } from "@/lib/db/queries/transactions";
 import { tickerKey } from "@/lib/market/sources";
 import { parseBrokerExport } from "@/lib/portfolio/broker-import";
+import {
+  checkSyncLimits,
+  MAX_SYNC_BODY_BYTES,
+  MAX_USER_BROKER_CONNECTIONS,
+} from "@/lib/portfolio/broker-sync-limits";
 import { getConnectors } from "@/lib/portfolio/connector";
 import type { ExtractedTxnRow } from "@/lib/portfolio/ocr";
 import { LEDGER_KINDS, signedAmount } from "@/lib/portfolio/txn-import";
@@ -27,7 +36,9 @@ import { LEDGER_KINDS, signedAmount } from "@/lib/portfolio/txn-import";
 // account's orders to its own portfolio (created plan-named on first sight,
 // thereafter the user's mapping in Settings → Connections); inserts idempotently
 // (re-sync skips orders already in the ledger by external_id) and consolidates
-// any earlier rows of that account into the mapped portfolio.
+// any earlier rows of that account into the mapped portfolio. Every size limit
+// (broker-sync-limits.ts) is checked before the first write, and the writes run
+// in one transaction, so a refused or failed sync leaves nothing behind.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,7 +47,15 @@ const LEDGER_KIND_SET = new Set<string>(LEDGER_KINDS);
 
 type ValidRow = ExtractedTxnRow & { kind: string; tradeDate: string };
 
-/** Plan name per account_code, read from the raw export's account list. */
+/** An account code as the ledger stores it: a string, or a number's digits.
+ *  Anything else (an object, a boolean) isn't a code. */
+function accountCode(v: unknown): string | undefined {
+  if (typeof v === "string") return v;
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  return undefined;
+}
+
+/** Plan name per account_code, in the export's own account order. */
 function accountNames(exportData: unknown): Map<string, string> {
   const m = new Map<string, string>();
   if (
@@ -46,13 +65,59 @@ function accountNames(exportData: unknown): Map<string, string> {
   ) {
     for (const a of (exportData as { accounts: unknown[] }).accounts) {
       if (a && typeof a === "object") {
-        const code = (a as { account_code?: unknown }).account_code;
+        const code = accountCode((a as { account_code?: unknown }).account_code);
         const name = (a as { name?: unknown }).name;
-        if (typeof code === "string") m.set(code, typeof name === "string" ? name : "");
+        if (code !== undefined) m.set(code, typeof name === "string" ? name : "");
       }
     }
   }
   return m;
+}
+
+/** Rows with a recognized ledger kind + a DATE-ONLY ISO day. The parser already
+ *  drops cancel/pending/unknown and trims datetimes to their date part; this
+ *  guards the kind→column and date-only contracts, since this route bypasses the
+ *  /api/transactions Zod boundary and a stored datetime breaks every date-only
+ *  fold downstream. */
+function validRows(rows: ExtractedTxnRow[]): ValidRow[] {
+  return rows.filter(
+    (r): r is ValidRow =>
+      !!r.tradeDate &&
+      /^\d{4}-\d{2}-\d{2}$/.test(r.tradeDate) &&
+      !!r.kind &&
+      LEDGER_KIND_SET.has(r.kind),
+  );
+}
+
+/** Group by broker account; rows with no account (bare-array shape) share `""`. */
+function groupByAccount(valid: ValidRow[]): Map<string, ValidRow[]> {
+  const groups = new Map<string, ValidRow[]>();
+  for (const r of valid) {
+    const key = r.externalAccount ?? "";
+    const g = groups.get(key);
+    if (g) g.push(r);
+    else groups.set(key, [r]);
+  }
+  return groups;
+}
+
+/** The 400 for a sync that would add connections past the per-user limit, or
+ *  null. Only accounts new to this user count, so syncing accounts already
+ *  linked always works. Runs inside a DB context. */
+function connectionLimitError(sourceTag: string, accounts: Iterable<string>): NextResponse | null {
+  const existing = brokerConnectionKeys();
+  let added = 0;
+  for (const a of accounts) {
+    if (a && !existing.has(brokerConnectionKey(sourceTag, a))) added++;
+  }
+  if (added === 0 || existing.size + added <= MAX_USER_BROKER_CONNECTIONS) return null;
+  return NextResponse.json(
+    {
+      error: "account_limit",
+      message: `This sync would link more than ${MAX_USER_BROKER_CONNECTIONS} broker accounts. Unlink accounts you no longer use in Settings, then sync again.`,
+    },
+    { status: 400 },
+  );
 }
 
 /** Map parsed broker rows for ONE bucket into ledger inserts. */
@@ -105,9 +170,10 @@ interface AccountResult {
   skipped: number;
 }
 
-/** Route + insert per broker account. Runs inside a DB context. */
+/** Route + insert per broker account. Runs inside a DB context and transaction. */
 function commit(
-  rows: ExtractedTxnRow[],
+  valid: ValidRow[],
+  groups: Map<string, ValidRow[]>,
   sourceTag: string,
   sourceLabel: string,
   names: Map<string, string>,
@@ -119,28 +185,6 @@ function commit(
   // Remember the broker's account order (as the export listed them) so the
   // Connections list sorts the same way as the source, not by account code.
   if (names.size) setBrokerAccountOrder(sourceTag, Array.from(names.keys()));
-
-  // Keep only rows with a recognized ledger kind + a DATE-ONLY ISO day (parser
-  // already dropped cancel/pending/unknown and trims datetimes to their date
-  // part; guard the kind→column and date-only contracts — this route bypasses
-  // the /api/transactions Zod boundary, and a stored datetime breaks every
-  // date-only fold downstream).
-  const valid = rows.filter(
-    (r): r is ValidRow =>
-      !!r.tradeDate &&
-      /^\d{4}-\d{2}-\d{2}$/.test(r.tradeDate) &&
-      !!r.kind &&
-      LEDGER_KIND_SET.has(r.kind),
-  );
-
-  // Group by broker account; rows with no account (bare-array shape) share `""`.
-  const groups = new Map<string, ValidRow[]>();
-  for (const r of valid) {
-    const key = r.externalAccount ?? "";
-    const g = groups.get(key);
-    if (g) g.push(r);
-    else groups.set(key, [r]);
-  }
 
   const owned = listBuckets();
   let ownedIds = owned.map((b) => b.id);
@@ -211,15 +255,22 @@ function commit(
 export async function POST(req: Request) {
   const headerToken = req.headers.get("x-import-token")?.trim() ?? "";
 
-  let raw: unknown;
-  try {
-    raw = await req.json();
-  } catch {
-    return NextResponse.json(
-      { error: "bad_request", message: "Expected a JSON body." },
-      { status: 400 },
-    );
+  const body = await readJsonBody(req, MAX_SYNC_BODY_BYTES);
+  if (!body.ok) {
+    return body.reason === "too_large"
+      ? NextResponse.json(
+          {
+            error: "payload_too_large",
+            message: `A sync can be at most ${MAX_SYNC_BODY_BYTES / (1024 * 1024)} MB.`,
+          },
+          { status: 413 },
+        )
+      : NextResponse.json(
+          { error: "bad_request", message: "Expected a JSON body." },
+          { status: 400 },
+        );
   }
+  const raw = body.value;
 
   // Body is the raw broker export; a thin optional envelope can carry an explicit
   // fallback bucket / token: { payload, bucketId, token }.
@@ -246,7 +297,22 @@ export async function POST(req: Request) {
   // probe which brokers are configured.
   const unknownSource = exportSource !== undefined && !matched;
   const connector = matched ?? connectors[0] ?? null;
-  const { rows } = parseBrokerExport(exportData, connector?.shape);
+  const parsed = parseBrokerExport(exportData, connector?.shape);
+  // The parser copies each account's code onto its rows as-is; normalize it the
+  // same way as the account list, and refuse a code that isn't one.
+  let badAccount = false;
+  const rows = parsed.rows.map((r) => {
+    if (r.externalAccount === undefined) return r;
+    const code = accountCode(r.externalAccount);
+    if (code === undefined) badAccount = true;
+    return { ...r, externalAccount: code };
+  });
+  if (badAccount) {
+    return NextResponse.json(
+      { error: "bad_request", message: "A broker account code must be text or a number." },
+      { status: 400 },
+    );
+  }
   if (rows.length === 0) {
     return NextResponse.json(
       { error: "no_rows", message: "No importable orders in that export." },
@@ -265,9 +331,24 @@ export async function POST(req: Request) {
       ? (exportData as { accountLabel: string }).accountLabel
       : "";
 
+  const valid = validRows(rows);
+  const groups = groupByAccount(valid);
+
   const run = () => {
     if (!unknownSource) {
-      return commit(rows, sourceTag, sourceLabel, names, fallbackBucketId, accountLabel);
+      const limit = checkSyncLimits({
+        listedAccounts: Array.from(names.keys()),
+        names,
+        rowAccounts: Array.from(groups.keys()).filter(Boolean),
+        accountLabel,
+        rows,
+      });
+      if (limit) return NextResponse.json(limit, { status: 400 });
+      return getDb().transaction(
+        () =>
+          connectionLimitError(sourceTag, groups.keys()) ??
+          commit(valid, groups, sourceTag, sourceLabel, names, fallbackBucketId, accountLabel),
+      );
     }
     // No connector at all usually means the manifest couldn't be loaded right
     // now, so the sync is worth retrying; a list without this tag is final.
