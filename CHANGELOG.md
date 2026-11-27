@@ -25,6 +25,9 @@ cut: this section is sliced into a dated/versioned heading and a fresh
   brokers that use the same account code no longer pull each other's orders
   when syncing, moving an account to another portfolio or removing its history,
   and moving an account that isn't linked no longer leaves an empty portfolio.
+- **Creating or editing a portfolio checks its fields.** Only the editable
+  fields are saved, names are capped at 200 characters and other text fields
+  have limits too, and the server assigns each new portfolio's id.
 - **Broker sync accepts only configured brokers.** A sync whose export names a
   broker this server has no connector for is refused with a clear error and
   saves nothing.

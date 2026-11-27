@@ -18,8 +18,8 @@ or rename a route.
 
 | Route | Methods | Purpose |
 |---|---|---|
-| `/api/buckets` | GET, POST | List / create investment buckets (portfolio slices) |
-| `/api/buckets/[id]` | GET, PATCH, DELETE | Read / update / delete a bucket |
+| `/api/buckets` | GET, POST | List / create investment buckets (portfolio slices); POST accepts only the editable fields (name up to 200 characters, plus type label, icon, color, brokerage, notes, goal, target model and allocation), the server assigns the id and owner, and anything else returns 400 `validation_failed` |
+| `/api/buckets/[id]` | GET, PATCH, DELETE | Read / update / delete a bucket; PATCH takes the same editable fields and limits as create |
 | `/api/holdings` | GET, POST | List positions / add one. POST writes an `opening` anchor to the ledger; the holding is its projection ([ADR 0004](../explanation/decisions/0004-unified-ledger-positions-derived.md)); adding a ticker a broker connection already syncs into that portfolio is refused (`409 synced_duplicate`) to prevent a silent double-count |
 | `/api/holdings/[id]` | GET, PATCH, DELETE | Read / edit / delete. PATCH edits the single backing event in place (or appends a `snapshot` for multi-event positions); metadata updates the row; DELETE removes the ticker's ledger events. On a broker-synced holding, changing its `source` or `ticker` is refused (`409 managed_source`) since the connection owns its identity and the edit would desync on the next sync; other metadata stays editable |
 | `/api/holdings/series` | GET | Value-over-time for one holding — `units × NAV × fx` per date plus its cost-basis line (`?ticker=`, `range`). The per-position slice of the portfolio replay ([ADR 0005](../explanation/decisions/0005-value-over-time-ledger-replay.md)), folded across every bucket the instrument appears in; powers the Position page chart |

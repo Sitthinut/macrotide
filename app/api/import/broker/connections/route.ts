@@ -17,7 +17,7 @@ import {
   deleteTransactionsByExternalAccount,
   remapExternalAccountToBucket,
 } from "@/lib/db/queries/transactions";
-import { MAX_PORTFOLIO_NAME_LENGTH } from "@/lib/portfolio/broker-sync-limits";
+import { MAX_PORTFOLIO_NAME_LENGTH } from "@/lib/portfolio/bucket-input";
 
 // Manage broker-import connections (Settings → Connections). Session-scoped via
 // withDb. GET lists each account's mapped portfolio + last-sync status; PATCH

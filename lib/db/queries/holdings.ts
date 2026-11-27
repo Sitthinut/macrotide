@@ -225,8 +225,8 @@ export function renameHoldingSource(bucketIds: string[], from: string, to: strin
 
 /**
  * The source labels in these buckets that belong to a LIVE broker connection: the
- * provenance (`source`) of ledger rows carrying an `external_id` whose
- * `external_account` still maps to a current `brokerConnections` row. Renaming one
+ * provenance (`source`) of ledger rows carrying an `external_id` whose broker and
+ * `external_account` still map to a current `brokerConnections` row. Renaming one
  * would desync it from the connector — the next sync re-stamps the old label and
  * the source splits in two — so the rename flow refuses these. Once a broker is
  * disconnected its connection rows are gone, so its label drops out of this set and
@@ -235,10 +235,21 @@ export function renameHoldingSource(bucketIds: string[], from: string, to: strin
 export function managedSourceLabels(bucketIds: string[]): Set<string> {
   const out = new Set<string>();
   if (bucketIds.length === 0) return out;
-  const liveAccounts = listBrokerConnections().map((c) => c.accountCode);
+  // Account code → the brokers it's linked under. A code alone isn't unique
+  // across brokers, so a row counts only when its dedup key (`<broker>:<code>:…`)
+  // names one of them.
+  const sourcesByAccount = new Map<string, string[]>();
+  for (const c of listBrokerConnections()) {
+    sourcesByAccount.set(c.accountCode, [...(sourcesByAccount.get(c.accountCode) ?? []), c.source]);
+  }
+  const liveAccounts = [...sourcesByAccount.keys()];
   if (liveAccounts.length === 0) return out;
   const rows = getDb()
-    .select({ source: transactions.source })
+    .select({
+      source: transactions.source,
+      externalId: transactions.externalId,
+      externalAccount: transactions.externalAccount,
+    })
     .from(transactions)
     .where(
       and(
@@ -250,6 +261,8 @@ export function managedSourceLabels(bucketIds: string[]): Set<string> {
     )
     .all();
   for (const r of rows) {
+    const linked = sourcesByAccount.get(r.externalAccount ?? "") ?? [];
+    if (!linked.some((src) => r.externalId?.startsWith(`${src}:${r.externalAccount}:`))) continue;
     const s = r.source?.trim();
     if (s) out.add(s);
   }
