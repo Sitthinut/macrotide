@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { withDb } from "@/lib/api/with-db";
-import { createJournalEntry, type JournalKind, listJournalEntries } from "@/lib/db/queries/journal";
-
-const VALID_KINDS: ReadonlyArray<JournalKind> = ["note", "decision", "question", "reading"];
+import {
+  createJournalEntry,
+  JOURNAL_KINDS,
+  type JournalKind,
+  journalCreateBody,
+  listJournalEntries,
+} from "@/lib/db/queries/journal";
 
 function parseKind(value: string | null): JournalKind | undefined {
   if (!value) return undefined;
-  return (VALID_KINDS as readonly string[]).includes(value) ? (value as JournalKind) : undefined;
+  return (JOURNAL_KINDS as readonly string[]).includes(value) ? (value as JournalKind) : undefined;
 }
 
 export async function GET(req: Request) {
@@ -22,6 +26,19 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const body = await req.json();
-  return withDb(() => NextResponse.json(createJournalEntry(body), { status: 201 }));
+  let json: unknown;
+  try {
+    json = await req.json();
+  } catch {
+    return NextResponse.json({ error: "bad_request" }, { status: 400 });
+  }
+  const parsed = journalCreateBody.safeParse(json);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "validation_failed", issues: parsed.error.issues },
+      { status: 400 },
+    );
+  }
+  const input = parsed.data;
+  return withDb(() => NextResponse.json(createJournalEntry(input), { status: 201 }));
 }

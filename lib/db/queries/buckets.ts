@@ -2,11 +2,27 @@ import "server-only";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "../context";
 import { buckets } from "../schema";
-import { ownedBy, ownerId } from "./scope";
+import { ownedBy, ownerId, pickEditable } from "./scope";
 
 export type Bucket = typeof buckets.$inferSelect;
 export type BucketInsert = typeof buckets.$inferInsert;
-export type BucketUpdate = Partial<Omit<BucketInsert, "id" | "createdAt">>;
+
+/**
+ * The columns a bucket update may change. Ownership, the id and timestamps are
+ * server-managed; `position` changes only through {@link reorderBuckets}.
+ */
+export const BUCKET_EDITABLE_FIELDS = [
+  "name",
+  "typeLabel",
+  "icon",
+  "color",
+  "brokerage",
+  "notes",
+  "goalText",
+  "targetModelId",
+  "targetAllocation",
+] as const;
+export type BucketUpdate = Partial<Pick<BucketInsert, (typeof BUCKET_EDITABLE_FIELDS)[number]>>;
 
 export function listBuckets(): Bucket[] {
   // Manual `position` wins; un-positioned rows (NULL) sort last, then by
@@ -32,7 +48,7 @@ export function createBucket(input: BucketInsert): Bucket {
     getDb()
       .insert(buckets)
       // Stamp ownership AFTER the input spread so a client-supplied `userId` can't
-      // override the server's owner scoping (#190).
+      // override the server's owner scoping.
       .values({ ...input, userId: ownerId() })
       .returning()
       .get()
@@ -42,7 +58,7 @@ export function createBucket(input: BucketInsert): Bucket {
 export function updateBucket(id: string, patch: BucketUpdate): Bucket | undefined {
   return getDb()
     .update(buckets)
-    .set({ ...patch, updatedAt: new Date().toISOString() })
+    .set({ ...pickEditable(patch, BUCKET_EDITABLE_FIELDS), updatedAt: new Date().toISOString() })
     .where(and(eq(buckets.id, id), ownedBy(buckets.userId)))
     .returning()
     .get();

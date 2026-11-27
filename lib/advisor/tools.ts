@@ -18,7 +18,12 @@ import {
   getFundsByAbbr,
 } from "../db/queries/funds";
 import { listHeldQuoteKeys, listHoldings } from "../db/queries/holdings";
-import { createJournalEntry, type JournalKind, listJournalEntries } from "../db/queries/journal";
+import {
+  createJournalEntry,
+  JOURNAL_KINDS,
+  type JournalKind,
+  listJournalEntries,
+} from "../db/queries/journal";
 import { getModelPortfolio } from "../db/queries/models";
 import { getPlan } from "../db/queries/plan";
 import { listFundQuotes } from "../db/queries/quotes";
@@ -45,7 +50,6 @@ import {
   shapeForModel,
 } from "./shape";
 
-const JOURNAL_KINDS = ["note", "decision", "question", "reading"] as const;
 const PERF_RANGES = ["1mo", "3mo", "6mo", "1y", "5y", "max"] as const;
 
 export interface AdvisorToolOptions {
