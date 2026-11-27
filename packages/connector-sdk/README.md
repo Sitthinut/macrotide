@@ -548,7 +548,7 @@ relevant app routes are:
 | `GET /api/import/broker/connectors` | Lists every configured connector for the Connect-a-broker picker. |
 | `GET /api/import/broker/userscript/macrotide-connector.user.js` | Serves the install-ready userscript (one script covers all connectors). |
 | `GET /api/import/broker/runtime?host=<hostname>` | Returns the live config (endpoints + resolved shape) to the installed loader on each run. |
-| `POST /api/import/broker/ingest` | Receives the raw `BrokerExport`, calls `parseBrokerExport` with the matched connector's shape, and writes to the ledger. |
+| `POST /api/import/broker/ingest` | Receives the raw `BrokerExport`, calls `parseBrokerExport` with the matched connector's shape, and writes to the ledger. An export whose `source` matches no configured connector's `sourceTag` is refused (400) before anything is written. |
 
 No changes to application code are needed when adding or switching a connector —
 update the env var and restart the app.
